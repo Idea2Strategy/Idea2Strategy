@@ -1,0 +1,3 @@
+[submodule "ui"]
+	path = ui
+	url = https://github.com/Idea2Strategy/Idea2Strategy-ui.git
