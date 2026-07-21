@@ -1,7 +1,7 @@
 # Git Flow design
 
 Date: 2026-07-22
-Status: approved correction
+Status: implemented and verified
 
 ## Branch roles
 

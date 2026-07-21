@@ -34,18 +34,18 @@
 **Files:**
 - Modify only Git refs and ignored local sync metadata.
 
-- [ ] Rename the clean linked-worktree branch from `feature/collaboration-harness` to `develop`.
-- [ ] Push `develop`, verify its exact remote SHA, then delete the redundant remote feature branch.
-- [ ] Change the GitHub default branch to `develop` through a credential-manager-backed API call and verify it without exposing account data.
+- [x] Rename the clean linked-worktree branch from `feature/collaboration-harness` to `develop`.
+- [x] Push `develop`, verify its exact remote SHA, then delete the redundant remote feature branch.
+- [x] Change the GitHub default branch to `develop` through a credential-manager-backed API call and verify it without exposing account data.
 
 ### Task 3: GitLab develop branch
 
 **Files:**
 - Modify only Git refs and ignored local sync metadata in `Idea2Strategy-gitlab`.
 
-- [ ] Fetch the exact GitHub policy commit and cherry-pick it into the clean monolithic workspace.
-- [ ] Rename the local GitLab branch from `main` to `develop`, push it, and verify its exact remote SHA.
-- [ ] Change the GitLab default branch to `develop`, verify the symref, then delete the mistaken remote `main`.
+- [x] Fetch the exact GitHub policy commit and cherry-pick it into the clean monolithic workspace.
+- [x] Rename the local GitLab branch from `main` to `develop`, push it, and verify its exact remote SHA.
+- [x] Change the GitLab default branch to `develop`, verify the symref, then delete the mistaken remote `main`.
 
 ### Task 4: Final verification
 
