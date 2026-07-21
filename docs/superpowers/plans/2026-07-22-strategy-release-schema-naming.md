@@ -58,5 +58,5 @@
 - [x] Run `pnpm dbml:validate-release-names` and expect success.
 - [x] Search for prohibited former strategy/component version identifiers and expect no matches.
 - [x] Run `git diff --check` and inspect the exact diff.
-- [ ] Commit only the DBML naming plan, validator, schema, package script, and logical-data-model design.
-- [ ] Push `feature/dbml` to `origin` without merging it into `main`.
+- [x] Commit only the DBML naming plan, validator, schema, package script, and logical-data-model design.
+- [x] Push `feature/dbml` to `origin` without merging it into `main`.
