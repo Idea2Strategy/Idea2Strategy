@@ -1,6 +1,6 @@
 # Idea2Strategy 공식 협업 정책
 
-상태: 배포 승인·구현 중
+상태: 배포됨
 정본 위치: `docs/collaboration-policy.md`
 적용 범위: Idea2Strategy 루트 저장소, `ui` 작업공간, 향후 GitLab 제출 작업공간, 모든 개발자·에이전트·자동화 작업
 
@@ -151,5 +151,6 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 
 | 날짜 | 상태 | 변경 이유 | 승인 근거 |
 | --- | --- | --- | --- |
+| 2026-07-22 | GitHub·GitLab 배포 | GitHub submodule 기준선과 별도 GitLab monolithic 기준선을 검증된 커밋으로 게시 | 사용자의 명시적 진행 요청; 로컬·DBML·UI tree 검증 통과 |
 | 2026-07-22 | 배포 승인·구현 중 | 로컬 운영 영역을 `.harness/local/`로 통합하고 GitLab 저장소·인증·별도 monolithic 작업공간 경계를 확정 | 사용자의 A 구조 선택과 명시적 진행 요청 |
 | 2026-07-22 | 배포 전 검토본 생성 | GitHub submodule·향후 GitLab monolithic 구조와 Stackcord 기반 협업을 하나의 정책으로 통합 | 현재 세션의 명시적 사용자 요청; 원격 소유권·보호 설정은 아직 검증·적용하지 않음 |

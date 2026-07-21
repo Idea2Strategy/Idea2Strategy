@@ -1,7 +1,7 @@
 # Local harness layout and ignore design
 
 Date: 2026-07-22
-Status: approved structure, pending implementation review
+Status: implemented and verified
 
 ## Purpose
 

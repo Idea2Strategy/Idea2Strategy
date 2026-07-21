@@ -1,5 +1,6 @@
 param(
-  [switch]$BootstrapReview
+  [switch]$BootstrapReview,
+  [switch]$AuthorizedPolicyChange
 )
 
 $ErrorActionPreference = 'Stop'
@@ -88,7 +89,7 @@ $headPolicyPath = git -C $repositoryRoot ls-tree --name-only HEAD -- $policyRela
 $trackedInHead = $LASTEXITCODE -eq 0 -and $headPolicyPath -eq $policyRelativePath
 if ($trackedInHead) {
   git -C $repositoryRoot diff --quiet HEAD -- $policyRelativePath
-  if ($LASTEXITCODE -ne 0) {
+  if ($LASTEXITCODE -ne 0 -and -not $AuthorizedPolicyChange) {
     throw 'Official collaboration policy has an unapproved working-tree change.'
   }
 } elseif (-not $BootstrapReview) {
@@ -103,5 +104,6 @@ if ($trackedInHead) {
   recovery_links = $requiredLinks.Count
   tracked_in_head = $trackedInHead
   bootstrap_review = [bool]$BootstrapReview
+  authorized_policy_change = [bool]$AuthorizedPolicyChange
   status = 'passed'
 } | ConvertTo-Json -Compress

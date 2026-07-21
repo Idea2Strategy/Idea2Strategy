@@ -141,7 +141,7 @@ Expected: policy verification and context audit pass; `ui` pointer equals `28392
 - Consumes: Tasks 1–3 verified working tree
 - Produces: an exact staged candidate with no secret or local-only file
 
-- [ ] **Step 1: Inspect the complete candidate**
+- [x] **Step 1: Inspect the complete candidate**
 
 ```powershell
 git status --short --branch
@@ -150,7 +150,7 @@ git diff --cached --check
 git submodule status --recursive
 ```
 
-- [ ] **Step 2: Run all repository checks**
+- [x] **Step 2: Run all repository checks**
 
 ```powershell
 pnpm run dbml:validate
@@ -162,7 +162,7 @@ stackcord db diff --before db/schema.dbml --after .harness/local/dbdiagram/dbdia
 
 Expected: all commands exit `0`; DB semantic diff contains no changes.
 
-- [ ] **Step 3: Commit and publish only after the candidate is exact**
+- [x] **Step 3: Commit and publish only after the candidate is exact**
 
 Use ordinary project-oriented commit messages with no agent/tool markers. Push the reviewed GitHub branch without altering remote configuration or submodule history.
 
@@ -176,7 +176,7 @@ Use ordinary project-oriented commit messages with no agent/tool markers. Push t
 - Consumes: exact GitHub commit from Task 4 and GitLab HTTPS repository `https://lab.ssafy.com/s15-webmobile2-sub1/S15P11B205.git`
 - Produces: independently authenticated GitLab checkout whose `ui/` is ordinary tracked content, not a gitlink
 
-- [ ] **Step 1: Verify both remotes read-only**
+- [x] **Step 1: Verify both remotes read-only**
 
 ```powershell
 git ls-remote origin
@@ -186,11 +186,11 @@ git -c credential.interactive=never ls-remote https://lab.ssafy.com/s15-webmobil
 
 Expected: GitHub is reachable and GitLab authentication succeeds without printing credentials.
 
-- [ ] **Step 2: Create the sibling workspace from the reviewed root commit**
+- [x] **Step 2: Create the sibling workspace from the reviewed root commit**
 
 Clone into an explicit sibling path, verify it is outside the GitHub root, and configure the GitLab URL only in that workspace. Remove the gitlink and `.gitmodules` there, copy the exact committed `ui` tree without its `.git` metadata, and verify ordinary tracked files replace mode `160000`.
 
-- [ ] **Step 3: Verify monolithic boundaries**
+- [x] **Step 3: Verify monolithic boundaries**
 
 ```powershell
 git -C ..\Idea2Strategy-gitlab ls-files --stage ui
@@ -200,7 +200,7 @@ git -C ..\Idea2Strategy-gitlab remote -v
 
 Expected: `ui` entries are ordinary files, no submodule remains, and only the GitLab workspace has the GitLab push target.
 
-- [ ] **Step 4: Commit and push the GitLab transformation**
+- [x] **Step 4: Commit and push the GitLab transformation**
 
 Commit the GitLab-only structure conversion separately from product changes, push to the authenticated GitLab repository, re-read the exact remote branch, and record only commit IDs and topology state in the ignored local sync record.
 
@@ -213,7 +213,7 @@ Commit the GitLab-only structure conversion separately from product changes, pus
 - Consumes: published GitHub baseline and GitLab monolithic commit
 - Produces: evidence-backed readiness report with remaining unapplied server protections clearly identified
 
-- [ ] **Step 1: Run fresh local verification**
+- [x] **Step 1: Run fresh local verification**
 
 ```powershell
 git status --short --branch
@@ -223,10 +223,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-collabora
 stackcord context audit --root . --json
 ```
 
-- [ ] **Step 2: Re-read remote identities**
+- [x] **Step 2: Re-read remote identities**
 
 Confirm the exact GitHub and GitLab commit IDs from their respective workspaces without displaying account identifiers or credentials.
 
-- [ ] **Step 3: Report remaining governance boundaries**
+- [x] **Step 3: Report remaining governance boundaries**
 
 State separately whether GitHub/GitLab protected branches, CODEOWNERS/approval rules, CI checks, Issue provider connectivity, and Jira migration have actually been configured. Unapplied controls remain unapplied.
