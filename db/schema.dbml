@@ -54,7 +54,7 @@ Table identity.account_sanctions {
   operation_audit_event_id uuid
 }
 
-// strategy: mutable documents, validation and immutable releases
+// strategy: mutable drafts/templates and immutable validated releases
 Table strategy.strategy_drafts {
   id uuid [pk]
   owner_account_id uuid [not null]
@@ -73,22 +73,10 @@ Table strategy.strategy_drafts {
   created_at timestamp [not null]
   saved_at timestamp [not null]
 }
-Table strategy.validation_runs {
-  id uuid [pk]
-  draft_id uuid [not null]
-  semantic_hash varchar [not null]
-  language_version varchar [not null]
-  catalog_version varchar [not null]
-  data_requirement_version varchar [not null]
-  status varchar [not null]
-  result_document json [not null]
-  validated_at timestamp [not null]
-}
 Table strategy.strategy_releases {
   id uuid [pk]
   owner_account_id uuid [not null]
   source_draft_id uuid [not null]
-  validation_run_id uuid [not null]
   mode varchar [not null]
   name varchar [not null]
   description text
@@ -99,39 +87,24 @@ Table strategy.strategy_releases {
   layout_document json [not null]
   semantic_hash varchar [not null]
   layout_hash varchar [not null]
+  validator_version varchar [not null]
+  validated_at timestamp [not null]
   released_at timestamp [not null]
-  Note: 'Immutable. Runtime identity uses semantic_hash; layout is retained for exact viewing.'
+  Note: 'Inserted only after successful server validation. Immutable; runtime identity uses semantic_hash.'
 }
-Table strategy.component_drafts {
+Table strategy.strategy_templates {
   id uuid [pk]
   owner_account_id uuid [not null]
   mode varchar [not null]
   name varchar [not null]
+  description text
   semantic_document json [not null]
   layout_document json [not null]
   semantic_hash varchar [not null]
   layout_hash varchar [not null]
-  edit_sequence bigint [not null]
+  created_at timestamp [not null]
   saved_at timestamp [not null]
-}
-Table strategy.component_releases {
-  id uuid [pk]
-  owner_account_id uuid [not null]
-  source_draft_id uuid [not null]
-  semantic_document json [not null]
-  layout_document json [not null]
-  semantic_hash varchar [not null]
-  layout_hash varchar [not null]
-  released_at timestamp [not null]
-}
-Table strategy.release_components {
-  strategy_release_id uuid [not null]
-  component_release_id uuid [not null]
-  reference_key varchar [not null]
-  indexes {
-    (strategy_release_id, reference_key) [pk]
-    (strategy_release_id, component_release_id) [unique]
-  }
+  Note: 'Copy source only. Insertion creates independent nodes in a draft and stores no template relationship.'
 }
 Table strategy.release_instruments {
   strategy_release_id uuid [not null]
@@ -783,15 +756,9 @@ Ref: identity.account_sanctions.account_id > identity.accounts.id
 Ref: identity.account_sanctions.operation_audit_event_id > operations.audit_events.id
 Ref: strategy.strategy_drafts.owner_account_id > identity.accounts.id
 Ref: strategy.strategy_drafts.source_draft_id > strategy.strategy_drafts.id
-Ref: strategy.validation_runs.draft_id > strategy.strategy_drafts.id
 Ref: strategy.strategy_releases.owner_account_id > identity.accounts.id
 Ref: strategy.strategy_releases.source_draft_id > strategy.strategy_drafts.id
-Ref: strategy.strategy_releases.validation_run_id > strategy.validation_runs.id
-Ref: strategy.component_drafts.owner_account_id > identity.accounts.id
-Ref: strategy.component_releases.owner_account_id > identity.accounts.id
-Ref: strategy.component_releases.source_draft_id > strategy.component_drafts.id
-Ref: strategy.release_components.strategy_release_id > strategy.strategy_releases.id
-Ref: strategy.release_components.component_release_id > strategy.component_releases.id
+Ref: strategy.strategy_templates.owner_account_id > identity.accounts.id
 Ref: strategy.release_instruments.strategy_release_id > strategy.strategy_releases.id
 Ref: strategy.release_instruments.instrument_id > market_data.instruments.id
 Ref: bot.bots.owner_account_id > identity.accounts.id
