@@ -1,0 +1,8 @@
+schema_version: 1
+project_id: idea2strategy.platform
+workspaces:
+  - id: workspace.root
+    kind: root
+    path: .
+    responsibilities: [orchestration]
+    dependencies: []

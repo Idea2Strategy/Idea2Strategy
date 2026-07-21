@@ -1,0 +1,62 @@
+schema_version: 1
+id: work.collaboration-policy-bootstrap
+readiness: ready
+title: Establish the Idea2Strategy collaboration policy and recovery links
+outcome: Every participant and harness recovery reads one shared project policy while credentials, owner mapping, Jira records, and remote sync state remain local-only.
+acceptance:
+    - id: acceptance.collaboration.local-private
+      given: Owner, Jira, and remote sync metadata must not be shared
+      when: Local operational records are created
+      then: They exist under the ignored operational area of .harness/local and contain no credentials
+      failure: Verification fails when the directory is tracked or credential-like values appear in shared policy files
+    - id: acceptance.collaboration.remote-safe
+      given: GitHub and GitLab publication is approved but remote protection is not
+      when: The bootstrap is published
+      then: Only a verified GitHub baseline and its separate GitLab monolithic conversion are published while unapplied protections remain explicit
+      failure: An unverified candidate is published or any unapplied protection is represented as active
+    - id: acceptance.collaboration.single-source
+      given: No existing Idea2Strategy collaboration policy is canonical
+      when: A contributor or automation starts work
+      then: AGENTS and the fallback harness skill require docs/collaboration-policy.md before work
+      failure: Work stops when the policy is missing or changed without the owner review flow
+refs:
+    - decision.dependencies.evidence-based
+workspaces:
+    - workspace.root
+scope:
+    repositories:
+        - repository.github.root
+    paths:
+        - .agents/skills/use-project-harness/SKILL.md
+        - .agents/skills/use-project-harness/references/fallback.md
+        - .gitignore
+        - .harness/local
+        - AGENTS.md
+        - README.md
+        - docs/collaboration-policy.md
+        - scripts/initialize-local-harness.ps1
+        - scripts/test-local-harness.ps1
+        - scripts/verify-collaboration-policy.ps1
+    policy_ids: []
+    scenario_ids: []
+    contract_ids: []
+    db_entities: []
+    migration_slots: []
+    ui_flows: []
+    dependency_majors: []
+    root_pointers: []
+dependencies: []
+merge_order:
+    - workspace.root
+first_failing_test: scripts/verify-collaboration-policy.ps1 fails when the policy hash, recovery link, local ignore boundary, or shared credential scan is invalid.
+evidence:
+    kinds:
+        - context-audit
+        - git-inspection
+        - policy-verification
+        - submodule-inspection
+    integration_required: false
+    user_validation: true
+    migration_required: false
+    rollback_required: false
+fingerprint: sha256:66e9ed7fab616f01c3fa183e2c0253b69ccc8e8a0e19ce793566e09b791bf346

@@ -1,0 +1,5 @@
+schema_version: 1
+provider: git-local
+live_status_source: git-local
+remote: origin
+coordination_branch: coordination

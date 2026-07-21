@@ -1,0 +1,125 @@
+# Tool-owned local workspaces
+.harness-drafts/
+.dbdiagram/
+.worktrees/
+
+# Environment and local overrides
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+
+# Credentials and signing material
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Logs, runtime state, crash dumps
+*.log
+*.log.*
+*.pid
+*.pid.lock
+*.seed
+*.stackdump
+logs/
+
+# Generic caches and scratch directories
+.cache/
+.tmp/
+.temp/
+temp/
+cache/
+
+# Node.js, pnpm, and frontend tooling
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/cache/
+.yarn/install-state.gz
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tsbuildinfo
+.turbo/
+.vite/
+.next/
+.nuxt/
+.svelte-kit/
+dist/
+storybook-static/
+playwright-report/
+test-results/
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Java, Kotlin, Gradle, and Maven
+.gradle/
+build/
+target/
+out/
+*.class
+.classpath
+.project
+.settings/
+
+# IntelliJ-family IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Visual Studio Code user state
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Local databases and editor backup files
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*~
+*.swp
+*.swo
+
+# Idea2Strategy local harness: keep only the shared skeleton.
+.harness/local/**
+!.harness/local/
+!.harness/local/README.md
+!.harness/local/**/
+!.harness/local/**/.gitkeep
