@@ -1,0 +1,900 @@
+Project Idea2Strategy {
+  database_type: 'PostgreSQL'
+  Note: 'Logical model only. PostgreSQL is used for DBML validation; production DBMS, physical topology, precision, indexes, partitioning, retention and migrations are not selected.'
+}
+
+// identity: customer identity and access lifecycle
+Table identity.accounts {
+  id uuid [pk]
+  public_id varchar [not null, unique, note: 'Opaque service identifier.']
+  status varchar [not null]
+  created_at timestamp [not null]
+  closed_at timestamp
+}
+Table identity.login_methods {
+  id uuid [pk]
+  account_id uuid [not null]
+  method_type varchar [not null]
+  provider_subject varchar [not null]
+  verified_at timestamp
+  disabled_at timestamp
+  created_at timestamp [not null]
+  indexes {
+    (method_type, provider_subject) [unique]
+  }
+}
+Table identity.sessions {
+  id uuid [pk]
+  account_id uuid [not null]
+  session_digest varchar [not null, unique, note: 'Never a raw token.']
+  issued_at timestamp [not null]
+  expires_at timestamp [not null]
+  revoked_at timestamp
+  revoke_reason varchar
+}
+Table identity.consents {
+  id uuid [pk]
+  account_id uuid [not null]
+  policy_code varchar [not null]
+  policy_version varchar [not null]
+  decision varchar [not null]
+  recorded_at timestamp [not null]
+  indexes {
+    (account_id, policy_code, policy_version) [unique]
+  }
+}
+Table identity.account_sanctions {
+  id uuid [pk]
+  account_id uuid [not null]
+  sanction_type varchar [not null]
+  reason_code varchar [not null]
+  effective_at timestamp [not null]
+  expires_at timestamp
+  lifted_at timestamp
+  operation_audit_event_id uuid
+}
+
+// strategy: mutable documents, validation and immutable releases
+Table strategy.strategy_drafts {
+  id uuid [pk]
+  owner_account_id uuid [not null]
+  source_draft_id uuid
+  mode varchar [not null, note: 'BASIC or PRO.']
+  name varchar [not null]
+  description text
+  language_version varchar [not null]
+  schema_version varchar [not null]
+  catalog_version varchar [not null]
+  semantic_document json [not null, note: 'Typed executable blocks, nodes, ports, edges, parameters, semantic groups and policies.']
+  layout_document json [not null, note: 'Coordinates, sizes, viewport, zoom and non-executable editor state.']
+  semantic_hash varchar [not null]
+  layout_hash varchar [not null]
+  edit_sequence bigint [not null]
+  created_at timestamp [not null]
+  saved_at timestamp [not null]
+}
+Table strategy.validation_runs {
+  id uuid [pk]
+  draft_id uuid [not null]
+  semantic_hash varchar [not null]
+  language_version varchar [not null]
+  catalog_version varchar [not null]
+  data_requirement_version varchar [not null]
+  status varchar [not null]
+  result_document json [not null]
+  validated_at timestamp [not null]
+}
+Table strategy.strategy_versions {
+  id uuid [pk]
+  owner_account_id uuid [not null]
+  source_draft_id uuid [not null]
+  validation_run_id uuid [not null]
+  mode varchar [not null]
+  name varchar [not null]
+  description text
+  language_version varchar [not null]
+  schema_version varchar [not null]
+  catalog_version varchar [not null]
+  semantic_document json [not null]
+  layout_document json [not null]
+  semantic_hash varchar [not null]
+  layout_hash varchar [not null]
+  released_at timestamp [not null]
+  Note: 'Immutable. Runtime identity uses semantic_hash; layout is retained for exact viewing.'
+}
+Table strategy.component_drafts {
+  id uuid [pk]
+  owner_account_id uuid [not null]
+  mode varchar [not null]
+  name varchar [not null]
+  semantic_document json [not null]
+  layout_document json [not null]
+  semantic_hash varchar [not null]
+  layout_hash varchar [not null]
+  edit_sequence bigint [not null]
+  saved_at timestamp [not null]
+}
+Table strategy.component_versions {
+  id uuid [pk]
+  owner_account_id uuid [not null]
+  source_draft_id uuid [not null]
+  semantic_document json [not null]
+  layout_document json [not null]
+  semantic_hash varchar [not null]
+  layout_hash varchar [not null]
+  released_at timestamp [not null]
+}
+Table strategy.version_components {
+  strategy_version_id uuid [not null]
+  component_version_id uuid [not null]
+  reference_key varchar [not null]
+  indexes {
+    (strategy_version_id, reference_key) [pk]
+    (strategy_version_id, component_version_id) [unique]
+  }
+}
+Table strategy.version_instruments {
+  strategy_version_id uuid [not null]
+  instrument_id uuid [not null]
+  selection_source varchar [not null]
+  indexes {
+    (strategy_version_id, instrument_id) [pk]
+  }
+}
+
+// bot: immutable launch configuration and per-bot official order
+Table bot.bots {
+  id uuid [pk]
+  owner_account_id uuid [not null]
+  source_bot_id uuid
+  visibility varchar [not null]
+  lifecycle_status varchar [not null, note: 'WAITING, RUNNING or terminal STOPPED.']
+  initial_cash_amount decimal [not null]
+  base_currency varchar [not null, note: 'USD in current scope.']
+  current_event_sequence bigint [not null]
+  created_at timestamp [not null]
+  launched_at timestamp
+  stopped_at timestamp
+  stop_reason varchar
+}
+Table bot.bot_strategies {
+  id uuid [pk]
+  bot_id uuid [not null]
+  strategy_version_id uuid [not null]
+  position_order int [not null]
+  budget_limit_type varchar [not null]
+  budget_limit_value decimal [not null]
+  allocation_policy_document json [not null]
+  rebalance_policy_document json [not null]
+  conflict_policy_document json [not null]
+  indexes {
+    (bot_id, position_order) [unique]
+    (bot_id, strategy_version_id) [unique]
+  }
+}
+Table bot.bot_events {
+  id uuid [pk]
+  bot_id uuid [not null]
+  event_sequence bigint [not null]
+  event_type varchar [not null]
+  occurred_at timestamp [not null]
+  received_at timestamp [not null]
+  parent_event_id uuid
+  idempotency_key varchar [not null]
+  strategy_version_id uuid
+  market_dataset_manifest_id uuid
+  summary_document json [not null]
+  indexes {
+    (bot_id, event_sequence) [unique]
+    (bot_id, idempotency_key) [unique]
+  }
+}
+Table bot.strategy_runtime_states {
+  id uuid [pk]
+  bot_strategy_id uuid [not null]
+  state_key varchar [not null]
+  state_type varchar [not null]
+  current_value json [not null]
+  last_event_sequence bigint [not null]
+  indexes {
+    (bot_strategy_id, state_key) [unique]
+  }
+}
+Table bot.continuation_deadlines {
+  id uuid [pk]
+  bot_id uuid [not null]
+  due_at timestamp [not null]
+  basis_type varchar [not null]
+  basis_event_id uuid [not null]
+  confirmed_at timestamp
+  superseded_by_id uuid
+}
+
+// trading: live official orders, fills, reservations and ledger
+Table trading.order_candidate_batches {
+  id uuid [pk]
+  bot_id uuid [not null]
+  bot_event_id uuid [not null]
+  strategy_version_id uuid [not null]
+  status varchar [not null]
+  conflict_rule_document json [not null]
+  decided_at timestamp [not null]
+}
+Table trading.order_candidates {
+  id uuid [pk]
+  batch_id uuid [not null]
+  bot_strategy_id uuid [not null]
+  instrument_id uuid [not null]
+  side varchar [not null]
+  order_type varchar [not null]
+  requested_quantity decimal [not null]
+  requested_amount decimal
+  decision varchar [not null]
+  decision_reason varchar [not null]
+  final_quantity decimal
+  final_amount decimal
+}
+Table trading.orders {
+  id uuid [pk]
+  bot_id uuid [not null]
+  candidate_id uuid [not null, unique]
+  instrument_id uuid [not null]
+  side varchar [not null]
+  order_type varchar [not null]
+  time_in_force varchar [not null]
+  requested_quantity decimal [not null]
+  remaining_quantity decimal [not null]
+  limit_price decimal
+  stop_price decimal
+  trailing_value decimal
+  status varchar [not null]
+  accepted_event_sequence bigint [not null]
+  accepted_at timestamp [not null]
+  expires_at timestamp
+  replaced_order_id uuid
+  cancellation_reason varchar
+  Note: 'Immutable official live order; corrections and replacements reference prior records.'
+}
+Table trading.order_reservations {
+  id uuid [pk]
+  order_id uuid [not null]
+  reservation_type varchar [not null]
+  reserved_amount decimal
+  reserved_quantity decimal
+  status varchar [not null]
+  created_at timestamp [not null]
+  released_at timestamp
+  release_reason varchar
+}
+Table trading.fills {
+  id uuid [pk]
+  order_id uuid [not null]
+  bot_id uuid [not null]
+  instrument_id uuid [not null]
+  fill_sequence int [not null]
+  quantity decimal [not null]
+  reference_price decimal [not null]
+  fill_price decimal [not null]
+  fee_amount decimal [not null]
+  slippage_amount decimal [not null]
+  filled_at timestamp [not null]
+  bot_event_sequence bigint [not null]
+  indexes {
+    (order_id, fill_sequence) [unique]
+  }
+}
+Table trading.strategy_fill_allocations {
+  id uuid [pk]
+  fill_id uuid [not null]
+  bot_strategy_id uuid [not null]
+  allocated_quantity decimal [not null]
+  allocated_amount decimal [not null]
+  indexes {
+    (fill_id, bot_strategy_id) [unique]
+  }
+}
+Table trading.ledger_accounts {
+  id uuid [pk]
+  bot_id uuid [not null]
+  account_code varchar [not null]
+  account_type varchar [not null]
+  currency varchar [not null]
+  instrument_id uuid
+  indexes {
+    (bot_id, account_code) [unique]
+  }
+}
+Table trading.ledger_transactions {
+  id uuid [pk]
+  bot_id uuid [not null]
+  source_type varchar [not null]
+  source_id uuid [not null]
+  reversal_of_id uuid
+  occurred_at timestamp [not null]
+  bot_event_sequence bigint [not null]
+  description varchar [not null]
+  indexes {
+    (bot_id, source_type, source_id) [unique]
+  }
+  Note: 'Immutable header; a reversal is a new transaction referencing the original.'
+}
+Table trading.ledger_entries {
+  id uuid [pk]
+  transaction_id uuid [not null]
+  ledger_account_id uuid [not null]
+  entry_sequence int [not null]
+  amount decimal [not null, note: 'Signed; each transaction must balance to zero.']
+  quantity decimal
+  bot_strategy_id uuid
+  indexes {
+    (transaction_id, entry_sequence) [unique]
+  }
+}
+Table trading.position_lots {
+  id uuid [pk]
+  bot_id uuid [not null]
+  bot_strategy_id uuid [not null]
+  instrument_id uuid [not null]
+  opening_fill_id uuid [not null]
+  position_side varchar [not null]
+  opened_quantity decimal [not null]
+  remaining_quantity decimal [not null]
+  unit_cost decimal [not null]
+  opened_at timestamp [not null]
+}
+Table trading.lot_consumptions {
+  id uuid [pk]
+  position_lot_id uuid [not null]
+  closing_fill_id uuid [not null]
+  consumed_quantity decimal [not null]
+  realized_pnl decimal [not null]
+  consumed_at timestamp [not null]
+  indexes {
+    (position_lot_id, closing_fill_id) [unique]
+  }
+}
+
+// market_data: supported instruments and immutable dataset manifests
+Table market_data.instruments {
+  id uuid [pk]
+  symbol varchar [not null, unique]
+  asset_type varchar [not null]
+  exchange_code varchar [not null]
+  currency varchar [not null]
+  listed_at timestamp
+  delisted_at timestamp
+  support_status varchar [not null]
+}
+Table market_data.official_universes {
+  id uuid [pk]
+  code varchar [not null, unique]
+  name varchar [not null]
+  definition_version varchar [not null]
+  status varchar [not null]
+  effective_at timestamp [not null]
+}
+Table market_data.universe_memberships {
+  id uuid [pk]
+  universe_id uuid [not null]
+  instrument_id uuid [not null]
+  effective_from timestamp [not null]
+  effective_to timestamp
+  source_event_id uuid [not null]
+  indexes {
+    (universe_id, instrument_id, effective_from) [unique]
+  }
+}
+Table market_data.providers {
+  id uuid [pk]
+  code varchar [not null, unique]
+  name varchar [not null]
+  rights_version varchar [not null]
+  status varchar [not null]
+}
+Table market_data.feeds {
+  id uuid [pk]
+  provider_id uuid [not null]
+  code varchar [not null]
+  data_kind varchar [not null]
+  resolution varchar [not null]
+  session_scope varchar [not null]
+  status varchar [not null]
+  indexes {
+    (provider_id, code) [unique]
+  }
+}
+Table market_data.dataset_manifests {
+  id uuid [pk]
+  feed_id uuid [not null]
+  instrument_id uuid
+  data_layer varchar [not null, note: 'RAW, ADJUSTED or DERIVED.']
+  resolution varchar [not null]
+  period_start timestamp [not null]
+  period_end timestamp [not null]
+  revision_number int [not null]
+  as_of_at timestamp [not null]
+  processing_version varchar [not null]
+  quality_status varchar [not null]
+  row_count bigint [not null]
+  manifest_hash varchar [not null, unique]
+  created_at timestamp [not null]
+}
+Table market_data.dataset_objects {
+  id uuid [pk]
+  dataset_manifest_id uuid [not null]
+  object_kind varchar [not null]
+  logical_object_key varchar [not null, unique]
+  content_hash varchar [not null]
+  format_version varchar [not null]
+  byte_size bigint [not null]
+  row_count bigint [not null]
+  created_at timestamp [not null]
+}
+Table market_data.dataset_lineage {
+  derived_manifest_id uuid [not null]
+  source_manifest_id uuid [not null]
+  relationship_type varchar [not null]
+  indexes {
+    (derived_manifest_id, source_manifest_id) [pk]
+  }
+}
+Table market_data.corporate_actions {
+  id uuid [pk]
+  instrument_id uuid [not null]
+  action_type varchar [not null]
+  effective_at timestamp [not null]
+  confirmation_status varchar [not null]
+  source_document json [not null]
+  accounting_effect_document json
+  supersedes_action_id uuid
+  recorded_at timestamp [not null]
+}
+Table market_data.quality_incidents {
+  id uuid [pk]
+  dataset_manifest_id uuid
+  instrument_id uuid
+  incident_type varchar [not null]
+  period_start timestamp [not null]
+  period_end timestamp
+  status varchar [not null]
+  impact_document json [not null]
+  recorded_at timestamp [not null]
+}
+
+// backtest: relational summaries plus immutable detail object manifests
+Table backtest.evaluation_periods {
+  id uuid [pk]
+  release_quarter varchar [not null, unique]
+  period_start timestamp [not null]
+  period_end timestamp [not null]
+  initial_cash_amount decimal [not null, note: 'USD 10,000 in current official model.']
+  settings_version varchar [not null]
+  published_at timestamp [not null]
+}
+Table backtest.runs {
+  id uuid [pk]
+  owner_account_id uuid [not null]
+  strategy_version_id uuid [not null, unique]
+  evaluation_period_id uuid [not null]
+  status varchar [not null]
+  catalog_version varchar [not null]
+  calculation_model_version varchar [not null]
+  cost_model_version varchar [not null]
+  started_at timestamp
+  completed_at timestamp
+  failure_code varchar
+  failure_detail_document json
+  created_at timestamp [not null]
+}
+Table backtest.input_bundles {
+  id uuid [pk]
+  run_id uuid [not null, unique]
+  bundle_hash varchar [not null, unique]
+  locked_at timestamp [not null]
+}
+Table backtest.input_datasets {
+  input_bundle_id uuid [not null]
+  dataset_manifest_id uuid [not null]
+  purpose varchar [not null]
+  indexes {
+    (input_bundle_id, dataset_manifest_id, purpose) [pk]
+  }
+}
+Table backtest.monthly_judgment_summaries {
+  id uuid [pk]
+  run_id uuid [not null]
+  et_year int [not null]
+  et_month int [not null]
+  evaluation_count bigint [not null]
+  trade_event_count bigint [not null]
+  summary_hash varchar [not null]
+  indexes {
+    (run_id, et_year, et_month) [unique]
+  }
+}
+Table backtest.failure_condition_counts {
+  id uuid [pk]
+  monthly_summary_id uuid [not null]
+  flow_or_branch_key varchar [not null]
+  first_failure_condition_key varchar [not null]
+  occurrence_count bigint [not null]
+  indexes {
+    (monthly_summary_id, flow_or_branch_key, first_failure_condition_key) [unique]
+  }
+}
+Table backtest.performance_summaries {
+  id uuid [pk]
+  run_id uuid [not null]
+  metric_version varchar [not null]
+  summary_document json [not null]
+  source_set_hash varchar [not null]
+  calculated_at timestamp [not null]
+  superseded_by_id uuid
+}
+Table backtest.detail_object_manifests {
+  id uuid [pk]
+  run_id uuid [not null]
+  strategy_version_id uuid [not null]
+  record_type varchar [not null]
+  et_year int [not null]
+  et_month int [not null]
+  logical_object_key varchar [not null, unique]
+  file_format varchar [not null]
+  schema_version varchar [not null]
+  row_count bigint [not null]
+  byte_size bigint [not null]
+  content_hash varchar [not null]
+  created_at timestamp [not null]
+  supersedes_manifest_id uuid
+  indexes {
+    (run_id, record_type, et_year, et_month, content_hash) [unique]
+  }
+  Note: 'High-volume trade, replay-ledger, position and calculation rows live outside the main RDB.'
+}
+
+// competition: room lifecycle, scoring and bot-only leaderboard
+Table competition.rooms {
+  id uuid [pk]
+  creator_account_id uuid [not null]
+  room_type varchar [not null]
+  name varchar [not null]
+  status varchar [not null]
+  created_at timestamp [not null]
+  cancelled_at timestamp
+  cancellation_reason varchar
+}
+Table competition.room_schedules {
+  room_id uuid [pk]
+  recruitment_start_at timestamp [not null]
+  submission_start_at timestamp [not null]
+  submission_end_at timestamp [not null]
+  evaluation_start_at timestamp [not null]
+  evaluation_end_at timestamp [not null]
+  result_finalized_at timestamp
+}
+Table competition.room_rules {
+  room_id uuid [pk]
+  initial_cash_amount decimal [not null]
+  participant_limit int [not null]
+  minimum_operation_duration_seconds bigint [not null]
+  minimum_fill_count int [not null]
+  start_policy varchar [not null]
+  scoring_template_version_id uuid [not null]
+  tunable_parameters_document json [not null]
+  locked_at timestamp [not null]
+}
+Table competition.scoring_templates {
+  id uuid [pk]
+  code varchar [not null, unique]
+  template_type varchar [not null]
+  status varchar [not null]
+  created_at timestamp [not null]
+}
+Table competition.scoring_template_versions {
+  id uuid [pk]
+  scoring_template_id uuid [not null]
+  version varchar [not null]
+  calculation_document json [not null]
+  allowed_parameter_document json [not null]
+  calculation_hash varchar [not null]
+  verified_at timestamp [not null]
+  indexes {
+    (scoring_template_id, version) [unique]
+  }
+}
+Table competition.participations {
+  id uuid [pk]
+  room_id uuid [not null]
+  bot_id uuid [not null]
+  owner_account_id uuid [not null]
+  anonymous_alias varchar [not null]
+  status varchar [not null]
+  submitted_at timestamp [not null]
+  expelled_at timestamp
+  expulsion_reason varchar
+  post_room_choice varchar
+  choice_recorded_at timestamp
+  choice_locked_at timestamp
+  indexes {
+    (room_id, bot_id) [unique]
+    (room_id, anonymous_alias) [unique]
+  }
+}
+Table competition.evaluation_segments {
+  id uuid [pk]
+  participation_id uuid [not null]
+  evaluation_start_at timestamp [not null]
+  evaluation_end_at timestamp [not null]
+  initial_state_hash varchar [not null]
+  final_state_hash varchar
+  virtual_liquidation_document json [note: 'Performance-only; never mutates the bot ledger.']
+  finalized_at timestamp
+}
+Table competition.leaderboard_snapshots {
+  id uuid [pk]
+  room_id uuid [not null]
+  scoring_template_version_id uuid [not null]
+  as_of_at timestamp [not null]
+  status varchar [not null]
+  source_set_hash varchar [not null]
+}
+Table competition.leaderboard_entries {
+  id uuid [pk]
+  snapshot_id uuid [not null]
+  participation_id uuid [not null]
+  rank int
+  score decimal
+  eligibility_status varchar [not null]
+  calculation_document json [not null]
+  indexes {
+    (snapshot_id, participation_id) [unique]
+  }
+}
+
+// operations: RBAC, notification, support, audit and delivery
+Table operations.operator_accounts {
+  id uuid [pk]
+  external_identity_key varchar [not null, unique]
+  status varchar [not null]
+  mfa_verified_at timestamp
+  created_at timestamp [not null]
+}
+Table operations.roles {
+  id uuid [pk]
+  code varchar [not null, unique]
+  rank int [not null]
+  status varchar [not null]
+}
+Table operations.permissions {
+  id uuid [pk]
+  code varchar [not null, unique]
+  description varchar [not null]
+}
+Table operations.role_permissions {
+  role_id uuid [not null]
+  permission_id uuid [not null]
+  indexes {
+    (role_id, permission_id) [pk]
+  }
+}
+Table operations.operator_role_assignments {
+  id uuid [pk]
+  operator_account_id uuid [not null]
+  role_id uuid [not null]
+  granted_by_operator_id uuid [not null]
+  granted_at timestamp [not null]
+  revoked_at timestamp
+  revocation_reason varchar
+}
+Table operations.notification_preferences {
+  id uuid [pk]
+  account_id uuid [not null]
+  bot_id uuid
+  event_type varchar [not null]
+  channel varchar [not null]
+  enabled boolean [not null]
+  indexes {
+    (account_id, bot_id, event_type, channel) [unique]
+  }
+}
+Table operations.notifications {
+  id uuid [pk]
+  account_id uuid [not null]
+  bot_id uuid
+  notification_type varchar [not null]
+  mandatory boolean [not null]
+  payload_document json [not null]
+  created_at timestamp [not null]
+  read_at timestamp
+}
+Table operations.delivery_attempts {
+  id uuid [pk]
+  notification_id uuid [not null]
+  channel varchar [not null]
+  attempt_number int [not null]
+  status varchar [not null]
+  attempted_at timestamp [not null]
+  failure_code varchar
+  indexes {
+    (notification_id, channel, attempt_number) [unique]
+  }
+}
+Table operations.cases {
+  id uuid [pk]
+  account_id uuid [not null]
+  case_type varchar [not null]
+  status varchar [not null]
+  subject varchar [not null]
+  created_at timestamp [not null]
+  closed_at timestamp
+}
+Table operations.case_events {
+  id uuid [pk]
+  case_id uuid [not null]
+  actor_type varchar [not null]
+  actor_id uuid [not null]
+  event_type varchar [not null]
+  payload_document json [not null]
+  created_at timestamp [not null]
+}
+Table operations.audit_events {
+  id uuid [pk]
+  actor_type varchar [not null]
+  actor_id uuid [not null]
+  action_type varchar [not null]
+  target_type varchar [not null]
+  target_id uuid [not null]
+  reason varchar [not null]
+  before_hash varchar
+  after_hash varchar
+  occurred_at timestamp [not null]
+  idempotency_key varchar [not null, unique]
+  Note: 'Immutable. Human operators cannot read customer strategy document contents.'
+}
+Table operations.evidence_objects {
+  id uuid [pk]
+  owner_domain varchar [not null]
+  owner_record_id uuid [not null]
+  evidence_type varchar [not null]
+  logical_object_key varchar [not null, unique]
+  content_hash varchar [not null]
+  format_version varchar [not null]
+  byte_size bigint [not null]
+  created_at timestamp [not null]
+}
+Table operations.outbox_messages {
+  id uuid [pk]
+  owner_domain varchar [not null]
+  aggregate_id uuid [not null]
+  event_type varchar [not null]
+  payload_document json [not null]
+  idempotency_key varchar [not null, unique]
+  created_at timestamp [not null]
+  delivered_at timestamp
+  attempt_count int [not null]
+  last_failure_code varchar
+}
+
+// References
+Ref: identity.login_methods.account_id > identity.accounts.id
+Ref: identity.sessions.account_id > identity.accounts.id
+Ref: identity.consents.account_id > identity.accounts.id
+Ref: identity.account_sanctions.account_id > identity.accounts.id
+Ref: identity.account_sanctions.operation_audit_event_id > operations.audit_events.id
+Ref: strategy.strategy_drafts.owner_account_id > identity.accounts.id
+Ref: strategy.strategy_drafts.source_draft_id > strategy.strategy_drafts.id
+Ref: strategy.validation_runs.draft_id > strategy.strategy_drafts.id
+Ref: strategy.strategy_versions.owner_account_id > identity.accounts.id
+Ref: strategy.strategy_versions.source_draft_id > strategy.strategy_drafts.id
+Ref: strategy.strategy_versions.validation_run_id > strategy.validation_runs.id
+Ref: strategy.component_drafts.owner_account_id > identity.accounts.id
+Ref: strategy.component_versions.owner_account_id > identity.accounts.id
+Ref: strategy.component_versions.source_draft_id > strategy.component_drafts.id
+Ref: strategy.version_components.strategy_version_id > strategy.strategy_versions.id
+Ref: strategy.version_components.component_version_id > strategy.component_versions.id
+Ref: strategy.version_instruments.strategy_version_id > strategy.strategy_versions.id
+Ref: strategy.version_instruments.instrument_id > market_data.instruments.id
+Ref: bot.bots.owner_account_id > identity.accounts.id
+Ref: bot.bots.source_bot_id > bot.bots.id
+Ref: bot.bot_strategies.bot_id > bot.bots.id
+Ref: bot.bot_strategies.strategy_version_id > strategy.strategy_versions.id
+Ref: bot.bot_events.bot_id > bot.bots.id
+Ref: bot.bot_events.parent_event_id > bot.bot_events.id
+Ref: bot.bot_events.strategy_version_id > strategy.strategy_versions.id
+Ref: bot.bot_events.market_dataset_manifest_id > market_data.dataset_manifests.id
+Ref: bot.strategy_runtime_states.bot_strategy_id > bot.bot_strategies.id
+Ref: bot.continuation_deadlines.bot_id > bot.bots.id
+Ref: bot.continuation_deadlines.basis_event_id > bot.bot_events.id
+Ref: bot.continuation_deadlines.superseded_by_id > bot.continuation_deadlines.id
+Ref: trading.order_candidate_batches.bot_id > bot.bots.id
+Ref: trading.order_candidate_batches.bot_event_id > bot.bot_events.id
+Ref: trading.order_candidate_batches.strategy_version_id > strategy.strategy_versions.id
+Ref: trading.order_candidates.batch_id > trading.order_candidate_batches.id
+Ref: trading.order_candidates.bot_strategy_id > bot.bot_strategies.id
+Ref: trading.order_candidates.instrument_id > market_data.instruments.id
+Ref: trading.orders.bot_id > bot.bots.id
+Ref: trading.orders.candidate_id > trading.order_candidates.id
+Ref: trading.orders.instrument_id > market_data.instruments.id
+Ref: trading.orders.replaced_order_id > trading.orders.id
+Ref: trading.order_reservations.order_id > trading.orders.id
+Ref: trading.fills.order_id > trading.orders.id
+Ref: trading.fills.bot_id > bot.bots.id
+Ref: trading.fills.instrument_id > market_data.instruments.id
+Ref: trading.strategy_fill_allocations.fill_id > trading.fills.id
+Ref: trading.strategy_fill_allocations.bot_strategy_id > bot.bot_strategies.id
+Ref: trading.ledger_accounts.bot_id > bot.bots.id
+Ref: trading.ledger_accounts.instrument_id > market_data.instruments.id
+Ref: trading.ledger_transactions.bot_id > bot.bots.id
+Ref: trading.ledger_transactions.reversal_of_id > trading.ledger_transactions.id
+Ref: trading.ledger_entries.transaction_id > trading.ledger_transactions.id
+Ref: trading.ledger_entries.ledger_account_id > trading.ledger_accounts.id
+Ref: trading.ledger_entries.bot_strategy_id > bot.bot_strategies.id
+Ref: trading.position_lots.bot_id > bot.bots.id
+Ref: trading.position_lots.bot_strategy_id > bot.bot_strategies.id
+Ref: trading.position_lots.instrument_id > market_data.instruments.id
+Ref: trading.position_lots.opening_fill_id > trading.fills.id
+Ref: trading.lot_consumptions.position_lot_id > trading.position_lots.id
+Ref: trading.lot_consumptions.closing_fill_id > trading.fills.id
+Ref: market_data.universe_memberships.universe_id > market_data.official_universes.id
+Ref: market_data.universe_memberships.instrument_id > market_data.instruments.id
+Ref: market_data.feeds.provider_id > market_data.providers.id
+Ref: market_data.dataset_manifests.feed_id > market_data.feeds.id
+Ref: market_data.dataset_manifests.instrument_id > market_data.instruments.id
+Ref: market_data.dataset_objects.dataset_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.dataset_lineage.derived_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.dataset_lineage.source_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.corporate_actions.instrument_id > market_data.instruments.id
+Ref: market_data.corporate_actions.supersedes_action_id > market_data.corporate_actions.id
+Ref: market_data.quality_incidents.dataset_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.quality_incidents.instrument_id > market_data.instruments.id
+Ref: backtest.runs.owner_account_id > identity.accounts.id
+Ref: backtest.runs.strategy_version_id > strategy.strategy_versions.id
+Ref: backtest.runs.evaluation_period_id > backtest.evaluation_periods.id
+Ref: backtest.input_bundles.run_id > backtest.runs.id
+Ref: backtest.input_datasets.input_bundle_id > backtest.input_bundles.id
+Ref: backtest.input_datasets.dataset_manifest_id > market_data.dataset_manifests.id
+Ref: backtest.monthly_judgment_summaries.run_id > backtest.runs.id
+Ref: backtest.failure_condition_counts.monthly_summary_id > backtest.monthly_judgment_summaries.id
+Ref: backtest.performance_summaries.run_id > backtest.runs.id
+Ref: backtest.performance_summaries.superseded_by_id > backtest.performance_summaries.id
+Ref: backtest.detail_object_manifests.run_id > backtest.runs.id
+Ref: backtest.detail_object_manifests.strategy_version_id > strategy.strategy_versions.id
+Ref: backtest.detail_object_manifests.supersedes_manifest_id > backtest.detail_object_manifests.id
+Ref: competition.rooms.creator_account_id > identity.accounts.id
+Ref: competition.room_schedules.room_id > competition.rooms.id
+Ref: competition.room_rules.room_id > competition.rooms.id
+Ref: competition.room_rules.scoring_template_version_id > competition.scoring_template_versions.id
+Ref: competition.scoring_template_versions.scoring_template_id > competition.scoring_templates.id
+Ref: competition.participations.room_id > competition.rooms.id
+Ref: competition.participations.bot_id > bot.bots.id
+Ref: competition.participations.owner_account_id > identity.accounts.id
+Ref: competition.evaluation_segments.participation_id > competition.participations.id
+Ref: competition.leaderboard_snapshots.room_id > competition.rooms.id
+Ref: competition.leaderboard_snapshots.scoring_template_version_id > competition.scoring_template_versions.id
+Ref: competition.leaderboard_entries.snapshot_id > competition.leaderboard_snapshots.id
+Ref: competition.leaderboard_entries.participation_id > competition.participations.id
+Ref: operations.role_permissions.role_id > operations.roles.id
+Ref: operations.role_permissions.permission_id > operations.permissions.id
+Ref: operations.operator_role_assignments.operator_account_id > operations.operator_accounts.id
+Ref: operations.operator_role_assignments.role_id > operations.roles.id
+Ref: operations.operator_role_assignments.granted_by_operator_id > operations.operator_accounts.id
+Ref: operations.notification_preferences.account_id > identity.accounts.id
+Ref: operations.notification_preferences.bot_id > bot.bots.id
+Ref: operations.notifications.account_id > identity.accounts.id
+Ref: operations.notifications.bot_id > bot.bots.id
+Ref: operations.delivery_attempts.notification_id > operations.notifications.id
+Ref: operations.cases.account_id > identity.accounts.id
+Ref: operations.case_events.case_id > operations.cases.id
+
+DiagramView Default {
+  Schemas {
+    identity
+    strategy
+    bot
+    trading
+    market_data
+    backtest
+    competition
+    operations
+  }
+}

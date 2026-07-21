@@ -1,0 +1,12 @@
+{
+  "name": "idea2strategy-schema-tooling",
+  "private": true,
+  "scripts": {
+    "dbml:validate": "node scripts/validate-dbml.mjs db/schema.dbml",
+    "dbdiagram": "dbdiagram"
+  },
+  "devDependencies": {
+    "@dbml/core": "8.2.5",
+    "dbdiagram": "0.2.0"
+  }
+}
