@@ -48,8 +48,8 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 
 ### GitLab
 
-- SSAFY 제출·팀 협업용 monolithic 구조의 예정 원격이다.
-- 현재 GitLab remote·작업공간·인증은 구성되지 않았다.
+- SSAFY 제출·팀 협업용 monolithic 원격이다.
+- 별도 sibling 작업공간과 Git Credential Manager 인증이 구성되어 있다. 구체적인 계정 식별자와 자격 증명은 공유 기록에 남기지 않는다.
 - GitLab 구조는 `ui` 콘텐츠를 포함하지만 GitHub 정본 작업공간에서 submodule을 제거하거나 직접 전환하지 않는다.
 - 별도 하네스 또는 안전한 작업공간에서 변환하며, 정확한 동기화 방식이 승인되기 전 자동화하지 않는다.
 - 자격 증명은 OS 자격 증명 저장소 또는 공식 credential helper만 사용한다.
@@ -68,7 +68,7 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 - 두 원격의 커밋 SHA나 브랜치 이력이 동일하다고 가정하지 않는다.
 - 논리적으로 같은 변경은 향후 승인될 동기화 기록에서 원본 변경, 대상 변경, 관련 Issue/Jira 키와 검증 결과로 연결한다.
 - GitHub 구조를 GitLab에, GitLab monolithic 구조를 GitHub 정본에 잘못 게시하지 않도록 원격·작업공간·submodule 형태 검사를 배포 전 필수로 둔다.
-- monolithic 변환 방식, 충돌 처리와 되돌리기 절차는 미결정이며 별도 설계·검토 없이 구현하지 않는다.
+- 최초 monolithic 변환은 검증된 GitHub 루트 커밋과 정확히 일치하는 UI tree를 사용한다. 이후 반복 동기화·충돌·되돌리기 자동화는 별도 설계 전까지 수행하지 않는다.
 
 ## 6. Git convention과 Git Flow
 
@@ -77,7 +77,10 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 - 브랜치명과 커밋 메시지에 에이전트·모델·자동 생성 표식이나 도구 이름을 넣지 않는다.
 - 작업 식별자가 생기면 GitHub Issue 또는 향후 Jira 기록과 연결한다.
 - 제품 코드와 이 정책 문서의 변경은 같은 커밋에 섞지 않는다.
-- 장기 브랜치 구성, release 주기와 두 원격 간 정확한 Git Flow는 기존 팀 합의가 확인되지 않았으므로 미결정이다. 배포 전에 임의로 확정하지 않는다.
+- `develop`은 GitHub와 GitLab의 기본 개발·통합 브랜치다. 일반 `feature/*`, `fix/*`, `docs/*`, `chore/*` pull/merge request는 `develop`을 대상으로 한다.
+- `main`은 정식 릴리스 전용이다. 첫 제품 변경은 완성된 서비스가 승인된 `v1.0.0` 시점에만 검증된 `develop`에서 `main`으로 반영하고 같은 semantic version 태그를 붙인다.
+- `v1.0.0` 이후 긴급 수정은 `hotfix/*`를 `main`에서 분기해 검증 후 `main`과 `develop` 양쪽에 반영한다.
+- 호스팅 서비스가 제안하는 기본 대상 브랜치를 그대로 사용하지 않고 작업 성격과 이 규칙을 먼저 확인한다.
 
 ## 7. 공식 협업 정책 변경 통제
 
@@ -97,7 +100,7 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 | --- | --- | --- |
 | 로컬 | 필수 읽기 진입점, ignore 검증, 정책 해시·변경 감지, 민감정보 패턴 검사 | 이번 검토본에 구성 |
 | GitHub | 보호 브랜치, 정책 경로 CODEOWNERS 승인, 필수 상태 검사, 직접 push 제한 | 미적용·사용자 승인 필요 |
-| GitLab | protected branch, CODEOWNERS/approval rule, 필수 pipeline, 직접 push 제한 | 원격 미구성·미적용 |
+| GitLab | protected branch, CODEOWNERS/approval rule, 필수 pipeline, 직접 push 제한 | 원격 구성·보호 규칙 미적용 |
 | CI/검토 | 정책 변경 전용 검사, 승인 소유자 검증, 제품 변경과 정책 변경 혼합 차단 | 미구현 |
 | 조직 권한 | GitHub/GitLab의 실제 정책 소유자 계정 매핑과 최소 권한 | 로컬 역할만 존재, 원격 검증 미완료 |
 
@@ -144,13 +147,13 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 - 최초 변환 이후 submodule 변경을 GitLab monolithic 구조에 반복 동기화하는 자동화·충돌·rollback 방식
 - GitHub Issues를 Stackcord의 실시간 task provider로 전환하는 시점
 - GitHub/GitLab 정책 소유자 검증과 원격 보호 설정
-- 팀의 정확한 장기 Git Flow와 release 절차
 - Jira 프로젝트 키·실제 담당자·일정
 
 ## 14. 변경 이력
 
 | 날짜 | 상태 | 변경 이유 | 승인 근거 |
 | --- | --- | --- | --- |
+| 2026-07-22 | Git Flow 정정 | 양쪽 기본 개발 브랜치를 `develop`으로 통일하고 `main`을 `v1.0.0`부터의 정식 릴리스 전용으로 제한 | 사용자의 명시적 정정 및 진행 승인 |
 | 2026-07-22 | GitHub·GitLab 배포 | GitHub submodule 기준선과 별도 GitLab monolithic 기준선을 검증된 커밋으로 게시 | 사용자의 명시적 진행 요청; 로컬·DBML·UI tree 검증 통과 |
 | 2026-07-22 | 배포 승인·구현 중 | 로컬 운영 영역을 `.harness/local/`로 통합하고 GitLab 저장소·인증·별도 monolithic 작업공간 경계를 확정 | 사용자의 A 구조 선택과 명시적 진행 요청 |
 | 2026-07-22 | 배포 전 검토본 생성 | GitHub submodule·향후 GitLab monolithic 구조와 Stackcord 기반 협업을 하나의 정책으로 통합 | 현재 세션의 명시적 사용자 요청; 원격 소유권·보호 설정은 아직 검증·적용하지 않음 |
