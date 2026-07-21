@@ -116,12 +116,12 @@ Table identity.accounts {
   id uuid [pk]
 }
 
-Table strategy.strategy_versions {
+Table strategy.strategy_releases {
   id uuid [pk]
   owner_account_id uuid [not null]
 }
 
-Ref: strategy.strategy_versions.owner_account_id > identity.accounts.id
+Ref: strategy.strategy_releases.owner_account_id > identity.accounts.id
 ```
 
 위 예시의 `uuid`는 논리적 불투명 식별자를 나타내는 DBML 표현이며 특정 DBMS 함수·생성 방식·저장 크기를 확정하지 않는다.

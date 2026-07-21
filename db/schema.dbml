@@ -84,7 +84,7 @@ Table strategy.validation_runs {
   result_document json [not null]
   validated_at timestamp [not null]
 }
-Table strategy.strategy_versions {
+Table strategy.strategy_releases {
   id uuid [pk]
   owner_account_id uuid [not null]
   source_draft_id uuid [not null]
@@ -114,7 +114,7 @@ Table strategy.component_drafts {
   edit_sequence bigint [not null]
   saved_at timestamp [not null]
 }
-Table strategy.component_versions {
+Table strategy.component_releases {
   id uuid [pk]
   owner_account_id uuid [not null]
   source_draft_id uuid [not null]
@@ -124,21 +124,21 @@ Table strategy.component_versions {
   layout_hash varchar [not null]
   released_at timestamp [not null]
 }
-Table strategy.version_components {
-  strategy_version_id uuid [not null]
-  component_version_id uuid [not null]
+Table strategy.release_components {
+  strategy_release_id uuid [not null]
+  component_release_id uuid [not null]
   reference_key varchar [not null]
   indexes {
-    (strategy_version_id, reference_key) [pk]
-    (strategy_version_id, component_version_id) [unique]
+    (strategy_release_id, reference_key) [pk]
+    (strategy_release_id, component_release_id) [unique]
   }
 }
-Table strategy.version_instruments {
-  strategy_version_id uuid [not null]
+Table strategy.release_instruments {
+  strategy_release_id uuid [not null]
   instrument_id uuid [not null]
   selection_source varchar [not null]
   indexes {
-    (strategy_version_id, instrument_id) [pk]
+    (strategy_release_id, instrument_id) [pk]
   }
 }
 
@@ -160,7 +160,7 @@ Table bot.bots {
 Table bot.bot_strategies {
   id uuid [pk]
   bot_id uuid [not null]
-  strategy_version_id uuid [not null]
+  strategy_release_id uuid [not null]
   position_order int [not null]
   budget_limit_type varchar [not null]
   budget_limit_value decimal [not null]
@@ -169,7 +169,7 @@ Table bot.bot_strategies {
   conflict_policy_document json [not null]
   indexes {
     (bot_id, position_order) [unique]
-    (bot_id, strategy_version_id) [unique]
+    (bot_id, strategy_release_id) [unique]
   }
 }
 Table bot.bot_events {
@@ -181,7 +181,7 @@ Table bot.bot_events {
   received_at timestamp [not null]
   parent_event_id uuid
   idempotency_key varchar [not null]
-  strategy_version_id uuid
+  strategy_release_id uuid
   market_dataset_manifest_id uuid
   summary_document json [not null]
   indexes {
@@ -215,7 +215,7 @@ Table trading.order_candidate_batches {
   id uuid [pk]
   bot_id uuid [not null]
   bot_event_id uuid [not null]
-  strategy_version_id uuid [not null]
+  strategy_release_id uuid [not null]
   status varchar [not null]
   conflict_rule_document json [not null]
   decided_at timestamp [not null]
@@ -474,7 +474,7 @@ Table backtest.evaluation_periods {
 Table backtest.runs {
   id uuid [pk]
   owner_account_id uuid [not null]
-  strategy_version_id uuid [not null, unique]
+  strategy_release_id uuid [not null, unique]
   evaluation_period_id uuid [not null]
   status varchar [not null]
   catalog_version varchar [not null]
@@ -534,7 +534,7 @@ Table backtest.performance_summaries {
 Table backtest.detail_object_manifests {
   id uuid [pk]
   run_id uuid [not null]
-  strategy_version_id uuid [not null]
+  strategy_release_id uuid [not null]
   record_type varchar [not null]
   et_year int [not null]
   et_month int [not null]
@@ -784,23 +784,23 @@ Ref: identity.account_sanctions.operation_audit_event_id > operations.audit_even
 Ref: strategy.strategy_drafts.owner_account_id > identity.accounts.id
 Ref: strategy.strategy_drafts.source_draft_id > strategy.strategy_drafts.id
 Ref: strategy.validation_runs.draft_id > strategy.strategy_drafts.id
-Ref: strategy.strategy_versions.owner_account_id > identity.accounts.id
-Ref: strategy.strategy_versions.source_draft_id > strategy.strategy_drafts.id
-Ref: strategy.strategy_versions.validation_run_id > strategy.validation_runs.id
+Ref: strategy.strategy_releases.owner_account_id > identity.accounts.id
+Ref: strategy.strategy_releases.source_draft_id > strategy.strategy_drafts.id
+Ref: strategy.strategy_releases.validation_run_id > strategy.validation_runs.id
 Ref: strategy.component_drafts.owner_account_id > identity.accounts.id
-Ref: strategy.component_versions.owner_account_id > identity.accounts.id
-Ref: strategy.component_versions.source_draft_id > strategy.component_drafts.id
-Ref: strategy.version_components.strategy_version_id > strategy.strategy_versions.id
-Ref: strategy.version_components.component_version_id > strategy.component_versions.id
-Ref: strategy.version_instruments.strategy_version_id > strategy.strategy_versions.id
-Ref: strategy.version_instruments.instrument_id > market_data.instruments.id
+Ref: strategy.component_releases.owner_account_id > identity.accounts.id
+Ref: strategy.component_releases.source_draft_id > strategy.component_drafts.id
+Ref: strategy.release_components.strategy_release_id > strategy.strategy_releases.id
+Ref: strategy.release_components.component_release_id > strategy.component_releases.id
+Ref: strategy.release_instruments.strategy_release_id > strategy.strategy_releases.id
+Ref: strategy.release_instruments.instrument_id > market_data.instruments.id
 Ref: bot.bots.owner_account_id > identity.accounts.id
 Ref: bot.bots.source_bot_id > bot.bots.id
 Ref: bot.bot_strategies.bot_id > bot.bots.id
-Ref: bot.bot_strategies.strategy_version_id > strategy.strategy_versions.id
+Ref: bot.bot_strategies.strategy_release_id > strategy.strategy_releases.id
 Ref: bot.bot_events.bot_id > bot.bots.id
 Ref: bot.bot_events.parent_event_id > bot.bot_events.id
-Ref: bot.bot_events.strategy_version_id > strategy.strategy_versions.id
+Ref: bot.bot_events.strategy_release_id > strategy.strategy_releases.id
 Ref: bot.bot_events.market_dataset_manifest_id > market_data.dataset_manifests.id
 Ref: bot.strategy_runtime_states.bot_strategy_id > bot.bot_strategies.id
 Ref: bot.continuation_deadlines.bot_id > bot.bots.id
@@ -808,7 +808,7 @@ Ref: bot.continuation_deadlines.basis_event_id > bot.bot_events.id
 Ref: bot.continuation_deadlines.superseded_by_id > bot.continuation_deadlines.id
 Ref: trading.order_candidate_batches.bot_id > bot.bots.id
 Ref: trading.order_candidate_batches.bot_event_id > bot.bot_events.id
-Ref: trading.order_candidate_batches.strategy_version_id > strategy.strategy_versions.id
+Ref: trading.order_candidate_batches.strategy_release_id > strategy.strategy_releases.id
 Ref: trading.order_candidates.batch_id > trading.order_candidate_batches.id
 Ref: trading.order_candidates.bot_strategy_id > bot.bot_strategies.id
 Ref: trading.order_candidates.instrument_id > market_data.instruments.id
@@ -848,7 +848,7 @@ Ref: market_data.corporate_actions.supersedes_action_id > market_data.corporate_
 Ref: market_data.quality_incidents.dataset_manifest_id > market_data.dataset_manifests.id
 Ref: market_data.quality_incidents.instrument_id > market_data.instruments.id
 Ref: backtest.runs.owner_account_id > identity.accounts.id
-Ref: backtest.runs.strategy_version_id > strategy.strategy_versions.id
+Ref: backtest.runs.strategy_release_id > strategy.strategy_releases.id
 Ref: backtest.runs.evaluation_period_id > backtest.evaluation_periods.id
 Ref: backtest.input_bundles.run_id > backtest.runs.id
 Ref: backtest.input_datasets.input_bundle_id > backtest.input_bundles.id
@@ -858,7 +858,7 @@ Ref: backtest.failure_condition_counts.monthly_summary_id > backtest.monthly_jud
 Ref: backtest.performance_summaries.run_id > backtest.runs.id
 Ref: backtest.performance_summaries.superseded_by_id > backtest.performance_summaries.id
 Ref: backtest.detail_object_manifests.run_id > backtest.runs.id
-Ref: backtest.detail_object_manifests.strategy_version_id > strategy.strategy_versions.id
+Ref: backtest.detail_object_manifests.strategy_release_id > strategy.strategy_releases.id
 Ref: backtest.detail_object_manifests.supersedes_manifest_id > backtest.detail_object_manifests.id
 Ref: competition.rooms.creator_account_id > identity.accounts.id
 Ref: competition.room_schedules.room_id > competition.rooms.id
