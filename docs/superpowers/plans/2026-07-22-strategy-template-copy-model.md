@@ -18,5 +18,5 @@
 - [x] Replace component draft/release/link entities with independent `strategy_templates`.
 - [x] Keep `release_instruments` as the normalized released-instrument relationship.
 - [x] Validate DBML syntax, strategy-model rules, semantic diff, and stale-name absence.
-- [ ] Commit and push `feature/dbml`.
-- [ ] Push the verified canonical DBML to the existing dbdiagram.io diagram and pull it back for a zero-diff check.
+- [x] Commit and push `feature/dbml`.
+- [x] Push the verified canonical DBML to the existing dbdiagram.io diagram and pull it back for a zero-diff check.
