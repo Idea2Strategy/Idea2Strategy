@@ -52,7 +52,7 @@
 **Files:**
 - Verify only.
 
-- [ ] Confirm both hosting projects report `develop` as default and both local workspaces track `develop`.
-- [ ] Confirm GitHub `main` remains unchanged and GitLab `main` no longer exists.
-- [ ] Confirm GitHub has exactly one `ui` gitlink, GitLab has none, and the GitLab `ui` tree equals the source UI tree.
-- [ ] Run local-harness, collaboration-policy, Stackcord context, DBML hash, build, remote-SHA, and clean-worktree checks.
+- [x] Confirm both hosting projects report `develop` as default and both local workspaces track `develop`.
+- [x] Confirm GitHub `main` remains unchanged and GitLab `main` no longer exists.
+- [x] Confirm GitHub has exactly one `ui` gitlink, GitLab has none, and the GitLab `ui` tree equals the source UI tree.
+- [x] Run local-harness, collaboration-policy, Stackcord context, DBML hash, build, remote-SHA, and clean-worktree checks.
