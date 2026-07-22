@@ -48,6 +48,7 @@ Run these commands from the cloned repository root:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/initialize-local-harness.ps1 -Verify
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-collaboration-policy.ps1
 stackcord context audit --root . --json
+git status --short --branch
 stackcord status --json
 ```
 
