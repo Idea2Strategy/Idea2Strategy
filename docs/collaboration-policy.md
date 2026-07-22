@@ -111,7 +111,7 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 | GitHub | 보호 브랜치, 정책 경로 CODEOWNERS 승인, 필수 상태 검사, 직접 push 제한 | 미적용·사용자 승인 필요 |
 | GitLab | protected branch, CODEOWNERS/approval rule, 필수 pipeline, 직접 push 제한 | 원격 구성·보호 규칙 미적용 |
 | CI/검토 | 정책 변경 전용 검사, 승인 소유자 검증, 제품 변경과 정책 변경 혼합 차단 | 미구현 |
-| 조직 권한 | GitHub/GitLab의 실제 정책 소유자 계정 매핑과 최소 권한 | 로컬 역할만 존재, 원격 검증 미완료 |
+| 조직 권한 | GitHub/GitLab의 실제 정책 소유자 계정 매핑과 최소 권한 | Stackcord 권한자는 `user:kcrmin`으로 구성, fresh provider 승인 관찰은 아직 없음 |
 
 원격 보호를 적용하기 전에는 누구도 정책 문서가 기술적으로 변경 불가능하다고 주장하지 않는다.
 
@@ -155,13 +155,14 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 
 - 최초 변환 이후 submodule 변경을 GitLab monolithic 구조에 반복 동기화하는 자동화·충돌·rollback 방식
 - GitHub Issues를 Stackcord의 실시간 task provider로 전환하는 시점
-- GitHub/GitLab 정책 소유자 검증과 원격 보호 설정
+- GitHub `user:kcrmin`의 fresh provider 승인 관찰과 GitHub/GitLab 원격 보호 설정
 - Jira 프로젝트 키·실제 담당자·일정
 
 ## 14. 변경 이력
 
 | 날짜 | 상태 | 변경 이유 | 승인 근거 |
 | --- | --- | --- | --- |
+| 2026-07-22 | 제품 권한 governance 활성화 | GitHub `user:kcrmin`만 확정 제품·정책·비즈니스·계약 변경을 승인할 수 있게 하고, 다른 사용자는 격리 제안만 만들도록 사전 차단 규칙을 추가 | 사용자가 권한 계정과 로컬 연락 이메일을 명시하고 설계 검토 후 진행 승인 |
 | 2026-07-22 | Git Flow 정정 | 양쪽 기본 개발 브랜치를 `develop`으로 통일하고 `main`을 `v1.0.0`부터의 정식 릴리스 전용으로 제한 | 사용자의 명시적 정정 및 진행 승인 |
 | 2026-07-22 | GitHub·GitLab 배포 | GitHub submodule 기준선과 별도 GitLab monolithic 기준선을 검증된 커밋으로 게시 | 사용자의 명시적 진행 요청; 로컬·DBML·UI tree 검증 통과 |
 | 2026-07-22 | 배포 승인·구현 중 | 로컬 운영 영역을 `.harness/local/`로 통합하고 GitLab 저장소·인증·별도 monolithic 작업공간 경계를 확정 | 사용자의 A 구조 선택과 명시적 진행 요청 |
