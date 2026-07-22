@@ -5,7 +5,7 @@
       "id": "claim.clone-readiness",
       "work_id": "work.clone-readiness",
       "definition_fingerprint": "sha256:007e725aeded65f342f5cc4e3826f3f197fc7ea6f9b691ed80c83453323f1e7a",
-      "status": "in_progress",
+      "status": "review",
       "owner": "clone-readiness-bootstrap",
       "branch": "fix/clone-readiness",
       "repository": "repository.github.root",
