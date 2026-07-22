@@ -4,5 +4,6 @@ workspaces:
   - id: workspace.root
     kind: root
     path: .
+    commands_path: .harness/commands.yaml
     responsibilities: [orchestration]
     dependencies: []

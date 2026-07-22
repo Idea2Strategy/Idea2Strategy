@@ -30,7 +30,9 @@ scope:
         - .agents/skills/use-project-harness/SKILL.md
         - .agents/skills/use-project-harness/references/fallback.md
         - .gitignore
+        - .harness/commands.yaml
         - .harness/local
+        - .harness/workspaces.yaml
         - AGENTS.md
         - README.md
         - docs/collaboration-policy.md
@@ -51,12 +53,11 @@ merge_order:
 first_failing_test: scripts/verify-collaboration-policy.ps1 fails when the policy hash, recovery link, local ignore boundary, or shared credential scan is invalid.
 evidence:
     kinds:
-        - context-audit
-        - git-inspection
-        - policy-verification
-        - submodule-inspection
+        - security
+        - test
+        - user
     integration_required: false
     user_validation: true
     migration_required: false
     rollback_required: false
-fingerprint: sha256:66e9ed7fab616f01c3fa183e2c0253b69ccc8e8a0e19ce793566e09b791bf346
+fingerprint: sha256:a97a27623721431e491c6b2927a16d4b89da602bcd4fb8ee28b0e1191608338b
