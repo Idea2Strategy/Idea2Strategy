@@ -1,0 +1,12 @@
+.variant-balanced {
+  --accent: #246bfd;
+}
+.variant-balanced.theme-dark { --accent: #6d96ff; }
+.variant-balanced .page { max-width: 1450px; }
+.variant-balanced .panel { box-shadow: 0 12px 35px rgba(38, 55, 74, .055); }
+.variant-balanced .app-sidebar { padding-left: 18px; padding-right: 18px; }
+.variant-balanced .page-heading { margin-top: 4px; }
+.variant-balanced .room-card.featured { background: linear-gradient(145deg, var(--surface), color-mix(in srgb, var(--accent-soft) 48%, var(--surface))); }
+.variant-balanced .stats-grid { gap: 18px; }
+.variant-balanced .stat-card { border-top: 3px solid color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.variant-balanced .strategy-container { backdrop-filter: blur(8px); }
