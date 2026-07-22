@@ -1,0 +1,5 @@
+schema_version: 1
+work_id: work.collaboration-policy-bootstrap
+claim_id: claim.collaboration-policy-bootstrap
+branch: chore/collaboration-bootstrap-completion
+baseline: pending-context-refresh
