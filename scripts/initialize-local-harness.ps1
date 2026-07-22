@@ -81,6 +81,23 @@ function Initialize-TrackedPolicyIntegrity {
   } | ConvertTo-Json | Set-Content -LiteralPath $integrityPath -Encoding utf8
 }
 
+function Initialize-ProductAuthorityReference {
+  $ownerMetadataPath = Join-Path $localRoot 'project/policy/owner.yaml'
+  if (Test-Path -LiteralPath $ownerMetadataPath -PathType Leaf) {
+    return
+  }
+
+  $ownerMetadata = @'
+schema_version: 1
+provider: github
+repository: Idea2Strategy/Idea2Strategy
+provider_authority: user:kcrmin
+contact_email_is_authority: false
+purpose: non-secret product-authority reference; provider verification is required
+'@
+  Set-Content -LiteralPath $ownerMetadataPath -Encoding utf8 -Value $ownerMetadata
+}
+
 function Remove-EmptyDirectoryTree {
   param([string]$Path)
 
@@ -180,6 +197,7 @@ function Test-Layout {
 
 Initialize-Layout
 Initialize-TrackedPolicyIntegrity
+Initialize-ProductAuthorityReference
 $migratedFiles = 0
 if ($MigrateLegacy) {
   $migrations = @(

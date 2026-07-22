@@ -52,6 +52,13 @@ try {
   & $scriptUnderTest -RepositoryRoot $sandbox -MigrateLegacy -Verify
   Assert-True ($LASTEXITCODE -eq 0) 'first bootstrap run exits successfully'
 
+  $ownerPath = Join-Path $sandbox '.harness/local/project/policy/owner.yaml'
+  Assert-True (Test-Path -LiteralPath $ownerPath -PathType Leaf) 'first bootstrap creates local authority reference'
+  $ownerText = Get-Content -Raw -Encoding utf8 $ownerPath
+  Assert-True $ownerText.Contains('provider_authority: user:kcrmin') 'authority reference names provider identity'
+  Assert-True $ownerText.Contains('contact_email_is_authority: false') 'authority reference rejects email authentication'
+  Assert-True (-not $ownerText.Contains('@')) 'generated authority reference contains no email address'
+
   $expectedFiles = @{
     '.harness/local/artifacts/report.txt' = 'artifact-data'
     '.harness/local/tmp/checkpoint.yaml' = 'checkpoint-data'
@@ -91,12 +98,22 @@ try {
   git -C $sandbox check-ignore --quiet -- '.harness/local/tmp/.gitkeep'
   Assert-True ($LASTEXITCODE -ne 0) '.gitkeep is eligible for tracking'
 
+  $preservedOwner = @'
+schema_version: 1
+provider_authority: user:existing-local-owner
+contact_email_is_authority: false
+'@
+  Set-Content -LiteralPath $ownerPath -Encoding utf8 -Value $preservedOwner
+  $ownerHashBeforeSecondRun = (Get-FileHash -Algorithm SHA256 -LiteralPath $ownerPath).Hash
+
   & $scriptUnderTest -RepositoryRoot $sandbox -MigrateLegacy -Verify
   Assert-True ($LASTEXITCODE -eq 0) 'second bootstrap run is idempotent'
+  $ownerHashAfterSecondRun = (Get-FileHash -Algorithm SHA256 -LiteralPath $ownerPath).Hash
+  Assert-True ($ownerHashAfterSecondRun -eq $ownerHashBeforeSecondRun) 'second bootstrap preserves existing local owner metadata'
 
   [pscustomobject]@{
     status = 'passed'
-    assertions = 26
+    assertions = 31
   } | ConvertTo-Json -Compress
 } finally {
   $resolvedTemp = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
