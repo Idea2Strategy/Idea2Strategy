@@ -9,6 +9,9 @@ $policyRelativePath = 'docs/collaboration-policy.md'
 $policyPath = Join-Path $repositoryRoot $policyRelativePath
 $localRoot = Join-Path $repositoryRoot '.harness/local/project'
 $integrityPath = Join-Path $localRoot 'policy/integrity.json'
+$governanceRelativePath = '.harness/governance.yaml'
+$governancePath = Join-Path $repositoryRoot $governanceRelativePath
+$ownerMetadataPath = Join-Path $localRoot 'policy/owner.yaml'
 
 if (-not (Test-Path -LiteralPath $policyPath -PathType Leaf)) {
   throw "Missing official collaboration policy: $policyRelativePath"
@@ -54,12 +57,64 @@ foreach ($link in $requiredLinks) {
   }
 }
 
+if (-not (Test-Path -LiteralPath $governancePath -PathType Leaf)) {
+  throw "Missing Stackcord governance policy: $governanceRelativePath"
+}
+$governanceText = Get-Content -Raw -Encoding utf8 $governancePath
+$requiredGovernanceValues = @(
+  'enabled: true',
+  'provider: github',
+  'repository: Idea2Strategy/Idea2Strategy',
+  'product_authorities: [user:kcrmin]',
+  'protected_kinds: [product, policy, business, contract]',
+  'minimum: 1',
+  'authority_self_approval: true'
+)
+foreach ($required in $requiredGovernanceValues) {
+  if (-not $governanceText.Contains($required)) {
+    throw "Governance requirement is missing: $required"
+  }
+}
+
+$authorityRuleFiles = @(
+  'AGENTS.md',
+  '.agents/skills/use-project-harness/SKILL.md',
+  '.agents/skills/use-project-harness/references/fallback.md',
+  'docs/collaboration-policy.md'
+)
+$requiredAuthorityRules = @(
+  'stackcord governance check --json',
+  'user:kcrmin',
+  'fresh provider',
+  'must not edit',
+  'Git user.name and user.email never prove authority'
+)
+foreach ($relativePath in $authorityRuleFiles) {
+  $content = Get-Content -Raw -Encoding utf8 (Join-Path $repositoryRoot $relativePath)
+  foreach ($required in $requiredAuthorityRules) {
+    if (-not $content.Contains($required)) {
+      throw "Missing product-authority rule '$required' in $relativePath."
+    }
+  }
+}
+
+if (-not (Test-Path -LiteralPath $ownerMetadataPath -PathType Leaf)) {
+  throw 'Ignored local product-owner metadata is missing.'
+}
+$ownerMetadata = Get-Content -Raw -Encoding utf8 $ownerMetadataPath
+foreach ($required in @('provider_authority: user:kcrmin', 'contact_email_is_authority: false')) {
+  if (-not $ownerMetadata.Contains($required)) {
+    throw "Local product-owner metadata requirement is missing: $required"
+  }
+}
+
 $sharedFiles = @(
   $policyPath,
   (Join-Path $repositoryRoot 'AGENTS.md'),
   (Join-Path $repositoryRoot 'README.md'),
   (Join-Path $repositoryRoot '.agents/skills/use-project-harness/SKILL.md'),
   (Join-Path $repositoryRoot '.agents/skills/use-project-harness/references/fallback.md'),
+  $governancePath,
   (Join-Path $repositoryRoot '.harness/work/definitions/work.collaboration-policy-bootstrap.yaml')
 )
 $emailPattern = '(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}'
@@ -105,5 +160,7 @@ if ($trackedInHead) {
   tracked_in_head = $trackedInHead
   bootstrap_review = [bool]$BootstrapReview
   authorized_policy_change = [bool]$AuthorizedPolicyChange
+  governance_enabled = $true
+  product_authority = 'user:kcrmin'
   status = 'passed'
 } | ConvertTo-Json -Compress

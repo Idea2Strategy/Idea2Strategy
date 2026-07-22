@@ -1,8 +1,8 @@
 schema_version: 1
-enabled: false
-provider: ""
-repository: ""
-product_authorities: []
+enabled: true
+provider: github
+repository: Idea2Strategy/Idea2Strategy
+product_authorities: [user:kcrmin]
 protected_kinds: [product, policy, business, contract]
 approval:
   minimum: 1

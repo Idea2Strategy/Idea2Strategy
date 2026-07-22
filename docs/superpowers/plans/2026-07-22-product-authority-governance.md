@@ -12,7 +12,7 @@
 
 - The sole authority is the provider-normalized GitHub subject `user:kcrmin`.
 - The canonical review repository is `Idea2Strategy/Idea2Strategy`.
-- `kyoungcheul.min@gmail.com` is contact metadata only and never authorization evidence.
+- The owner email is ignored local contact metadata only and never authorization evidence.
 - Missing, stale, unavailable, or non-matching provider evidence denies canonical mutation.
 - Other actors may prepare isolated proposals but may not modify canonical protected sources in place or claim approval, integration, or release.
 - Remote branch protection and CI remain explicitly unapplied; this work must not claim otherwise.
@@ -104,9 +104,10 @@ Add these ignored local fields:
 
 ```yaml
 provider_authority: user:kcrmin
-contact_email: kyoungcheul.min@gmail.com
 contact_email_is_authority: false
 ```
+
+Keep the owner-provided contact email only in this ignored local file; do not copy it into any tracked document.
 
 - [ ] **Step 4: Run the verifier and confirm green**
 

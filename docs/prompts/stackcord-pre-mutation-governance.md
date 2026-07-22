@@ -31,7 +31,7 @@ Acceptance example:
 
 - Policy authority is `user:kcrmin` on GitHub.
 - A fresh exact observation for `user:kcrmin` allows a canonical protected write.
-- Any other subject, an unknown actor, or a local Git identity using `kyoungcheul.min@gmail.com` without provider proof is denied canonical mutation and may only create an isolated proposal.
+- Any other subject, an unknown actor, or a local Git identity using the configured contact email without provider proof is denied canonical mutation and may only create an isolated proposal.
 - Existing projects without strict pre-mutation mode retain Stackcord's current proposal/approval/integration behavior.
 
 Deliver a reviewed design, implementation plan, tests, implementation, migration notes, and exact verification evidence. Do not publish or release the plugin unless separately authorized.

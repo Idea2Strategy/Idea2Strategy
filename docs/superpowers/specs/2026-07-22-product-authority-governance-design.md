@@ -2,7 +2,7 @@
 
 ## Objective
 
-Idea2Strategy must fail closed when an actor attempts to change canonical product meaning without product-owner authority. The only product authority is the GitHub account `user:kcrmin`. The known email `kyoungcheul.min@gmail.com` is owner contact metadata, not authentication evidence.
+Idea2Strategy must fail closed when an actor attempts to change canonical product meaning without product-owner authority. The only product authority is the GitHub account `user:kcrmin`. The known owner email remains ignored local contact metadata, not authentication evidence.
 
 ## Current gap
 
@@ -18,7 +18,7 @@ The repository already tells agents to run `stackcord governance check`, but `.h
 - Authority self-approval: allowed for the sole owner.
 - A fresh provider observation for the exact head commit and protected fingerprint is required.
 - Git `user.name`, Git `user.email`, commit author fields, issue assignment, comments, and cached observations never grant authority.
-- `kyoungcheul.min@gmail.com` may be retained in ignored local owner metadata as a contact and consistency hint, but a matching email never satisfies the gate.
+- The owner email may be retained in ignored local owner metadata as a contact and consistency hint, but a matching email never satisfies the gate.
 
 The GitLab monolithic mirror uses the same GitHub governance authority and canonical review repository. A different GitLab username cannot independently approve protected product meaning.
 

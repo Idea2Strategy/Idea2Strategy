@@ -94,6 +94,15 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 
 이 규칙은 로컬 검증만으로 절대적인 수정 방지를 보장하지 않는다. 실제 강제에는 아래 원격 보호와 CI가 필요하다.
 
+### 제품 권한과 확정 원본 수정 차단
+
+- Stackcord 제품 권한 검사를 활성화하며 선택 provider는 GitHub, 기준 저장소는 `Idea2Strategy/Idea2Strategy`, 유일한 권한자는 `user:kcrmin`이다.
+- `.harness/governance.yaml`, `specs/**`, `contracts/**`, 이 문서와 차단 규칙을 집행하는 파일을 수정하기 전에 `stackcord governance check --json`을 실행한다.
+- 정확한 저장소·HEAD 커밋·보호 의미 fingerprint에 대해 `user:kcrmin`을 승인자로 확인한 fresh provider 관찰만 확정 원본 수정을 허용한다.
+- 관찰이 없거나 stale·unknown·unavailable이거나 다른 subject이면 작업자는 must not edit 원칙에 따라 확정 원본을 수정하지 않는다. 별도 격리 제안은 만들 수 있지만 승인·통합·릴리스된 변경으로 표현하지 않는다.
+- Git user.name and user.email never prove authority. 알려진 이메일은 로컬 연락 메타데이터일 뿐 권한 판정에 사용하지 않는다.
+- GitLab monolithic 저장소도 별도의 GitLab 사용자에게 제품 권한을 부여하지 않고 위 GitHub 권한을 동일하게 따른다.
+
 ## 8. 보호 계층과 현재 적용 상태
 
 | 계층 | 필요한 통제 | 현재 상태 |
