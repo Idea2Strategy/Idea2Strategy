@@ -1,0 +1,5 @@
+schema_version: 1
+work_id: work.clone-readiness
+claim_id: claim.clone-readiness
+branch: fix/clone-readiness
+baseline: pending-context-refresh
