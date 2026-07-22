@@ -115,7 +115,7 @@ $sharedFiles = @(
   (Join-Path $repositoryRoot '.agents/skills/use-project-harness/SKILL.md'),
   (Join-Path $repositoryRoot '.agents/skills/use-project-harness/references/fallback.md'),
   $governancePath,
-  (Join-Path $repositoryRoot '.harness/work/definitions/work.collaboration-policy-bootstrap.yaml')
+  (Join-Path $repositoryRoot '.harness/work/items/work.collaboration-policy-bootstrap.yaml')
 )
 $emailPattern = '(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}'
 $credentialPatterns = @('ghp_[A-Za-z0-9]+', 'github_pat_[A-Za-z0-9_]+', 'glpat-[A-Za-z0-9_-]+', '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----')
