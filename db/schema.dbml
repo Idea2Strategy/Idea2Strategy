@@ -603,27 +603,6 @@ Table competition.evaluation_segments {
   virtual_liquidation_document json [note: 'Performance-only; never mutates the bot ledger.']
   finalized_at timestamp
 }
-Table competition.leaderboard_snapshots {
-  id uuid [pk]
-  room_id uuid [not null]
-  scoring_template_version_id uuid [not null]
-  as_of_at timestamp [not null]
-  status varchar [not null]
-  source_set_hash varchar [not null]
-}
-Table competition.leaderboard_entries {
-  id uuid [pk]
-  snapshot_id uuid [not null]
-  participation_id uuid [not null]
-  rank int
-  score decimal
-  eligibility_status varchar [not null]
-  calculation_document json [not null]
-  indexes {
-    (snapshot_id, participation_id) [unique]
-  }
-}
-
 // operations: RBAC, notification, support, audit and delivery
 Table operations.operator_accounts {
   id uuid [pk]
@@ -836,10 +815,6 @@ Ref: competition.participations.room_id > competition.rooms.id
 Ref: competition.participations.bot_id > bot.bots.id
 Ref: competition.participations.owner_account_id > identity.accounts.id
 Ref: competition.evaluation_segments.participation_id > competition.participations.id
-Ref: competition.leaderboard_snapshots.room_id > competition.rooms.id
-Ref: competition.leaderboard_snapshots.scoring_template_version_id > competition.scoring_template_versions.id
-Ref: competition.leaderboard_entries.snapshot_id > competition.leaderboard_snapshots.id
-Ref: competition.leaderboard_entries.participation_id > competition.participations.id
 Ref: operations.role_permissions.role_id > operations.roles.id
 Ref: operations.role_permissions.permission_id > operations.permissions.id
 Ref: operations.operator_role_assignments.operator_account_id > operations.operator_accounts.id

@@ -4,6 +4,7 @@
   "scripts": {
     "dbml:validate": "node scripts/validate-dbml.mjs db/schema.dbml",
     "dbml:validate-release-names": "node scripts/validate-dbml-release-names.mjs db/schema.dbml",
+    "dbml:validate-no-leaderboard-storage": "node scripts/validate-dbml-no-leaderboard-storage.mjs db/schema.dbml",
     "dbdiagram": "dbdiagram"
   },
   "devDependencies": {
