@@ -5,7 +5,7 @@
       "id": "claim.product-authority-governance",
       "work_id": "work.product-authority-governance",
       "definition_fingerprint": "sha256:071f04c0b8a0860e1efd5df9f9545fd36fb5ad8238b4525dc736ecf19f668cd3",
-      "status": "integrated",
+      "status": "done",
       "owner": "product-authority-bootstrap",
       "branch": "chore/product-authority-governance",
       "repository": "repository.github.root",
