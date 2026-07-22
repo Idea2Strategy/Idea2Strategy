@@ -5,7 +5,7 @@
       "id": "claim.collaboration-policy-bootstrap",
       "work_id": "work.collaboration-policy-bootstrap",
       "definition_fingerprint": "sha256:a97a27623721431e491c6b2927a16d4b89da602bcd4fb8ee28b0e1191608338b",
-      "status": "in_progress",
+      "status": "review",
       "owner": "policy-document-owner",
       "branch": "chore/collaboration-bootstrap-completion",
       "repository": "repository.github.root",
