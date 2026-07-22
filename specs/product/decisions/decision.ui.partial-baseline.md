@@ -3,12 +3,12 @@ schema_version: 1
 id: decision.ui.partial-baseline
 kind: decision
 status: approved
-revision: 1
+revision: 2
 refs: []
 ---
 
 # decision.ui.partial-baseline
 
-Choice: Freeze UI meaning and required states now, but defer exact visual design until a harness and editable UI workspace exist.
+Choice: Retire the old UI reference, freeze the approved Basic and Pro editor interactions and required states, and defer exact visual design to a new editable UI workspace.
 
-Rationale: Layout quality must be judged with representative screens without treating exploratory UI as specification.
+Rationale: The old exploratory UI no longer represents the intended editor. New representative screens must be judged against product meaning without inheriting its layout or code.
