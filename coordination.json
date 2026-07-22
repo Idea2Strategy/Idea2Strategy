@@ -2,22 +2,20 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.product-authority-governance",
-      "work_id": "work.product-authority-governance",
-      "definition_fingerprint": "sha256:071f04c0b8a0860e1efd5df9f9545fd36fb5ad8238b4525dc736ecf19f668cd3",
-      "status": "done",
-      "owner": "product-authority-bootstrap",
-      "branch": "chore/product-authority-governance",
+      "id": "claim.clone-readiness",
+      "work_id": "work.clone-readiness",
+      "definition_fingerprint": "sha256:007e725aeded65f342f5cc4e3826f3f197fc7ea6f9b691ed80c83453323f1e7a",
+      "status": "in_progress",
+      "owner": "clone-readiness-bootstrap",
+      "branch": "fix/clone-readiness",
       "repository": "repository.github.root",
       "paths": [
-        ".agents/skills/use-project-harness/SKILL.md",
-        ".harness/governance.yaml",
-        ".harness/work/definitions/work.product-authority-governance.yaml",
-        "AGENTS.md",
-        "docs/collaboration-policy.md",
-        "docs/prompts/stackcord-pre-mutation-governance.md",
-        "docs/superpowers/specs/2026-07-22-product-authority-governance-design.md",
-        "scripts/verify-collaboration-policy.ps1"
+        ".harness/work/definitions/work.clone-readiness.yaml",
+        "README.md",
+        "docs/superpowers/plans/2026-07-22-clone-readiness.md",
+        "docs/superpowers/specs/2026-07-22-clone-readiness-design.md",
+        "scripts/initialize-local-harness.ps1",
+        "scripts/test-local-harness.ps1"
       ],
       "policy_ids": [],
       "scenario_ids": [],
@@ -30,8 +28,8 @@
         "decision.dependencies.evidence-based"
       ],
       "root_pointer": false,
-      "starts_at": "2026-07-22T04:39:21.4568335Z",
-      "expires_at": "2026-07-23T04:39:21.3070144Z"
+      "starts_at": "2026-07-22T05:10:40.2643492Z",
+      "expires_at": "2026-07-23T05:10:40.1206962Z"
     }
   ]
 }
