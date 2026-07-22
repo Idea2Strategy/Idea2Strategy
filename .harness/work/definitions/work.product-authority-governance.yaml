@@ -1,0 +1,59 @@
+schema_version: 1
+id: work.product-authority-governance
+readiness: ready
+title: Enforce product-authority governance in the project harness
+outcome: Only the provider-authenticated GitHub authority user:kcrmin can approve canonical product, policy, business, contract, or governance changes; other actors are limited to isolated proposals.
+acceptance:
+    - id: acceptance.governance.no-email-auth
+      given: Local Git names and emails are forgeable display metadata
+      when: An actor matches the configured name or email without provider proof
+      then: The actor remains unauthorized and may only prepare an isolated proposal
+      failure: Git user.name or user.email grants product authority
+    - id: acceptance.governance.plugin-handoff
+      given: Stackcord currently gates approval, integration, and release rather than arbitrary local writes
+      when: The stricter pre-mutation requirement is documented
+      then: A standalone plugin-change prompt defines the required backward-compatible enhancement
+      failure: The project claims the plugin already hard-blocks arbitrary local file edits
+    - id: acceptance.governance.provider-authority
+      given: A task changes protected canonical meaning
+      when: The actor attempts to approve, integrate, release, or write the canonical protected source
+      then: The harness requires a fresh GitHub observation identifying user:kcrmin
+      failure: A missing, stale, or different provider identity can change canonical protected meaning
+refs:
+    - decision.dependencies.evidence-based
+workspaces:
+    - workspace.root
+scope:
+    repositories:
+        - repository.github.root
+    paths:
+        - .agents/skills/use-project-harness/SKILL.md
+        - .harness/governance.yaml
+        - .harness/work/definitions/work.product-authority-governance.yaml
+        - AGENTS.md
+        - docs/collaboration-policy.md
+        - docs/prompts/stackcord-pre-mutation-governance.md
+        - docs/superpowers/specs/2026-07-22-product-authority-governance-design.md
+        - scripts/verify-collaboration-policy.ps1
+    policy_ids: []
+    scenario_ids: []
+    contract_ids: []
+    db_entities: []
+    migration_slots: []
+    ui_flows: []
+    dependency_majors: []
+    root_pointers: []
+dependencies: []
+merge_order:
+    - workspace.root
+first_failing_test: scripts/verify-collaboration-policy.ps1 must fail while governance is disabled, user:kcrmin is absent, or canonical-write rules accept Git display identity.
+evidence:
+    kinds:
+        - security
+        - test
+        - user
+    integration_required: false
+    user_validation: true
+    migration_required: false
+    rollback_required: false
+fingerprint: sha256:071f04c0b8a0860e1efd5df9f9545fd36fb5ad8238b4525dc736ecf19f668cd3

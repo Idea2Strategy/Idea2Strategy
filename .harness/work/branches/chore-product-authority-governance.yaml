@@ -1,0 +1,5 @@
+schema_version: 1
+work_id: work.product-authority-governance
+claim_id: claim.product-authority-governance
+branch: chore/product-authority-governance
+baseline: pending-context-refresh
