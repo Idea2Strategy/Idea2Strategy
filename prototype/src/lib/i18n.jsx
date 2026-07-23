@@ -1,0 +1,286 @@
+import { Children, cloneElement, createContext, isValidElement, useContext, useEffect, useMemo, useState } from 'react';
+
+const LanguageContext = createContext(null);
+const STORAGE_KEY = 'i2s-language';
+
+const english = {
+  'Signal 주요 메뉴': 'Signal primary navigation',
+  '최대 동시 운영': 'Maximum concurrent bots',
+  '전체 가상자산': 'Total simulated equity',
+  '3개 봇 합계': 'Total across 3 bots',
+  '개별 체결 기준': 'Counted per fill',
+  '확인 기한': 'Confirmation due',
+  'Atlas 07 계속 실행': 'Keep Atlas 07 running',
+  'Atlas 07 · 미국 동부 시각 기준': 'Atlas 07 · US Eastern Time',
+  '실행·평가·조치 상태': 'Running, evaluating, and action states',
+  '공식 가상 체결 원장 기준': 'Based on the official simulated-fill ledger',
+  '실시간 노드 실행은 표시하지 않습니다': 'Live node execution is not displayed',
+  '예산 상한 검사 통과': 'Budget-cap check passed',
+  '조건 미충족': 'Condition not met',
+  '최초 실패 RSI': 'First failed condition: RSI',
+  '초기 $10,000': 'Initial $10,000',
+  '기간 내 고점 대비': 'From the period high',
+  '부분 체결 각각 집계': 'Partial fills counted separately',
+  '수수료 0.2 + 슬리피지 0.05': 'Fee 0.2 + slippage 0.05',
+  '2023 Q3–2026 Q2 · 조정 가격 데이터': '2023 Q3–2026 Q2 · adjusted price data',
+  '조건 미충족 요약': 'Unmet-condition summary',
+  '최초 실패 조건별 월간 횟수': 'Monthly count by first failed condition',
+  '거래가 없었던 개별 평가 로그는 보존하거나 표시하지 않습니다.': 'Individual evaluation logs without trades are neither stored nor displayed.',
+  '거래 상세': 'Trade details',
+  '주문·개별 체결·취소·거절과 거래 후 상태': 'Orders, fills, cancellations, rejections, and post-trade state',
+  '완료': 'Complete',
+  '기간 수익률': 'Period return',
+  '개별 체결': 'Individual fills',
+  '시각 (ET)': 'Time (ET)',
+  '행동': 'Action',
+  '요청액': 'Requested',
+  '체결액': 'Filled',
+  '수수료': 'Fee',
+  '결과': 'Result',
+  '매수': 'Buy',
+  '매도': 'Sell',
+  '복합 점수': 'Composite score',
+  '샤프 지수': 'Sharpe ratio',
+  '점수 방식 필터': 'Scoring filter',
+  '참여 인원 필터': 'Participant filter',
+  '순위 펼치기': 'Expand ranking',
+  '봇 순위': 'Bot ranking',
+  '남음': 'remaining',
+  '일 후 시작': 'days until start',
+  '로그인 수단과 서버 실행 확인 정책을 관리합니다.': 'Manage sign-in methods and server execution confirmations.',
+  '김전략': 'Strategy Kim',
+  '이메일 로그인': 'Email sign-in',
+  '인증 완료': 'Verified',
+  '소셜 로그인': 'Social sign-in',
+  'Google 계정': 'Google account',
+  '동시 접속': 'Concurrent access',
+  '한 번에 하나의 세션만 허용': 'Allow one session at a time',
+  '무소속 봇 계속 실행': 'Keep independent bot running',
+  '다음 확인 기한': 'Next confirmation due',
+  '30일 연장': 'Extend 30 days',
+  '로그인이나 화면 조회만으로 기한은 연장되지 않습니다. 서버가 버튼 요청을 접수한 시각을 기준으로 계산합니다.': 'Signing in or viewing the screen does not extend the deadline. It is calculated from the time the server receives the button request.',
+  '처리 대기': 'Pending work',
+  '오늘 확인할 운영 사건': 'Operational events to review today',
+  '시장 데이터 품질 사건 2건': '2 market-data quality incidents',
+  '기업행동 검토 1건': '1 corporate-action review',
+  '수집 파이프라인': 'Ingestion pipeline',
+  '실행 완료': 'Run complete',
+  '권한 범위': 'Permission scope',
+  '상위 권한자가 하위 권한을 부여': 'Higher roles grant lower-level access',
+  '데이터 카탈로그 관리': 'Manage data catalog',
+  '시장 이벤트 검토': 'Review market events',
+  '운영자 권한 부여': 'Grant operator access',
+  '시장 이벤트 반영 흐름': 'Market-event workflow',
+  'AI 조사 결과는 자동 투자 판단이 아니라 운영자용 자료입니다': 'AI research is operator reference material, not automated investment judgment.',
+  '외부 정보 조사': 'External research',
+  '운영자 검토': 'Operator review',
+  '승인': 'Approval',
+  '이벤트 트리거 반영': 'Apply event trigger',
+  '제품 내부 전략 평가에는 AI를 사용하지 않습니다.': 'AI is not used for in-product strategy evaluation.',
+  '총자산': 'Total equity',
+  '누적 수익률': 'Cumulative return',
+  '운영 자산': 'Managed equity',
+  '현재 포지션': 'Current positions',
+  '최근 판단': 'Recent decisions',
+  '개인 봇': 'Personal bot',
+  '조치 필요': 'Action required',
+  '작성 중인 전략을 이어가거나 새 전략을 시작하세요.': 'Continue a draft or start a new strategy.',
+  '새로 만들거나 기존 전략에서 시작하세요.': 'Start fresh or import an existing strategy.',
+  '기존 전략에서 초안을 생성': 'Create a new draft from an existing strategy',
+  '블록을 위에서 아래로 맞물리며 각 종목을 독립적으로 평가합니다.': 'Build from top to bottom and evaluate each symbol independently.',
+  '매수 또는 매도 전략 제목을 클릭하면 해당 묶음의 자연어 설명을 한 번에 확인할 수 있습니다.': 'Select a Buy or Sell strategy header to read the complete rule.',
+  '새로운 1분봉이 완성되고, RSI가 30 아래로 내려오면 전략 예산의 25%로 시장가 매수 후보를 만듭니다.': 'When a new 1-minute bar closes and RSI falls below 30, create a market buy candidate using 25% of the strategy budget.',
+  '포지션을 보유한 상태에서 RSI가 70 위로 올라가면 보유 수량 100%의 매도 후보를 만듭니다.': 'When a position is open and RSI rises above 70, create a sell candidate for 100% of the position.',
+  '전략 편집은 데스크톱에서 사용할 수 있습니다': 'Strategy editing is available on desktop',
+  '현재 화면에서는 구성만 조회할 수 있습니다.': 'This screen supports read-only viewing.',
+  '타입이 맞는 노드를 좌우로 연결해 분기·다종목·자금 정책을 명시합니다.': 'Connect compatible nodes to define branches, multi-symbol rules, and capital policy.',
+  '같은 규칙 안에서 봇의 결과를 비교하고 참여할 Competition을 찾으세요.': 'Compare bots under the same rules and find a competition to join.',
+  '서버에서 실행 중인 봇과 공식 가상 체결 상태를 확인합니다.': 'Monitor server-run bots and official simulated fills.',
+  '출시된 전략을 같은 분기의 고정 구간과 공식 데이터 스냅샷으로 평가합니다.': 'Evaluate released strategies against fixed periods and official data snapshots.',
+  '로그인 수단과 서버 실행 확인 정책을 관리합니다.': 'Manage sign-in methods and server execution confirmations.',
+  '권한이 있는 운영자만 데이터 품질과 시장 이벤트 반영 작업을 처리합니다.': 'Authorized operators manage data quality and market events.',
+  '조건에 맞는 Competition이 없습니다.': 'No competitions match these filters.',
+  '조건에 맞는 전략이 없습니다.': 'No strategies match these filters.',
+  '운영팀이 관리하는 대회': 'Competitions managed by the operations team',
+  '새 전략 선택': 'Choose strategy type',
+  '새 전략 선택 닫기': 'Close strategy chooser',
+  'Basic으로 시작': 'Start with Basic',
+  'Pro로 시작': 'Start with Pro',
+  '편집기에서 블록으로 구성': 'Build with blocks in the editor',
+  '편집기에서 노드로 구성': 'Build with nodes in the editor',
+  '원본은 그대로 두고 새 초안 생성': 'Keep the original and create a new draft',
+  '기존 전략 가져오기': 'Import existing strategy',
+  '가져올 전략을 선택하세요.': 'Choose a strategy to import.',
+  '전체 전략 보기': 'Show all strategies',
+  'Basic 전략만 보기': 'Show Basic strategies',
+  'Pro 전략만 보기': 'Show Pro strategies',
+  '매수 전략 자연어 설명': 'Explain buy strategy',
+  '매도 전략 자연어 설명': 'Explain sell strategy',
+  '고정 매수 출력': 'Fixed buy output',
+  '고정 매도 출력': 'Fixed sell output',
+  '관심종목 설정': 'Configure watchlist',
+  '내가 고른 종목만 표시': 'Show selected symbols only',
+  '최근 알림': 'Recent notifications',
+  '읽지 않음 2개': '2 unread',
+  '라이트 모드': 'Light mode',
+  '다크 모드': 'Dark mode',
+  '언어 선택': 'Language',
+  '전체 검색': 'Global search',
+  '전략 검색': 'Strategy search',
+  '이름으로 검색': 'Search by name',
+  '전략 모드 필터': 'Strategy mode filter',
+  '전략 상태 필터': 'Strategy status filter',
+  '모든 상태': 'All statuses',
+  '준비 완료': 'Ready',
+  '확인 필요': 'Needs review',
+  '검증 완료': 'Validated',
+  '임시 저장': 'Draft',
+  '미완성': 'Incomplete',
+  '열기': 'Open',
+  '가져오기': 'Import',
+  '내 전략': 'My strategies',
+  '새 전략': 'New strategy',
+  '전략': 'Strategies',
+  '봇 운영 센터': 'Bot operations',
+  '자동 백테스트': 'Automated backtest',
+  '백테스트': 'Backtest',
+  '봇': 'Bots',
+  '계정과 보안': 'Account & security',
+  '운영 관리': 'Operations admin',
+  '관리자': 'Admin',
+  '계정': 'Account',
+  '알림': 'Notifications',
+  '프로필': 'Profile',
+  '관심종목': 'Watchlist',
+  '사용자 설정': 'Custom',
+  '추가': 'Add',
+  '닫기': 'Close',
+  'Basic 편집기': 'Basic editor',
+  'Pro 편집기': 'Pro editor',
+  'Basic 전략 편집기': 'Basic strategy editor',
+  'Pro 전략 편집기': 'Pro strategy editor',
+  '목록': 'Back',
+  '저장': 'Save',
+  '저장됨': 'Saved',
+  '미저장 변경': 'Unsaved changes',
+  '검증': 'Validate',
+  '블록 검색': 'Search blocks',
+  'RSI, 가격, 체결량': 'RSI, price, volume',
+  '이동평균': 'Moving average',
+  '거래량': 'Volume',
+  'Basic 전략 캔버스': 'Basic strategy canvas',
+  '블록 추가': 'Add block',
+  '시작': 'Start',
+  '조건 · 지표': 'Conditions · indicators',
+  '실행 제한': 'Execution limits',
+  '주문 행동': 'Order actions',
+  '예산 · 배분': 'Budget · allocation',
+  '구조 템플릿': 'Structure template',
+  '값이 비어 있는 시작점': 'Start with empty values',
+  '매수 전략': 'Buy strategy',
+  '매도 전략': 'Sell strategy',
+  '가격 갱신 · 종목별 평가': 'Price update · per-symbol evaluation',
+  '포지션 상태 · 종목별 평가': 'Position state · per-symbol evaluation',
+  '전략 이름': 'Strategy name',
+  '대상 종목': 'Symbols',
+  '예산 상한': 'Budget cap',
+  '배분': 'Allocation',
+  '균등 배분 · Basic 고정': 'Equal allocation · fixed in Basic',
+  '필터 초기화': 'Reset filters',
+  '필터': 'Filters',
+  '공식 Competition': 'Official competitions',
+  'Competition 찾기': 'Find competitions',
+  'Competition 만들기': 'Create competition',
+  '점수 방식': 'Scoring',
+  '참여': 'Participants',
+  '순위': 'Rank',
+  '점수': 'Score',
+  '수익률': 'Return',
+  '내 봇': 'My bot',
+  '진행 중': 'Active',
+  '모집 중': 'Recruiting',
+  '현황 보기': 'View status',
+  '참가 준비': 'Prepare to join',
+  '모든 점수 방식': 'All scoring methods',
+  '모든 참여 인원': 'All group sizes',
+  '10명 이하': '10 or fewer',
+  '11명 이상': '11 or more',
+  '전체': 'All',
+  '오늘 체결': 'Fills today',
+  '실행 중': 'Running',
+  '평가 중': 'Evaluating',
+  '상태': 'Status',
+  '종목': 'Symbol',
+  '수량': 'Quantity',
+  '평균가': 'Average price',
+  '현재가': 'Current price',
+  '평가손익': 'Unrealized P&L',
+  '비중': 'Weight',
+  '새로고침': 'Refresh',
+  '봇 출시': 'Launch bot',
+  '운영 자산': 'Managed equity',
+  '봇 상태': 'Bot status',
+  '현재 포지션': 'Current positions',
+  '최근 판단': 'Recent decisions',
+  '자산 곡선': 'Equity curve',
+  '기간 수익률': 'Period return',
+  '최대 낙폭': 'Maximum drawdown',
+  '개별 체결': 'Individual fills',
+  '비용 모델': 'Cost model',
+  '프로필': 'Profile',
+  '접근 보안': 'Access security',
+  '연결됨': 'Connected',
+  '정상': 'Healthy',
+};
+
+const entries = Object.entries(english).sort(([a], [b]) => b.length - a.length);
+
+function translateString(value, language) {
+  if (language === 'ko' || typeof value !== 'string') return value;
+  return entries.reduce((result, [source, target]) => result.replaceAll(source, target), value);
+}
+
+function localizeValue(value, language, propName = '') {
+  if (typeof value === 'string') {
+    if (['className', 'id', 'href', 'src', 'value', 'name', 'type', 'role'].includes(propName)) return value;
+    return translateString(value, language);
+  }
+  if (propName === 'rows') return value;
+  if (Array.isArray(value)) return value.map((item) => localizeValue(item, language, propName));
+  if (isValidElement(value)) {
+    const props = {};
+    for (const [key, item] of Object.entries(value.props)) props[key] = localizeValue(item, language, key);
+    return cloneElement(value, props);
+  }
+  if (value && typeof value === 'object' && value.constructor === Object) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, localizeValue(item, language, key)]));
+  }
+  return value;
+}
+
+export function LanguageProvider({ children }) {
+  const [language, setLanguage] = useState(() => {
+    if (typeof window === 'undefined') return 'ko';
+    return window.localStorage.getItem(STORAGE_KEY) === 'en' ? 'en' : 'ko';
+  });
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY, language);
+    document.documentElement.lang = language;
+  }, [language]);
+  const value = useMemo(() => ({
+    language,
+    setLanguage,
+    t: (text) => translateString(text, language),
+  }), [language]);
+  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
+}
+
+export function useLanguage() {
+  const context = useContext(LanguageContext);
+  return context ?? { language: 'ko', setLanguage: () => {}, t: (text) => text };
+}
+
+export function Localized({ children }) {
+  const { language } = useLanguage();
+  return Children.map(children, (child) => localizeValue(child, language));
+}

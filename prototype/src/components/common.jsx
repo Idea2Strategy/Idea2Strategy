@@ -1,4 +1,5 @@
 import { ArrowUpRight, ChevronRight, CircleHelp, Search, SlidersHorizontal } from 'lucide-react';
+import { Localized } from '../lib/i18n.jsx';
 
 export function PageHeading({ eyebrow, title, description, actions, meta }) {
   return (
@@ -53,12 +54,12 @@ export function FilterButton() {
 
 export function DataTable({ columns, rows, rowKey = 'name', className = '' }) {
   return (
-    <div className={`table-wrap ${className}`}>
+    <Localized><div className={`table-wrap ${className}`}>
       <table>
         <thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}</tr></thead>
         <tbody>{rows.map((row, index) => <tr key={row[rowKey] ?? index} className={row.mine ? 'is-mine' : ''}>{columns.map((column) => <td key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>)}</tr>)}</tbody>
       </table>
-    </div>
+    </div></Localized>
   );
 }
 

@@ -1,8 +1,16 @@
 :root {
-  font-family: Inter, Pretendard, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   color-scheme: light dark;
   font-synthesis: none;
+  --font-sans: Pretendard, Inter, "Noto Sans KR", "Segoe UI", sans-serif;
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 48px;
   --radius-xs: 6px;
   --radius-sm: 10px;
   --radius-md: 16px;
