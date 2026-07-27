@@ -63,6 +63,13 @@ Enum identity.auth_provider_type {
   OIDC
 }
 
+Enum identity.login_identity_status {
+  PENDING
+  ACTIVE
+  REPLACED
+  DISABLED
+}
+
 Enum identity.consent_decision {
   ACCEPTED
   DECLINED
@@ -229,6 +236,23 @@ Table identity.accounts {
   }
 }
 
+Table identity.account_security_states {
+  account_id uuid [pk]
+  auth_epoch bigint [not null, default: 1]
+  sessions_revoked_before timestamptz
+  updated_at timestamptz [not null, default: `now()`]
+
+  checks {
+    `auth_epoch > 0` [name: 'account_security_auth_epoch_positive']
+  }
+
+  Note: '계정당 정확히 하나인 인증 보안 현재 상태. 비밀번호 변경, 로그인 수단 교체, 계정 복구 또는 전체 로그아웃 시 auth_epoch를 증가시켜 이전 세션과 캐시를 일괄 무효화한다.'
+
+  Records (account_id, auth_epoch, sessions_revoked_before, updated_at) {
+    '00000000-0000-4000-8000-000000000001', 1, null, '2026-07-27T09:00:00+09:00'
+  }
+}
+
 Table identity.account_lifecycle_events {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
@@ -323,7 +347,7 @@ Table identity.auth_providers {
   Note: '시드되는 인증 제공자 카탈로그. PASSWORD는 issuer가 없고, OIDC는 정확한 issuer와 불변 subject 검증을 요구.'
 
   Records (id, code, display_name, provider_type, issuer, is_active, created_at, updated_at) {
-    1, 'REVIEW_EXAMPLE', 'Review Example', 'PASSWORD', 'review-example', true, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+    1, 'PASSWORD', 'Password', 'PASSWORD', null, true, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -333,21 +357,31 @@ Table identity.login_identities {
   provider_id smallint [not null]
   provider_subject_hmac varchar(128)
   subject_key_version smallint
-  linked_at timestamptz [not null, default: `now()`]
+  status identity.login_identity_status [not null]
+  created_at timestamptz [not null, default: `now()`]
+  linked_at timestamptz
+  activated_at timestamptz
   last_authenticated_at timestamptz
+  replaced_at timestamptz
   disabled_at timestamptz
   disabled_reason_code varchar(80)
 
   indexes {
     (provider_id, provider_subject_hmac) [unique]
-    (account_id, provider_id) [unique]
+    (account_id, status)
     (account_id, id) [unique]
   }
 
-  Note: '단일 검증 이메일을 쓰는 PASSWORD는 provider subject가 null이어야 한다. OIDC는 키 처리된 불변 subject 필요. 제공자 이메일로 계정을 자동 연결하지 않는다.'
+  checks {
+    `status <> 'ACTIVE' OR (activated_at IS NOT NULL AND replaced_at IS NULL AND disabled_at IS NULL)` [name: 'login_identity_active_state_complete']
+    `status <> 'REPLACED' OR replaced_at IS NOT NULL` [name: 'login_identity_replaced_at_required']
+    `status <> 'DISABLED' OR disabled_at IS NOT NULL` [name: 'login_identity_disabled_at_required']
+  }
 
-  Records (id, account_id, provider_id, provider_subject_hmac, subject_key_version, linked_at, last_authenticated_at, disabled_at, disabled_reason_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
+  Note: '계정에는 로그인 가능한 ACTIVE 행을 최대 1개만 허용하며 PostgreSQL 마이그레이션에서 WHERE status = ACTIVE partial unique index로 강제한다. PENDING도 계정당 최대 1개로 제한한다. PENDING은 아직 연결된 로그인 수단이 아니고, 과거 REPLACED/DISABLED 행은 발급 세션과 보안 감사를 위해 보존한다. PASSWORD는 provider subject와 subject_key_version이 null이어야 하고 OIDC는 둘 다 필요하다. 제공자 이메일로 계정을 자동 연결하지 않는다. 로그인 수단 교체는 기존 ACTIVE를 REPLACED로, 검증된 PENDING을 ACTIVE로 바꾸고 auth_epoch 증가와 기존 세션·재설정 요청 회수를 같은 트랜잭션에서 수행한다.'
+
+  Records (id, account_id, provider_id, provider_subject_hmac, subject_key_version, status, created_at, linked_at, activated_at, last_authenticated_at, replaced_at, disabled_at, disabled_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, null, null, 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, null
   }
 }
 
@@ -371,6 +405,8 @@ Table identity.sessions {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
   authenticated_by_login_identity_id uuid [not null]
+  auth_epoch_at_issue bigint [not null]
+  credential_version_at_issue bigint
   token_digest varchar(128) [not null, unique]
   digest_key_version smallint [not null]
   device_label varchar(120)
@@ -386,10 +422,15 @@ Table identity.sessions {
     (account_id, revoked_at)
   }
 
-  Note: '서버 소유 불투명 세션. 발급·회수는 PostgreSQL 소유. 캐시는 조회만 가속하며 회수된 세션을 인가할 수 없다.'
+  checks {
+    `auth_epoch_at_issue > 0` [name: 'session_auth_epoch_positive']
+    `credential_version_at_issue IS NULL OR credential_version_at_issue > 0` [name: 'session_credential_version_positive']
+  }
 
-  Records (id, account_id, authenticated_by_login_identity_id, token_digest, digest_key_version, device_label, issued_at, last_seen_at, expires_at, reauthenticated_at, revoked_at, revoke_reason_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'review-example', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '2026-07-27T09:00:00+09:00', null, 'REVIEW_EXAMPLE'
+  Note: '서버 소유 불투명 세션. 발급 당시 로그인 ID와 auth_epoch를 고정하며 PASSWORD 세션은 credential_version도 고정한다. 현재 계정 보안 상태와 값이 다르면 세션은 무효다. 발급·회수는 PostgreSQL 소유이고 캐시는 조회만 가속하며 회수된 세션을 인가할 수 없다.'
+
+  Records (id, account_id, authenticated_by_login_identity_id, auth_epoch_at_issue, credential_version_at_issue, token_digest, digest_key_version, device_label, issued_at, last_seen_at, expires_at, reauthenticated_at, revoked_at, revoke_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'review-example', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null
   }
 }
 
@@ -397,6 +438,8 @@ Table identity.password_reset_requests {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
   login_identity_id uuid [not null]
+  auth_epoch_at_issue bigint [not null]
+  credential_version_at_issue bigint [not null]
   token_digest varchar(128) [not null, unique]
   digest_key_version smallint [not null]
   requested_at timestamptz [not null, default: `now()`]
@@ -412,10 +455,44 @@ Table identity.password_reset_requests {
     (expires_at, consumed_at)
   }
 
-  Note: '계정 이메일이 하나이므로 요청은 계정과 PASSWORD ID에 바인딩. 토큰 검증, 비밀번호 교체, 요청 소진, 세션 회수는 원자적.'
+  checks {
+    `auth_epoch_at_issue > 0` [name: 'password_reset_auth_epoch_positive']
+    `credential_version_at_issue > 0` [name: 'password_reset_credential_version_positive']
+  }
 
-  Records (id, account_id, login_identity_id, token_digest, digest_key_version, requested_at, expires_at, consumed_at, revoked_at, failed_attempt_count, request_ip_prefix) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, null, 1, '203.0.113.0/24'
+  Note: '계정 이메일이 하나이므로 요청은 발급 당시 ACTIVE PASSWORD 로그인 ID, auth_epoch, credential_version에 바인딩한다. 어느 값이든 바뀌면 이전 요청은 무효다. 토큰 검증, 비밀번호 교체, credential_version·auth_epoch 증가, 요청 소진, 기존 세션과 다른 활성 요청 회수는 원자적이다.'
+
+  Records (id, account_id, login_identity_id, auth_epoch_at_issue, credential_version_at_issue, token_digest, digest_key_version, requested_at, expires_at, consumed_at, revoked_at, failed_attempt_count, request_ip_prefix) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, null, 1, '203.0.113.0/24'
+  }
+}
+
+Table identity.authentication_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  event_sequence bigint [not null]
+  event_type varchar(60) [not null, note: 'LOGIN_IDENTITY_CREATED, VERIFIED, ACTIVATED, REPLACED, DISABLED, PASSWORD_CHANGED, SESSIONS_REVOKED 등.']
+  subject_login_identity_id uuid
+  previous_login_identity_id uuid
+  new_login_identity_id uuid
+  actor_type varchar(30) [not null, note: 'ACCOUNT, OPERATOR 또는 SYSTEM.']
+  actor_id uuid
+  reason_code varchar(80)
+  correlation_id uuid [not null]
+  idempotency_key varchar(160) [not null]
+  occurred_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (account_id, event_sequence) [unique]
+    (account_id, idempotency_key) [unique]
+    (event_type, occurred_at)
+    (correlation_id)
+  }
+
+  Note: '계정 인증 보안의 추가 전용 감사 스트림. 로그인 수단 전환 시 이전·새 ID를 함께 기록하며 모든 참조 로그인 ID가 같은 account_id에 속하는지는 지연 제약으로 검증한다. 비밀번호·토큰·복구 코드·OIDC 원문 subject는 기록하지 않는다.'
+
+  Records (id, account_id, event_sequence, event_type, subject_login_identity_id, previous_login_identity_id, new_login_identity_id, actor_type, actor_id, reason_code, correlation_id, idempotency_key, occurred_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'LOGIN_IDENTITY_ACTIVATED', '00000000-0000-4000-8000-000000000001', null, '00000000-0000-4000-8000-000000000001', 'ACCOUNT', '00000000-0000-4000-8000-000000000001', null, '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -2648,6 +2725,7 @@ Table operations.case_events {
 // -----------------------------------------------------------------------------
 
 Ref: identity.account_lifecycle_events.account_id > identity.accounts.id
+Ref: identity.account_security_states.account_id > identity.accounts.id
 Ref: identity.account_preferences.account_id > identity.accounts.id
 Ref: identity.account_emails.account_id > identity.accounts.id
 Ref: identity.email_verification_requests.account_id > identity.account_emails.account_id
@@ -2659,6 +2737,10 @@ Ref: identity.account_consents.account_id > identity.accounts.id
 Ref: identity.account_consents.policy_document_id > identity.policy_documents.id
 Ref: identity.account_consents.supersedes_consent_id > identity.account_consents.id
 Ref: identity.password_reset_requests.(account_id, login_identity_id) > identity.login_identities.(account_id, id)
+Ref: identity.authentication_events.account_id > identity.accounts.id
+Ref: identity.authentication_events.subject_login_identity_id > identity.login_identities.id
+Ref: identity.authentication_events.previous_login_identity_id > identity.login_identities.id
+Ref: identity.authentication_events.new_login_identity_id > identity.login_identities.id
 Ref: identity.recovery_code_sets.account_id > identity.accounts.id
 Ref: identity.recovery_codes.recovery_code_set_id > identity.recovery_code_sets.id
 Ref: identity.account_sanctions.account_id > identity.accounts.id
