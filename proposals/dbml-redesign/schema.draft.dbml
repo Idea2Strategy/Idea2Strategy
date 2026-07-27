@@ -1,14 +1,17 @@
 Project Idea2Strategy_DBML_Redesign_Proposal {
   database_type: 'PostgreSQL'
   Note: '''
+  REVIEW DATA: Every table has one fictional Records row for dbdiagram review. These values are documentation only and must never be exported as production seeds or fixtures.
   ISOLATED PROPOSAL. This file is not the canonical product model and must not
   replace db/schema.dbml until product-authority review is complete.
 
   Core ownership:
     identity account -> bot -> bot partition -> partition-owned strategy
     strategy blocks/edges/parameters are one PostgreSQL JSONB aggregate
+    every copy/paste creates fully independent rows with new identifiers;
+    copied objects never retain a source FK, lineage, or version connection
 
-  PostgreSQL is the system of record for locked bot configuration, budgets,
+  PostgreSQL is the system of record for immutable-from-creation bot configuration, budgets,
   official events, order intents, reservations, orders, fills, double-entry
   ledgers, current projections, immutable boundary snapshots, object manifests,
   audit records, room rules, and official results.
@@ -23,19 +26,48 @@ Project Idea2Strategy_DBML_Redesign_Proposal {
   not own domain state. PostgreSQL transactional outbox rows bridge commits to
   those systems.
 
+  Common server calculations are content-addressed by immutable feature definitions,
+  exact inputs, instruments, periods, and calculator versions. Historical result
+  bodies and reproducible live snapshots stay in object storage; PostgreSQL keeps
+  definitions, manifests, lineage, hashes, and bot-to-feature requirements. Bot
+  workers consume shared snapshots and perform only private state, risk, budget,
+  conflict, and order-intent logic.
+
   No PostgreSQL physical table partitioning is selected initially. Production
-  migrations must still provide RLS, locked-row guards, deferred budget and
+  migrations must still provide RLS, immutable-configuration guards, deferred budget and
   balanced-ledger checks, lifecycle guards, idempotent consumers, retention,
   backup/restore evidence, and load-test gates that DBML cannot fully express.
   '''
 }
 
-Enum identity.account_status {
+Enum identity.account_lifecycle_status {
   PENDING_VERIFICATION
   ACTIVE
-  SUSPENDED
   CLOSING
   CLOSED
+}
+
+Enum identity.email_status {
+  PENDING_VERIFICATION
+  VERIFIED
+  REVOKED
+}
+
+Enum identity.auth_provider_type {
+  PASSWORD
+  OIDC
+}
+
+Enum identity.consent_decision {
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+}
+
+Enum identity.sanction_status {
+  ACTIVE
+  LIFTED
+  EXPIRED
 }
 
 Enum strategy.strategy_mode {
@@ -43,19 +75,17 @@ Enum strategy.strategy_mode {
   PRO
 }
 
-Enum bot.bot_kind {
-  PERSONAL
-  ROOM
-}
-
 Enum bot.lifecycle_status {
-  DRAFT
-  LOCKING
-  WAITING
   RUNNING
   STOPPING
   STOPPED
-  FAILED
+}
+
+Enum bot.health_status {
+  HEALTHY
+  ACTION_REQUIRED
+  DATA_DEGRADED
+  SETTLEMENT_FAILED
 }
 
 Enum storage.object_status {
@@ -164,62 +194,156 @@ Enum operations.work_status {
   CANCELLED
 }
 
+Enum bot.runtime_value_type {
+  BOOLEAN
+  INTEGER
+  DECIMAL
+  STRING
+  TIMESTAMP
+  JSON
+}
+
 // -----------------------------------------------------------------------------
 // identity: customer identity and service-owned authentication.
 // -----------------------------------------------------------------------------
 
 Table identity.accounts {
   id uuid [pk, default: `gen_random_uuid()`]
-  status identity.account_status [not null]
-  preferred_language varchar(5) [not null]
+  lifecycle_status identity.account_lifecycle_status [not null]
+  status_changed_at timestamptz [not null, default: `now()`]
   created_at timestamptz [not null, default: `now()`]
-  activated_at timestamptz
-  closing_started_at timestamptz
-  closed_at timestamptz
-  status_reason_code varchar(80)
 
   indexes {
-    (status, created_at)
+    (lifecycle_status, created_at)
+  }
+
+  Note: 'Minimal account root. Preferences, email, authentication, consent, and sanctions are separate aggregates. Account creation inserts its email and preferences in the same transaction; activation requires the single email to be VERIFIED. Sanctions do not overload lifecycle_status.'
+
+  Records (id, lifecycle_status, status_changed_at, created_at) {
+    '00000000-0000-4000-8000-000000000001', 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table identity.account_lifecycle_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  event_sequence bigint [not null]
+  previous_status identity.account_lifecycle_status
+  new_status identity.account_lifecycle_status [not null]
+  reason_code varchar(80)
+  occurred_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (account_id, event_sequence) [unique]
+    (account_id, occurred_at)
+  }
+
+  Note: 'Append-only lifecycle evidence. accounts.lifecycle_status is the transactionally maintained current projection.'
+
+  Records (id, account_id, event_sequence, previous_status, new_status, reason_code, occurred_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, null, 'ACTIVE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table identity.account_preferences {
+  account_id uuid [pk]
+  language_code varchar(12) [not null, note: 'Current supported values are ko and en.']
+  timezone_name varchar(80) [not null, note: 'IANA time-zone name used for display only; market calculations use exchange calendars.']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'Created atomically with the account. Notification opt-ins remain in operations.notification_preferences and legal marketing consent remains in account_consents.'
+
+  Records (account_id, language_code, timezone_name, created_at, updated_at) {
+    '00000000-0000-4000-8000-000000000001', 'ko', 'America/New_York', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
 Table identity.account_emails {
-  id uuid [pk, default: `gen_random_uuid()`]
-  account_id uuid [not null]
+  account_id uuid [pk]
   email_ciphertext text [not null]
   email_lookup_hmac varchar(128) [not null, unique]
-  status varchar(20) [not null, note: 'PENDING, VERIFIED, or REVOKED.']
-  is_primary boolean [not null, default: false]
-  verification_digest varchar(128)
-  verification_expires_at timestamptz
+  email_lookup_key_version smallint [not null]
+  encryption_key_version smallint [not null]
+  status identity.email_status [not null]
   verified_at timestamptz
   created_at timestamptz [not null, default: `now()`]
   revoked_at timestamptz
 
   indexes {
-    (account_id, status)
+    (status, created_at)
   }
 
-  Note: 'A partial unique index must allow only one active primary email per account.'
+  Note: 'Shared primary key enforces at most one email row per account. A deferred lifecycle guard requires every activatable account to own this row and requires VERIFIED before activation. The application normalizes before keyed lookup, stores no plaintext index, and must define whether a revoked email may later be reused.'
+
+  Records (account_id, email_ciphertext, email_lookup_hmac, email_lookup_key_version, encryption_key_version, status, verified_at, created_at, revoked_at) {
+    '00000000-0000-4000-8000-000000000001', 'encrypted-user@example.test', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 1, 'VERIFIED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null
+  }
+}
+
+Table identity.email_verification_requests {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  token_digest varchar(128) [not null, unique]
+  digest_key_version smallint [not null]
+  requested_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz [not null]
+  consumed_at timestamptz
+  revoked_at timestamptz
+  failed_attempt_count int [not null, default: 0]
+  request_ip_prefix inet
+
+  indexes {
+    (account_id, requested_at)
+    (expires_at, consumed_at)
+  }
+
+  Note: 'Append-only verification attempts. Issuing a newer request may revoke an older active request; verification and consumption are atomic.'
+
+  Records (id, account_id, token_digest, digest_key_version, requested_at, expires_at, consumed_at, revoked_at, failed_attempt_count, request_ip_prefix) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, null, 1, '203.0.113.0/24'
+  }
+}
+
+Table identity.auth_providers {
+  id smallint [pk]
+  code varchar(40) [not null, unique]
+  display_name varchar(80) [not null]
+  provider_type identity.auth_provider_type [not null]
+  issuer text
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'Seeded provider catalog. PASSWORD has no issuer; OIDC providers require an exact issuer and immutable subject validation.'
+
+  Records (id, code, display_name, provider_type, issuer, is_active, created_at, updated_at) {
+    1, 'REVIEW_EXAMPLE', 'Review Example', 'PASSWORD', 'review-example', true, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table identity.login_identities {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
-  account_email_id uuid
-  provider_code varchar(40) [not null]
+  provider_id smallint [not null]
   provider_subject_hmac varchar(128)
+  subject_key_version smallint
   linked_at timestamptz [not null, default: `now()`]
   last_authenticated_at timestamptz
   disabled_at timestamptz
+  disabled_reason_code varchar(80)
 
   indexes {
-    (provider_code, provider_subject_hmac) [unique]
-    (account_email_id) [unique]
-    (account_id, provider_code)
+    (provider_id, provider_subject_hmac) [unique]
+    (account_id, provider_id) [unique]
+    (account_id, id) [unique]
   }
 
-  Note: 'PASSWORD requires a verified account_email_id. Social identities require an immutable provider subject and never auto-link by matching email.'
+  Note: 'PASSWORD uses the single verified account email and requires a null provider subject. OIDC requires a keyed immutable subject. Provider email never auto-links accounts.'
+
+  Records (id, account_id, provider_id, provider_subject_hmac, subject_key_version, linked_at, last_authenticated_at, disabled_at, disabled_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
+  }
 }
 
 Table identity.password_credentials {
@@ -227,18 +351,28 @@ Table identity.password_credentials {
   password_hash text [not null]
   hash_scheme varchar(40) [not null]
   hash_parameters jsonb [not null]
-  changed_at timestamptz [not null]
+  credential_version bigint [not null, default: 1]
+  password_changed_at timestamptz [not null]
   compromised_at timestamptz
+
+  Note: 'Allowed only for a PASSWORD login identity. Password change increments credential_version and revokes affected sessions in the same workflow.'
+
+  Records (login_identity_id, password_hash, hash_scheme, hash_parameters, credential_version, password_changed_at, compromised_at) {
+    '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'REVIEW_EXAMPLE', '{"example":true}', 1, '2026-07-27T09:00:00+09:00', null
+  }
 }
 
 Table identity.sessions {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
-  login_identity_id uuid [not null]
+  authenticated_by_login_identity_id uuid [not null]
   token_digest varchar(128) [not null, unique]
+  digest_key_version smallint [not null]
+  device_label varchar(120)
   issued_at timestamptz [not null, default: `now()`]
   last_seen_at timestamptz [not null]
   expires_at timestamptz [not null]
+  reauthenticated_at timestamptz
   revoked_at timestamptz
   revoke_reason_code varchar(80)
 
@@ -246,65 +380,56 @@ Table identity.sessions {
     (account_id, expires_at)
     (account_id, revoked_at)
   }
-}
 
-Table identity.policy_versions {
-  id uuid [pk, default: `gen_random_uuid()`]
-  policy_code varchar(80) [not null]
-  version varchar(40) [not null]
-  content_hash varchar(128) [not null]
-  published_at timestamptz [not null]
-  retired_at timestamptz
+  Note: 'Server-owned opaque session. PostgreSQL owns issuance and revocation; caches may accelerate lookup but may not authorize a revoked session.'
 
-  indexes {
-    (policy_code, version) [unique]
-  }
-}
-
-Table identity.account_consents {
-  account_id uuid [not null]
-  policy_version_id uuid [not null]
-  decision varchar(20) [not null]
-  recorded_at timestamptz [not null, default: `now()`]
-  withdrawn_at timestamptz
-
-  indexes {
-    (account_id, policy_version_id) [pk]
+  Records (id, account_id, authenticated_by_login_identity_id, token_digest, digest_key_version, device_label, issued_at, last_seen_at, expires_at, reauthenticated_at, revoked_at, revoke_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'review-example', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '2026-07-27T09:00:00+09:00', null, 'REVIEW_EXAMPLE'
   }
 }
 
 Table identity.password_reset_requests {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
-  account_email_id uuid [not null]
   login_identity_id uuid [not null]
   token_digest varchar(128) [not null, unique]
+  digest_key_version smallint [not null]
   requested_at timestamptz [not null, default: `now()`]
   expires_at timestamptz [not null]
-  verified_at timestamptz
   consumed_at timestamptz
   revoked_at timestamptz
   failed_attempt_count int [not null, default: 0]
   request_ip_prefix inet
 
   indexes {
-    (account_email_id, requested_at)
+    (account_id, requested_at)
     (login_identity_id, consumed_at)
     (expires_at, consumed_at)
   }
 
-  Note: 'Only digests of random single-use reset credentials are stored. Rate limits and retention are policy-controlled.'
+  Note: 'The account has one email, so the request binds account and PASSWORD identity. Token verification, password replacement, request consumption, and session revocation are atomic.'
+
+  Records (id, account_id, login_identity_id, token_digest, digest_key_version, requested_at, expires_at, consumed_at, revoked_at, failed_attempt_count, request_ip_prefix) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, null, 1, '203.0.113.0/24'
+  }
 }
 
 Table identity.recovery_code_sets {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
+  purpose varchar(40) [not null, note: 'ACCOUNT_RECOVERY in the current product.']
   issued_at timestamptz [not null, default: `now()`]
   revoked_at timestamptz
   revoke_reason_code varchar(80)
 
   indexes {
-    (account_id, issued_at)
+    (account_id, purpose, issued_at)
+  }
+
+  Note: 'Only one active set per account and purpose is permitted by a partial unique index in the migration.'
+
+  Records (id, account_id, purpose, issued_at, revoked_at, revoke_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', null, 'REVIEW_EXAMPLE'
   }
 }
 
@@ -312,10 +437,61 @@ Table identity.recovery_codes {
   id uuid [pk, default: `gen_random_uuid()`]
   recovery_code_set_id uuid [not null]
   code_digest varchar(128) [not null, unique]
+  digest_key_version smallint [not null]
   used_at timestamptz
 
   indexes {
     (recovery_code_set_id, used_at)
+  }
+
+  Note: 'Stores recovery codes. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, recovery_code_set_id, code_digest, digest_key_version, used_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table identity.policy_documents {
+  id uuid [pk, default: `gen_random_uuid()`]
+  policy_code varchar(80) [not null]
+  version varchar(40) [not null]
+  language_code varchar(12) [not null]
+  title varchar(160) [not null]
+  content_format varchar(20) [not null]
+  content_text text [not null]
+  content_hash varchar(128) [not null]
+  is_required boolean [not null, default: true]
+  published_at timestamptz [not null]
+  retired_at timestamptz
+
+  indexes {
+    (policy_code, version, language_code) [unique]
+    (is_required, published_at)
+  }
+
+  Note: 'Policy text is small immutable relational content. Large evidence attachments, if introduced, use storage.objects rather than replacing this authoritative text.'
+
+  Records (id, policy_code, version, language_code, title, content_format, content_text, content_hash, is_required, published_at, retired_at) {
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', 'ko', 'Review Example', 'REVIEW_EXAMPLE', 'Fictional review content', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', true, '2026-07-27T09:00:00+09:00', null
+  }
+}
+
+Table identity.account_consents {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  policy_document_id uuid [not null]
+  decision identity.consent_decision [not null]
+  supersedes_consent_id uuid [unique]
+  recorded_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (account_id, policy_document_id, recorded_at)
+  }
+
+  Note: 'Append-only decision history. Withdrawal and later re-acceptance create new rows instead of mutating prior legal evidence.'
+
+  Records (id, account_id, policy_document_id, decision, supersedes_consent_id, recorded_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACCEPTED', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -323,21 +499,47 @@ Table identity.account_sanctions {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
   sanction_type varchar(40) [not null, note: 'SUSPENSION or PERMANENT.']
+  status identity.sanction_status [not null]
   reason_code varchar(80) [not null]
   applied_by_operator_id uuid [not null]
   applied_at timestamptz [not null]
   effective_at timestamptz [not null]
   expires_at timestamptz
-  lifted_by_operator_id uuid
-  lifted_at timestamptz
-  lift_reason_code varchar(80)
+  source_case_id uuid
+  status_changed_at timestamptz [not null]
 
   indexes {
     (account_id, effective_at)
-    (expires_at)
+    (status, expires_at)
   }
 
-  Note: 'A sanction workflow stops service access and bots while preserving immutable evidence.'
+  Note: 'Current sanction aggregate. Status is a transactionally maintained projection of immutable sanction events.'
+
+  Records (id, account_id, sanction_type, status, reason_code, applied_by_operator_id, applied_at, effective_at, expires_at, source_case_id, status_changed_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'ACTIVE', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table identity.account_sanction_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  sanction_id uuid [not null]
+  event_sequence bigint [not null]
+  event_type varchar(40) [not null, note: 'APPLIED, LIFTED, or EXPIRED.']
+  actor_operator_id uuid
+  reason_code varchar(80) [not null]
+  evidence_object_id uuid
+  occurred_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (sanction_id, event_sequence) [unique]
+    (occurred_at)
+  }
+
+  Note: 'Append-only official sanction history. A null actor is allowed only for a system-generated expiry event.'
+
+  Records (id, sanction_id, event_sequence, event_type, actor_operator_id, reason_code, evidence_object_id, occurred_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -358,6 +560,12 @@ Table strategy.catalog_versions {
   indexes {
     (language_version, schema_version, catalog_version) [unique]
   }
+
+  Note: 'Stores catalog versions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, language_version, schema_version, catalog_version, data_requirement_version, definition_hash, published_at, retired_at) {
+    '00000000-0000-4000-8000-000000000001', '1.0.0', '1.0.0', '1.0.0', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
+  }
 }
 
 Table strategy.platform_templates {
@@ -367,6 +575,12 @@ Table strategy.platform_templates {
   status varchar(30) [not null]
   created_at timestamptz [not null]
   retired_at timestamptz
+
+  Note: 'Stores platform templates. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, code, mode, status, created_at, retired_at) {
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'BASIC', 'ACTIVE', '2026-07-27T09:00:00+09:00', null
+  }
 }
 
 Table strategy.platform_template_versions {
@@ -377,13 +591,40 @@ Table strategy.platform_template_versions {
   name_i18n jsonb [not null]
   description_i18n jsonb [not null]
   semantic_skeleton jsonb [not null]
-  layout_document jsonb [not null]
   content_hash varchar(128) [not null, unique]
   published_at timestamptz [not null]
   retired_at timestamptz
 
   indexes {
     (template_id, version) [unique]
+  }
+
+  Note: 'Stores platform template versions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, template_id, version, catalog_version_id, name_i18n, description_i18n, semantic_skeleton, content_hash, published_at, retired_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '1.0.0', '00000000-0000-4000-8000-000000000001', '{"example":true}', '{"example":true}', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
+  }
+}
+
+Table strategy.compiled_execution_plans {
+  id uuid [pk, default: `gen_random_uuid()`]
+  catalog_version_id uuid [not null]
+  semantic_hash varchar(128) [not null]
+  compiler_version varchar(80) [not null]
+  required_feature_set_hash varchar(128) [not null]
+  plan_document jsonb [not null]
+  plan_hash varchar(128) [not null, unique]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (catalog_version_id, semantic_hash, compiler_version) [unique]
+    (required_feature_set_hash)
+  }
+
+  Note: 'Content-addressed server execution plan shared by semantically identical strategies. This is an infrastructure cache, not a reusable user strategy, version lineage, or copy relationship. The compiler validates typed blocks and emits only the minimal per-bot instructions; common market calculations are represented by required_feature_set_hash and executed outside the bot worker.'
+
+  Records (id, catalog_version_id, semantic_hash, compiler_version, required_feature_set_hash, plan_document, plan_hash, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -425,6 +666,10 @@ Table storage.objects {
   }
 
   Note: 'An object becomes AVAILABLE only after size, hash, schema, Parquet footer, and codec verification. New revisions never overwrite authoritative object versions; deletion requires elapsed retention and no legal hold.'
+
+  Records (id, status, storage_provider, bucket_name, object_key, provider_version_id, content_hash, byte_size, file_format, compression_codec, media_type, schema_version, row_count, period_start, period_end, encryption_key_ref, retention_policy_version, retention_until, legal_hold, created_at, verified_at, quarantined_at, superseded_at, deleted_at) {
+    '00000000-0000-4000-8000-000000000001', 'AVAILABLE', 'review-example', 'Review Example', 'review/2026-07-27/sample.parquet', 'review-version-1', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'PARQUET', 'UNCOMPRESSED', 'application/vnd.apache.parquet', '1.0.0', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'REVIEW_EXAMPLE', '1.0.0', '2026-07-27T09:00:00+09:00', true, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, null
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -444,6 +689,12 @@ Table market_data.instruments {
   indexes {
     (asset_type, primary_exchange_mic)
   }
+
+  Note: 'Stores instruments. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, asset_type, primary_exchange_mic, currency_code, provider_reference, listed_at, delisted_at, created_at) {
+    '00000000-0000-4000-8000-000000000001', 'STOCK', 'XNAS', 'USD', 'review-example', '2026-07-27', null, '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table market_data.instrument_symbols {
@@ -460,36 +711,9 @@ Table market_data.instrument_symbols {
   }
 
   Note: 'Migration must prevent overlapping symbol effective periods.'
-}
 
-Table market_data.official_universes {
-  id uuid [pk, default: `gen_random_uuid()`]
-  code varchar(80) [not null, unique]
-  universe_type varchar(40) [not null]
-  created_at timestamptz [not null]
-  retired_at timestamptz
-}
-
-Table market_data.universe_versions {
-  id uuid [pk, default: `gen_random_uuid()`]
-  universe_id uuid [not null]
-  version varchar(40) [not null]
-  effective_from timestamptz [not null]
-  effective_to timestamptz
-  membership_hash varchar(128) [not null]
-
-  indexes {
-    (universe_id, version) [unique]
-    (universe_id, effective_from)
-  }
-}
-
-Table market_data.universe_members {
-  universe_version_id uuid [not null]
-  instrument_id uuid [not null]
-
-  indexes {
-    (universe_version_id, instrument_id) [pk]
+  Records (id, instrument_id, exchange_mic, symbol, effective_from, effective_to) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'XNAS', 'AAPL', '2026-07-27T09:00:00+09:00', null
   }
 }
 
@@ -507,6 +731,10 @@ Table market_data.trading_sessions {
   }
 
   Note: 'Calendar versions pin session boundaries used by backtests, live evaluation, ET-close snapshots, and weekly object validation.'
+
+  Records (id, exchange_mic, session_date, opens_at, closes_at, session_type, calendar_version) {
+    '00000000-0000-4000-8000-000000000001', 'XNAS', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'REVIEW_EXAMPLE', '1.0.0'
+  }
 }
 
 Table market_data.providers {
@@ -516,6 +744,12 @@ Table market_data.providers {
   rights_version varchar(80) [not null, note: 'Exact provider and licensed rights require external approval evidence.']
   status varchar(30) [not null]
   created_at timestamptz [not null]
+
+  Note: 'Stores providers. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, code, display_name, rights_version, status, created_at) {
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'Review Example', '1.0.0', 'ACTIVE', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table market_data.feeds {
@@ -531,6 +765,12 @@ Table market_data.feeds {
 
   indexes {
     (provider_id, code, feed_version) [unique]
+  }
+
+  Note: 'Stores feeds. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, provider_id, code, data_kind, resolution, timezone_name, feed_version, created_at, retired_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '1m', 'America/New_York', '1.0.0', '2026-07-27T09:00:00+09:00', null
   }
 }
 
@@ -557,6 +797,10 @@ Table market_data.dataset_manifests {
   }
 
   Note: 'Null-safe uniqueness for multi-instrument datasets must be enforced by migration.'
+
+  Records (id, feed_id, instrument_id, data_layer, resolution, revision_number, status, period_start, period_end, schema_version, dataset_hash, supersedes_manifest_id, created_at, available_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1m', 1, 'AVAILABLE', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table market_data.dataset_objects {
@@ -579,6 +823,10 @@ Table market_data.dataset_objects {
   }
 
   Note: 'Objects never cross an ET week. Microbatch parts may be compacted only into a new dataset revision with lineage.'
+
+  Records (id, dataset_manifest_id, object_id, object_kind, week_start_date, period_start, period_end, shard_key, part_number, row_count, min_instrument_id, max_instrument_id) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'REVIEW_EXAMPLE', 1, 1, null, null
+  }
 }
 
 Table market_data.dataset_lineage {
@@ -588,6 +836,108 @@ Table market_data.dataset_lineage {
 
   indexes {
     (derived_manifest_id, source_manifest_id, relation_type) [pk]
+  }
+
+  Note: 'Stores dataset lineage. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (derived_manifest_id, source_manifest_id, relation_type) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE'
+  }
+}
+
+Table market_data.feature_definitions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  catalog_version_id uuid [not null]
+  feature_code varchar(120) [not null]
+  calculator_version varchar(80) [not null]
+  resolution varchar(30) [not null]
+  normalized_parameters jsonb [not null]
+  output_value_type varchar(40) [not null]
+  required_history_points int [not null]
+  definition_hash varchar(128) [not null, unique]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (catalog_version_id, feature_code, calculator_version, resolution, definition_hash) [unique]
+  }
+
+  checks {
+    `required_history_points >= 0` [name: 'feature_required_history_nonnegative']
+  }
+
+  Note: 'Immutable canonical definition of a deterministic, bot-independent market calculation such as SMA(20). definition_hash covers calculator code version, normalized parameters, resolution, output type, history requirement, and calendar/precision semantics. User budget, positions, runtime state, or private strategy identity must never enter this hash or this shared calculation boundary.'
+
+  Records (id, catalog_version_id, feature_code, calculator_version, resolution, normalized_parameters, output_value_type, required_history_points, definition_hash, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', '1m', '{"example":true}', 'REVIEW_EXAMPLE', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table market_data.feature_materializations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  feature_definition_id uuid [not null]
+  instrument_id uuid [not null]
+  pipeline_run_id uuid [not null, unique]
+  input_dataset_set_hash varchar(128) [not null]
+  period_start timestamptz [not null]
+  period_end timestamptz [not null]
+  source_watermark varchar(300) [not null]
+  output_dataset_manifest_id uuid
+  result_hash varchar(128)
+  status operations.work_status [not null]
+  available_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (feature_definition_id, instrument_id, input_dataset_set_hash, period_start, period_end) [unique]
+    (instrument_id, period_end, status)
+    (output_dataset_manifest_id) [unique]
+  }
+
+
+  checks {
+    `period_end > period_start` [name: 'feature_materialization_period_order']
+    `status <> 'SUCCEEDED' OR (output_dataset_manifest_id IS NOT NULL AND result_hash IS NOT NULL AND available_at IS NOT NULL)` [name: 'feature_materialization_success_complete']
+  }
+
+  Note: 'One historical shared-calculation result per canonical definition, instrument, exact input set, and period. Large time-series values remain in the DERIVED dataset objects in S3-compatible storage; PostgreSQL stores only identity, status, hashes, watermarks, and the output manifest. The unique computation key and pipeline idempotency prevent duplicate server work.'
+
+  Records (id, feature_definition_id, instrument_id, pipeline_run_id, input_dataset_set_hash, period_start, period_end, source_watermark, output_dataset_manifest_id, result_hash, status, available_at, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'SUCCEEDED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table market_data.feature_snapshot_batches {
+  id uuid [pk, default: `gen_random_uuid()`]
+  feature_set_hash varchar(128) [not null]
+  input_market_set_hash varchar(128) [not null]
+  source_start_watermark varchar(300) [not null]
+  source_end_watermark varchar(300) [not null]
+  period_start timestamptz [not null]
+  period_end timestamptz [not null]
+  snapshot_object_id uuid
+  batch_hash varchar(128)
+  row_count bigint
+  status operations.work_status [not null]
+  idempotency_key varchar(160) [not null, unique]
+  available_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (feature_set_hash, input_market_set_hash, period_start, period_end) [unique]
+    (status, period_end)
+  }
+
+
+  checks {
+    `period_end > period_start` [name: 'feature_snapshot_batch_period_order']
+    `row_count IS NULL OR row_count > 0` [name: 'feature_snapshot_batch_row_count_positive']
+    `status <> 'SUCCEEDED' OR (snapshot_object_id IS NOT NULL AND batch_hash IS NOT NULL AND row_count IS NOT NULL AND available_at IS NOT NULL)` [name: 'feature_snapshot_batch_success_complete']
+  }
+
+  Note: 'Metadata for an immutable microbatch of shared live-feature snapshots calculated once and fanned out to all eligible bots. Snapshot bodies are buffered in stream/cache and sealed together into one object, avoiding one PostgreSQL row or one S3 object per tick. Each body row has a batch-local snapshot key and hashes; evaluations store that key and their exact hashes. SUCCEEDED requires object, batch_hash, row_count, and available_at. Cache expiry never deletes authoritative evidence.'
+
+  Records (id, feature_set_hash, input_market_set_hash, source_start_watermark, source_end_watermark, period_start, period_end, snapshot_object_id, batch_hash, row_count, status, idempotency_key, available_at, created_at) {
+    '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'SUCCEEDED', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -606,6 +956,12 @@ Table market_data.corporate_actions {
   indexes {
     (source_manifest_id, provider_event_key) [unique]
     (instrument_id, effective_at)
+  }
+
+  Note: 'Stores corporate actions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, instrument_id, source_manifest_id, provider_event_key, action_type, effective_at, terms_document, terms_hash, supersedes_action_id, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -626,6 +982,12 @@ Table market_data.quality_incidents {
     (status, severity, detected_at)
     (dataset_manifest_id, period_start)
   }
+
+  Note: 'Stores quality incidents. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, dataset_manifest_id, instrument_id, severity, incident_code, period_start, period_end, status, evidence_object_id, detected_at, resolved_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'review-example', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'ACTIVE', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', null
+  }
 }
 
 Table market_data.pipeline_runs {
@@ -643,33 +1005,71 @@ Table market_data.pipeline_runs {
   indexes {
     (pipeline_code, status, started_at)
   }
+
+  Note: 'Stores pipeline runs. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, pipeline_code, pipeline_version, idempotency_key, status, input_hash, output_hash, started_at, completed_at, failure_code) {
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', 'REVIEW_EXAMPLE', 'SUCCEEDED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
+  }
 }
 
 // -----------------------------------------------------------------------------
-// bot: mutable draft hierarchy locked in place at launch.
+// bot: editable workspace plus immutable execution aggregate.
 // -----------------------------------------------------------------------------
+
+Table bot.bot_workspaces {
+  id uuid [pk, default: `gen_random_uuid()`]
+  owner_account_id uuid [not null]
+  mode strategy.strategy_mode [not null]
+  name varchar(120) [not null]
+  workspace_document jsonb [not null]
+  document_schema_version varchar(40) [not null]
+  edit_sequence bigint [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (owner_account_id, updated_at)
+  }
+
+  Note: 'Autosaved incomplete editor aggregate. Empty partitions and incomplete strategies are allowed only here. Completion validates the whole document and creates a new independent bot hierarchy atomically; no workspace, source-copy, version, or lineage reference is retained by the completed bot. edit_sequence is used for optimistic concurrency.'
+
+  Records (id, owner_account_id, mode, name, workspace_document, document_schema_version, edit_sequence, created_at, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', '{"example":true}', '1.0.0', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
+}
 
 Table bot.bots {
   id uuid [pk, default: `gen_random_uuid()`]
   owner_account_id uuid [not null]
-  copied_from_bot_id uuid
-  bot_kind bot.bot_kind [not null]
+  mode strategy.strategy_mode [not null]
   name varchar(120) [not null]
   lifecycle_status bot.lifecycle_status [not null]
-  last_committed_event_sequence bigint [not null, default: 0]
+  health_status bot.health_status [not null]
+  lifecycle_changed_at timestamptz [not null]
+  health_changed_at timestamptz [not null]
+  health_reason_code varchar(80)
   created_at timestamptz [not null, default: `now()`]
-  scheduled_start_at timestamptz
-  started_at timestamptz
+  started_at timestamptz [not null]
   stop_requested_at timestamptz
   stopped_at timestamptz
   stop_reason_code varchar(80)
+  archived_at timestamptz
+  deleted_at timestamptz
+  edit_sequence bigint [not null, default: 0]
+  updated_at timestamptz [not null, default: `now()`]
 
   indexes {
     (owner_account_id, lifecycle_status, created_at)
-    (lifecycle_status, scheduled_start_at)
+    (lifecycle_status, health_status, created_at)
+    (owner_account_id, deleted_at, archived_at, created_at)
   }
 
-  Note: 'Configuration is mutable only in DRAFT. Runtime cash, state, orders, positions, ledgers, and performance are never copied.'
+  Note: 'Created directly in RUNNING/HEALTHY only after the aggregate has at least one partition, every partition has at least one complete strategy, and launch validation succeeds. Lifecycle is RUNNING -> STOPPING -> STOPPED; STOPPED is permanent. Non-HEALTHY blocks new evaluations and orders but existing order cancellation, fills, reservation release, and settlement continue; recovery returns health to HEALTHY without a PAUSED state. mode and execution meaning are immutable. name, archived_at, and deleted_at are mutable fields excluded from configuration hashes. archived_at reversibly hides a STOPPED bot; deleted_at is an irreversible user-visible logical deletion and may be set directly without prior archive, but only after the bot reaches STOPPED and settlement completes. A delete request for a running bot first initiates the idempotent stop and settlement workflow. Physical purge is a separate retention/legal process and must not cascade-delete official orders, fills, ledgers, events, or evidence. edit_sequence starts at 0 and increments exactly once per successful editable-field update for optimistic concurrency; updated_at records that commit time. A copy is an independent new aggregate with new identifiers and no source lineage; runtime cash, state, orders, positions, ledgers, competition participation, and performance are never copied. Production migrations should use partial indexes for active lists where deleted_at IS NULL and archived_at IS NULL.'
+
+  Records (id, owner_account_id, mode, name, lifecycle_status, health_status, lifecycle_changed_at, health_changed_at, health_reason_code, created_at, started_at, stop_requested_at, stopped_at, stop_reason_code, archived_at, deleted_at, edit_sequence, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', 'RUNNING', 'HEALTHY', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, 'REVIEW_EXAMPLE', null, null, 1, '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table bot.launch_configurations {
@@ -682,81 +1082,109 @@ Table bot.launch_configurations {
   fee_configuration jsonb [not null]
   slippage_rate_bps int [not null, note: 'Fixed 5 bps; + for buys and - for sells.']
   buying_power_buffer_policy_id uuid [not null]
-  portfolio_risk_policy jsonb [not null]
   candidate_conflict_policy jsonb [not null]
-  configuration_hash varchar(128)
-  locked_at timestamptz
-  locked_by_event_id uuid
+  configuration_hash varchar(128) [not null]
 
-  Note: 'Launch validates and locks the full bot-partition-strategy aggregate atomically. Semantic updates and deletes are rejected after locked_at.'
+  checks {
+    `initial_cash_amount > 0` [name: 'launch_initial_cash_positive']
+    `slippage_rate_bps = 5` [name: 'launch_fixed_slippage_five_bps']
+  }
+
+  Note: 'Inserted atomically with the bot, partitions, and completed strategies. Initial virtual capital is positive, USD-denominated, isolated per bot, and cannot be deposited, withdrawn, or increased. User-defined risk controls live only in strategy RISK_POLICY blocks. Execution configuration is immutable from creation; semantic updates and deletes are always rejected.'
+
+  Records (bot_id, initial_cash_amount, currency_code, broker_rules_version, accounting_rules_version, precision_rules_version, fee_configuration, slippage_rate_bps, buying_power_buffer_policy_id, candidate_conflict_policy, configuration_hash) {
+    '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', '1.0.0', '1.0.0', '1.0.0', '{"example":true}', 5, '00000000-0000-4000-8000-000000000001', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  }
 }
 
 Table bot.bot_partitions {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
-  copied_from_partition_id uuid
   name varchar(120) [not null]
+  description text
   budget_cap_bps int [not null, note: '0..10000 of bot initial capital. Sibling sum must be <=10000.']
-  risk_policy jsonb [not null]
-  display_order int [not null]
-  configuration_hash varchar(128)
-  locked_at timestamptz
+  position_x numeric(14,4) [not null]
+  position_y numeric(14,4) [not null]
+  configuration_hash varchar(128) [not null]
+  edit_sequence bigint [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
 
   indexes {
-    (bot_id, display_order) [unique]
+    (bot_id, position_y, position_x, id)
     (bot_id, id) [unique]
   }
 
-  Note: 'A partition owns budgets, risk policy, and strategies; it does not own instruments. No borrowing across sibling partitions.'
+
+  checks {
+    `budget_cap_bps > 0 AND budget_cap_bps <= 10000` [name: 'partition_budget_cap_range']
+  }
+
+  Note: 'A completed partition owns an immutable positive budget cap of at most 100% and at least one strategy block group; sibling caps are validated with a deferred aggregate constraint so their sum is at most 100%. It does not own instruments or a separate risk-policy document. The partition is the lowest budget boundary, so all child strategies share this cap and receive no individual allocation. Risk controls are RISK_POLICY blocks in each strategy semantic_document. No borrowing across sibling partitions. name, description, position_x, and position_y are editable fields excluded from configuration_hash; coordinates may overlap, and id is only a deterministic query tie-breaker. edit_sequence starts at 0 and increments exactly once per successful editable-field update for optimistic concurrency; updated_at records that commit time. (bot_id, id) is an alternate ownership key, not a composite primary key or version. Copy/paste creates a new independent row and children with no source reference.'
+
+  Records (id, bot_id, name, description, budget_cap_bps, position_x, position_y, configuration_hash, edit_sequence, created_at, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'Fictional review sample', 5000, 100000.00000000, 100000.00000000, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
 }
 
-Table bot.partition_strategies {
+Table bot.strategies {
   id uuid [pk, default: `gen_random_uuid()`]
   partition_id uuid [not null]
-  copied_from_strategy_id uuid
-  mode strategy.strategy_mode [not null]
   name varchar(120) [not null]
   description text
-  catalog_version_id uuid [not null]
-  budget_cap_bps int [note: 'Required for PRO and null for BASIC equal allocation. Pro sibling sum must be <=10000.']
+  block_catalog_version_id uuid [not null]
+  execution_plan_id uuid [not null]
+  position_x numeric(14,4) [not null]
+  position_y numeric(14,4) [not null]
   semantic_document jsonb [not null]
-  layout_document jsonb [not null]
   semantic_hash varchar(128) [not null]
-  layout_hash varchar(128) [not null]
+  configuration_hash varchar(128) [not null]
   edit_sequence bigint [not null, default: 0]
-  validation_status varchar(30) [not null]
-  validation_result jsonb [not null]
-  configuration_hash varchar(128)
   created_at timestamptz [not null, default: `now()`]
-  saved_at timestamptz [not null]
-  locked_at timestamptz
+  updated_at timestamptz [not null, default: `now()`]
 
   indexes {
-    (partition_id, saved_at)
+    (partition_id, position_y, position_x, id)
     (partition_id, id) [unique]
     (semantic_hash)
   }
 
-  Note: 'Blocks, ports, edges, parameters, and semantic groups are one atomic JSONB aggregate. The strategy cannot be shared by another partition.'
+  Note: 'A strategy is a complete block-group aggregate owned by exactly one partition, not a reusable library item or a versioned entity. It inherits the single BASIC/PRO mode from its bot. The partition is the only budget-allocation boundary; strategy_id on runtime rows records attribution only. name, description, position_x, and position_y are editable fields excluded from semantic_hash and configuration_hash; coordinates may overlap, and id is only a deterministic query tie-breaker. edit_sequence starts at 0 and increments exactly once per successful editable-field update for optimistic concurrency; updated_at records that commit time. Blocks, ports, edges, parameters, semantic groups, and RISK_POLICY blocks are one immutable semantic JSONB aggregate. Per-block coordinates, sizes, viewport, zoom, selection, folding, and other UI layout state are not persisted; clients derive block placement deterministically from the semantic graph and may evolve their renderer independently. configuration_hash binds the block catalog version and semantic_hash only. (partition_id, id) is an alternate ownership key for composite runtime FKs. Copy/paste creates an independent new row with no source reference.'
+
+  Records (id, partition_id, name, description, block_catalog_version_id, execution_plan_id, position_x, position_y, semantic_document, semantic_hash, configuration_hash, edit_sequence, created_at, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'Fictional review sample', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table bot.strategy_instruments {
   strategy_id uuid [not null]
   instrument_id uuid [not null]
-  selection_role varchar(30) [not null, note: 'TRADE, REFERENCE, or EXCLUDE.']
 
   indexes {
-    (strategy_id, instrument_id, selection_role) [pk]
+    (strategy_id, instrument_id) [pk]
+  }
+
+  Note: 'Immutable set of explicit instruments required by the completed strategy semantic_document. Whether an instrument is traded or used as a reference is defined once by typed blocks and edges in that document, not duplicated as a mutable role here. Inserted atomically with the strategy; launch validation requires at least one instrument and exact equality between extracted dependencies and these rows. Future universe selection is out of current scope and must be introduced through a separately reviewed model and migration when the product supports it.'
+
+  Records (strategy_id, instrument_id) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
   }
 }
 
-Table bot.strategy_universes {
+Table bot.strategy_feature_requirements {
   strategy_id uuid [not null]
-  universe_id uuid [not null]
-  selection_role varchar(30) [not null]
+  instrument_id uuid [not null]
+  feature_definition_id uuid [not null]
 
   indexes {
-    (strategy_id, universe_id, selection_role) [pk]
+    (strategy_id, instrument_id, feature_definition_id) [pk]
+    (feature_definition_id, instrument_id, strategy_id)
+  }
+
+  Note: 'Immutable dependency set extracted from the strategy semantic_document at completion. It is not user-authored state and grants no budget. The reverse index lets the server group all active strategies by identical feature and instrument so a common calculation is performed once and fanned out to many bot evaluations.'
+
+  Records (strategy_id, instrument_id, feature_definition_id) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
   }
 }
 
@@ -778,12 +1206,17 @@ Table bot.bot_events {
 
   indexes {
     (bot_id, event_sequence) [unique]
+    (bot_id, id) [unique]
     (bot_id, idempotency_key) [unique]
     (event_type, committed_at)
     (correlation_id)
   }
 
-  Note: 'Append-only gapless official stream per bot. Exact market observations used for decisions are pinned by value/version/hash.'
+  Note: 'Append-only ordered official stream per bot. event_sequence is runtime audit ordering, not a bot version; gaps are allowed. Exact market observations used for decisions are pinned by value/version/hash.'
+
+  Records (id, bot_id, event_sequence, event_type, event_schema_version, causation_event_id, correlation_id, idempotency_key, occurred_at, received_at, committed_at, summary_document, market_dataset_manifest_id, evidence_object_id) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '1.0.0', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '{"example":true}', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
+  }
 }
 
 Table bot.evaluation_runs {
@@ -791,9 +1224,12 @@ Table bot.evaluation_runs {
   bot_id uuid [not null]
   trigger_event_id uuid [not null, unique]
   result_event_id uuid [unique]
-  status varchar(30) [not null]
+  feature_snapshot_batch_id uuid [not null]
+  feature_snapshot_key varchar(200) [not null]
+  feature_snapshot_hash varchar(128) [not null]
+  status operations.work_status [not null]
   input_state_hash varchar(128) [not null]
-  input_market_hash varchar(128) [not null]
+  input_market_hash varchar(128) [not null, note: 'Must equal the referenced shared feature snapshot input hash.']
   conflict_policy_hash varchar(128) [not null]
   candidate_set_hash varchar(128)
   started_at timestamptz [not null]
@@ -801,14 +1237,25 @@ Table bot.evaluation_runs {
   failure_code varchar(80)
 
   indexes {
+    (bot_id, id) [unique]
     (bot_id, started_at)
+    (feature_snapshot_batch_id, feature_snapshot_key)
+  }
+
+
+  Note: 'A bot-specific evaluation consumes one immutable shared feature snapshot addressed by batch, key, and hash, then applies only private strategy state, risk blocks, budget, conflict resolution, and order-intent generation. input_market_hash and feature_snapshot_hash are tamper-evident evidence validated against the batched object row; common indicators are never recalculated per bot.'
+
+  Records (id, bot_id, trigger_event_id, result_event_id, feature_snapshot_batch_id, feature_snapshot_key, feature_snapshot_hash, status, input_state_hash, input_market_hash, conflict_policy_hash, candidate_set_hash, started_at, completed_at, failure_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'SUCCEEDED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
   }
 }
 
 Table bot.evaluation_strategy_results {
   evaluation_run_id uuid [not null]
+  bot_id uuid [not null]
+  partition_id uuid [not null]
   strategy_id uuid [not null]
-  status varchar(30) [not null]
+  status operations.work_status [not null]
   candidate_count int [not null]
   state_change_count int [not null]
   result_hash varchar(128) [not null]
@@ -818,32 +1265,45 @@ Table bot.evaluation_strategy_results {
   indexes {
     (evaluation_run_id, strategy_id) [pk]
   }
+
+  Note: 'Per-strategy result within one bot evaluation. Composite ownership FKs prevent a result from naming a strategy in another bot or partition; aggregate candidate conflict resolution remains on the evaluation and order-intent batch boundary.'
+
+  Records (evaluation_run_id, bot_id, partition_id, strategy_id, status, candidate_count, state_change_count, result_hash, failure_code, summary_document) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'SUCCEEDED', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'REVIEW_EXAMPLE', '{"example":true}'
+  }
 }
 
 Table bot.runtime_state_values {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
-  strategy_id uuid
+  partition_id uuid [not null]
+  strategy_id uuid [not null]
+  instrument_id uuid
+  block_instance_key varchar(160) [not null]
   state_definition_key varchar(160) [not null]
-  scope_type varchar(40) [not null]
-  scope_id uuid
-  value_type varchar(30) [not null]
+  value_type bot.runtime_value_type [not null]
   current_value jsonb [not null]
   last_event_sequence bigint [not null]
   updated_at timestamptz [not null]
 
   indexes {
-    (bot_id, state_definition_key, scope_type, scope_id, strategy_id) [unique]
+    (bot_id, id) [unique]
+    (bot_id, partition_id, strategy_id, block_instance_key, state_definition_key, instrument_id) [unique]
     (bot_id, last_event_sequence)
   }
 
-  Note: 'PostgreSQL owns official current strategy state. Null-safe uniqueness is enforced in migration.'
+  Note: 'PostgreSQL owns only official bot-specific strategy state required across evaluations. Explicit bot/partition/strategy ownership prevents cross-bot leakage; instrument_id is nullable only for strategy-wide state. Shared prices, candles, indicators, calendars, or feature values are forbidden here and belong to market_data shared computation or disposable caches. Null-safe uniqueness for instrument_id is enforced in migration.'
+
+  Records (id, bot_id, partition_id, strategy_id, instrument_id, block_instance_key, state_definition_key, value_type, current_value, last_event_sequence, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'DECIMAL', '{"example":true}', 1, '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table bot.runtime_state_changes {
+  bot_id uuid [not null]
   bot_event_id uuid [not null]
   runtime_state_value_id uuid [not null]
-  previous_value_hash varchar(128) [not null]
+  previous_value_hash varchar(128) [note: 'Null only when the state key is created for the first time.']
   new_value jsonb [not null]
   new_value_hash varchar(128) [not null]
   change_reason_code varchar(80) [not null]
@@ -851,28 +1311,12 @@ Table bot.runtime_state_changes {
   indexes {
     (bot_event_id, runtime_state_value_id) [pk]
   }
-}
 
-Table bot.continuation_periods {
-  id uuid [pk, default: `gen_random_uuid()`]
-  bot_id uuid [not null]
-  basis_type varchar(40) [not null, note: 'ROOM_END, ROOM_WITHDRAWAL, FORCED_ROOM_END, or USER_RENEWAL.']
-  basis_record_id uuid [not null]
-  period_start_at timestamptz [not null]
-  due_at timestamptz [not null]
-  renewal_window_opens_at timestamptz [not null]
-  status varchar(30) [not null, note: 'PENDING, CONFIRMED, EXPIRED, or SUPERSEDED.']
-  confirmed_at timestamptz
-  expired_at timestamptz
-  supersedes_period_id uuid
-  created_at timestamptz [not null, default: `now()`]
+  Note: 'Append-only before/after evidence for bot-specific state changes. bot_id participates in both composite references so an event cannot mutate a state row owned by another bot.'
 
-  indexes {
-    (bot_id, period_start_at) [unique]
-    (status, due_at)
+  Records (bot_id, bot_event_id, runtime_state_value_id, previous_value_hash, new_value, new_value_hash, change_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'REVIEW_EXAMPLE'
   }
-
-  Note: 'Append-only continuation history. A partial unique index allows only one PENDING period per bot; a claimed due row drives an idempotent stop workflow.'
 }
 
 // -----------------------------------------------------------------------------
@@ -896,6 +1340,10 @@ Table trading.buying_power_buffer_policy_versions {
   }
 
   Note: 'Platform-managed immutable policy. Exact buffer_bps needs evidence before production.'
+
+  Records (id, policy_code, version, buffer_bps, rounding_rules_version, rules_hash, effective_from, effective_to, published_at) {
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', 1, '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null, '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table trading.order_intent_batches {
@@ -912,6 +1360,12 @@ Table trading.order_intent_batches {
 
   indexes {
     (bot_id, finalized_at)
+  }
+
+  Note: 'Stores order intent batches. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, bot_id, evaluation_run_id, source_event_id, status, conflict_policy_hash, allocation_rules_version, input_state_hash, result_hash, finalized_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACTIVE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -945,6 +1399,10 @@ Table trading.order_intents {
   }
 
   Note: 'Original intent and every reduction/netting result are immutable. Partition and strategy ownership must match through composite constraints.'
+
+  Records (id, batch_id, partition_id, strategy_id, instrument_id, intent_key, side, position_effect, order_type, time_in_force, requested_quantity, requested_notional, approved_quantity, approved_notional, netted_quantity, final_quantity, final_notional, limit_price, stop_price, decision, decision_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'BUY', 'OPEN_LONG', 'MARKET', 'DAY', 10.00000000, 100000.00000000, 10.00000000, 100000.00000000, 10.00000000, 10.00000000, 100000.00000000, 100.00000000, 100.00000000, 'review-example', 'REVIEW_EXAMPLE'
+  }
 }
 
 Table trading.orders {
@@ -975,6 +1433,10 @@ Table trading.orders {
   }
 
   Note: 'Immutable physical-order contract. Current status and remaining quantity come only from order_events and order_state_projections.'
+
+  Records (id, bot_id, instrument_id, order_group_id, replaces_order_id, order_key, side, position_effect, order_type, time_in_force, requested_quantity, requested_notional, limit_price, stop_price, accepted_event_id, accepted_at, expires_at, contract_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, 'REVIEW_EXAMPLE', 'BUY', 'OPEN_LONG', 'MARKET', 'DAY', 10.00000000, 100000.00000000, 100.00000000, 100.00000000, '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  }
 }
 
 Table trading.order_groups {
@@ -991,6 +1453,10 @@ Table trading.order_groups {
   }
 
   Note: 'Present for production-safe group lifecycle and reserved until the exact supported strategy block catalog is approved.'
+
+  Records (id, bot_id, group_type, group_key, status, created_event_id, closed_event_id) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'ACTIVE', '00000000-0000-4000-8000-000000000001', null
+  }
 }
 
 Table trading.order_intent_allocations {
@@ -1004,6 +1470,12 @@ Table trading.order_intent_allocations {
   indexes {
     (order_id, intent_id) [pk]
     (intent_id)
+  }
+
+  Note: 'Stores order intent allocations. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (order_id, intent_id, allocated_quantity, allocated_notional, allocation_rank, allocation_rules_version) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 1, '1.0.0'
   }
 }
 
@@ -1037,7 +1509,11 @@ Table trading.capital_reservations {
     (strategy_id, status)
   }
 
-  Note: 'Buffer affects buying-power reservation only, never fill price, PnL, or performance. Final price/fee recheck must reduce or reject before exceeding any hard cap.'
+  Note: 'Buffer affects buying-power reservation only, never fill price, PnL, or performance. Budget enforcement uses bot and partition caps only; strategy_id is attribution. Final price/fee recheck must reduce or reject before exceeding either hard cap.'
+
+  Records (id, bot_id, partition_id, strategy_id, intent_id, order_id, buffer_policy_id, status, reference_price, reference_observed_at, reference_market_hash, base_notional, fixed_slippage_amount, estimated_fee_amount, buffer_amount, reserved_amount, consumed_amount, released_amount, created_event_id, created_at, settled_event_id, settled_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACTIVE', 100.00000000, '2026-07-27T09:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table trading.order_events {
@@ -1054,6 +1530,12 @@ Table trading.order_events {
 
   indexes {
     (order_id, order_sequence) [unique]
+  }
+
+  Note: 'Stores order events. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, order_id, bot_event_id, order_sequence, event_type, previous_status, new_status, reason_code, occurred_at, event_document) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', null, 'OPEN', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"example":true}'
   }
 }
 
@@ -1073,6 +1555,10 @@ Table trading.order_state_projections {
   }
 
   Note: 'Rebuildable PostgreSQL current-order read model. Append-only order_events remain authoritative.'
+
+  Records (order_id, status, filled_quantity, remaining_quantity, reserved_cash, reserved_quantity, last_order_event_sequence, last_bot_event_sequence, updated_at) {
+    '00000000-0000-4000-8000-000000000001', 'OPEN', 10.00000000, 10.00000000, 100000.00000000, 10.00000000, 1, 1, '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table trading.fills {
@@ -1102,6 +1588,10 @@ Table trading.fills {
   }
 
   Note: 'Immutable execution evidence. The fixed 5 bps slippage and fee are applied to the latest pinned reference price after the buying-power recheck.'
+
+  Records (id, order_id, bot_id, bot_event_id, instrument_id, provider_fill_key, quantity, reference_price, reference_observed_at, reference_market_hash, slippage_rate_bps, slippage_amount, fill_price, gross_amount, fee_amount, net_amount, occurred_at, recorded_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 10.00000000, 100.00000000, '2026-07-27T09:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 5, 100000.00000000, 100.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table trading.fill_allocations {
@@ -1124,6 +1614,10 @@ Table trading.fill_allocations {
   }
 
   Note: 'Allocation settles each intent reservation independently; unused buffer is released and never enters fill price or performance.'
+
+  Records (fill_id, intent_id, reservation_id, partition_id, strategy_id, allocated_quantity, allocated_gross_amount, allocated_fee_amount, reservation_consumed_amount, reservation_released_amount, allocation_rules_version) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '1.0.0'
+  }
 }
 
 Table trading.ledger_accounts {
@@ -1142,6 +1636,10 @@ Table trading.ledger_accounts {
   }
 
   Note: 'Null-safe uniqueness and valid scope combinations are enforced in migration. Strategy subaccounts support attribution without transferring budgets or lots.'
+
+  Records (id, bot_id, partition_id, strategy_id, account_type, currency_code, instrument_id, created_at, closed_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'USD', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', null
+  }
 }
 
 Table trading.ledger_transactions {
@@ -1162,6 +1660,10 @@ Table trading.ledger_transactions {
   }
 
   Note: 'Append-only. Corrections use reversing transactions; committed entries are never rewritten.'
+
+  Records (id, bot_id, bot_event_id, transaction_type, transaction_key, currency_code, reversal_of_transaction_id, occurred_at, recorded_at, description_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'USD', null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'Fictional review sample'
+  }
 }
 
 Table trading.ledger_entries {
@@ -1183,6 +1685,10 @@ Table trading.ledger_entries {
   }
 
   Note: 'A deferred constraint trigger must enforce balanced currency amounts and valid partition/strategy ownership at commit.'
+
+  Records (id, transaction_id, ledger_account_id, partition_id, strategy_id, entry_sequence, direction, amount, quantity, entry_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'review-example', 100000.00000000, 10.00000000, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  }
 }
 
 Table trading.position_lots {
@@ -1202,6 +1708,12 @@ Table trading.position_lots {
     (strategy_id, instrument_id, opened_at)
     (bot_id, instrument_id, opened_at)
   }
+
+  Note: 'Stores position lots. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, bot_id, partition_id, strategy_id, instrument_id, opening_fill_id, opened_quantity, remaining_quantity, unit_cost, opened_at, closed_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 10.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00', null
+  }
 }
 
 Table trading.lot_movements {
@@ -1218,6 +1730,12 @@ Table trading.lot_movements {
   indexes {
     (position_lot_id, bot_event_id) [unique]
     (source_fill_id, position_lot_id)
+  }
+
+  Note: 'Stores lot movements. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, position_lot_id, bot_event_id, source_fill_id, corporate_action_id, movement_type, quantity_delta, remaining_after, occurred_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 10.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -1240,6 +1758,10 @@ Table trading.strategy_position_projections {
   }
 
   Note: 'Rebuildable PostgreSQL current projection. Official history remains fills, lot movements, and ledger entries.'
+
+  Records (strategy_id, partition_id, bot_id, instrument_id, long_quantity, short_quantity, cost_basis_amount, last_event_sequence, projection_hash, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 10.00000000, 100000.00000000, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table trading.position_projections {
@@ -1259,6 +1781,10 @@ Table trading.position_projections {
   }
 
   Note: 'Rebuildable bot-wide net position used for global instrument convergence; ledger and lot records remain authoritative.'
+
+  Records (bot_id, instrument_id, net_quantity, average_cost, realized_pnl, last_valuation_price, last_valuation_at, valuation_status, last_bot_event_sequence, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 100000.00000000, 100.00000000, '2026-07-27T09:00:00+09:00', 'ACTIVE', 1, '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table trading.bot_budget_projections {
@@ -1269,6 +1795,12 @@ Table trading.bot_budget_projections {
   last_event_sequence bigint [not null]
   projection_hash varchar(128) [not null]
   updated_at timestamptz [not null]
+
+  Note: 'Stores bot budget projections. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (bot_id, available_cash_amount, active_reservation_amount, invested_amount, last_event_sequence, projection_hash, updated_at) {
+    '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, 100000.00000000, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table trading.partition_budget_projections {
@@ -1279,16 +1811,12 @@ Table trading.partition_budget_projections {
   last_event_sequence bigint [not null]
   projection_hash varchar(128) [not null]
   updated_at timestamptz [not null]
-}
 
-Table trading.strategy_budget_projections {
-  strategy_id uuid [pk]
-  budget_cap_amount numeric(24,8) [not null]
-  active_reservation_amount numeric(24,8) [not null]
-  invested_amount numeric(24,8) [not null]
-  last_event_sequence bigint [not null]
-  projection_hash varchar(128) [not null]
-  updated_at timestamptz [not null]
+  Note: 'Stores partition budget projections. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (partition_id, budget_cap_amount, active_reservation_amount, invested_amount, last_event_sequence, projection_hash, updated_at) {
+    '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, 100000.00000000, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -1322,7 +1850,11 @@ Table backtest.runs {
     (owner_account_id, queued_at)
   }
 
-  Note: 'Created atomically with bot configuration lock. Backtest delay/failure never changes live bot lifecycle or ledger.'
+  Note: 'Created atomically with the validated immutable bot aggregate. Backtest delay/failure never changes live bot lifecycle or ledger.'
+
+  Records (id, bot_id, owner_account_id, configuration_hash, status, evaluation_start, evaluation_end, initial_cash_amount, market_rules_version, accounting_rules_version, precision_rules_version, fee_rules_version, slippage_rate_bps, buying_power_buffer_policy_id, idempotency_key, queued_at, started_at, completed_at, failure_code, result_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'RUNNING', '2026-07-27', '2026-07-27', 100000.00000000, '1.0.0', '1.0.0', '1.0.0', '1.0.0', 5, '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  }
 }
 
 Table backtest.run_attempts {
@@ -1338,6 +1870,12 @@ Table backtest.run_attempts {
   indexes {
     (run_id, attempt_number) [unique]
   }
+
+  Note: 'Stores run attempts. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, run_id, attempt_number, worker_execution_key, status, started_at, completed_at, failure_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'SUCCEEDED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
+  }
 }
 
 Table backtest.input_datasets {
@@ -1349,6 +1887,28 @@ Table backtest.input_datasets {
   indexes {
     (input_bundle_id, dataset_manifest_id, purpose_code) [pk]
   }
+
+  Note: 'Stores input datasets. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (input_bundle_id, dataset_manifest_id, purpose_code, locked_dataset_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  }
+}
+
+Table backtest.input_feature_materializations {
+  input_bundle_id uuid [not null]
+  feature_materialization_id uuid [not null]
+  locked_result_hash varchar(128) [not null]
+
+  indexes {
+    (input_bundle_id, feature_materialization_id) [pk]
+  }
+
+  Note: 'Pins shared historical feature results reused by the official backtest. The locked hash must equal the AVAILABLE materialization result hash; missing or mismatched features fail input locking instead of triggering hidden per-bot recomputation.'
+
+  Records (input_bundle_id, feature_materialization_id, locked_result_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  }
 }
 
 Table backtest.input_bundles {
@@ -1359,6 +1919,10 @@ Table backtest.input_bundles {
   locked_at timestamptz [not null]
 
   Note: 'Pins the complete reproducibility boundary for one official whole-bot run.'
+
+  Records (id, run_id, bundle_hash, as_of_at, locked_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table backtest.monthly_judgment_summaries {
@@ -1377,6 +1941,12 @@ Table backtest.monthly_judgment_summaries {
   indexes {
     (run_id, et_year_month) [unique]
   }
+
+  Note: 'Stores monthly judgment summaries. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, run_id, et_year_month, evaluation_count, active_branch_count, trade_event_count, data_gap_count, triggered_count, rejected_count, summary_document, summary_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'review-example', 1, 1, 1, 1, 1, 1, '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  }
 }
 
 Table backtest.failure_condition_counts {
@@ -1389,6 +1959,12 @@ Table backtest.failure_condition_counts {
   indexes {
     (monthly_summary_id, flow_or_branch_key, first_failure_condition_key) [unique]
   }
+
+  Note: 'Stores failure condition counts. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, monthly_summary_id, flow_or_branch_key, first_failure_condition_key, occurrence_count) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 1
+  }
 }
 
 Table backtest.performance_summaries {
@@ -1400,6 +1976,12 @@ Table backtest.performance_summaries {
   input_hash varchar(128) [not null]
   result_hash varchar(128) [not null]
   calculated_at timestamptz [not null]
+
+  Note: 'Stores performance summaries. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (run_id, metric_catalog_version, metrics_document, calculation_rules_version, source_set_hash, input_hash, result_hash, calculated_at) {
+    '00000000-0000-4000-8000-000000000001', '1.0.0', '{"example":true}', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table backtest.detail_manifests {
@@ -1424,6 +2006,10 @@ Table backtest.detail_manifests {
   }
 
   Note: 'Parquet objects are explicit UNCOMPRESSED and never cross an ET Monday week boundary.'
+
+  Records (id, run_id, object_id, record_type, week_start_date, period_start, period_end, part_number, row_count, schema_version, source_set_hash, supersedes_manifest_id, detail_hash, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 1, 1, '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -1439,6 +2025,12 @@ Table performance.bot_current_projections {
   last_event_sequence bigint [not null]
   projection_hash varchar(128) [not null]
   updated_at timestamptz [not null]
+
+  Note: 'Stores bot current projections. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (bot_id, metrics_document, ledger_state_hash, position_state_hash, calculation_rules_version, last_event_sequence, projection_hash, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table performance.bot_snapshots {
@@ -1459,6 +2051,10 @@ Table performance.bot_snapshots {
   }
 
   Note: 'Immutable official boundary snapshot. NoSQL leaderboard or dashboard documents are never scoring evidence.'
+
+  Records (id, bot_id, snapshot_type, source_event_sequence, evaluated_at, metrics_document, input_hash, calculation_rules_version, snapshot_hash, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 1, '2026-07-27T09:00:00+09:00', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table performance.series_manifests {
@@ -1475,6 +2071,12 @@ Table performance.series_manifests {
 
   indexes {
     (bot_id, series_type, week_start_date, part_number) [unique]
+  }
+
+  Note: 'Stores series manifests. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, bot_id, object_id, series_type, week_start_date, period_start, period_end, part_number, calculation_rules_version, series_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 1, '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   }
 }
 
@@ -1494,6 +2096,12 @@ Table competition.scoring_template_versions {
   indexes {
     (template_code, version) [unique]
   }
+
+  Note: 'Stores scoring template versions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, template_code, version, rules_document, rules_hash, published_at, retired_at) {
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
+  }
 }
 
 Table competition.rooms {
@@ -1509,6 +2117,12 @@ Table competition.rooms {
 
   indexes {
     (status, created_at)
+  }
+
+  Note: 'Stores rooms. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, creator_account_id, name, access_type, status, created_at, ended_at, invalidated_at, invalidation_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'PUBLIC', 'RECRUITING', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
   }
 }
 
@@ -1535,6 +2149,10 @@ Table competition.room_rules {
   locked_at timestamptz [not null]
 
   Note: 'Core eligibility and capacity fields remain relational for constraints and admission locking; extensible criteria remain in versioned JSONB.'
+
+  Records (room_id, scoring_template_version_id, initial_cash_amount, currency_code, participant_limit, per_account_bot_limit, stopped_bot_slot_policy, minimum_operation_seconds, minimum_fill_count, late_submission_policy, eligibility_document, market_scope_document, scoring_parameters, fee_rules_version, fee_configuration, slippage_rate_bps, buying_power_buffer_policy_id, precision_rules_version, rules_hash, locked_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', 1, 1, 'REVIEW_EXAMPLE', 1, 1, 'REVIEW_EXAMPLE', '{"example":true}', '{"example":true}', '{"example":true}', '1.0.0', '{"example":true}', 5, '00000000-0000-4000-8000-000000000001', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table competition.room_events {
@@ -1552,6 +2170,10 @@ Table competition.room_events {
   }
 
   Note: 'Append-only lifecycle evidence. rooms.status is only a guarded current projection.'
+
+  Records (id, room_id, event_sequence, event_type, resulting_status, reason_code, occurred_at, payload_document) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'RECRUITING', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"example":true}'
+  }
 }
 
 Table competition.room_invitations {
@@ -1570,6 +2192,10 @@ Table competition.room_invitations {
   }
 
   Note: 'Plain invitation secrets are never stored. Active invitations expire at submission close or earlier room termination.'
+
+  Records (id, room_id, issued_by_account_id, credential_type, credential_digest, issued_at, expires_at, revoked_at, revocation_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, 'REVIEW_EXAMPLE'
+  }
 }
 
 Table competition.room_schedules {
@@ -1582,6 +2208,10 @@ Table competition.room_schedules {
   timezone_name varchar(80) [not null]
 
   Note: 'Migration CHECKs enforce chronological ordering. The schedule becomes immutable when recruitment opens.'
+
+  Records (room_id, recruitment_opens_at, submission_opens_at, submission_closes_at, evaluation_starts_at, evaluation_ends_at, timezone_name) {
+    '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'America/New_York'
+  }
 }
 
 Table competition.participations {
@@ -1608,6 +2238,10 @@ Table competition.participations {
   }
 
   Note: 'A room bot starts with empty runtime state. An already-running personal bot is never attached.'
+
+  Records (id, room_id, bot_id, owner_account_id, anonymous_alias, status, joined_at, withdrawn_at, withdrawal_reason_code, expelled_at, expulsion_reason_code, completed_at, post_room_action, action_recorded_at, action_locked_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'review-example', 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', 'review-example', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table competition.participation_events {
@@ -1621,6 +2255,12 @@ Table competition.participation_events {
 
   indexes {
     (participation_id, event_sequence) [unique]
+  }
+
+  Note: 'Stores participation events. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, participation_id, event_sequence, event_type, reason_code, occurred_at, payload_document) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"example":true}'
   }
 }
 
@@ -1643,6 +2283,10 @@ Table competition.evaluation_segments {
   }
 
   Note: 'Virtual liquidation is scoring-only evidence and never creates live fills, reservations, or ledger entries.'
+
+  Records (id, participation_id, segment_type, starts_at, ends_at, start_event_sequence, end_event_sequence, initial_state_hash, final_state_hash, source_set_hash, virtual_liquidation_document, finalized_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"example":true}', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table competition.leaderboard_snapshots {
@@ -1656,6 +2300,12 @@ Table competition.leaderboard_snapshots {
 
   indexes {
     (room_id, cutoff_at) [unique]
+  }
+
+  Note: 'Stores leaderboard snapshots. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, room_id, scoring_template_version_id, cutoff_at, status, result_hash, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', 'ACTIVE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -1675,6 +2325,12 @@ Table competition.leaderboard_entries {
     (snapshot_id, participation_id) [pk]
     (snapshot_id, rank)
   }
+
+  Note: 'Stores leaderboard entries. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (snapshot_id, participation_id, performance_snapshot_id, rank, is_joint_rank, eligibility_status, eligibility_reason_code, score, tie_break_document, calculation_document) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, true, 'ACTIVE', 'REVIEW_EXAMPLE', 0.05000000, '{"example":true}', '{"example":true}'
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -1689,6 +2345,12 @@ Table operations.operator_accounts {
   last_mfa_verified_at timestamptz
   created_at timestamptz [not null]
   disabled_at timestamptz
+
+  Note: 'Stores operator accounts. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, external_identity_key_hmac, status, mfa_enrolled_at, last_mfa_verified_at, created_at, disabled_at) {
+    '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table operations.roles {
@@ -1696,6 +2358,12 @@ Table operations.roles {
   code varchar(80) [not null, unique]
   hierarchy_rank int [not null]
   status varchar(30) [not null]
+
+  Note: 'Stores roles. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, code, hierarchy_rank, status) {
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 1, 'ACTIVE'
+  }
 }
 
 Table operations.permissions {
@@ -1703,6 +2371,12 @@ Table operations.permissions {
   code varchar(120) [not null, unique]
   description varchar(500) [not null]
   sensitivity varchar(30) [not null]
+
+  Note: 'Stores permissions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, code, description, sensitivity) {
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'Fictional review sample', 'review-example'
+  }
 }
 
 Table operations.role_permissions {
@@ -1711,6 +2385,12 @@ Table operations.role_permissions {
 
   indexes {
     (role_id, permission_id) [pk]
+  }
+
+  Note: 'Stores role permissions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (role_id, permission_id) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
   }
 }
 
@@ -1728,6 +2408,12 @@ Table operations.operator_role_assignments {
   indexes {
     (operator_account_id, role_id, granted_at) [unique]
     (expires_at)
+  }
+
+  Note: 'Stores operator role assignments. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, operator_account_id, role_id, granted_by_operator_id, granted_at, expires_at, revoked_by_operator_id, revoked_at, revocation_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, null, 'REVIEW_EXAMPLE'
   }
 }
 
@@ -1752,6 +2438,10 @@ Table operations.outbox_messages {
   }
 
   Note: 'Inserted atomically with domain changes. Publishers may deliver at least once, so every consumer uses idempotency_key.'
+
+  Records (id, owner_domain, aggregate_id, aggregate_sequence, event_type, event_schema_version, payload_document, idempotency_key, created_at, published_at, publish_attempt_count, next_attempt_at, last_failure_code) {
+    '00000000-0000-4000-8000-000000000001', 'review-example', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '1.0.0', '{"example":true}', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 1, '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
+  }
 }
 
 Table operations.projection_checkpoints {
@@ -1773,6 +2463,10 @@ Table operations.projection_checkpoints {
   }
 
   Note: 'NoSQL/search/cache content is disposable and must be rebuildable from PostgreSQL plus verified S3 objects.'
+
+  Records (id, projection_name, target_store, shard_key, source_domain, last_source_sequence, last_source_time, projection_version, status, updated_at, failure_code) {
+    '00000000-0000-4000-8000-000000000001', 'Review Example', 'review-example', 'REVIEW_EXAMPLE', 'review-example', 1, '2026-07-27T09:00:00+09:00', '1.0.0', 'ACTIVE', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
+  }
 }
 
 Table operations.audit_events {
@@ -1798,6 +2492,10 @@ Table operations.audit_events {
   }
 
   Note: 'Append-only security evidence. Payloads and object evidence must not duplicate credentials, private strategy source, or unnecessary holdings.'
+
+  Records (id, actor_type, actor_id, action_type, target_domain, target_id, reason_code, correlation_id, idempotency_key, before_hash, after_hash, evidence_object_id, occurred_at, recorded_at) {
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'review-example', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table operations.notification_preferences {
@@ -1814,6 +2512,10 @@ Table operations.notification_preferences {
   }
 
   Note: 'Mandatory operational notices ignore opt-outs. Migration must enforce null-safe uniqueness for account-wide preferences.'
+
+  Records (id, account_id, bot_id, event_type, channel, enabled, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', true, '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table operations.notifications {
@@ -1833,6 +2535,12 @@ Table operations.notifications {
   indexes {
     (account_id, read_at, created_at)
   }
+
+  Note: 'Stores notifications. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, account_id, bot_id, notification_type, mandatory, locale, template_version, payload_document, idempotency_key, created_at, read_at, expires_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', true, 'review-example', '1.0.0', '{"example":true}', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00'
+  }
 }
 
 Table operations.delivery_attempts {
@@ -1851,6 +2559,12 @@ Table operations.delivery_attempts {
     (notification_id, channel, attempt_number) [unique]
     (status, next_attempt_at)
   }
+
+  Note: 'Stores delivery attempts. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, notification_id, channel, attempt_number, status, attempted_at, completed_at, provider_message_key, failure_code, next_attempt_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 1, 'SUCCEEDED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 Table operations.cases {
@@ -1865,6 +2579,12 @@ Table operations.cases {
 
   indexes {
     (account_id, status, created_at)
+  }
+
+  Note: 'Stores cases. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, account_id, case_type, status, subject, created_at, closed_at, resolution_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'ACTIVE', 'review-example', '2026-07-27T09:00:00+09:00', null, '1m'
   }
 }
 
@@ -1881,36 +2601,44 @@ Table operations.case_events {
   indexes {
     (case_id, event_sequence) [unique]
   }
+
+  Note: 'Stores case events. Records contains fictional documentation-only review data and is never a production seed or migration.'
+
+  Records (id, case_id, event_sequence, actor_type, actor_id, event_type, payload_document, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '{"example":true}', '2026-07-27T09:00:00+09:00'
+  }
 }
 
 // -----------------------------------------------------------------------------
 // References
 // -----------------------------------------------------------------------------
 
+Ref: identity.account_lifecycle_events.account_id > identity.accounts.id
+Ref: identity.account_preferences.account_id > identity.accounts.id
 Ref: identity.account_emails.account_id > identity.accounts.id
+Ref: identity.email_verification_requests.account_id > identity.account_emails.account_id
+Ref: identity.login_identities.provider_id > identity.auth_providers.id
 Ref: identity.login_identities.account_id > identity.accounts.id
-Ref: identity.login_identities.account_email_id > identity.account_emails.id
 Ref: identity.password_credentials.login_identity_id > identity.login_identities.id
-Ref: identity.sessions.account_id > identity.accounts.id
-Ref: identity.sessions.login_identity_id > identity.login_identities.id
+Ref: identity.sessions.(account_id, authenticated_by_login_identity_id) > identity.login_identities.(account_id, id)
 Ref: identity.account_consents.account_id > identity.accounts.id
-Ref: identity.account_consents.policy_version_id > identity.policy_versions.id
-Ref: identity.password_reset_requests.account_id > identity.accounts.id
-Ref: identity.password_reset_requests.account_email_id > identity.account_emails.id
-Ref: identity.password_reset_requests.login_identity_id > identity.login_identities.id
+Ref: identity.account_consents.policy_document_id > identity.policy_documents.id
+Ref: identity.account_consents.supersedes_consent_id > identity.account_consents.id
+Ref: identity.password_reset_requests.(account_id, login_identity_id) > identity.login_identities.(account_id, id)
 Ref: identity.recovery_code_sets.account_id > identity.accounts.id
 Ref: identity.recovery_codes.recovery_code_set_id > identity.recovery_code_sets.id
 Ref: identity.account_sanctions.account_id > identity.accounts.id
 Ref: identity.account_sanctions.applied_by_operator_id > operations.operator_accounts.id
-Ref: identity.account_sanctions.lifted_by_operator_id > operations.operator_accounts.id
+Ref: identity.account_sanctions.source_case_id > operations.cases.id
+Ref: identity.account_sanction_events.sanction_id > identity.account_sanctions.id
+Ref: identity.account_sanction_events.actor_operator_id > operations.operator_accounts.id
+Ref: identity.account_sanction_events.evidence_object_id > storage.objects.id
 
 Ref: strategy.platform_template_versions.template_id > strategy.platform_templates.id
 Ref: strategy.platform_template_versions.catalog_version_id > strategy.catalog_versions.id
+Ref: strategy.compiled_execution_plans.catalog_version_id > strategy.catalog_versions.id
 
 Ref: market_data.instrument_symbols.instrument_id > market_data.instruments.id
-Ref: market_data.universe_versions.universe_id > market_data.official_universes.id
-Ref: market_data.universe_members.universe_version_id > market_data.universe_versions.id
-Ref: market_data.universe_members.instrument_id > market_data.instruments.id
 Ref: market_data.feeds.provider_id > market_data.providers.id
 Ref: market_data.dataset_manifests.feed_id > market_data.feeds.id
 Ref: market_data.dataset_manifests.instrument_id > market_data.instruments.id
@@ -1919,6 +2647,12 @@ Ref: market_data.dataset_objects.dataset_manifest_id > market_data.dataset_manif
 Ref: market_data.dataset_objects.object_id > storage.objects.id
 Ref: market_data.dataset_lineage.derived_manifest_id > market_data.dataset_manifests.id
 Ref: market_data.dataset_lineage.source_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.feature_definitions.catalog_version_id > strategy.catalog_versions.id
+Ref: market_data.feature_materializations.feature_definition_id > market_data.feature_definitions.id
+Ref: market_data.feature_materializations.instrument_id > market_data.instruments.id
+Ref: market_data.feature_materializations.pipeline_run_id > market_data.pipeline_runs.id
+Ref: market_data.feature_materializations.output_dataset_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.feature_snapshot_batches.snapshot_object_id > storage.objects.id
 Ref: market_data.corporate_actions.instrument_id > market_data.instruments.id
 Ref: market_data.corporate_actions.source_manifest_id > market_data.dataset_manifests.id
 Ref: market_data.corporate_actions.supersedes_action_id > market_data.corporate_actions.id
@@ -1926,41 +2660,41 @@ Ref: market_data.quality_incidents.dataset_manifest_id > market_data.dataset_man
 Ref: market_data.quality_incidents.instrument_id > market_data.instruments.id
 Ref: market_data.quality_incidents.evidence_object_id > storage.objects.id
 
+Ref: bot.bot_workspaces.owner_account_id > identity.accounts.id
 Ref: bot.bots.owner_account_id > identity.accounts.id
-Ref: bot.bots.copied_from_bot_id > bot.bots.id
 Ref: bot.launch_configurations.bot_id > bot.bots.id
 Ref: bot.launch_configurations.buying_power_buffer_policy_id > trading.buying_power_buffer_policy_versions.id
-Ref: bot.launch_configurations.locked_by_event_id > bot.bot_events.id
 Ref: bot.bot_partitions.bot_id > bot.bots.id
-Ref: bot.bot_partitions.copied_from_partition_id > bot.bot_partitions.id
-Ref: bot.partition_strategies.partition_id > bot.bot_partitions.id
-Ref: bot.partition_strategies.copied_from_strategy_id > bot.partition_strategies.id
-Ref: bot.partition_strategies.catalog_version_id > strategy.catalog_versions.id
-Ref: bot.strategy_instruments.strategy_id > bot.partition_strategies.id
+Ref: bot.strategies.partition_id > bot.bot_partitions.id
+Ref: bot.strategies.block_catalog_version_id > strategy.catalog_versions.id
+Ref: bot.strategies.execution_plan_id > strategy.compiled_execution_plans.id
+Ref: bot.strategy_instruments.strategy_id > bot.strategies.id
 Ref: bot.strategy_instruments.instrument_id > market_data.instruments.id
-Ref: bot.strategy_universes.strategy_id > bot.partition_strategies.id
-Ref: bot.strategy_universes.universe_id > market_data.official_universes.id
+Ref: bot.strategy_feature_requirements.strategy_id > bot.strategies.id
+Ref: bot.strategy_feature_requirements.(strategy_id, instrument_id) > bot.strategy_instruments.(strategy_id, instrument_id)
+Ref: bot.strategy_feature_requirements.feature_definition_id > market_data.feature_definitions.id
 Ref: bot.bot_events.bot_id > bot.bots.id
 Ref: bot.bot_events.causation_event_id > bot.bot_events.id
 Ref: bot.bot_events.market_dataset_manifest_id > market_data.dataset_manifests.id
 Ref: bot.bot_events.evidence_object_id > storage.objects.id
 Ref: bot.evaluation_runs.bot_id > bot.bots.id
-Ref: bot.evaluation_runs.trigger_event_id > bot.bot_events.id
-Ref: bot.evaluation_runs.result_event_id > bot.bot_events.id
-Ref: bot.evaluation_strategy_results.evaluation_run_id > bot.evaluation_runs.id
-Ref: bot.evaluation_strategy_results.strategy_id > bot.partition_strategies.id
+Ref: bot.evaluation_runs.(bot_id, trigger_event_id) > bot.bot_events.(bot_id, id)
+Ref: bot.evaluation_runs.(bot_id, result_event_id) > bot.bot_events.(bot_id, id)
+Ref: bot.evaluation_runs.feature_snapshot_batch_id > market_data.feature_snapshot_batches.id
+Ref: bot.evaluation_strategy_results.(bot_id, evaluation_run_id) > bot.evaluation_runs.(bot_id, id)
+Ref: bot.evaluation_strategy_results.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
+Ref: bot.evaluation_strategy_results.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: bot.runtime_state_values.bot_id > bot.bots.id
-Ref: bot.runtime_state_values.strategy_id > bot.partition_strategies.id
-Ref: bot.runtime_state_changes.bot_event_id > bot.bot_events.id
-Ref: bot.runtime_state_changes.runtime_state_value_id > bot.runtime_state_values.id
-Ref: bot.continuation_periods.bot_id > bot.bots.id
-Ref: bot.continuation_periods.supersedes_period_id > bot.continuation_periods.id
-
+Ref: bot.runtime_state_values.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
+Ref: bot.runtime_state_values.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
+Ref: bot.runtime_state_values.instrument_id > market_data.instruments.id
+Ref: bot.runtime_state_changes.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
+Ref: bot.runtime_state_changes.(bot_id, runtime_state_value_id) > bot.runtime_state_values.(bot_id, id)
 Ref: trading.order_intent_batches.bot_id > bot.bots.id
 Ref: trading.order_intent_batches.evaluation_run_id > bot.evaluation_runs.id
 Ref: trading.order_intent_batches.source_event_id > bot.bot_events.id
 Ref: trading.order_intents.batch_id > trading.order_intent_batches.id
-Ref: trading.order_intents.(partition_id, strategy_id) > bot.partition_strategies.(partition_id, id)
+Ref: trading.order_intents.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: trading.order_intents.instrument_id > market_data.instruments.id
 Ref: trading.orders.bot_id > bot.bots.id
 Ref: trading.orders.instrument_id > market_data.instruments.id
@@ -1974,7 +2708,7 @@ Ref: trading.order_intent_allocations.order_id > trading.orders.id
 Ref: trading.order_intent_allocations.intent_id > trading.order_intents.id
 Ref: trading.capital_reservations.bot_id > bot.bots.id
 Ref: trading.capital_reservations.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: trading.capital_reservations.(partition_id, strategy_id) > bot.partition_strategies.(partition_id, id)
+Ref: trading.capital_reservations.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: trading.capital_reservations.intent_id > trading.order_intents.id
 Ref: trading.capital_reservations.order_id > trading.orders.id
 Ref: trading.capital_reservations.buffer_policy_id > trading.buying_power_buffer_policy_versions.id
@@ -1990,12 +2724,12 @@ Ref: trading.fills.instrument_id > market_data.instruments.id
 Ref: trading.fill_allocations.fill_id > trading.fills.id
 Ref: trading.fill_allocations.intent_id > trading.order_intents.id
 Ref: trading.fill_allocations.reservation_id > trading.capital_reservations.id
-Ref: trading.fill_allocations.(partition_id, strategy_id) > bot.partition_strategies.(partition_id, id)
+Ref: trading.fill_allocations.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: trading.ledger_accounts.bot_id > bot.bots.id
 Ref: trading.ledger_accounts.partition_id > bot.bot_partitions.id
-Ref: trading.ledger_accounts.strategy_id > bot.partition_strategies.id
+Ref: trading.ledger_accounts.strategy_id > bot.strategies.id
 Ref: trading.ledger_accounts.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: trading.ledger_accounts.(partition_id, strategy_id) > bot.partition_strategies.(partition_id, id)
+Ref: trading.ledger_accounts.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: trading.ledger_accounts.instrument_id > market_data.instruments.id
 Ref: trading.ledger_transactions.bot_id > bot.bots.id
 Ref: trading.ledger_transactions.bot_event_id > bot.bot_events.id
@@ -2003,11 +2737,11 @@ Ref: trading.ledger_transactions.reversal_of_transaction_id > trading.ledger_tra
 Ref: trading.ledger_entries.transaction_id > trading.ledger_transactions.id
 Ref: trading.ledger_entries.ledger_account_id > trading.ledger_accounts.id
 Ref: trading.ledger_entries.partition_id > bot.bot_partitions.id
-Ref: trading.ledger_entries.strategy_id > bot.partition_strategies.id
-Ref: trading.ledger_entries.(partition_id, strategy_id) > bot.partition_strategies.(partition_id, id)
+Ref: trading.ledger_entries.strategy_id > bot.strategies.id
+Ref: trading.ledger_entries.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: trading.position_lots.bot_id > bot.bots.id
 Ref: trading.position_lots.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: trading.position_lots.(partition_id, strategy_id) > bot.partition_strategies.(partition_id, id)
+Ref: trading.position_lots.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: trading.position_lots.instrument_id > market_data.instruments.id
 Ref: trading.position_lots.opening_fill_id > trading.fills.id
 Ref: trading.lot_movements.position_lot_id > trading.position_lots.id
@@ -2016,13 +2750,12 @@ Ref: trading.lot_movements.source_fill_id > trading.fills.id
 Ref: trading.lot_movements.corporate_action_id > market_data.corporate_actions.id
 Ref: trading.strategy_position_projections.bot_id > bot.bots.id
 Ref: trading.strategy_position_projections.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: trading.strategy_position_projections.(partition_id, strategy_id) > bot.partition_strategies.(partition_id, id)
+Ref: trading.strategy_position_projections.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: trading.strategy_position_projections.instrument_id > market_data.instruments.id
 Ref: trading.position_projections.bot_id > bot.bots.id
 Ref: trading.position_projections.instrument_id > market_data.instruments.id
 Ref: trading.bot_budget_projections.bot_id > bot.bots.id
 Ref: trading.partition_budget_projections.partition_id > bot.bot_partitions.id
-Ref: trading.strategy_budget_projections.strategy_id > bot.partition_strategies.id
 
 Ref: backtest.runs.bot_id > bot.bots.id
 Ref: backtest.runs.owner_account_id > identity.accounts.id
@@ -2031,6 +2764,8 @@ Ref: backtest.run_attempts.run_id > backtest.runs.id
 Ref: backtest.input_bundles.run_id > backtest.runs.id
 Ref: backtest.input_datasets.input_bundle_id > backtest.input_bundles.id
 Ref: backtest.input_datasets.dataset_manifest_id > market_data.dataset_manifests.id
+Ref: backtest.input_feature_materializations.input_bundle_id > backtest.input_bundles.id
+Ref: backtest.input_feature_materializations.feature_materialization_id > market_data.feature_materializations.id
 Ref: backtest.monthly_judgment_summaries.run_id > backtest.runs.id
 Ref: backtest.failure_condition_counts.monthly_summary_id > backtest.monthly_judgment_summaries.id
 Ref: backtest.performance_summaries.run_id > backtest.runs.id
