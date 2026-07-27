@@ -8,6 +8,28 @@
 기준 Stackcord fingerprint: `sha256:3cb632a0a1d1b75fd1e879be6da23c95d884a8250e4da3aba22f94cf5e59d7f2`
 DBML 초안: `proposals/dbml-redesign/schema.draft.dbml`
 
+## 2026-07-27 봇 실행 아키텍처 재설계 제안
+
+봇 하나마다 전용 실행 파일·프로세스·컨테이너·스레드를 서버에 상주시키는 구조는 사용하지 않는다. 봇은 PostgreSQL에 저장된 불변 실행 설정과 복구 가능한 런타임 상태 데이터이며, 이벤트가 발생했을 때 공용 Worker Pool이 관련 전략만 평가한다. 상시 실행 주체는 Market Data Consumer, Trigger Router, Schedule Event Producer, Evaluation Worker Pool, Order/Fill Processor, Settlement Worker, Outbox Publisher, Projection Builder뿐이고, 이들은 봇 수가 아니라 Queue 처리량에 따라 수평 확장한다.
+
+사용자 확정 결정(2026-07-27 A/B 질문):
+
+1. **트리거 이벤트 정본 = 봇별 `bot_events`만 (A).** 전역 트리거 테이블은 두지 않는다. Trigger Router가 라우팅된 봇마다 결정적 `idempotency_key`(전역 이벤트 식별 내장, 예: `PRICE:AAPL:<bar-close>` / `SCHEDULE:ONE_MINUTE:<minute>`)로 bot_events를 append하며, `(bot_id, idempotency_key)` 유니크가 at-least-once 재전달을 흡수한다.
+2. **평가 단위 = 전략×트리거 (B).** `bot.evaluation_runs`가 전략 단위 행이 되고 기존 `evaluation_strategy_results`는 흡수·삭제된다. 판단 기록의 제품 단위도 전략별 평가다. 같은 봇의 전략 평가는 병렬 실행 가능(런타임 상태가 전략 소유라 서로소)하고, 봇 수준 예산·충돌 해소·이벤트 적용은 `order_intent_batches` `(bot_id, source_event_id)` 경계에서 bot_id advisory lock으로 직렬화한다.
+3. **지연·차단 해소 후 재개 = 최신만 평가 (A).** 밀린 트리거는 `SKIPPED`(`CATCHUP_SUPERSEDED`)로 기록만 남기고 과거 가격으로는 절대 평가하지 않는다. `operations.work_status`에 `SKIPPED`를 추가했다.
+
+서버가 선택한 동시성 조합(제품 의미 불변): Queue partition key = `bot_id` + 전략당 활성(PENDING/RUNNING) 평가 1개 부분 유니크 + 적용 시점 bot_id advisory lock. Worker 승계는 `evaluation_runs.lease_expires_at` 만료로 판정한다.
+
+헬스 모델 분리:
+
+- **인프라·파이프라인(전역)**: `market_data.stream_watermarks`(신규, 재생성 가능 Projection) + `quality_incidents` + operations 관측이 소유한다. 평가 직전 실행 게이트가 이를 읽으며, 전역 장애가 bot 행을 일괄 갱신하는 일은 없다.
+- **봇별 실행 차단**: `bot.bots.health_status` enum(HEALTHY/ACTION_REQUIRED/DATA_DEGRADED/SETTLEMENT_FAILED)을 제거하고 nullable Projection `execution_blocked_at` / `execution_block_reason_code` / `execution_block_event_id`로 대체한다. 정상 = `execution_blocked_at IS NULL`. 차단·해제 공식 이력은 append-only bot_events(`BOT_EXECUTION_BLOCKED`, `BOT_EXECUTION_UNBLOCKED`, `SETTLEMENT_FAILED`, `LEDGER_INVARIANT_VIOLATED`, `STATE_REBUILD_COMPLETED`)로 남는다. 차단 중에도 기존 주문 취소·체결 반영·예약 해제·원장·정산·STOPPING 처리는 계속된다.
+- `lifecycle_status`의 의미를 재정의한다: RUNNING은 "새 트리거 발생 시 평가 대상이 될 수 있음"이지 프로세스 실행이 아니다. heartbeat/process_id/worker_id/last_alive_at 류 컬럼은 금지한다.
+
+Trigger Dependency는 두 번째 정본이 아니라 완성 시 `semantic_document`에서 서버가 검증·추출한 관계형 Projection이다. 종목·피처 의존성은 기존 `bot.strategy_instruments`와 `bot.strategy_feature_requirements`를 재사용하고, 비종목(시간·세션) 트리거만 신규 `bot.strategy_time_triggers`(MARKET_OPEN/MARKET_CLOSE/SCHEDULE + schedule_key)가 담는다. 시장 이벤트마다 전체 봇·전략을 조회하지 않는다.
+
+DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교체, evaluation_runs 재구조화(전략 소유 복합 FK, queued_at/attempt_count/lease_expires_at, 스냅샷 컬럼 nullable), evaluation_strategy_results 삭제, order_intent_batches를 `(bot_id, source_event_id)` 유니크의 봇 수준 충돌 경계로 변경, order_intents에 evaluation_run_id 추가, strategy_time_triggers·stream_watermarks 신설.
+
 ## 2026-07-27 identity 재구성 제안
 
 사용자 결정에 따라 하나의 계정은 서비스 이메일을 최대 한 개만 소유한다. 기존 다중 이메일·대표 이메일 모델은 제거한다.

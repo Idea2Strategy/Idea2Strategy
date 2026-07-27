@@ -1,42 +1,47 @@
 Project Idea2Strategy_DBML_Redesign_Proposal {
   database_type: 'PostgreSQL'
   Note: '''
-  REVIEW DATA: Every table has one fictional Records row for dbdiagram review. These values are documentation only and must never be exported as production seeds or fixtures.
-  ISOLATED PROPOSAL. This file is not the canonical product model and must not
-  replace db/schema.dbml until product-authority review is complete.
+  검토용 데이터: 모든 테이블의 Records 1행은 dbdiagram 검토용 가상 값이며
+  운영 시드나 픽스처로 절대 내보내지 않는다.
+  격리된 제안: 제품 권한 검토 완료 전에는 db/schema.dbml 정본을 대체하지 않는다.
 
-  Core ownership:
-    identity account -> bot -> bot partition -> partition-owned strategy
-    strategy blocks/edges/parameters are one PostgreSQL JSONB aggregate
-    every copy/paste creates fully independent rows with new identifiers;
-    copied objects never retain a source FK, lineage, or version connection
+  핵심 소유 구조:
+    계정 -> 봇 -> 파티션 -> 파티션 소유 전략.
+    전략의 블록·연결·매개변수는 하나의 PostgreSQL JSONB 집합체다.
+    복사는 항상 새 식별자의 완전 독립 행을 만들며 원본 FK·계보·버전 연결을 남기지 않는다.
 
-  PostgreSQL is the system of record for immutable-from-creation bot configuration, budgets,
-  official events, order intents, reservations, orders, fills, double-entry
-  ledgers, current projections, immutable boundary snapshots, object manifests,
-  audit records, room rules, and official results.
+  PostgreSQL 정본 소유: 생성 시점 불변 봇 설정과 예산, 공식 이벤트, 주문 의도,
+  예약, 주문, 체결, 복식 원장, 현재 Projection, 불변 경계 스냅샷, 오브젝트
+  매니페스트, 감사 기록, 방 규칙, 공식 결과.
 
-  S3-compatible storage is the system of record for immutable high-volume market
-  data and backtest/performance details. Tabular objects use Parquet with an
-  explicit UNCOMPRESSED codec in this draft and ET-Monday weekly logical
-  partitions containing immutable microbatch parts.
+  S3 호환 스토리지 정본 소유: 대용량 시장 데이터와 백테스트·성과 상세.
+  표 형식 오브젝트는 Parquet(이 초안에서는 UNCOMPRESSED 명시)이고,
+  ET 월요일 기준 주 단위 논리 파티션 안의 불변 마이크로배치 파트로 저장한다.
 
-  Stream infrastructure delivers live market data. NoSQL contains disposable
-  hot/read projections only. External queues and schedulers deliver work but do
-  not own domain state. PostgreSQL transactional outbox rows bridge commits to
-  those systems.
+  스트림 인프라는 실시간 시장 데이터 전달만 담당한다. NoSQL은 재생성 가능한
+  핫/읽기 Projection만 가진다. 외부 큐·스케줄러는 작업 전달만 하고 도메인
+  상태를 소유하지 않는다. PostgreSQL 트랜잭셔널 outbox가 커밋과 외부 시스템을 잇는다.
 
-  Common server calculations are content-addressed by immutable feature definitions,
-  exact inputs, instruments, periods, and calculator versions. Historical result
-  bodies and reproducible live snapshots stay in object storage; PostgreSQL keeps
-  definitions, manifests, lineage, hashes, and bot-to-feature requirements. Bot
-  workers consume shared snapshots and perform only private state, risk, budget,
-  conflict, and order-intent logic.
+  실행 모델: 봇은 상주 프로세스·컨테이너·스레드가 아니다. 상시 실행 주체는
+  공용 서비스뿐이며(Market Data Consumer, Trigger Router, Schedule Event
+  Producer, Evaluation Worker Pool, Order/Fill Processor, Settlement Worker,
+  Outbox Publisher, Projection Builder) 봇 수가 아니라 큐 처리량에 따라
+  수평 확장한다. 흐름: 시장/시간/체결/기업행사 이벤트 -> Trigger Router
+  (strategy_instruments, strategy_feature_requirements, strategy_time_triggers
+  로 관련 전략만 조회, 전체 봇 스캔 금지) -> 봇별 bot_events 적재 ->
+  bot_id 파티션 at-least-once 큐의 전략별 evaluation_runs -> 공용 Evaluation
+  Worker -> 주문 의도·이벤트·outbox를 한 트랜잭션으로 저장. 지연·차단 해소
+  후에는 최신만 평가하고 대체된 트리거는 SKIPPED로만 기록한다.
 
-  No PostgreSQL physical table partitioning is selected initially. Production
-  migrations must still provide RLS, immutable-configuration guards, deferred budget and
-  balanced-ledger checks, lifecycle guards, idempotent consumers, retention,
-  backup/restore evidence, and load-test gates that DBML cannot fully express.
+  공통 서버 계산은 불변 피처 정의·정확한 입력·종목·기간·계산기 버전으로
+  content-addressing 한다. 과거 결과 본문과 재현 가능한 실시간 스냅샷은
+  오브젝트 스토리지에 두고, PostgreSQL은 정의·매니페스트·계보·해시·봇별
+  피처 요구만 가진다. 봇 Worker는 공유 스냅샷을 소비해 개인 상태·위험·예산·
+  충돌·주문 의도 로직만 수행한다.
+
+  물리 테이블 파티셔닝은 아직 선정하지 않는다. 운영 마이그레이션은 RLS,
+  불변 설정 가드, 지연 검증 예산·원장 균형 체크, 생명주기 가드, 멱등 소비자,
+  보존 정책, 백업/복구 증적, 부하 테스트 게이트를 별도로 제공해야 한다.
   '''
 }
 
@@ -76,16 +81,15 @@ Enum strategy.strategy_mode {
 }
 
 Enum bot.lifecycle_status {
-  RUNNING
-  STOPPING
-  STOPPED
+  RUNNING [note: '새 트리거 이벤트 발생 시 평가 대상이 될 수 있다는 뜻. 봇별 프로세스 실행을 의미하지 않는다.']
+  STOPPING [note: '신규 평가 등록은 차단하고 기존 주문 취소·체결 반영·예약 해제·정산을 마무리하는 중.']
+  STOPPED [note: '신규 평가 대상에서 영구 제외.']
 }
 
-Enum bot.health_status {
-  HEALTHY
-  ACTION_REQUIRED
-  DATA_DEGRADED
-  SETTLEMENT_FAILED
+Enum bot.time_trigger_type {
+  MARKET_OPEN
+  MARKET_CLOSE
+  SCHEDULE
 }
 
 Enum storage.object_status {
@@ -192,6 +196,7 @@ Enum operations.work_status {
   SUCCEEDED
   FAILED
   CANCELLED
+  SKIPPED [note: '실행 없이 기록만 남김. 예: 지연·차단 해소 후 최신만 평가 정책으로 대체된 트리거.']
 }
 
 Enum bot.runtime_value_type {
@@ -217,7 +222,7 @@ Table identity.accounts {
     (lifecycle_status, created_at)
   }
 
-  Note: 'Minimal account root. Preferences, email, authentication, consent, and sanctions are separate aggregates. Account creation inserts its email and preferences in the same transaction; activation requires the single email to be VERIFIED. Sanctions do not overload lifecycle_status.'
+  Note: '최소 계정 루트. 환경설정·이메일·인증·동의·제재는 별도 집합체. 계정 생성은 이메일·환경설정을 같은 트랜잭션으로 삽입하고, 활성화에는 단일 이메일의 VERIFIED가 필요. 제재를 lifecycle_status에 겹쳐 싣지 않는다.'
 
   Records (id, lifecycle_status, status_changed_at, created_at) {
     '00000000-0000-4000-8000-000000000001', 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -238,7 +243,7 @@ Table identity.account_lifecycle_events {
     (account_id, occurred_at)
   }
 
-  Note: 'Append-only lifecycle evidence. accounts.lifecycle_status is the transactionally maintained current projection.'
+  Note: '추가 전용 생명주기 증적. accounts.lifecycle_status는 트랜잭션으로 유지되는 현재 Projection.'
 
   Records (id, account_id, event_sequence, previous_status, new_status, reason_code, occurred_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, null, 'ACTIVE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00'
@@ -247,12 +252,12 @@ Table identity.account_lifecycle_events {
 
 Table identity.account_preferences {
   account_id uuid [pk]
-  language_code varchar(12) [not null, note: 'Current supported values are ko and en.']
-  timezone_name varchar(80) [not null, note: 'IANA time-zone name used for display only; market calculations use exchange calendars.']
+  language_code varchar(12) [not null, note: '현재 지원 값은 ko와 en.']
+  timezone_name varchar(80) [not null, note: '표시 전용 IANA 시간대 이름. 시장 계산은 거래소 캘린더 사용.']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null, default: `now()`]
 
-  Note: 'Created atomically with the account. Notification opt-ins remain in operations.notification_preferences and legal marketing consent remains in account_consents.'
+  Note: '계정과 원자적으로 생성. 알림 수신 설정은 operations.notification_preferences, 마케팅 법적 동의는 account_consents에 유지.'
 
   Records (account_id, language_code, timezone_name, created_at, updated_at) {
     '00000000-0000-4000-8000-000000000001', 'ko', 'America/New_York', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -274,7 +279,7 @@ Table identity.account_emails {
     (status, created_at)
   }
 
-  Note: 'Shared primary key enforces at most one email row per account. A deferred lifecycle guard requires every activatable account to own this row and requires VERIFIED before activation. The application normalizes before keyed lookup, stores no plaintext index, and must define whether a revoked email may later be reused.'
+  Note: '공유 PK로 계정당 이메일 최대 1행. 지연 생명주기 가드가 활성화 가능한 계정에 이 행 소유와 활성화 전 VERIFIED를 요구. 애플리케이션은 정규화 후 키 기반 조회하고 평문 인덱스를 두지 않으며, 회수된 이메일의 재사용 허용 여부를 정의해야 한다.'
 
   Records (account_id, email_ciphertext, email_lookup_hmac, email_lookup_key_version, encryption_key_version, status, verified_at, created_at, revoked_at) {
     '00000000-0000-4000-8000-000000000001', 'encrypted-user@example.test', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 1, 'VERIFIED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null
@@ -298,7 +303,7 @@ Table identity.email_verification_requests {
     (expires_at, consumed_at)
   }
 
-  Note: 'Append-only verification attempts. Issuing a newer request may revoke an older active request; verification and consumption are atomic.'
+  Note: '추가 전용 인증 시도. 새 요청 발급이 이전 활성 요청을 회수할 수 있으며, 검증과 소진은 원자적.'
 
   Records (id, account_id, token_digest, digest_key_version, requested_at, expires_at, consumed_at, revoked_at, failed_attempt_count, request_ip_prefix) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, null, 1, '203.0.113.0/24'
@@ -315,7 +320,7 @@ Table identity.auth_providers {
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null, default: `now()`]
 
-  Note: 'Seeded provider catalog. PASSWORD has no issuer; OIDC providers require an exact issuer and immutable subject validation.'
+  Note: '시드되는 인증 제공자 카탈로그. PASSWORD는 issuer가 없고, OIDC는 정확한 issuer와 불변 subject 검증을 요구.'
 
   Records (id, code, display_name, provider_type, issuer, is_active, created_at, updated_at) {
     1, 'REVIEW_EXAMPLE', 'Review Example', 'PASSWORD', 'review-example', true, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -339,7 +344,7 @@ Table identity.login_identities {
     (account_id, id) [unique]
   }
 
-  Note: 'PASSWORD uses the single verified account email and requires a null provider subject. OIDC requires a keyed immutable subject. Provider email never auto-links accounts.'
+  Note: '단일 검증 이메일을 쓰는 PASSWORD는 provider subject가 null이어야 한다. OIDC는 키 처리된 불변 subject 필요. 제공자 이메일로 계정을 자동 연결하지 않는다.'
 
   Records (id, account_id, provider_id, provider_subject_hmac, subject_key_version, linked_at, last_authenticated_at, disabled_at, disabled_reason_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
@@ -355,10 +360,10 @@ Table identity.password_credentials {
   password_changed_at timestamptz [not null]
   compromised_at timestamptz
 
-  Note: 'Allowed only for a PASSWORD login identity. Password change increments credential_version and revokes affected sessions in the same workflow.'
+  Note: '오직 PASSWORD 로그인 ID에만 허용. 비밀번호 변경은 credential_version을 증가시키고 같은 워크플로에서 관련 세션을 회수.'
 
   Records (login_identity_id, password_hash, hash_scheme, hash_parameters, credential_version, password_changed_at, compromised_at) {
-    '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'REVIEW_EXAMPLE', '{"example":true}', 1, '2026-07-27T09:00:00+09:00', null
+    '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'REVIEW_EXAMPLE', '{"memoryKiB":65536,"iterations":3,"parallelism":4}', 1, '2026-07-27T09:00:00+09:00', null
   }
 }
 
@@ -381,7 +386,7 @@ Table identity.sessions {
     (account_id, revoked_at)
   }
 
-  Note: 'Server-owned opaque session. PostgreSQL owns issuance and revocation; caches may accelerate lookup but may not authorize a revoked session.'
+  Note: '서버 소유 불투명 세션. 발급·회수는 PostgreSQL 소유. 캐시는 조회만 가속하며 회수된 세션을 인가할 수 없다.'
 
   Records (id, account_id, authenticated_by_login_identity_id, token_digest, digest_key_version, device_label, issued_at, last_seen_at, expires_at, reauthenticated_at, revoked_at, revoke_reason_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'review-example', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '2026-07-27T09:00:00+09:00', null, 'REVIEW_EXAMPLE'
@@ -407,7 +412,7 @@ Table identity.password_reset_requests {
     (expires_at, consumed_at)
   }
 
-  Note: 'The account has one email, so the request binds account and PASSWORD identity. Token verification, password replacement, request consumption, and session revocation are atomic.'
+  Note: '계정 이메일이 하나이므로 요청은 계정과 PASSWORD ID에 바인딩. 토큰 검증, 비밀번호 교체, 요청 소진, 세션 회수는 원자적.'
 
   Records (id, account_id, login_identity_id, token_digest, digest_key_version, requested_at, expires_at, consumed_at, revoked_at, failed_attempt_count, request_ip_prefix) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, null, 1, '203.0.113.0/24'
@@ -417,7 +422,7 @@ Table identity.password_reset_requests {
 Table identity.recovery_code_sets {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
-  purpose varchar(40) [not null, note: 'ACCOUNT_RECOVERY in the current product.']
+  purpose varchar(40) [not null, note: '현재 제품에서는 ACCOUNT_RECOVERY.']
   issued_at timestamptz [not null, default: `now()`]
   revoked_at timestamptz
   revoke_reason_code varchar(80)
@@ -426,7 +431,7 @@ Table identity.recovery_code_sets {
     (account_id, purpose, issued_at)
   }
 
-  Note: 'Only one active set per account and purpose is permitted by a partial unique index in the migration.'
+  Note: '계정·용도별 활성 세트는 1개만 허용(마이그레이션의 partial unique index).'
 
   Records (id, account_id, purpose, issued_at, revoked_at, revoke_reason_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', null, 'REVIEW_EXAMPLE'
@@ -444,7 +449,7 @@ Table identity.recovery_codes {
     (recovery_code_set_id, used_at)
   }
 
-  Note: 'Stores recovery codes. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '복구 코드 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, recovery_code_set_id, code_digest, digest_key_version, used_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00'
@@ -469,7 +474,7 @@ Table identity.policy_documents {
     (is_required, published_at)
   }
 
-  Note: 'Policy text is small immutable relational content. Large evidence attachments, if introduced, use storage.objects rather than replacing this authoritative text.'
+  Note: '정책 본문은 작은 불변 관계형 콘텐츠. 대용량 증적 첨부가 도입되면 이 정본 텍스트를 대체하지 않고 storage.objects를 사용.'
 
   Records (id, policy_code, version, language_code, title, content_format, content_text, content_hash, is_required, published_at, retired_at) {
     '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', 'ko', 'Review Example', 'REVIEW_EXAMPLE', 'Fictional review content', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', true, '2026-07-27T09:00:00+09:00', null
@@ -488,7 +493,7 @@ Table identity.account_consents {
     (account_id, policy_document_id, recorded_at)
   }
 
-  Note: 'Append-only decision history. Withdrawal and later re-acceptance create new rows instead of mutating prior legal evidence.'
+  Note: '추가 전용 동의 결정 이력. 철회·재동의는 기존 법적 증적을 수정하지 않고 새 행을 생성.'
 
   Records (id, account_id, policy_document_id, decision, supersedes_consent_id, recorded_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACCEPTED', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
@@ -498,7 +503,7 @@ Table identity.account_consents {
 Table identity.account_sanctions {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
-  sanction_type varchar(40) [not null, note: 'SUSPENSION or PERMANENT.']
+  sanction_type varchar(40) [not null, note: '값은 SUSPENSION 또는 PERMANENT.']
   status identity.sanction_status [not null]
   reason_code varchar(80) [not null]
   applied_by_operator_id uuid [not null]
@@ -513,7 +518,7 @@ Table identity.account_sanctions {
     (status, expires_at)
   }
 
-  Note: 'Current sanction aggregate. Status is a transactionally maintained projection of immutable sanction events.'
+  Note: '현재 제재 집합체. status는 불변 제재 이벤트의 트랜잭션 유지 Projection.'
 
   Records (id, account_id, sanction_type, status, reason_code, applied_by_operator_id, applied_at, effective_at, expires_at, source_case_id, status_changed_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'ACTIVE', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
@@ -524,7 +529,7 @@ Table identity.account_sanction_events {
   id uuid [pk, default: `gen_random_uuid()`]
   sanction_id uuid [not null]
   event_sequence bigint [not null]
-  event_type varchar(40) [not null, note: 'APPLIED, LIFTED, or EXPIRED.']
+  event_type varchar(40) [not null, note: '값은 APPLIED, LIFTED, EXPIRED.']
   actor_operator_id uuid
   reason_code varchar(80) [not null]
   evidence_object_id uuid
@@ -535,7 +540,7 @@ Table identity.account_sanction_events {
     (occurred_at)
   }
 
-  Note: 'Append-only official sanction history. A null actor is allowed only for a system-generated expiry event.'
+  Note: '추가 전용 공식 제재 이력. actor null은 시스템 생성 만료 이벤트에서만 허용.'
 
   Records (id, sanction_id, event_sequence, event_type, actor_operator_id, reason_code, evidence_object_id, occurred_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
@@ -561,7 +566,7 @@ Table strategy.catalog_versions {
     (language_version, schema_version, catalog_version) [unique]
   }
 
-  Note: 'Stores catalog versions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '블록 카탈로그 버전 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, language_version, schema_version, catalog_version, data_requirement_version, definition_hash, published_at, retired_at) {
     '00000000-0000-4000-8000-000000000001', '1.0.0', '1.0.0', '1.0.0', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
@@ -576,7 +581,7 @@ Table strategy.platform_templates {
   created_at timestamptz [not null]
   retired_at timestamptz
 
-  Note: 'Stores platform templates. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '플랫폼 템플릿 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, code, mode, status, created_at, retired_at) {
     '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'BASIC', 'ACTIVE', '2026-07-27T09:00:00+09:00', null
@@ -599,10 +604,10 @@ Table strategy.platform_template_versions {
     (template_id, version) [unique]
   }
 
-  Note: 'Stores platform template versions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '플랫폼 템플릿 버전 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, template_id, version, catalog_version_id, name_i18n, description_i18n, semantic_skeleton, content_hash, published_at, retired_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '1.0.0', '00000000-0000-4000-8000-000000000001', '{"example":true}', '{"example":true}', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '1.0.0', '00000000-0000-4000-8000-000000000001', '{"ko":"RSI 과매도 반등","en":"RSI Oversold Rebound"}', '{"ko":"RSI 30 미만에서 진입하는 기본 템플릿","en":"Entry template for RSI below 30"}', '{"blocks":[{"key":"ind-1","type":"RSI","params":{"period":14}},{"key":"cond-1","type":"THRESHOLD","params":{"operator":"LT","value":30}}],"edges":[{"from":"ind-1.value","to":"cond-1.input"}]}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
   }
 }
 
@@ -621,10 +626,10 @@ Table strategy.compiled_execution_plans {
     (required_feature_set_hash)
   }
 
-  Note: 'Content-addressed server execution plan shared by semantically identical strategies. This is an infrastructure cache, not a reusable user strategy, version lineage, or copy relationship. The compiler validates typed blocks and emits only the minimal per-bot instructions; common market calculations are represented by required_feature_set_hash and executed outside the bot worker.'
+  Note: '의미상 동일한 전략들이 공유하는 content-addressing 서버 실행 계획. 재사용 사용자 전략·버전 계보·복사 관계가 아닌 인프라 캐시. 컴파일러는 타입 블록을 검증해 봇별 최소 명령만 산출하고, 공통 시장 계산은 required_feature_set_hash로 표현되어 봇 Worker 밖에서 실행된다.'
 
   Records (id, catalog_version_id, semantic_hash, compiler_version, required_feature_set_hash, plan_document, plan_hash, created_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"steps":[{"op":"LOAD_FEATURE","feature":"RSI:period=14:1m"},{"op":"COMPARE","operator":"LT","value":30},{"op":"EMIT_INTENT","side":"BUY","budgetBps":2500}]}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -641,8 +646,8 @@ Table storage.objects {
   provider_version_id varchar(300) [not null]
   content_hash varchar(128) [not null]
   byte_size bigint [not null]
-  file_format varchar(40) [not null, note: 'PARQUET for large tabular data in this draft.']
-  compression_codec varchar(40) [not null, note: 'Explicitly UNCOMPRESSED for current Parquet objects.']
+  file_format varchar(40) [not null, note: '이 초안에서 대용량 표 데이터는 PARQUET.']
+  compression_codec varchar(40) [not null, note: '현재 Parquet 오브젝트는 명시적 UNCOMPRESSED.']
   media_type varchar(120) [not null]
   schema_version varchar(40) [not null]
   row_count bigint
@@ -665,7 +670,7 @@ Table storage.objects {
     (retention_until)
   }
 
-  Note: 'An object becomes AVAILABLE only after size, hash, schema, Parquet footer, and codec verification. New revisions never overwrite authoritative object versions; deletion requires elapsed retention and no legal hold.'
+  Note: '크기·해시·스키마·Parquet footer·코덱 검증 후에만 AVAILABLE. 새 리비전은 정본 오브젝트 버전을 덮어쓰지 않으며, 삭제는 보존기간 경과와 legal hold 부재를 요구.'
 
   Records (id, status, storage_provider, bucket_name, object_key, provider_version_id, content_hash, byte_size, file_format, compression_codec, media_type, schema_version, row_count, period_start, period_end, encryption_key_ref, retention_policy_version, retention_until, legal_hold, created_at, verified_at, quarantined_at, superseded_at, deleted_at) {
     '00000000-0000-4000-8000-000000000001', 'AVAILABLE', 'review-example', 'Review Example', 'review/2026-07-27/sample.parquet', 'review-version-1', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'PARQUET', 'UNCOMPRESSED', 'application/vnd.apache.parquet', '1.0.0', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'REVIEW_EXAMPLE', '1.0.0', '2026-07-27T09:00:00+09:00', true, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, null
@@ -690,7 +695,7 @@ Table market_data.instruments {
     (asset_type, primary_exchange_mic)
   }
 
-  Note: 'Stores instruments. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '종목 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, asset_type, primary_exchange_mic, currency_code, provider_reference, listed_at, delisted_at, created_at) {
     '00000000-0000-4000-8000-000000000001', 'STOCK', 'XNAS', 'USD', 'review-example', '2026-07-27', null, '2026-07-27T09:00:00+09:00'
@@ -710,7 +715,7 @@ Table market_data.instrument_symbols {
     (instrument_id, effective_from)
   }
 
-  Note: 'Migration must prevent overlapping symbol effective periods.'
+  Note: '마이그레이션은 심볼 유효기간 겹침을 방지해야 한다.'
 
   Records (id, instrument_id, exchange_mic, symbol, effective_from, effective_to) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'XNAS', 'AAPL', '2026-07-27T09:00:00+09:00', null
@@ -723,14 +728,14 @@ Table market_data.trading_sessions {
   session_date date [not null]
   opens_at timestamptz
   closes_at timestamptz
-  session_type varchar(30) [not null, note: 'REGULAR, EARLY_CLOSE, or CLOSED.']
+  session_type varchar(30) [not null, note: '값은 REGULAR, EARLY_CLOSE, CLOSED.']
   calendar_version varchar(40) [not null]
 
   indexes {
     (exchange_mic, session_date, calendar_version) [unique]
   }
 
-  Note: 'Calendar versions pin session boundaries used by backtests, live evaluation, ET-close snapshots, and weekly object validation.'
+  Note: '캘린더 버전이 백테스트, 실시간 평가, ET 마감 스냅샷, 주간 오브젝트 검증에 쓰는 세션 경계를 고정.'
 
   Records (id, exchange_mic, session_date, opens_at, closes_at, session_type, calendar_version) {
     '00000000-0000-4000-8000-000000000001', 'XNAS', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'REVIEW_EXAMPLE', '1.0.0'
@@ -741,11 +746,11 @@ Table market_data.providers {
   id uuid [pk, default: `gen_random_uuid()`]
   code varchar(80) [not null, unique]
   display_name varchar(160) [not null]
-  rights_version varchar(80) [not null, note: 'Exact provider and licensed rights require external approval evidence.']
+  rights_version varchar(80) [not null, note: '정확한 제공자와 라이선스 권리는 외부 승인 증적 필요.']
   status varchar(30) [not null]
   created_at timestamptz [not null]
 
-  Note: 'Stores providers. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '시장 데이터 제공자 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, code, display_name, rights_version, status, created_at) {
     '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'Review Example', '1.0.0', 'ACTIVE', '2026-07-27T09:00:00+09:00'
@@ -767,7 +772,7 @@ Table market_data.feeds {
     (provider_id, code, feed_version) [unique]
   }
 
-  Note: 'Stores feeds. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '시장 데이터 피드 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, provider_id, code, data_kind, resolution, timezone_name, feed_version, created_at, retired_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '1m', 'America/New_York', '1.0.0', '2026-07-27T09:00:00+09:00', null
@@ -778,7 +783,7 @@ Table market_data.dataset_manifests {
   id uuid [pk, default: `gen_random_uuid()`]
   feed_id uuid [not null]
   instrument_id uuid
-  data_layer varchar(40) [not null, note: 'RAW, NORMALIZED, ADJUSTED, or DERIVED.']
+  data_layer varchar(40) [not null, note: '값은 RAW, NORMALIZED, ADJUSTED, DERIVED.']
   resolution varchar(30) [not null]
   revision_number int [not null]
   status market_data.dataset_status [not null]
@@ -796,7 +801,7 @@ Table market_data.dataset_manifests {
     (dataset_hash) [unique]
   }
 
-  Note: 'Null-safe uniqueness for multi-instrument datasets must be enforced by migration.'
+  Note: '다중 종목 데이터셋의 null-safe 유일성은 마이그레이션에서 강제해야 한다.'
 
   Records (id, feed_id, instrument_id, data_layer, resolution, revision_number, status, period_start, period_end, schema_version, dataset_hash, supersedes_manifest_id, created_at, available_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1m', 1, 'AVAILABLE', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -808,7 +813,7 @@ Table market_data.dataset_objects {
   dataset_manifest_id uuid [not null]
   object_id uuid [not null]
   object_kind varchar(40) [not null]
-  week_start_date date [not null, note: 'ET Monday.']
+  week_start_date date [not null, note: '주 시작일은 ET 월요일.']
   period_start timestamptz [not null]
   period_end timestamptz [not null]
   shard_key varchar(120) [not null]
@@ -822,7 +827,7 @@ Table market_data.dataset_objects {
     (week_start_date, period_start)
   }
 
-  Note: 'Objects never cross an ET week. Microbatch parts may be compacted only into a new dataset revision with lineage.'
+  Note: '오브젝트는 ET 주 경계를 넘지 않는다. 마이크로배치 파트 컴팩션은 계보를 남기는 새 데이터셋 리비전으로만 허용.'
 
   Records (id, dataset_manifest_id, object_id, object_kind, week_start_date, period_start, period_end, shard_key, part_number, row_count, min_instrument_id, max_instrument_id) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'REVIEW_EXAMPLE', 1, 1, null, null
@@ -838,7 +843,7 @@ Table market_data.dataset_lineage {
     (derived_manifest_id, source_manifest_id, relation_type) [pk]
   }
 
-  Note: 'Stores dataset lineage. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '데이터셋 계보 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (derived_manifest_id, source_manifest_id, relation_type) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE'
@@ -865,10 +870,10 @@ Table market_data.feature_definitions {
     `required_history_points >= 0` [name: 'feature_required_history_nonnegative']
   }
 
-  Note: 'Immutable canonical definition of a deterministic, bot-independent market calculation such as SMA(20). definition_hash covers calculator code version, normalized parameters, resolution, output type, history requirement, and calendar/precision semantics. User budget, positions, runtime state, or private strategy identity must never enter this hash or this shared calculation boundary.'
+  Note: '봇과 무관한 결정적 시장 계산(예: SMA(20))의 불변 정본 정의. definition_hash는 계산기 코드 버전, 정규화 매개변수, resolution, 출력 타입, 히스토리 요구량, 캘린더·정밀도 의미를 포함. 사용자 예산·포지션·런타임 상태·비공개 전략 식별자는 이 해시와 공유 계산 경계에 절대 들어가지 않는다.'
 
   Records (id, catalog_version_id, feature_code, calculator_version, resolution, normalized_parameters, output_value_type, required_history_points, definition_hash, created_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', '1m', '{"example":true}', 'REVIEW_EXAMPLE', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', '1m', '{"period":14}', 'REVIEW_EXAMPLE', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -899,7 +904,7 @@ Table market_data.feature_materializations {
     `status <> 'SUCCEEDED' OR (output_dataset_manifest_id IS NOT NULL AND result_hash IS NOT NULL AND available_at IS NOT NULL)` [name: 'feature_materialization_success_complete']
   }
 
-  Note: 'One historical shared-calculation result per canonical definition, instrument, exact input set, and period. Large time-series values remain in the DERIVED dataset objects in S3-compatible storage; PostgreSQL stores only identity, status, hashes, watermarks, and the output manifest. The unique computation key and pipeline idempotency prevent duplicate server work.'
+  Note: '정본 정의·종목·정확한 입력 집합·기간당 과거 공유 계산 결과 1건. 대용량 시계열 값은 S3 호환 스토리지의 DERIVED 데이터셋 오브젝트에 남고, PostgreSQL은 식별자·상태·해시·watermark·출력 매니페스트만 저장. 유일 계산 키와 파이프라인 idempotency가 중복 서버 작업을 방지.'
 
   Records (id, feature_definition_id, instrument_id, pipeline_run_id, input_dataset_set_hash, period_start, period_end, source_watermark, output_dataset_manifest_id, result_hash, status, available_at, created_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'SUCCEEDED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -934,7 +939,7 @@ Table market_data.feature_snapshot_batches {
     `status <> 'SUCCEEDED' OR (snapshot_object_id IS NOT NULL AND batch_hash IS NOT NULL AND row_count IS NOT NULL AND available_at IS NOT NULL)` [name: 'feature_snapshot_batch_success_complete']
   }
 
-  Note: 'Metadata for an immutable microbatch of shared live-feature snapshots calculated once and fanned out to all eligible bots. Snapshot bodies are buffered in stream/cache and sealed together into one object, avoiding one PostgreSQL row or one S3 object per tick. Each body row has a batch-local snapshot key and hashes; evaluations store that key and their exact hashes. SUCCEEDED requires object, batch_hash, row_count, and available_at. Cache expiry never deletes authoritative evidence.'
+  Note: '한 번 계산되어 대상 봇 전체로 팬아웃되는 공유 실시간 피처 스냅샷 불변 마이크로배치의 메타데이터. 스냅샷 본문은 스트림/캐시에 버퍼링 후 하나의 오브젝트로 봉인해 틱당 PostgreSQL 행이나 S3 오브젝트 생성을 피한다. 본문 각 행은 배치 로컬 스냅샷 키와 해시를 가지며 평가는 그 키와 정확한 해시를 저장. SUCCEEDED는 오브젝트, batch_hash, row_count, available_at을 요구. 캐시 만료가 정본 증적을 지우지 않는다.'
 
   Records (id, feature_set_hash, input_market_set_hash, source_start_watermark, source_end_watermark, period_start, period_end, snapshot_object_id, batch_hash, row_count, status, idempotency_key, available_at, created_at) {
     '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'SUCCEEDED', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -958,10 +963,10 @@ Table market_data.corporate_actions {
     (instrument_id, effective_at)
   }
 
-  Note: 'Stores corporate actions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '기업행사 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, instrument_id, source_manifest_id, provider_event_key, action_type, effective_at, terms_document, terms_hash, supersedes_action_id, created_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"actionType":"SPLIT","ratio":{"from":1,"to":4}}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -983,7 +988,7 @@ Table market_data.quality_incidents {
     (dataset_manifest_id, period_start)
   }
 
-  Note: 'Stores quality incidents. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '데이터 품질 인시던트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, dataset_manifest_id, instrument_id, severity, incident_code, period_start, period_end, status, evidence_object_id, detected_at, resolved_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'review-example', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'ACTIVE', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', null
@@ -1006,10 +1011,24 @@ Table market_data.pipeline_runs {
     (pipeline_code, status, started_at)
   }
 
-  Note: 'Stores pipeline runs. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '파이프라인 실행 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, pipeline_code, pipeline_version, idempotency_key, status, input_hash, output_hash, started_at, completed_at, failure_code) {
     '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', 'REVIEW_EXAMPLE', 'SUCCEEDED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
+  }
+}
+
+Table market_data.stream_watermarks {
+  feed_id uuid [pk]
+  last_source_event_at timestamptz [not null]
+  last_ingested_at timestamptz [not null]
+  last_sequence bigint
+  updated_at timestamptz [not null]
+
+  Note: '재구축 가능한 시장 데이터 신선도 Projection(market_data 소유, 실시간 피드당 1행). 평가 전 실행 게이트가 quality_incidents와 함께 읽어 시장 데이터 평가 진행 여부를 결정. 전역 지연·장애는 여기와 operations 관측성에만 존재하며 봇 행을 대량 갱신하지 않는다. 컨슈머 lag, 유실 이벤트, outbox 적체는 같은 파이프라인 범위 문제이고 봇은 자신의 execution_blocked_at만 가진다.'
+
+  Records (feed_id, last_source_event_at, last_ingested_at, last_sequence, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 1, '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -1032,10 +1051,10 @@ Table bot.bot_workspaces {
     (owner_account_id, updated_at)
   }
 
-  Note: 'Autosaved incomplete editor aggregate. Empty partitions and incomplete strategies are allowed only here. Completion validates the whole document and creates a new independent bot hierarchy atomically; no workspace, source-copy, version, or lineage reference is retained by the completed bot. edit_sequence is used for optimistic concurrency.'
+  Note: '자동 저장되는 미완성 편집 집합체. 빈 파티션과 미완성 전략은 여기서만 허용. 완성은 문서 전체를 검증해 새 독립 봇 계층을 원자적으로 생성하며, 완성된 봇은 워크스페이스·원본 복사·버전·계보 참조를 남기지 않는다. edit_sequence는 낙관적 동시성 제어용.'
 
   Records (id, owner_account_id, mode, name, workspace_document, document_schema_version, edit_sequence, created_at, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', '{"example":true}', '1.0.0', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', '{"partitions":[{"name":"SPY 반등","budgetCapBps":5000,"strategies":[{"name":"RSI 과매도 진입","complete":false,"blocks":[]}]}]}', '1.0.0', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -1045,10 +1064,10 @@ Table bot.bots {
   mode strategy.strategy_mode [not null]
   name varchar(120) [not null]
   lifecycle_status bot.lifecycle_status [not null]
-  health_status bot.health_status [not null]
   lifecycle_changed_at timestamptz [not null]
-  health_changed_at timestamptz [not null]
-  health_reason_code varchar(80)
+  execution_blocked_at timestamptz [note: 'nullable 실행 차단 Projection. NULL이면 정상. 이 봇에만 국한된 손상(런타임 상태 손상, 이벤트 시퀀스 갭, 예약·원장 불일치, 정산 실패, 복구 불가 블록 평가 오류)에서만 설정.']
+  execution_block_reason_code varchar(80)
+  execution_block_event_id uuid
   created_at timestamptz [not null, default: `now()`]
   started_at timestamptz [not null]
   stop_requested_at timestamptz
@@ -1061,14 +1080,18 @@ Table bot.bots {
 
   indexes {
     (owner_account_id, lifecycle_status, created_at)
-    (lifecycle_status, health_status, created_at)
+    (lifecycle_status, execution_blocked_at, created_at)
     (owner_account_id, deleted_at, archived_at, created_at)
   }
 
-  Note: 'Created directly in RUNNING/HEALTHY only after the aggregate has at least one partition, every partition has at least one complete strategy, and launch validation succeeds. Lifecycle is RUNNING -> STOPPING -> STOPPED; STOPPED is permanent. Non-HEALTHY blocks new evaluations and orders but existing order cancellation, fills, reservation release, and settlement continue; recovery returns health to HEALTHY without a PAUSED state. mode and execution meaning are immutable. name, archived_at, and deleted_at are mutable fields excluded from configuration hashes. archived_at reversibly hides a STOPPED bot; deleted_at is an irreversible user-visible logical deletion and may be set directly without prior archive, but only after the bot reaches STOPPED and settlement completes. A delete request for a running bot first initiates the idempotent stop and settlement workflow. Physical purge is a separate retention/legal process and must not cascade-delete official orders, fills, ledgers, events, or evidence. edit_sequence starts at 0 and increments exactly once per successful editable-field update for optimistic concurrency; updated_at records that commit time. A copy is an independent new aggregate with new identifiers and no source lineage; runtime cash, state, orders, positions, ledgers, competition participation, and performance are never copied. Production migrations should use partial indexes for active lists where deleted_at IS NULL and archived_at IS NULL.'
+  checks {
+    `execution_blocked_at IS NOT NULL OR (execution_block_reason_code IS NULL AND execution_block_event_id IS NULL)` [name: 'bot_block_fields_together']
+  }
 
-  Records (id, owner_account_id, mode, name, lifecycle_status, health_status, lifecycle_changed_at, health_changed_at, health_reason_code, created_at, started_at, stop_requested_at, stopped_at, stop_reason_code, archived_at, deleted_at, edit_sequence, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', 'RUNNING', 'HEALTHY', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, 'REVIEW_EXAMPLE', null, null, 1, '2026-07-27T09:00:00+09:00'
+  Note: '봇은 불변 시작 설정과 복구 가능한 런타임 데이터이며 상주 프로세스·컨테이너·스레드가 아니다. 상시 실행은 공용 서비스뿐. RUNNING은 새 트리거 평가 대상, STOPPING은 신규 등록을 막고 취소/체결/해제/정산을 마무리, STOPPED는 영구. 봇별 헬스 상태·하트비트는 없다: 전역 시장 데이터·파이프라인 문제는 market_data(stream_watermarks, quality_incidents)와 operations 소유이고 평가 전 실행 게이트가 참조하며 봇 행을 대량 갱신하지 않는다. execution_blocked_at은 봇별 nullable 차단 Projection. 차단 중에는 새 전략 평가와 새 주문 의도 생성만 멈추고 미체결 주문 취소, 체결 반영, 예약 해제, 원장 기록, 정산, STOPPING 처리는 계속된다. 차단·해제는 추가 전용 공식 bot_events(BOT_EXECUTION_BLOCKED, BOT_EXECUTION_UNBLOCKED, SETTLEMENT_FAILED, LEDGER_INVARIANT_VIOLATED, STATE_REBUILD_COMPLETED)이며 execution_block_event_id가 차단 이벤트를 고정. 파티션 1개 이상, 각 파티션에 완성 전략 1개 이상, 시작 검증 통과 후에만 RUNNING으로 직접 생성. mode와 실행 의미는 불변. name, archived_at, deleted_at은 설정 해시에서 제외되는 가변 필드. archived_at은 STOPPED 봇의 가역 숨김, deleted_at은 STOPPED와 정산 완료 후에만 허용되는 비가역 논리 삭제이며, 실행 중 봇 삭제는 멱등 정지-정산 워크플로를 먼저 수행. 물리 퍼지는 별도 보존·법무 프로세스이고 공식 주문·체결·원장·이벤트·증적을 연쇄 삭제하지 않는다. edit_sequence는 편집 필드 갱신 성공마다 1 증가(낙관적 동시성). 복사는 원본 계보 없는 독립 새 집합체이며 런타임 현금·상태·주문·포지션·원장·참가·성과를 복사하지 않는다. 운영 마이그레이션은 deleted_at IS NULL AND archived_at IS NULL 활성 목록과 execution_blocked_at IS NOT NULL 차단 봇에 partial index 권장.'
+
+  Records (id, owner_account_id, mode, name, lifecycle_status, lifecycle_changed_at, execution_blocked_at, execution_block_reason_code, execution_block_event_id, created_at, started_at, stop_requested_at, stopped_at, stop_reason_code, archived_at, deleted_at, edit_sequence, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', 'RUNNING', '2026-07-27T09:00:00+09:00', null, null, null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, 'REVIEW_EXAMPLE', null, null, 1, '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -1080,7 +1103,7 @@ Table bot.launch_configurations {
   accounting_rules_version varchar(80) [not null]
   precision_rules_version varchar(80) [not null]
   fee_configuration jsonb [not null]
-  slippage_rate_bps int [not null, note: 'Fixed 5 bps; + for buys and - for sells.']
+  slippage_rate_bps int [not null, note: '고정 5 bps. 매수는 +, 매도는 -.']
   buying_power_buffer_policy_id uuid [not null]
   candidate_conflict_policy jsonb [not null]
   configuration_hash varchar(128) [not null]
@@ -1090,10 +1113,10 @@ Table bot.launch_configurations {
     `slippage_rate_bps = 5` [name: 'launch_fixed_slippage_five_bps']
   }
 
-  Note: 'Inserted atomically with the bot, partitions, and completed strategies. Initial virtual capital is positive, USD-denominated, isolated per bot, and cannot be deposited, withdrawn, or increased. User-defined risk controls live only in strategy RISK_POLICY blocks. Execution configuration is immutable from creation; semantic updates and deletes are always rejected.'
+  Note: '봇·파티션·완성 전략과 원자적으로 삽입. 초기 가상 자본은 양수 USD, 봇별 격리이며 입금·출금·증액 불가. 사용자 정의 위험 통제는 전략 RISK_POLICY 블록에만 존재. 실행 설정은 생성 시점부터 불변이며 의미 변경·삭제는 항상 거부.'
 
   Records (bot_id, initial_cash_amount, currency_code, broker_rules_version, accounting_rules_version, precision_rules_version, fee_configuration, slippage_rate_bps, buying_power_buffer_policy_id, candidate_conflict_policy, configuration_hash) {
-    '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', '1.0.0', '1.0.0', '1.0.0', '{"example":true}', 5, '00000000-0000-4000-8000-000000000001', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', '1.0.0', '1.0.0', '1.0.0', '{"type":"RATE_BPS","rateBps":20,"minimumFee":"0"}', 5, '00000000-0000-4000-8000-000000000001', '{"sameInstrumentOpposite":"NET","tieBreaker":"PARTITION_POSITION","budgetOverflow":"REDUCE"}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   }
 }
 
@@ -1102,7 +1125,7 @@ Table bot.bot_partitions {
   bot_id uuid [not null]
   name varchar(120) [not null]
   description text
-  budget_cap_bps int [not null, note: '0..10000 of bot initial capital. Sibling sum must be <=10000.']
+  budget_cap_bps int [not null, note: '봇 초기 자본의 0..10000 bps. 형제 합은 10000 이하.']
   position_x numeric(14,4) [not null]
   position_y numeric(14,4) [not null]
   configuration_hash varchar(128) [not null]
@@ -1120,7 +1143,7 @@ Table bot.bot_partitions {
     `budget_cap_bps > 0 AND budget_cap_bps <= 10000` [name: 'partition_budget_cap_range']
   }
 
-  Note: 'A completed partition owns an immutable positive budget cap of at most 100% and at least one strategy block group; sibling caps are validated with a deferred aggregate constraint so their sum is at most 100%. It does not own instruments or a separate risk-policy document. The partition is the lowest budget boundary, so all child strategies share this cap and receive no individual allocation. Risk controls are RISK_POLICY blocks in each strategy semantic_document. No borrowing across sibling partitions. name, description, position_x, and position_y are editable fields excluded from configuration_hash; coordinates may overlap, and id is only a deterministic query tie-breaker. edit_sequence starts at 0 and increments exactly once per successful editable-field update for optimistic concurrency; updated_at records that commit time. (bot_id, id) is an alternate ownership key, not a composite primary key or version. Copy/paste creates a new independent row and children with no source reference.'
+  Note: '완성된 파티션은 최대 100%의 불변 양수 예산 상한과 1개 이상의 전략 블록 그룹을 소유하며, 형제 상한 합은 지연 집계 제약으로 100% 이하 검증. 종목이나 별도 위험 정책 문서는 소유하지 않는다. 파티션이 최하위 예산 경계라 자식 전략들은 이 상한을 공유하고 개별 할당은 없다. 위험 통제는 각 전략 semantic_document의 RISK_POLICY 블록. 형제 파티션 간 차입 금지. name, description, position_x, position_y는 configuration_hash에서 제외되는 편집 필드이고 좌표 겹침 허용, id는 결정적 조회 타이브레이커. edit_sequence는 0에서 시작해 편집 필드 갱신 성공마다 정확히 1 증가(낙관적 동시성), updated_at은 그 커밋 시각. (bot_id, id)는 복합 PK나 버전이 아닌 대체 소유 키. 복사/붙여넣기는 원본 참조 없는 독립 새 행과 자식을 생성.'
 
   Records (id, bot_id, name, description, budget_cap_bps, position_x, position_y, configuration_hash, edit_sequence, created_at, updated_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'Fictional review sample', 5000, 100000.00000000, 100000.00000000, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -1149,10 +1172,10 @@ Table bot.strategies {
     (semantic_hash)
   }
 
-  Note: 'A strategy is a complete block-group aggregate owned by exactly one partition, not a reusable library item or a versioned entity. It inherits the single BASIC/PRO mode from its bot. The partition is the only budget-allocation boundary; strategy_id on runtime rows records attribution only. name, description, position_x, and position_y are editable fields excluded from semantic_hash and configuration_hash; coordinates may overlap, and id is only a deterministic query tie-breaker. edit_sequence starts at 0 and increments exactly once per successful editable-field update for optimistic concurrency; updated_at records that commit time. Blocks, ports, edges, parameters, semantic groups, and RISK_POLICY blocks are one immutable semantic JSONB aggregate. Per-block coordinates, sizes, viewport, zoom, selection, folding, and other UI layout state are not persisted; clients derive block placement deterministically from the semantic graph and may evolve their renderer independently. configuration_hash binds the block catalog version and semantic_hash only. (partition_id, id) is an alternate ownership key for composite runtime FKs. Copy/paste creates an independent new row with no source reference.'
+  Note: '전략은 정확히 하나의 파티션이 소유하는 완결 블록 그룹 집합체이며 재사용 라이브러리 항목이나 버전 엔티티가 아니다. BASIC/PRO 모드는 봇에서 상속. 예산 할당 경계는 파티션뿐이고 런타임 행의 strategy_id는 귀속 기록용. name, description, position_x, position_y는 semantic_hash·configuration_hash에서 제외되는 편집 필드, 좌표 겹침 허용, id는 결정적 조회 타이브레이커. edit_sequence는 0에서 시작해 편집 필드 갱신 성공마다 정확히 1 증가, updated_at은 그 커밋 시각. 블록·포트·엣지·매개변수·의미 그룹·RISK_POLICY 블록은 하나의 불변 의미 JSONB 집합체. 블록별 좌표·크기·뷰포트·줌·선택·접힘 등 UI 레이아웃 상태는 저장하지 않으며 클라이언트가 의미 그래프에서 결정적으로 배치를 유도. configuration_hash는 블록 카탈로그 버전과 semantic_hash만 바인딩. (partition_id, id)는 복합 런타임 FK용 대체 소유 키. 복사/붙여넣기는 원본 참조 없는 독립 새 행 생성.'
 
   Records (id, partition_id, name, description, block_catalog_version_id, execution_plan_id, position_x, position_y, semantic_document, semantic_hash, configuration_hash, edit_sequence, created_at, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'Fictional review sample', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'Fictional review sample', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, '{"blocks":[{"key":"data-1","type":"PRICE_DATA","params":{"resolution":"1m"}},{"key":"ind-1","type":"RSI","params":{"period":14}},{"key":"cond-1","type":"THRESHOLD","params":{"operator":"LT","value":30}},{"key":"order-1","type":"MARKET_BUY","params":{"budgetBps":2500}},{"key":"risk-1","type":"RISK_POLICY","params":{"maxPositionBps":5000}}],"edges":[{"from":"data-1.series","to":"ind-1.input"},{"from":"ind-1.value","to":"cond-1.input"},{"from":"cond-1.true","to":"order-1.trigger"}]}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -1164,7 +1187,7 @@ Table bot.strategy_instruments {
     (strategy_id, instrument_id) [pk]
   }
 
-  Note: 'Immutable set of explicit instruments required by the completed strategy semantic_document. Whether an instrument is traded or used as a reference is defined once by typed blocks and edges in that document, not duplicated as a mutable role here. Inserted atomically with the strategy; launch validation requires at least one instrument and exact equality between extracted dependencies and these rows. Future universe selection is out of current scope and must be introduced through a separately reviewed model and migration when the product supports it.'
+  Note: '완성된 전략 semantic_document가 요구하는 명시적 종목의 불변 집합. 종목의 매매/참조 역할은 그 문서의 타입 블록과 엣지로 한 번 정의되며 여기에 가변 역할로 중복 저장하지 않는다. 전략과 원자적으로 삽입. 시작 검증은 종목 1개 이상과 추출된 의존성-행의 정확한 일치를 요구. 향후 유니버스 선택은 현재 범위 밖이며 제품 지원 시 별도 검토된 모델·마이그레이션으로 도입해야 한다.'
 
   Records (strategy_id, instrument_id) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
@@ -1181,7 +1204,7 @@ Table bot.strategy_feature_requirements {
     (feature_definition_id, instrument_id, strategy_id)
   }
 
-  Note: 'Immutable dependency set extracted from the strategy semantic_document at completion. It is not user-authored state and grants no budget. The reverse index lets the server group all active strategies by identical feature and instrument so a common calculation is performed once and fanned out to many bot evaluations.'
+  Note: '완성 시 전략 semantic_document에서 추출한 불변 의존성 집합. 사용자 작성 상태가 아니며 예산도 부여하지 않는다. 역방향 인덱스로 서버가 동일 피처·종목 기준으로 활성 전략을 묶어 공통 계산을 한 번 수행하고 여러 봇 평가로 팬아웃.'
 
   Records (strategy_id, instrument_id, feature_definition_id) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
@@ -1212,64 +1235,73 @@ Table bot.bot_events {
     (correlation_id)
   }
 
-  Note: 'Append-only ordered official stream per bot. event_sequence is runtime audit ordering, not a bot version; gaps are allowed. Exact market observations used for decisions are pinned by value/version/hash.'
+  Note: '봇별 추가 전용 순서 보장 공식 스트림이자 라우팅된 트리거 이벤트의 유일한 봇별 구체화. Trigger Router가 전역 이벤트 식별자를 담은 결정적 idempotency_key(예: PRICE:AAPL:bar-close-timestamp, SCHEDULE:ONE_MINUTE:minute)로 라우팅 이벤트당 1행을 적재하므로 (bot_id, idempotency_key)가 별도 전역 트리거 테이블 없이 at-least-once 재전달을 흡수. event_sequence는 런타임 감사 순서이지 봇 버전이 아니며 갭 허용. 실행 차단 생명주기는 문서화된 이벤트 타입 BOT_EXECUTION_BLOCKED, BOT_EXECUTION_UNBLOCKED, SETTLEMENT_FAILED, LEDGER_INVARIANT_VIOLATED, STATE_REBUILD_COMPLETED 사용. 의사결정에 쓴 정확한 시장 관측치는 값/버전/해시로 고정.'
 
   Records (id, bot_id, event_sequence, event_type, event_schema_version, causation_event_id, correlation_id, idempotency_key, occurred_at, received_at, committed_at, summary_document, market_dataset_manifest_id, evidence_object_id) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '1.0.0', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '{"example":true}', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '1.0.0', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '{"trigger":"PRICE","symbol":"AAPL","barClosedAt":"2026-07-24T10:00:00-04:00"}', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
+  }
+}
+
+Table bot.strategy_time_triggers {
+  strategy_id uuid [not null]
+  trigger_type bot.time_trigger_type [not null]
+  schedule_key varchar(40) [not null, note: '값은 SCHEDULE이면 ONE_MINUTE 같은 Interval 키, 세션 트리거면 고정값 NONE.']
+
+  indexes {
+    (strategy_id, trigger_type, schedule_key) [pk]
+    (trigger_type, schedule_key, strategy_id)
+  }
+
+  Note: '완성된 전략 semantic_document에서 서버가 추출한 시간·세션 트리거 의존성 Projection. 사용자 작성이 아니고 제2의 정본도 아니다. 종목·피처 트리거 의존성은 strategy_instruments와 strategy_feature_requirements에 유지(중복 테이블 없음). 역방향 인덱스가 Trigger Router 조회에 답한다: MARKET_OPEN이나 ONE_MINUTE 이벤트는 구독한 전략만 찾아 RUNNING 비차단 봇과 조인하며, 시장 전체 이벤트가 전체 봇을 스캔하지 않는다.'
+
+  Records (strategy_id, trigger_type, schedule_key) {
+    '00000000-0000-4000-8000-000000000001', 'SCHEDULE', 'ONE_MINUTE'
   }
 }
 
 Table bot.evaluation_runs {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
-  trigger_event_id uuid [not null, unique]
+  partition_id uuid [not null]
+  strategy_id uuid [not null]
+  trigger_event_id uuid [not null]
   result_event_id uuid [unique]
-  feature_snapshot_batch_id uuid [not null]
-  feature_snapshot_key varchar(200) [not null]
-  feature_snapshot_hash varchar(128) [not null]
+  feature_snapshot_batch_id uuid
+  feature_snapshot_key varchar(200)
+  feature_snapshot_hash varchar(128)
   status operations.work_status [not null]
-  input_state_hash varchar(128) [not null]
-  input_market_hash varchar(128) [not null, note: 'Must equal the referenced shared feature snapshot input hash.']
-  conflict_policy_hash varchar(128) [not null]
+  attempt_count int [not null, default: 0]
+  lease_expires_at timestamptz [note: 'at-least-once 인계용 워커 lease. 만료되면 다른 공용 워커가 이어서 수행.']
+  input_state_hash varchar(128)
+  input_market_hash varchar(128) [note: '스냅샷이 고정된 경우 참조한 공유 피처 스냅샷 입력 해시와 같아야 한다.']
   candidate_set_hash varchar(128)
-  started_at timestamptz [not null]
+  candidate_count int
+  state_change_count int
+  result_hash varchar(128)
+  summary_document jsonb
+  queued_at timestamptz [not null]
+  started_at timestamptz
   completed_at timestamptz
   failure_code varchar(80)
 
   indexes {
+    (trigger_event_id, strategy_id) [unique]
     (bot_id, id) [unique]
-    (bot_id, started_at)
+    (strategy_id, queued_at)
+    (bot_id, queued_at)
+    (status, lease_expires_at)
     (feature_snapshot_batch_id, feature_snapshot_key)
   }
 
-
-  Note: 'A bot-specific evaluation consumes one immutable shared feature snapshot addressed by batch, key, and hash, then applies only private strategy state, risk blocks, budget, conflict resolution, and order-intent generation. input_market_hash and feature_snapshot_hash are tamper-evident evidence validated against the batched object row; common indicators are never recalculated per bot.'
-
-  Records (id, bot_id, trigger_event_id, result_event_id, feature_snapshot_batch_id, feature_snapshot_key, feature_snapshot_hash, status, input_state_hash, input_market_hash, conflict_policy_hash, candidate_set_hash, started_at, completed_at, failure_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'SUCCEEDED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
-  }
-}
-
-Table bot.evaluation_strategy_results {
-  evaluation_run_id uuid [not null]
-  bot_id uuid [not null]
-  partition_id uuid [not null]
-  strategy_id uuid [not null]
-  status operations.work_status [not null]
-  candidate_count int [not null]
-  state_change_count int [not null]
-  result_hash varchar(128) [not null]
-  failure_code varchar(80)
-  summary_document jsonb [not null]
-
-  indexes {
-    (evaluation_run_id, strategy_id) [pk]
+  checks {
+    `attempt_count >= 0` [name: 'evaluation_attempt_count_nonnegative']
+    `status <> 'SUCCEEDED' OR (completed_at IS NOT NULL AND result_hash IS NOT NULL)` [name: 'evaluation_success_complete']
   }
 
-  Note: 'Per-strategy result within one bot evaluation. Composite ownership FKs prevent a result from naming a strategy in another bot or partition; aggregate candidate conflict resolution remains on the evaluation and order-intent batch boundary.'
+  Note: '트리거 이벤트당 전략당 1행: 평가 큐, 사용자 노출 판단 로그, idempotency의 단위. 유일한 (trigger_event_id, strategy_id) 쌍이 상류 bot_events (bot_id, idempotency_key), 하류 order_intent_batches (bot_id, source_event_id)와 함께 at-least-once 재전달을 끝까지 안전하게 만든다. runtime_state_values가 전략 범위라 같은 봇의 전략 평가는 공용 워커에서 병렬 가능하며, 봇 수준 예산·충돌 해소·이벤트 적용은 bot_id advisory lock 아래 주문 의도 배치 경계에서 직렬화되고 큐는 bot_id로 파티셔닝. 행은 라우팅 시 PENDING으로 등록. 시장 데이터 평가는 배치·키·해시로 불변 공유 피처 스냅샷 하나를 고정(공통 지표를 봇별 재계산하지 않음), MARKET_OPEN/MARKET_CLOSE/SCHEDULE 평가는 스냅샷 없이 가능. 최신만 평가하는 캐치업 정책에서 지연·차단 중 대체된 트리거는 failure_code CATCHUP_SUPERSEDED의 SKIPPED로만 기록되고 오래된 가격으로 평가되지 않는다. 마이그레이션은 전략당 PENDING/RUNNING 1행을 허용하는 partial unique index 추가.'
 
-  Records (evaluation_run_id, bot_id, partition_id, strategy_id, status, candidate_count, state_change_count, result_hash, failure_code, summary_document) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'SUCCEEDED', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'REVIEW_EXAMPLE', '{"example":true}'
+  Records (id, bot_id, partition_id, strategy_id, trigger_event_id, result_event_id, feature_snapshot_batch_id, feature_snapshot_key, feature_snapshot_hash, status, attempt_count, lease_expires_at, input_state_hash, input_market_hash, candidate_set_hash, candidate_count, state_change_count, result_hash, summary_document, queued_at, started_at, completed_at, failure_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'SUCCEEDED', 1, '2026-07-27T09:01:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"decision":"ORDER_INTENT","firstFailedCondition":null,"notes":"RSI 28.4 < 30"}', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
   }
 }
 
@@ -1292,10 +1324,10 @@ Table bot.runtime_state_values {
     (bot_id, last_event_sequence)
   }
 
-  Note: 'PostgreSQL owns only official bot-specific strategy state required across evaluations. Explicit bot/partition/strategy ownership prevents cross-bot leakage; instrument_id is nullable only for strategy-wide state. Shared prices, candles, indicators, calendars, or feature values are forbidden here and belong to market_data shared computation or disposable caches. Null-safe uniqueness for instrument_id is enforced in migration.'
+  Note: '평가 간 유지가 필요한 공식 봇 전용 전략 상태만 PostgreSQL이 소유. 명시적 봇/파티션/전략 소유가 봇 간 누출을 방지하고, instrument_id는 전략 전역 상태에서만 null. 공유 가격·캔들·지표·캘린더·피처 값은 여기 금지이며 market_data 공유 계산이나 일회성 캐시 소관. instrument_id의 null-safe 유일성은 마이그레이션에서 강제.'
 
   Records (id, bot_id, partition_id, strategy_id, instrument_id, block_instance_key, state_definition_key, value_type, current_value, last_event_sequence, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'DECIMAL', '{"example":true}', 1, '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'DECIMAL', '{"value":28.4}', 1, '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -1303,7 +1335,7 @@ Table bot.runtime_state_changes {
   bot_id uuid [not null]
   bot_event_id uuid [not null]
   runtime_state_value_id uuid [not null]
-  previous_value_hash varchar(128) [note: 'Null only when the state key is created for the first time.']
+  previous_value_hash varchar(128) [note: '상태 키 최초 생성 시에만 null.']
   new_value jsonb [not null]
   new_value_hash varchar(128) [not null]
   change_reason_code varchar(80) [not null]
@@ -1312,10 +1344,10 @@ Table bot.runtime_state_changes {
     (bot_event_id, runtime_state_value_id) [pk]
   }
 
-  Note: 'Append-only before/after evidence for bot-specific state changes. bot_id participates in both composite references so an event cannot mutate a state row owned by another bot.'
+  Note: '봇 전용 상태 변경의 추가 전용 before/after 증적. bot_id가 두 복합 참조에 모두 포함되어 이벤트가 다른 봇 소유 상태 행을 변경할 수 없다.'
 
   Records (bot_id, bot_event_id, runtime_state_value_id, previous_value_hash, new_value, new_value_hash, change_reason_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'REVIEW_EXAMPLE'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, '{"value":28.4}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'REVIEW_EXAMPLE'
   }
 }
 
@@ -1339,7 +1371,7 @@ Table trading.buying_power_buffer_policy_versions {
     (policy_code, effective_from)
   }
 
-  Note: 'Platform-managed immutable policy. Exact buffer_bps needs evidence before production.'
+  Note: '플랫폼 관리 불변 정책. 정확한 buffer_bps는 운영 전 근거 필요.'
 
   Records (id, policy_code, version, buffer_bps, rounding_rules_version, rules_hash, effective_from, effective_to, published_at) {
     '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', 1, '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null, '2026-07-27T09:00:00+09:00'
@@ -1349,7 +1381,6 @@ Table trading.buying_power_buffer_policy_versions {
 Table trading.order_intent_batches {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
-  evaluation_run_id uuid [not null, unique]
   source_event_id uuid [not null]
   status varchar(30) [not null]
   conflict_policy_hash varchar(128) [not null]
@@ -1359,19 +1390,21 @@ Table trading.order_intent_batches {
   finalized_at timestamptz
 
   indexes {
+    (bot_id, source_event_id) [unique]
     (bot_id, finalized_at)
   }
 
-  Note: 'Stores order intent batches. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '한 트리거 이벤트의 전략별 평가 산출물이 결합되는 봇 수준 경계: 예산 상한, netting, 불변 충돌 정책이 여기서 bot_id advisory lock 아래 같은 봇의 다른 이벤트와 직렬화되어 적용. (bot_id, source_event_id) 유일 키가 at-least-once 재전달의 중복 배치 생성을 방지.'
 
-  Records (id, bot_id, evaluation_run_id, source_event_id, status, conflict_policy_hash, allocation_rules_version, input_state_hash, result_hash, finalized_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACTIVE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  Records (id, bot_id, source_event_id, status, conflict_policy_hash, allocation_rules_version, input_state_hash, result_hash, finalized_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACTIVE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
 Table trading.order_intents {
   id uuid [pk, default: `gen_random_uuid()`]
   batch_id uuid [not null]
+  evaluation_run_id uuid [not null, note: '이 의도를 만든 전략별 평가.']
   partition_id uuid [not null]
   strategy_id uuid [not null]
   instrument_id uuid [not null]
@@ -1389,19 +1422,20 @@ Table trading.order_intents {
   final_notional numeric(24,8)
   limit_price numeric(24,8)
   stop_price numeric(24,8)
-  decision varchar(30) [not null, note: 'APPROVED, REJECTED, REDUCED, NETTED, or CONFLICTED.']
+  decision varchar(30) [not null, note: '값은 APPROVED, REJECTED, REDUCED, NETTED, CONFLICTED.']
   decision_reason_code varchar(80) [not null]
 
   indexes {
     (batch_id, intent_key) [unique]
     (batch_id, instrument_id, side)
     (strategy_id, instrument_id)
+    (evaluation_run_id)
   }
 
-  Note: 'Original intent and every reduction/netting result are immutable. Partition and strategy ownership must match through composite constraints.'
+  Note: '원래 의도와 모든 축소/netting 결과는 불변. 파티션·전략 소유는 복합 제약으로 일치해야 하며, evaluation_run_id가 각 의도를 그것을 만든 정확한 전략별 평가에 귀속.'
 
-  Records (id, batch_id, partition_id, strategy_id, instrument_id, intent_key, side, position_effect, order_type, time_in_force, requested_quantity, requested_notional, approved_quantity, approved_notional, netted_quantity, final_quantity, final_notional, limit_price, stop_price, decision, decision_reason_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'BUY', 'OPEN_LONG', 'MARKET', 'DAY', 10.00000000, 100000.00000000, 10.00000000, 100000.00000000, 10.00000000, 10.00000000, 100000.00000000, 100.00000000, 100.00000000, 'review-example', 'REVIEW_EXAMPLE'
+  Records (id, batch_id, evaluation_run_id, partition_id, strategy_id, instrument_id, intent_key, side, position_effect, order_type, time_in_force, requested_quantity, requested_notional, approved_quantity, approved_notional, netted_quantity, final_quantity, final_notional, limit_price, stop_price, decision, decision_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'BUY', 'OPEN_LONG', 'MARKET', 'DAY', 10.00000000, 100000.00000000, 10.00000000, 100000.00000000, 10.00000000, 10.00000000, 100000.00000000, 100.00000000, 100.00000000, 'review-example', 'REVIEW_EXAMPLE'
   }
 }
 
@@ -1432,7 +1466,7 @@ Table trading.orders {
     (order_group_id)
   }
 
-  Note: 'Immutable physical-order contract. Current status and remaining quantity come only from order_events and order_state_projections.'
+  Note: '불변 물리 주문 계약. 현재 상태와 잔량은 order_events와 order_state_projections에서만 나온다.'
 
   Records (id, bot_id, instrument_id, order_group_id, replaces_order_id, order_key, side, position_effect, order_type, time_in_force, requested_quantity, requested_notional, limit_price, stop_price, accepted_event_id, accepted_at, expires_at, contract_hash) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, 'REVIEW_EXAMPLE', 'BUY', 'OPEN_LONG', 'MARKET', 'DAY', 10.00000000, 100000.00000000, 100.00000000, 100.00000000, '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -1442,7 +1476,7 @@ Table trading.orders {
 Table trading.order_groups {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
-  group_type varchar(30) [not null, note: 'OCO, BRACKET, or MULTI_LEG when supported by the approved block catalog.']
+  group_type varchar(30) [not null, note: '승인된 블록 카탈로그가 지원하는 경우 OCO, BRACKET, MULTI_LEG.']
   group_key varchar(160) [not null]
   status varchar(30) [not null]
   created_event_id uuid [not null]
@@ -1452,7 +1486,7 @@ Table trading.order_groups {
     (bot_id, group_key) [unique]
   }
 
-  Note: 'Present for production-safe group lifecycle and reserved until the exact supported strategy block catalog is approved.'
+  Note: '운영 안전한 그룹 생명주기를 위해 존재하며, 지원 전략 블록 카탈로그가 정확히 승인될 때까지 예약된 테이블.'
 
   Records (id, bot_id, group_type, group_key, status, created_event_id, closed_event_id) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'ACTIVE', '00000000-0000-4000-8000-000000000001', null
@@ -1472,7 +1506,7 @@ Table trading.order_intent_allocations {
     (intent_id)
   }
 
-  Note: 'Stores order intent allocations. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '주문-의도 배분 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (order_id, intent_id, allocated_quantity, allocated_notional, allocation_rank, allocation_rules_version) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 1, '1.0.0'
@@ -1509,7 +1543,7 @@ Table trading.capital_reservations {
     (strategy_id, status)
   }
 
-  Note: 'Buffer affects buying-power reservation only, never fill price, PnL, or performance. Budget enforcement uses bot and partition caps only; strategy_id is attribution. Final price/fee recheck must reduce or reject before exceeding either hard cap.'
+  Note: '버퍼는 구매력 예약에만 영향을 주고 체결가·PnL·성과에는 절대 반영되지 않는다. 예산 강제는 봇·파티션 상한만 사용하고 strategy_id는 귀속용. 최종 가격/수수료 재확인은 어느 상한이든 초과하기 전에 축소하거나 거부해야 한다.'
 
   Records (id, bot_id, partition_id, strategy_id, intent_id, order_id, buffer_policy_id, status, reference_price, reference_observed_at, reference_market_hash, base_notional, fixed_slippage_amount, estimated_fee_amount, buffer_amount, reserved_amount, consumed_amount, released_amount, created_event_id, created_at, settled_event_id, settled_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACTIVE', 100.00000000, '2026-07-27T09:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
@@ -1532,10 +1566,10 @@ Table trading.order_events {
     (order_id, order_sequence) [unique]
   }
 
-  Note: 'Stores order events. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '주문 이벤트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, order_id, bot_event_id, order_sequence, event_type, previous_status, new_status, reason_code, occurred_at, event_document) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', null, 'OPEN', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"example":true}'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', null, 'OPEN', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"fillQuantity":"5","remainingQuantity":"5","reason":"PARTIAL_FILL"}'
   }
 }
 
@@ -1554,7 +1588,7 @@ Table trading.order_state_projections {
     (status, updated_at)
   }
 
-  Note: 'Rebuildable PostgreSQL current-order read model. Append-only order_events remain authoritative.'
+  Note: '재구축 가능한 PostgreSQL 현재 주문 읽기 모델. 정본은 추가 전용 order_events.'
 
   Records (order_id, status, filled_quantity, remaining_quantity, reserved_cash, reserved_quantity, last_order_event_sequence, last_bot_event_sequence, updated_at) {
     '00000000-0000-4000-8000-000000000001', 'OPEN', 10.00000000, 10.00000000, 100000.00000000, 10.00000000, 1, 1, '2026-07-27T09:00:00+09:00'
@@ -1587,7 +1621,7 @@ Table trading.fills {
     (instrument_id, occurred_at)
   }
 
-  Note: 'Immutable execution evidence. The fixed 5 bps slippage and fee are applied to the latest pinned reference price after the buying-power recheck.'
+  Note: '불변 체결 증적. 고정 5 bps 슬리피지와 수수료는 구매력 재확인 후 최신 고정 참조 가격에 적용.'
 
   Records (id, order_id, bot_id, bot_event_id, instrument_id, provider_fill_key, quantity, reference_price, reference_observed_at, reference_market_hash, slippage_rate_bps, slippage_amount, fill_price, gross_amount, fee_amount, net_amount, occurred_at, recorded_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 10.00000000, 100.00000000, '2026-07-27T09:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 5, 100000.00000000, 100.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -1613,7 +1647,7 @@ Table trading.fill_allocations {
     (strategy_id, fill_id)
   }
 
-  Note: 'Allocation settles each intent reservation independently; unused buffer is released and never enters fill price or performance.'
+  Note: '배분은 의도별 예약을 독립 정산. 미사용 버퍼는 해제되며 체결가·성과에 절대 반영되지 않는다.'
 
   Records (fill_id, intent_id, reservation_id, partition_id, strategy_id, allocated_quantity, allocated_gross_amount, allocated_fee_amount, reservation_consumed_amount, reservation_released_amount, allocation_rules_version) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '1.0.0'
@@ -1635,7 +1669,7 @@ Table trading.ledger_accounts {
     (bot_id, partition_id, strategy_id, account_type, currency_code, instrument_id) [unique]
   }
 
-  Note: 'Null-safe uniqueness and valid scope combinations are enforced in migration. Strategy subaccounts support attribution without transferring budgets or lots.'
+  Note: 'null-safe 유일성과 유효한 범위 조합은 마이그레이션에서 강제. 전략 하위계정은 예산·로트 이전 없이 귀속만 지원.'
 
   Records (id, bot_id, partition_id, strategy_id, account_type, currency_code, instrument_id, created_at, closed_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'USD', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', null
@@ -1659,7 +1693,7 @@ Table trading.ledger_transactions {
     (bot_id, occurred_at)
   }
 
-  Note: 'Append-only. Corrections use reversing transactions; committed entries are never rewritten.'
+  Note: '추가 전용. 정정은 역분개 트랜잭션으로 하며 커밋된 분개는 재작성하지 않는다.'
 
   Records (id, bot_id, bot_event_id, transaction_type, transaction_key, currency_code, reversal_of_transaction_id, occurred_at, recorded_at, description_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'USD', null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'Fictional review sample'
@@ -1673,7 +1707,7 @@ Table trading.ledger_entries {
   partition_id uuid
   strategy_id uuid
   entry_sequence int [not null]
-  direction varchar(10) [not null, note: 'DEBIT or CREDIT.']
+  direction varchar(10) [not null, note: '값은 DEBIT 또는 CREDIT.']
   amount numeric(24,8) [not null]
   quantity numeric(28,8)
   entry_hash varchar(128) [not null]
@@ -1684,7 +1718,7 @@ Table trading.ledger_entries {
     (strategy_id, transaction_id)
   }
 
-  Note: 'A deferred constraint trigger must enforce balanced currency amounts and valid partition/strategy ownership at commit.'
+  Note: '지연 제약 트리거가 커밋 시 통화 금액 균형과 파티션/전략 소유 유효성을 강제해야 한다.'
 
   Records (id, transaction_id, ledger_account_id, partition_id, strategy_id, entry_sequence, direction, amount, quantity, entry_hash) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'review-example', 100000.00000000, 10.00000000, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -1709,7 +1743,7 @@ Table trading.position_lots {
     (bot_id, instrument_id, opened_at)
   }
 
-  Note: 'Stores position lots. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '포지션 로트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, bot_id, partition_id, strategy_id, instrument_id, opening_fill_id, opened_quantity, remaining_quantity, unit_cost, opened_at, closed_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 10.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00', null
@@ -1732,7 +1766,7 @@ Table trading.lot_movements {
     (source_fill_id, position_lot_id)
   }
 
-  Note: 'Stores lot movements. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '로트 변동 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, position_lot_id, bot_event_id, source_fill_id, corporate_action_id, movement_type, quantity_delta, remaining_after, occurred_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 10.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00'
@@ -1757,7 +1791,7 @@ Table trading.strategy_position_projections {
     (partition_id, instrument_id)
   }
 
-  Note: 'Rebuildable PostgreSQL current projection. Official history remains fills, lot movements, and ledger entries.'
+  Note: '재구축 가능한 PostgreSQL 현재 Projection. 공식 이력은 체결, 로트 변동, 원장 분개.'
 
   Records (strategy_id, partition_id, bot_id, instrument_id, long_quantity, short_quantity, cost_basis_amount, last_event_sequence, projection_hash, updated_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 10.00000000, 100000.00000000, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
@@ -1780,7 +1814,7 @@ Table trading.position_projections {
     (bot_id, instrument_id) [pk]
   }
 
-  Note: 'Rebuildable bot-wide net position used for global instrument convergence; ledger and lot records remain authoritative.'
+  Note: '전역 종목 수렴에 쓰는 재구축 가능한 봇 순포지션. 원장·로트 기록이 정본.'
 
   Records (bot_id, instrument_id, net_quantity, average_cost, realized_pnl, last_valuation_price, last_valuation_at, valuation_status, last_bot_event_sequence, updated_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 100000.00000000, 100.00000000, '2026-07-27T09:00:00+09:00', 'ACTIVE', 1, '2026-07-27T09:00:00+09:00'
@@ -1796,7 +1830,7 @@ Table trading.bot_budget_projections {
   projection_hash varchar(128) [not null]
   updated_at timestamptz [not null]
 
-  Note: 'Stores bot budget projections. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '봇 예산 Projection 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (bot_id, available_cash_amount, active_reservation_amount, invested_amount, last_event_sequence, projection_hash, updated_at) {
     '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, 100000.00000000, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
@@ -1812,7 +1846,7 @@ Table trading.partition_budget_projections {
   projection_hash varchar(128) [not null]
   updated_at timestamptz [not null]
 
-  Note: 'Stores partition budget projections. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '파티션 예산 Projection 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (partition_id, budget_cap_amount, active_reservation_amount, invested_amount, last_event_sequence, projection_hash, updated_at) {
     '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, 100000.00000000, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
@@ -1850,7 +1884,7 @@ Table backtest.runs {
     (owner_account_id, queued_at)
   }
 
-  Note: 'Created atomically with the validated immutable bot aggregate. Backtest delay/failure never changes live bot lifecycle or ledger.'
+  Note: '검증된 불변 봇 집합체와 원자적으로 생성. 백테스트 지연·실패는 라이브 봇 생명주기와 원장을 절대 바꾸지 않는다.'
 
   Records (id, bot_id, owner_account_id, configuration_hash, status, evaluation_start, evaluation_end, initial_cash_amount, market_rules_version, accounting_rules_version, precision_rules_version, fee_rules_version, slippage_rate_bps, buying_power_buffer_policy_id, idempotency_key, queued_at, started_at, completed_at, failure_code, result_hash) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'RUNNING', '2026-07-27', '2026-07-27', 100000.00000000, '1.0.0', '1.0.0', '1.0.0', '1.0.0', 5, '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -1871,7 +1905,7 @@ Table backtest.run_attempts {
     (run_id, attempt_number) [unique]
   }
 
-  Note: 'Stores run attempts. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '백테스트 실행 시도 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, run_id, attempt_number, worker_execution_key, status, started_at, completed_at, failure_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'SUCCEEDED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
@@ -1888,7 +1922,7 @@ Table backtest.input_datasets {
     (input_bundle_id, dataset_manifest_id, purpose_code) [pk]
   }
 
-  Note: 'Stores input datasets. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '백테스트 입력 데이터셋 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (input_bundle_id, dataset_manifest_id, purpose_code, locked_dataset_hash) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -1904,7 +1938,7 @@ Table backtest.input_feature_materializations {
     (input_bundle_id, feature_materialization_id) [pk]
   }
 
-  Note: 'Pins shared historical feature results reused by the official backtest. The locked hash must equal the AVAILABLE materialization result hash; missing or mismatched features fail input locking instead of triggering hidden per-bot recomputation.'
+  Note: '공식 백테스트가 재사용하는 공유 과거 피처 결과를 고정. 잠금 해시는 AVAILABLE 구체화 결과 해시와 일치해야 하며, 누락·불일치 피처는 숨은 봇별 재계산 대신 입력 잠금 실패로 처리.'
 
   Records (input_bundle_id, feature_materialization_id, locked_result_hash) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -1918,7 +1952,7 @@ Table backtest.input_bundles {
   as_of_at timestamptz [not null]
   locked_at timestamptz [not null]
 
-  Note: 'Pins the complete reproducibility boundary for one official whole-bot run.'
+  Note: '공식 전체 봇 실행 1건의 완전한 재현성 경계를 고정.'
 
   Records (id, run_id, bundle_hash, as_of_at, locked_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -1942,10 +1976,10 @@ Table backtest.monthly_judgment_summaries {
     (run_id, et_year_month) [unique]
   }
 
-  Note: 'Stores monthly judgment summaries. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '월별 판정 요약 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, run_id, et_year_month, evaluation_count, active_branch_count, trade_event_count, data_gap_count, triggered_count, rejected_count, summary_document, summary_hash) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'review-example', 1, 1, 1, 1, 1, 1, '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'review-example', 1, 1, 1, 1, 1, 1, '{"etYearMonth":"2024-03","evaluations":8190,"orderIntents":112,"skippedTriggers":3}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   }
 }
 
@@ -1960,7 +1994,7 @@ Table backtest.failure_condition_counts {
     (monthly_summary_id, flow_or_branch_key, first_failure_condition_key) [unique]
   }
 
-  Note: 'Stores failure condition counts. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '실패 조건 집계 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, monthly_summary_id, flow_or_branch_key, first_failure_condition_key, occurrence_count) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 1
@@ -1977,10 +2011,10 @@ Table backtest.performance_summaries {
   result_hash varchar(128) [not null]
   calculated_at timestamptz [not null]
 
-  Note: 'Stores performance summaries. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '백테스트 성과 요약 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (run_id, metric_catalog_version, metrics_document, calculation_rules_version, source_set_hash, input_hash, result_hash, calculated_at) {
-    '00000000-0000-4000-8000-000000000001', '1.0.0', '{"example":true}', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '1.0.0', '{"totalReturnPct":12.64,"maxDrawdownPct":-3.21,"sharpe":1.42,"winRatePct":58.7}', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -2005,7 +2039,7 @@ Table backtest.detail_manifests {
     (object_id) [unique]
   }
 
-  Note: 'Parquet objects are explicit UNCOMPRESSED and never cross an ET Monday week boundary.'
+  Note: '백테스트 상세 Parquet 오브젝트는 명시적 UNCOMPRESSED이며 ET 월요일 주 경계를 넘지 않는다.'
 
   Records (id, run_id, object_id, record_type, week_start_date, period_start, period_end, part_number, row_count, schema_version, source_set_hash, supersedes_manifest_id, detail_hash, created_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 1, 1, '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
@@ -2026,17 +2060,17 @@ Table performance.bot_current_projections {
   projection_hash varchar(128) [not null]
   updated_at timestamptz [not null]
 
-  Note: 'Stores bot current projections. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '봇 현재 성과 Projection 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (bot_id, metrics_document, ledger_state_hash, position_state_hash, calculation_rules_version, last_event_sequence, projection_hash, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '{"totalReturnPct":4.18,"maxDrawdownPct":-1.87,"sharpe":1.12,"realizedPnl":"418.32"}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
 Table performance.bot_snapshots {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
-  snapshot_type varchar(40) [not null, note: 'ET_DAILY_CLOSE, ROOM_START, ROOM_END, BOT_STOP, or LEADERBOARD_CUTOFF.']
+  snapshot_type varchar(40) [not null, note: '값은 ET_DAILY_CLOSE, ROOM_START, ROOM_END, BOT_STOP, LEADERBOARD_CUTOFF.']
   source_event_sequence bigint [not null]
   evaluated_at timestamptz [not null]
   metrics_document jsonb [not null]
@@ -2050,10 +2084,10 @@ Table performance.bot_snapshots {
     (bot_id, evaluated_at)
   }
 
-  Note: 'Immutable official boundary snapshot. NoSQL leaderboard or dashboard documents are never scoring evidence.'
+  Note: '불변 공식 경계 스냅샷. NoSQL 리더보드·대시보드 문서는 절대 채점 증거가 아니다.'
 
   Records (id, bot_id, snapshot_type, source_event_sequence, evaluated_at, metrics_document, input_hash, calculation_rules_version, snapshot_hash, created_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 1, '2026-07-27T09:00:00+09:00', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 1, '2026-07-27T09:00:00+09:00', '{"equity":"104128.70","totalReturnPct":4.13,"maxDrawdownPct":-2.05,"sharpe":1.08}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -2073,7 +2107,7 @@ Table performance.series_manifests {
     (bot_id, series_type, week_start_date, part_number) [unique]
   }
 
-  Note: 'Stores series manifests. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '성과 시계열 매니페스트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, bot_id, object_id, series_type, week_start_date, period_start, period_end, part_number, calculation_rules_version, series_hash) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 1, '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -2097,10 +2131,10 @@ Table competition.scoring_template_versions {
     (template_code, version) [unique]
   }
 
-  Note: 'Stores scoring template versions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '채점 템플릿 버전 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, template_code, version, rules_document, rules_hash, published_at, retired_at) {
-    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', '{"example":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', '{"metric":"COMPOSITE","weights":{"return":0.4,"sharpe":0.3,"maxDrawdown":0.3}}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
   }
 }
 
@@ -2119,7 +2153,7 @@ Table competition.rooms {
     (status, created_at)
   }
 
-  Note: 'Stores rooms. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '대회 방 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, creator_account_id, name, access_type, status, created_at, ended_at, invalidated_at, invalidation_reason_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'PUBLIC', 'RECRUITING', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
@@ -2142,16 +2176,16 @@ Table competition.room_rules {
   scoring_parameters jsonb [not null]
   fee_rules_version varchar(80) [not null]
   fee_configuration jsonb [not null]
-  slippage_rate_bps int [not null, note: 'Fixed 5 bps.']
+  slippage_rate_bps int [not null, note: '고정 5 bps.']
   buying_power_buffer_policy_id uuid [not null]
   precision_rules_version varchar(80) [not null]
   rules_hash varchar(128) [not null]
   locked_at timestamptz [not null]
 
-  Note: 'Core eligibility and capacity fields remain relational for constraints and admission locking; extensible criteria remain in versioned JSONB.'
+  Note: '핵심 자격·정원 필드는 제약과 입장 잠금을 위해 관계형으로 유지하고, 확장 기준은 버전 관리 JSONB에 유지.'
 
   Records (room_id, scoring_template_version_id, initial_cash_amount, currency_code, participant_limit, per_account_bot_limit, stopped_bot_slot_policy, minimum_operation_seconds, minimum_fill_count, late_submission_policy, eligibility_document, market_scope_document, scoring_parameters, fee_rules_version, fee_configuration, slippage_rate_bps, buying_power_buffer_policy_id, precision_rules_version, rules_hash, locked_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', 1, 1, 'REVIEW_EXAMPLE', 1, 1, 'REVIEW_EXAMPLE', '{"example":true}', '{"example":true}', '{"example":true}', '1.0.0', '{"example":true}', 5, '00000000-0000-4000-8000-000000000001', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', 1, 1, 'REVIEW_EXAMPLE', 1, 1, 'REVIEW_EXAMPLE', '{"minAccountAgeDays":7,"requireVerifiedEmail":true}', '{"assetTypes":["STOCK","ETF"],"exchanges":["XNAS","XNYS"]}', '{"weights":{"return":0.4,"sharpe":0.3,"maxDrawdown":0.3}}', '1.0.0', '{"type":"RATE_BPS","rateBps":20,"minimumFee":"0"}', 5, '00000000-0000-4000-8000-000000000001', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -2169,10 +2203,10 @@ Table competition.room_events {
     (room_id, event_sequence) [unique]
   }
 
-  Note: 'Append-only lifecycle evidence. rooms.status is only a guarded current projection.'
+  Note: '추가 전용 생명주기 증적. rooms.status는 가드된 현재 Projection일 뿐이다.'
 
   Records (id, room_id, event_sequence, event_type, resulting_status, reason_code, occurred_at, payload_document) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'RECRUITING', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"example":true}'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'RECRUITING', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"trigger":"RECRUITMENT_OPENED","participantCount":0}'
   }
 }
 
@@ -2180,7 +2214,7 @@ Table competition.room_invitations {
   id uuid [pk, default: `gen_random_uuid()`]
   room_id uuid [not null]
   issued_by_account_id uuid [not null]
-  credential_type varchar(20) [not null, note: 'LINK or CODE.']
+  credential_type varchar(20) [not null, note: '값은 LINK 또는 CODE.']
   credential_digest varchar(128) [not null, unique]
   issued_at timestamptz [not null]
   expires_at timestamptz [not null]
@@ -2191,7 +2225,7 @@ Table competition.room_invitations {
     (room_id, revoked_at, expires_at)
   }
 
-  Note: 'Plain invitation secrets are never stored. Active invitations expire at submission close or earlier room termination.'
+  Note: '평문 초대 비밀값은 저장하지 않는다. 활성 초대는 제출 마감 또는 더 이른 방 종료 시점에 만료.'
 
   Records (id, room_id, issued_by_account_id, credential_type, credential_digest, issued_at, expires_at, revoked_at, revocation_reason_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, 'REVIEW_EXAMPLE'
@@ -2207,7 +2241,7 @@ Table competition.room_schedules {
   evaluation_ends_at timestamptz [not null]
   timezone_name varchar(80) [not null]
 
-  Note: 'Migration CHECKs enforce chronological ordering. The schedule becomes immutable when recruitment opens.'
+  Note: '마이그레이션 CHECK가 시간 순서를 강제. 모집 시작 시점부터 일정은 불변.'
 
   Records (room_id, recruitment_opens_at, submission_opens_at, submission_closes_at, evaluation_starts_at, evaluation_ends_at, timezone_name) {
     '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'America/New_York'
@@ -2227,7 +2261,7 @@ Table competition.participations {
   expelled_at timestamptz
   expulsion_reason_code varchar(80)
   completed_at timestamptz
-  post_room_action varchar(30) [note: 'CONTINUE_PRIVATE or STOP; null resolves to STOP at the decision deadline.']
+  post_room_action varchar(30) [note: '값은 CONTINUE_PRIVATE 또는 STOP. null이면 결정 마감 시 STOP 처리.']
   action_recorded_at timestamptz
   action_locked_at timestamptz
 
@@ -2237,7 +2271,7 @@ Table competition.participations {
     (room_id, status)
   }
 
-  Note: 'A room bot starts with empty runtime state. An already-running personal bot is never attached.'
+  Note: '방 참가 봇은 빈 런타임 상태로 시작. 이미 실행 중인 개인 봇은 절대 연결하지 않는다.'
 
   Records (id, room_id, bot_id, owner_account_id, anonymous_alias, status, joined_at, withdrawn_at, withdrawal_reason_code, expelled_at, expulsion_reason_code, completed_at, post_room_action, action_recorded_at, action_locked_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'review-example', 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', 'review-example', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -2257,10 +2291,10 @@ Table competition.participation_events {
     (participation_id, event_sequence) [unique]
   }
 
-  Note: 'Stores participation events. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '참가 이벤트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, participation_id, event_sequence, event_type, reason_code, occurred_at, payload_document) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"example":true}'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"alias":"참가자-07","joinedVia":"CODE"}'
   }
 }
 
@@ -2282,10 +2316,10 @@ Table competition.evaluation_segments {
     (participation_id, starts_at) [unique]
   }
 
-  Note: 'Virtual liquidation is scoring-only evidence and never creates live fills, reservations, or ledger entries.'
+  Note: '가상 청산은 채점 전용 증거이며 라이브 체결·예약·원장 분개를 생성하지 않는다.'
 
   Records (id, participation_id, segment_type, starts_at, ends_at, start_event_sequence, end_event_sequence, initial_state_hash, final_state_hash, source_set_hash, virtual_liquidation_document, finalized_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"example":true}', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"liquidatedAt":"2026-09-30T16:00:00-04:00","cashEquivalent":"10412.87"}', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -2302,7 +2336,7 @@ Table competition.leaderboard_snapshots {
     (room_id, cutoff_at) [unique]
   }
 
-  Note: 'Stores leaderboard snapshots. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '리더보드 스냅샷 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, room_id, scoring_template_version_id, cutoff_at, status, result_hash, created_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', 'ACTIVE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
@@ -2326,10 +2360,10 @@ Table competition.leaderboard_entries {
     (snapshot_id, rank)
   }
 
-  Note: 'Stores leaderboard entries. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '리더보드 엔트리 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (snapshot_id, participation_id, performance_snapshot_id, rank, is_joint_rank, eligibility_status, eligibility_reason_code, score, tie_break_document, calculation_document) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, true, 'ACTIVE', 'REVIEW_EXAMPLE', 0.05000000, '{"example":true}', '{"example":true}'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, true, 'ACTIVE', 'REVIEW_EXAMPLE', 0.05000000, '{"rule":"EARLIER_JOIN","joinedAt":"2026-08-03T10:12:00-04:00"}', '{"metric":"COMPOSITE","weights":{"return":0.4,"sharpe":0.3,"maxDrawdown":0.3},"score":0.7231}'
   }
 }
 
@@ -2346,7 +2380,7 @@ Table operations.operator_accounts {
   created_at timestamptz [not null]
   disabled_at timestamptz
 
-  Note: 'Stores operator accounts. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '운영자 계정 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, external_identity_key_hmac, status, mfa_enrolled_at, last_mfa_verified_at, created_at, disabled_at) {
     '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -2359,7 +2393,7 @@ Table operations.roles {
   hierarchy_rank int [not null]
   status varchar(30) [not null]
 
-  Note: 'Stores roles. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '운영자 역할 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, code, hierarchy_rank, status) {
     '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 1, 'ACTIVE'
@@ -2372,7 +2406,7 @@ Table operations.permissions {
   description varchar(500) [not null]
   sensitivity varchar(30) [not null]
 
-  Note: 'Stores permissions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '운영 권한 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, code, description, sensitivity) {
     '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'Fictional review sample', 'review-example'
@@ -2387,7 +2421,7 @@ Table operations.role_permissions {
     (role_id, permission_id) [pk]
   }
 
-  Note: 'Stores role permissions. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '역할-권한 매핑 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (role_id, permission_id) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
@@ -2410,7 +2444,7 @@ Table operations.operator_role_assignments {
     (expires_at)
   }
 
-  Note: 'Stores operator role assignments. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '운영자 역할 부여 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, operator_account_id, role_id, granted_by_operator_id, granted_at, expires_at, revoked_by_operator_id, revoked_at, revocation_reason_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, null, 'REVIEW_EXAMPLE'
@@ -2437,17 +2471,17 @@ Table operations.outbox_messages {
     (owner_domain, aggregate_id, aggregate_sequence)
   }
 
-  Note: 'Inserted atomically with domain changes. Publishers may deliver at least once, so every consumer uses idempotency_key.'
+  Note: '도메인 변경과 원자적으로 삽입. 퍼블리셔는 at-least-once 전달일 수 있으므로 모든 컨슈머가 idempotency_key를 사용.'
 
   Records (id, owner_domain, aggregate_id, aggregate_sequence, event_type, event_schema_version, payload_document, idempotency_key, created_at, published_at, publish_attempt_count, next_attempt_at, last_failure_code) {
-    '00000000-0000-4000-8000-000000000001', 'review-example', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '1.0.0', '{"example":true}', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 1, '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
+    '00000000-0000-4000-8000-000000000001', 'review-example', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '1.0.0', '{"eventType":"BOT_EXECUTION_BLOCKED","botId":"00000000-0000-4000-8000-000000000001","reasonCode":"LEDGER_INVARIANT_VIOLATED"}', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 1, '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
   }
 }
 
 Table operations.projection_checkpoints {
   id uuid [pk, default: `gen_random_uuid()`]
   projection_name varchar(100) [not null]
-  target_store varchar(40) [not null, note: 'NOSQL, SEARCH, CACHE, or POSTGRES_READ_MODEL.']
+  target_store varchar(40) [not null, note: '값은 NOSQL, SEARCH, CACHE, POSTGRES_READ_MODEL.']
   shard_key varchar(160) [not null]
   source_domain varchar(40) [not null]
   last_source_sequence bigint
@@ -2462,7 +2496,7 @@ Table operations.projection_checkpoints {
     (status, updated_at)
   }
 
-  Note: 'NoSQL/search/cache content is disposable and must be rebuildable from PostgreSQL plus verified S3 objects.'
+  Note: '일회성인 NoSQL·검색·캐시 콘텐츠는 PostgreSQL과 검증된 S3 오브젝트로부터 재구축 가능해야 한다.'
 
   Records (id, projection_name, target_store, shard_key, source_domain, last_source_sequence, last_source_time, projection_version, status, updated_at, failure_code) {
     '00000000-0000-4000-8000-000000000001', 'Review Example', 'review-example', 'REVIEW_EXAMPLE', 'review-example', 1, '2026-07-27T09:00:00+09:00', '1.0.0', 'ACTIVE', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
@@ -2491,7 +2525,7 @@ Table operations.audit_events {
     (correlation_id)
   }
 
-  Note: 'Append-only security evidence. Payloads and object evidence must not duplicate credentials, private strategy source, or unnecessary holdings.'
+  Note: '추가 전용 보안 증적. 페이로드·오브젝트 증거에 자격증명, 비공개 전략 소스, 불필요한 보유 정보를 중복 저장하지 않는다.'
 
   Records (id, actor_type, actor_id, action_type, target_domain, target_id, reason_code, correlation_id, idempotency_key, before_hash, after_hash, evidence_object_id, occurred_at, recorded_at) {
     '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'review-example', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -2511,7 +2545,7 @@ Table operations.notification_preferences {
     (account_id, bot_id, event_type, channel) [unique]
   }
 
-  Note: 'Mandatory operational notices ignore opt-outs. Migration must enforce null-safe uniqueness for account-wide preferences.'
+  Note: '필수 운영 공지는 수신 거부를 무시. 계정 전역 설정의 null-safe 유일성은 마이그레이션에서 강제.'
 
   Records (id, account_id, bot_id, event_type, channel, enabled, updated_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', true, '2026-07-27T09:00:00+09:00'
@@ -2536,10 +2570,10 @@ Table operations.notifications {
     (account_id, read_at, created_at)
   }
 
-  Note: 'Stores notifications. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '알림 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, account_id, bot_id, notification_type, mandatory, locale, template_version, payload_document, idempotency_key, created_at, read_at, expires_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', true, 'review-example', '1.0.0', '{"example":true}', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', true, 'review-example', '1.0.0', '{"title":"Atlas 07 · SPY 전량 체결","detail":"12주 · 평균 $634.06"}', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00'
   }
 }
 
@@ -2560,7 +2594,7 @@ Table operations.delivery_attempts {
     (status, next_attempt_at)
   }
 
-  Note: 'Stores delivery attempts. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '알림 발송 시도 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, notification_id, channel, attempt_number, status, attempted_at, completed_at, provider_message_key, failure_code, next_attempt_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 1, 'SUCCEEDED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00'
@@ -2581,7 +2615,7 @@ Table operations.cases {
     (account_id, status, created_at)
   }
 
-  Note: 'Stores cases. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '고객 문의 케이스 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, account_id, case_type, status, subject, created_at, closed_at, resolution_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'ACTIVE', 'review-example', '2026-07-27T09:00:00+09:00', null, '1m'
@@ -2602,10 +2636,10 @@ Table operations.case_events {
     (case_id, event_sequence) [unique]
   }
 
-  Note: 'Stores case events. Records contains fictional documentation-only review data and is never a production seed or migration.'
+  Note: '케이스 이벤트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, case_id, event_sequence, actor_type, actor_id, event_type, payload_document, created_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '{"example":true}', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '{"message":"봇 정지 문의 접수"}', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -2659,6 +2693,7 @@ Ref: market_data.corporate_actions.supersedes_action_id > market_data.corporate_
 Ref: market_data.quality_incidents.dataset_manifest_id > market_data.dataset_manifests.id
 Ref: market_data.quality_incidents.instrument_id > market_data.instruments.id
 Ref: market_data.quality_incidents.evidence_object_id > storage.objects.id
+Ref: market_data.stream_watermarks.feed_id > market_data.feeds.id
 
 Ref: bot.bot_workspaces.owner_account_id > identity.accounts.id
 Ref: bot.bots.owner_account_id > identity.accounts.id
@@ -2673,17 +2708,18 @@ Ref: bot.strategy_instruments.instrument_id > market_data.instruments.id
 Ref: bot.strategy_feature_requirements.strategy_id > bot.strategies.id
 Ref: bot.strategy_feature_requirements.(strategy_id, instrument_id) > bot.strategy_instruments.(strategy_id, instrument_id)
 Ref: bot.strategy_feature_requirements.feature_definition_id > market_data.feature_definitions.id
+Ref: bot.bots.execution_block_event_id > bot.bot_events.id
 Ref: bot.bot_events.bot_id > bot.bots.id
 Ref: bot.bot_events.causation_event_id > bot.bot_events.id
 Ref: bot.bot_events.market_dataset_manifest_id > market_data.dataset_manifests.id
 Ref: bot.bot_events.evidence_object_id > storage.objects.id
+Ref: bot.strategy_time_triggers.strategy_id > bot.strategies.id
 Ref: bot.evaluation_runs.bot_id > bot.bots.id
+Ref: bot.evaluation_runs.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
+Ref: bot.evaluation_runs.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: bot.evaluation_runs.(bot_id, trigger_event_id) > bot.bot_events.(bot_id, id)
 Ref: bot.evaluation_runs.(bot_id, result_event_id) > bot.bot_events.(bot_id, id)
 Ref: bot.evaluation_runs.feature_snapshot_batch_id > market_data.feature_snapshot_batches.id
-Ref: bot.evaluation_strategy_results.(bot_id, evaluation_run_id) > bot.evaluation_runs.(bot_id, id)
-Ref: bot.evaluation_strategy_results.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: bot.evaluation_strategy_results.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: bot.runtime_state_values.bot_id > bot.bots.id
 Ref: bot.runtime_state_values.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
 Ref: bot.runtime_state_values.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
@@ -2691,9 +2727,9 @@ Ref: bot.runtime_state_values.instrument_id > market_data.instruments.id
 Ref: bot.runtime_state_changes.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
 Ref: bot.runtime_state_changes.(bot_id, runtime_state_value_id) > bot.runtime_state_values.(bot_id, id)
 Ref: trading.order_intent_batches.bot_id > bot.bots.id
-Ref: trading.order_intent_batches.evaluation_run_id > bot.evaluation_runs.id
 Ref: trading.order_intent_batches.source_event_id > bot.bot_events.id
 Ref: trading.order_intents.batch_id > trading.order_intent_batches.id
+Ref: trading.order_intents.evaluation_run_id > bot.evaluation_runs.id
 Ref: trading.order_intents.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
 Ref: trading.order_intents.instrument_id > market_data.instruments.id
 Ref: trading.orders.bot_id > bot.bots.id
