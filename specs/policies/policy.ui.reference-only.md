@@ -3,10 +3,10 @@ schema_version: 1
 id: policy.ui.reference-only
 kind: policy
 status: approved
-revision: 1
+revision: 2
 refs: []
 ---
 
 # policy.ui.reference-only
 
-The current ui submodule and future UI skill outputs are reference proposals, not the approved UI baseline.
+The current ui submodule is obsolete and must not be used as a reference, seed, or approved baseline. Future UI skill outputs remain proposals until an exact new baseline is reviewed and approved.

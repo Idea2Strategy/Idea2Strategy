@@ -1,9 +1,19 @@
 schema_version: 1
 project_id: idea2strategy.platform
 workspaces:
-  - id: workspace.root
-    kind: root
-    path: .
-    commands_path: .harness/commands.yaml
-    responsibilities: [orchestration]
-    dependencies: []
+    - id: workspace.root
+      kind: root
+      path: .
+      responsibilities:
+        - orchestration
+      dependencies:
+        - workspace.ui
+      commands_path: .harness/commands.yaml
+    - id: workspace.ui
+      kind: submodule
+      path: ui
+      repository: https://github.com/Idea2Strategy/Idea2Strategy-ui.git
+      remote: https://github.com/Idea2Strategy/Idea2Strategy-ui.git
+      responsibilities:
+        - ui-baseline
+      dependencies: []

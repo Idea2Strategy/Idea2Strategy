@@ -3,10 +3,10 @@ schema_version: 1
 id: question.ui.visual-baseline
 kind: decision
 status: unknown
-revision: 1
+revision: 2
 refs: []
 ---
 
 # question.ui.visual-baseline
 
-Which layouts, responsive boundaries, design system, and editor interactions pass later representative UI review?
+Which exact layouts, responsive boundaries, colors, design system, panel density, and detailed editor interactions pass review in the new UI workspace without using the retired UI as an input?
