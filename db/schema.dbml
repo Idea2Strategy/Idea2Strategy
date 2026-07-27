@@ -1,831 +1,2085 @@
 Project Idea2Strategy {
   database_type: 'PostgreSQL'
-  Note: 'Logical model only. PostgreSQL is used for DBML validation; production DBMS, physical topology, precision, indexes, partitioning, retention and migrations are not selected.'
+  Note: '''
+  Production-oriented logical model for the complete Idea2Strategy service.
+
+  PostgreSQL is the authoritative system of record for identity, immutable strategy
+  releases, bot lifecycle, official events, live orders/fills, double-entry ledgers,
+  room rules/results, object manifests, audit records, and domain execution results.
+
+  S3-compatible object storage holds immutable high-volume market data, live decision
+  evidence, and backtest details. Every official object is addressed through storage.objects
+  and verified by content hash; a mutable URL or file name is never authoritative.
+
+  NoSQL/search/cache stores may contain rebuildable bot-overview, leaderboard, and log-search
+  projections only. They must not become the source of truth for money, orders, fills,
+  strategy runtime state, room rules, or official results. Projection progress is tracked
+  in operations.projection_checkpoints.
+
+  External queues and schedulers deliver market ingestion/normalization, automatic backtests,
+  performance and leaderboard projections, continuation expiry, notification delivery,
+  retention, and object-integrity verification. They are delivery infrastructure, not a
+  source of truth. PostgreSQL stores domain-specific run status, idempotency, locked inputs,
+  attempts where required by product meaning, results, failures, and transactional outbox rows.
+
+  Independent entity identifiers use PostgreSQL-generated UUIDv4 values through
+  gen_random_uuid(). Shared-primary-key extension tables reuse their parent's UUID, and pure
+  relationship tables use domain composite keys. UUID values never imply creation order;
+  ordered processing uses explicit timestamps and domain sequence columns.
+
+  PostgreSQL migrations must additionally enforce immutable-row permissions/triggers,
+  deferred balanced-ledger constraints, lifecycle transition guards, exclusion constraints
+  for overlapping effective periods, row-level security, partitioning, retention, and
+  partial unique indexes where DBML cannot express them.
+  '''
 }
 
-// identity: customer identity and access lifecycle
+// -----------------------------------------------------------------------------
+// Stable lifecycle enums. Open-ended reason/event codes remain varchar and are
+// versioned in application catalogs instead of PostgreSQL enums.
+// -----------------------------------------------------------------------------
+
+Enum identity.account_status {
+  PENDING_VERIFICATION
+  ACTIVE
+  CLOSING
+  CLOSED
+  SUSPENDED
+  PERMANENTLY_SANCTIONED
+}
+
+Enum identity.email_status {
+  PENDING
+  VERIFIED
+  REVOKED
+}
+
+Enum strategy.strategy_mode {
+  BASIC
+  PRO
+}
+
+Enum strategy.draft_status {
+  EDITABLE
+  VALIDATING
+  READY
+  RELEASED
+  DELETED
+}
+
+Enum strategy.validation_status {
+  RUNNING
+  VALID
+  INVALID
+  FAILED
+}
+
+Enum bot.bot_kind {
+  PERSONAL
+  ROOM
+}
+
+Enum bot.lifecycle_status {
+  WAITING
+  RUNNING
+  STOPPING
+  STOPPED
+}
+
+Enum trading.order_side {
+  BUY
+  SELL
+}
+
+Enum trading.position_effect {
+  OPEN_LONG
+  CLOSE_LONG
+  OPEN_SHORT
+  CLOSE_SHORT
+}
+
+Enum trading.order_type {
+  MARKET
+  LIMIT
+  STOP
+  STOP_LIMIT
+  TRAILING_STOP
+}
+
+Enum trading.time_in_force {
+  DAY
+  GTC
+  GTD
+}
+
+Enum trading.order_status {
+  PENDING
+  OPEN
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+  EXPIRED
+  REJECTED
+}
+
+Enum market_data.asset_type {
+  STOCK
+  ETF
+}
+
+Enum market_data.dataset_status {
+  BUILDING
+  AVAILABLE
+  QUARANTINED
+  SUPERSEDED
+  DELETED
+}
+
+Enum backtest.run_status {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  UNAVAILABLE
+}
+
+Enum competition.room_access_type {
+  PUBLIC
+  SECRET
+}
+
+Enum competition.room_status {
+  DRAFT
+  RECRUITING
+  SUBMISSION
+  WAITING
+  EVALUATING
+  ENDED
+  CANCELLED
+  INVALIDATED
+}
+
+Enum competition.participation_status {
+  WAITING
+  ACTIVE
+  WITHDRAWN
+  EXPELLED
+  COMPLETED
+}
+
+Enum operations.work_status {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+// -----------------------------------------------------------------------------
+// identity: private customer identity, authentication, consent, and sanctions.
+// PII is isolated from service-domain data.
+// -----------------------------------------------------------------------------
+
 Table identity.accounts {
-  id uuid [pk]
-  public_id varchar [not null, unique, note: 'Opaque service identifier.']
-  status varchar [not null]
-  created_at timestamp [not null]
-  closed_at timestamp
-}
-Table identity.login_methods {
-  id uuid [pk]
-  account_id uuid [not null]
-  method_type varchar [not null]
-  provider_subject varchar [not null]
-  verified_at timestamp
-  disabled_at timestamp
-  created_at timestamp [not null]
+  id uuid [pk, default: `gen_random_uuid()`]
+  status identity.account_status [not null]
+  preferred_language varchar(5) [not null, note: 'BCP 47 subset: ko or en in the current product.']
+  created_at timestamptz [not null, default: `now()`]
+  activated_at timestamptz
+  closing_started_at timestamptz
+  closed_at timestamptz
+  status_reason_code varchar(80)
+
   indexes {
-    (method_type, provider_subject) [unique]
+    (status, created_at)
   }
-}
-Table identity.sessions {
-  id uuid [pk]
-  account_id uuid [not null]
-  session_digest varchar [not null, unique, note: 'Never a raw token.']
-  issued_at timestamp [not null]
-  expires_at timestamp [not null]
-  revoked_at timestamp
-  revoke_reason varchar
-}
-Table identity.consents {
-  id uuid [pk]
-  account_id uuid [not null]
-  policy_code varchar [not null]
-  policy_version varchar [not null]
-  decision varchar [not null]
-  recorded_at timestamp [not null]
-  indexes {
-    (account_id, policy_code, policy_version) [unique]
-  }
-}
-Table identity.account_sanctions {
-  id uuid [pk]
-  account_id uuid [not null]
-  sanction_type varchar [not null]
-  reason_code varchar [not null]
-  effective_at timestamp [not null]
-  expires_at timestamp
-  lifted_at timestamp
-  operation_audit_event_id uuid
 }
 
-// strategy: mutable documents, validation and immutable releases
+Table identity.account_emails {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  email_ciphertext text [not null, note: 'Application-encrypted deliverable address; never copied to service schemas.']
+  email_lookup_hmac varchar(128) [not null, unique, note: 'Normalized email lookup without plaintext indexing.']
+  status identity.email_status [not null]
+  is_primary boolean [not null, default: false]
+  verification_digest varchar(128)
+  verification_expires_at timestamptz
+  verified_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  revoked_at timestamptz
+
+  indexes {
+    (account_id, status)
+  }
+
+  Note: 'A partial unique index must enforce one non-revoked primary email per account.'
+}
+
+Table identity.login_identities {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  provider_code varchar(40) [not null, note: 'PASSWORD or an approved social identity provider code.']
+  account_email_id uuid [note: 'Required only for PASSWORD; identifies the verified login email owned by the same account.']
+  provider_subject_hmac varchar(128) [note: 'Required only for social login; keyed digest of the provider subject, never an email-based auto-link key.']
+  linked_at timestamptz [not null, default: `now()`]
+  last_authenticated_at timestamptz
+  disabled_at timestamptz
+  disabled_reason_code varchar(80)
+
+  indexes {
+    (provider_code, provider_subject_hmac) [unique]
+    (account_email_id) [unique]
+    (account_id, provider_code)
+  }
+
+  Note: 'A database constraint must enforce PASSWORD => account_email_id present and provider_subject_hmac null; social provider => account_email_id null and provider_subject_hmac present. Linking also verifies that the email belongs to the same account and is VERIFIED.'
+}
+
+Table identity.password_credentials {
+  login_identity_id uuid [pk]
+  password_hash text [not null, note: 'Memory-hard password hash; never plaintext or reversible encryption.']
+  hash_scheme varchar(40) [not null]
+  hash_parameters jsonb [not null]
+  password_changed_at timestamptz [not null]
+  compromised_at timestamptz
+
+  Note: 'Allowed only for a PASSWORD login identity. Password reset replaces this hash atomically and consumes the authorizing reset request.'
+}
+
+Table identity.sessions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  authenticated_by_login_identity_id uuid [not null]
+  token_digest varchar(128) [not null, unique]
+  device_label varchar(120)
+  user_agent_summary varchar(300)
+  ip_prefix inet [note: 'Minimized security metadata; retention is policy-controlled.']
+  issued_at timestamptz [not null, default: `now()`]
+  last_seen_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  reauthenticated_at timestamptz
+  revoked_at timestamptz
+  revoke_reason_code varchar(80)
+
+  indexes {
+    (account_id, expires_at)
+    (account_id, revoked_at)
+  }
+}
+
+Table identity.password_reset_requests {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  account_email_id uuid [not null]
+  login_identity_id uuid [not null]
+  token_digest varchar(128) [not null, unique, note: 'Digest of a random, single-use reset token; never stores the delivered token.']
+  requested_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz [not null]
+  verified_at timestamptz
+  consumed_at timestamptz
+  revoked_at timestamptz
+  failed_attempt_count int [not null, default: 0]
+  request_ip_prefix inet [note: 'Minimized abuse-prevention metadata; retention is policy-controlled.']
+
+  indexes {
+    (account_email_id, requested_at)
+    (login_identity_id, consumed_at)
+    (expires_at, consumed_at)
+  }
+
+  Note: 'Service-owned verified-email password recovery. Consumption requires an unexpired, unrevoked request whose email and PASSWORD identity belong to the same account. Issuing a newer request may revoke older active requests by policy.'
+}
+
+Table identity.recovery_code_sets {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  issued_at timestamptz [not null, default: `now()`]
+  revoked_at timestamptz
+  revoke_reason_code varchar(80)
+
+  indexes {
+    (account_id, issued_at)
+  }
+}
+
+Table identity.recovery_codes {
+  id uuid [pk, default: `gen_random_uuid()`]
+  recovery_code_set_id uuid [not null]
+  code_digest varchar(128) [not null, unique]
+  used_at timestamptz
+
+  indexes {
+    (recovery_code_set_id, used_at)
+  }
+}
+
+Table identity.policy_versions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  policy_code varchar(80) [not null]
+  version varchar(40) [not null]
+  content_hash varchar(128) [not null]
+  published_at timestamptz [not null]
+  retired_at timestamptz
+
+  indexes {
+    (policy_code, version) [unique]
+  }
+}
+
+Table identity.account_consents {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  policy_version_id uuid [not null]
+  decision varchar(20) [not null, note: 'ACCEPTED or DECLINED.']
+  recorded_at timestamptz [not null, default: `now()`]
+  withdrawn_at timestamptz
+
+  indexes {
+    (account_id, policy_version_id) [unique]
+  }
+}
+
+Table identity.account_sanctions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  sanction_type varchar(40) [not null, note: 'SUSPENSION or PERMANENT.']
+  reason_code varchar(80) [not null]
+  applied_by_operator_id uuid [not null]
+  applied_at timestamptz [not null]
+  effective_at timestamptz [not null]
+  expires_at timestamptz
+  lifted_by_operator_id uuid
+  lifted_at timestamptz
+  lift_reason_code varchar(80)
+
+  indexes {
+    (account_id, effective_at)
+    (expires_at)
+  }
+}
+
+// -----------------------------------------------------------------------------
+// strategy: mutable working copies and immutable, server-validated releases.
+// Executable semantics and editor layout are separate JSONB documents.
+// -----------------------------------------------------------------------------
+
+Table strategy.catalog_versions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  language_version varchar(40) [not null]
+  schema_version varchar(40) [not null]
+  catalog_version varchar(40) [not null]
+  data_requirement_version varchar(40) [not null]
+  definition_hash varchar(128) [not null, unique]
+  published_at timestamptz [not null]
+  retired_at timestamptz
+
+  indexes {
+    (language_version, schema_version, catalog_version) [unique]
+  }
+}
+
 Table strategy.strategy_drafts {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   owner_account_id uuid [not null]
-  source_draft_id uuid
-  mode varchar [not null, note: 'BASIC or PRO.']
-  name varchar [not null]
-  description text
-  language_version varchar [not null]
-  schema_version varchar [not null]
-  catalog_version varchar [not null]
-  semantic_document json [not null, note: 'Typed executable blocks, nodes, ports, edges, parameters, semantic groups and policies.']
-  layout_document json [not null, note: 'Coordinates, sizes, viewport, zoom and non-executable editor state.']
-  semantic_hash varchar [not null]
-  layout_hash varchar [not null]
-  edit_sequence bigint [not null]
-  created_at timestamp [not null]
-  saved_at timestamp [not null]
+  copied_from_draft_id uuid
+  copied_from_version_id uuid
+  conversion_type varchar(40) [note: 'COPY, BASIC_TO_PRO, or CATALOG_UPGRADE; null for an original draft.']
+  mode strategy.strategy_mode [not null]
+  status strategy.draft_status [not null]
+  name varchar(120) [not null]
+  description text [note: 'User-facing, non-executable metadata; changes do not invalidate semantic validation.']
+  catalog_version_id uuid [not null]
+  semantic_document jsonb [not null]
+  layout_document jsonb [not null]
+  semantic_hash varchar(128) [not null]
+  layout_hash varchar(128) [not null]
+  edit_sequence bigint [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  saved_at timestamptz [not null]
+  released_at timestamptz
+  deleted_at timestamptz
+
+  indexes {
+    (owner_account_id, status, saved_at)
+    (semantic_hash)
+  }
+
+  Note: 'At most one copy-origin column may be set. Saving uses edit_sequence for optimistic concurrency.'
 }
+
+Table strategy.draft_edit_leases {
+  draft_id uuid [pk]
+  session_id uuid [not null]
+  lease_token_digest varchar(128) [not null, unique]
+  acquired_at timestamptz [not null]
+  heartbeat_at timestamptz [not null]
+  expires_at timestamptz [not null]
+
+  indexes {
+    (expires_at)
+  }
+
+  Note: 'Enforces the product rule that only one web, CLI, or delegated editor may edit a draft at a time.'
+}
+
 Table strategy.validation_runs {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   draft_id uuid [not null]
-  semantic_hash varchar [not null]
-  language_version varchar [not null]
-  catalog_version varchar [not null]
-  data_requirement_version varchar [not null]
-  status varchar [not null]
-  result_document json [not null]
-  validated_at timestamp [not null]
+  requested_by_account_id uuid [not null]
+  semantic_hash varchar(128) [not null]
+  catalog_version_id uuid [not null]
+  status strategy.validation_status [not null]
+  issue_count int [not null, default: 0]
+  result_document jsonb [not null]
+  requested_at timestamptz [not null, default: `now()`]
+  completed_at timestamptz
+
+  indexes {
+    (draft_id, requested_at)
+    (draft_id, semantic_hash, status)
+  }
 }
+
 Table strategy.strategy_versions {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   owner_account_id uuid [not null]
-  source_draft_id uuid [not null]
-  validation_run_id uuid [not null]
-  mode varchar [not null]
-  name varchar [not null]
+  source_draft_id uuid [not null, unique]
+  validation_run_id uuid [not null, unique]
+  copied_from_version_id uuid
+  mode strategy.strategy_mode [not null]
+  name varchar(120) [not null]
   description text
-  language_version varchar [not null]
-  schema_version varchar [not null]
-  catalog_version varchar [not null]
-  semantic_document json [not null]
-  layout_document json [not null]
-  semantic_hash varchar [not null]
-  layout_hash varchar [not null]
-  released_at timestamp [not null]
-  Note: 'Immutable. Runtime identity uses semantic_hash; layout is retained for exact viewing.'
+  catalog_version_id uuid [not null]
+  semantic_document jsonb [not null]
+  layout_document jsonb [not null]
+  semantic_hash varchar(128) [not null]
+  layout_hash varchar(128) [not null]
+  release_fingerprint varchar(128) [not null, unique, note: 'Hash of semantics plus every locked dependency.']
+  released_at timestamptz [not null, default: `now()`]
+  archived_at timestamptz
+
+  indexes {
+    (owner_account_id, released_at)
+    (semantic_hash)
+  }
+
+  Note: 'Immutable after insertion. Archive only affects the owner list; it never hides the automatic backtest.'
 }
+
 Table strategy.component_drafts {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   owner_account_id uuid [not null]
-  mode varchar [not null]
-  name varchar [not null]
-  semantic_document json [not null]
-  layout_document json [not null]
-  semantic_hash varchar [not null]
-  layout_hash varchar [not null]
-  edit_sequence bigint [not null]
-  saved_at timestamp [not null]
+  copied_from_version_id uuid
+  mode strategy.strategy_mode [not null]
+  name varchar(120) [not null]
+  description text
+  catalog_version_id uuid [not null]
+  semantic_document jsonb [not null]
+  layout_document jsonb [not null]
+  semantic_hash varchar(128) [not null]
+  layout_hash varchar(128) [not null]
+  edit_sequence bigint [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  saved_at timestamptz [not null]
+  deleted_at timestamptz
+
+  indexes {
+    (owner_account_id, saved_at)
+  }
 }
+
 Table strategy.component_versions {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   owner_account_id uuid [not null]
   source_draft_id uuid [not null]
-  semantic_document json [not null]
-  layout_document json [not null]
-  semantic_hash varchar [not null]
-  layout_hash varchar [not null]
-  released_at timestamp [not null]
+  mode strategy.strategy_mode [not null]
+  name varchar(120) [not null]
+  description text
+  catalog_version_id uuid [not null]
+  semantic_document jsonb [not null]
+  layout_document jsonb [not null]
+  semantic_hash varchar(128) [not null]
+  layout_hash varchar(128) [not null]
+  release_fingerprint varchar(128) [not null, unique]
+  released_at timestamptz [not null]
+
+  indexes {
+    (owner_account_id, released_at)
+  }
+
+  Note: 'Immutable account-private reusable component version.'
 }
+
 Table strategy.version_components {
   strategy_version_id uuid [not null]
   component_version_id uuid [not null]
-  reference_key varchar [not null]
+  reference_key varchar(120) [not null]
+  component_hash varchar(128) [not null]
+
   indexes {
     (strategy_version_id, reference_key) [pk]
     (strategy_version_id, component_version_id) [unique]
   }
 }
+
 Table strategy.version_instruments {
   strategy_version_id uuid [not null]
   instrument_id uuid [not null]
-  selection_source varchar [not null]
+  inclusion_type varchar(30) [not null, note: 'DIRECT_INCLUDE or DIRECT_EXCLUDE. This replaces ambiguous selection_source.']
+
   indexes {
-    (strategy_version_id, instrument_id) [pk]
+    (strategy_version_id, instrument_id, inclusion_type) [pk]
   }
 }
 
-// bot: immutable launch configuration and per-bot official order
-Table bot.bots {
-  id uuid [pk]
-  owner_account_id uuid [not null]
-  source_bot_id uuid
-  visibility varchar [not null]
-  lifecycle_status varchar [not null, note: 'WAITING, RUNNING or terminal STOPPED.']
-  initial_cash_amount decimal [not null]
-  base_currency varchar [not null, note: 'USD in current scope.']
-  current_event_sequence bigint [not null]
-  created_at timestamp [not null]
-  launched_at timestamp
-  stopped_at timestamp
-  stop_reason varchar
-}
-Table bot.bot_strategies {
-  id uuid [pk]
-  bot_id uuid [not null]
+Table strategy.version_universes {
   strategy_version_id uuid [not null]
-  position_order int [not null]
-  budget_limit_type varchar [not null]
-  budget_limit_value decimal [not null]
-  allocation_policy_document json [not null]
-  rebalance_policy_document json [not null]
-  conflict_policy_document json [not null]
-  indexes {
-    (bot_id, position_order) [unique]
-    (bot_id, strategy_version_id) [unique]
-  }
-}
-Table bot.bot_events {
-  id uuid [pk]
-  bot_id uuid [not null]
-  event_sequence bigint [not null]
-  event_type varchar [not null]
-  occurred_at timestamp [not null]
-  received_at timestamp [not null]
-  parent_event_id uuid
-  idempotency_key varchar [not null]
-  strategy_version_id uuid
-  market_dataset_manifest_id uuid
-  summary_document json [not null]
-  indexes {
-    (bot_id, event_sequence) [unique]
-    (bot_id, idempotency_key) [unique]
-  }
-}
-Table bot.strategy_runtime_states {
-  id uuid [pk]
-  bot_strategy_id uuid [not null]
-  state_key varchar [not null]
-  state_type varchar [not null]
-  current_value json [not null]
-  last_event_sequence bigint [not null]
-  indexes {
-    (bot_strategy_id, state_key) [unique]
-  }
-}
-Table bot.continuation_deadlines {
-  id uuid [pk]
-  bot_id uuid [not null]
-  due_at timestamp [not null]
-  basis_type varchar [not null]
-  basis_event_id uuid [not null]
-  confirmed_at timestamp
-  superseded_by_id uuid
-}
-
-// trading: live official orders, fills, reservations and ledger
-Table trading.order_candidate_batches {
-  id uuid [pk]
-  bot_id uuid [not null]
-  bot_event_id uuid [not null]
-  strategy_version_id uuid [not null]
-  status varchar [not null]
-  conflict_rule_document json [not null]
-  decided_at timestamp [not null]
-}
-Table trading.order_candidates {
-  id uuid [pk]
-  batch_id uuid [not null]
-  bot_strategy_id uuid [not null]
-  instrument_id uuid [not null]
-  side varchar [not null]
-  order_type varchar [not null]
-  requested_quantity decimal [not null]
-  requested_amount decimal
-  decision varchar [not null]
-  decision_reason varchar [not null]
-  final_quantity decimal
-  final_amount decimal
-}
-Table trading.orders {
-  id uuid [pk]
-  bot_id uuid [not null]
-  candidate_id uuid [not null, unique]
-  instrument_id uuid [not null]
-  side varchar [not null]
-  order_type varchar [not null]
-  time_in_force varchar [not null]
-  requested_quantity decimal [not null]
-  remaining_quantity decimal [not null]
-  limit_price decimal
-  stop_price decimal
-  trailing_value decimal
-  status varchar [not null]
-  accepted_event_sequence bigint [not null]
-  accepted_at timestamp [not null]
-  expires_at timestamp
-  replaced_order_id uuid
-  cancellation_reason varchar
-  Note: 'Immutable official live order; corrections and replacements reference prior records.'
-}
-Table trading.order_reservations {
-  id uuid [pk]
-  order_id uuid [not null]
-  reservation_type varchar [not null]
-  reserved_amount decimal
-  reserved_quantity decimal
-  status varchar [not null]
-  created_at timestamp [not null]
-  released_at timestamp
-  release_reason varchar
-}
-Table trading.fills {
-  id uuid [pk]
-  order_id uuid [not null]
-  bot_id uuid [not null]
-  instrument_id uuid [not null]
-  fill_sequence int [not null]
-  quantity decimal [not null]
-  reference_price decimal [not null]
-  fill_price decimal [not null]
-  fee_amount decimal [not null]
-  slippage_amount decimal [not null]
-  filled_at timestamp [not null]
-  bot_event_sequence bigint [not null]
-  indexes {
-    (order_id, fill_sequence) [unique]
-  }
-}
-Table trading.strategy_fill_allocations {
-  id uuid [pk]
-  fill_id uuid [not null]
-  bot_strategy_id uuid [not null]
-  allocated_quantity decimal [not null]
-  allocated_amount decimal [not null]
-  indexes {
-    (fill_id, bot_strategy_id) [unique]
-  }
-}
-Table trading.ledger_accounts {
-  id uuid [pk]
-  bot_id uuid [not null]
-  account_code varchar [not null]
-  account_type varchar [not null]
-  currency varchar [not null]
-  instrument_id uuid
-  indexes {
-    (bot_id, account_code) [unique]
-  }
-}
-Table trading.ledger_transactions {
-  id uuid [pk]
-  bot_id uuid [not null]
-  source_type varchar [not null]
-  source_id uuid [not null]
-  reversal_of_id uuid
-  occurred_at timestamp [not null]
-  bot_event_sequence bigint [not null]
-  description varchar [not null]
-  indexes {
-    (bot_id, source_type, source_id) [unique]
-  }
-  Note: 'Immutable header; a reversal is a new transaction referencing the original.'
-}
-Table trading.ledger_entries {
-  id uuid [pk]
-  transaction_id uuid [not null]
-  ledger_account_id uuid [not null]
-  entry_sequence int [not null]
-  amount decimal [not null, note: 'Signed; each transaction must balance to zero.']
-  quantity decimal
-  bot_strategy_id uuid
-  indexes {
-    (transaction_id, entry_sequence) [unique]
-  }
-}
-Table trading.position_lots {
-  id uuid [pk]
-  bot_id uuid [not null]
-  bot_strategy_id uuid [not null]
-  instrument_id uuid [not null]
-  opening_fill_id uuid [not null]
-  position_side varchar [not null]
-  opened_quantity decimal [not null]
-  remaining_quantity decimal [not null]
-  unit_cost decimal [not null]
-  opened_at timestamp [not null]
-}
-Table trading.lot_consumptions {
-  id uuid [pk]
-  position_lot_id uuid [not null]
-  closing_fill_id uuid [not null]
-  consumed_quantity decimal [not null]
-  realized_pnl decimal [not null]
-  consumed_at timestamp [not null]
-  indexes {
-    (position_lot_id, closing_fill_id) [unique]
-  }
-}
-
-// market_data: supported instruments and immutable dataset manifests
-Table market_data.instruments {
-  id uuid [pk]
-  symbol varchar [not null, unique]
-  asset_type varchar [not null]
-  exchange_code varchar [not null]
-  currency varchar [not null]
-  listed_at timestamp
-  delisted_at timestamp
-  support_status varchar [not null]
-}
-Table market_data.official_universes {
-  id uuid [pk]
-  code varchar [not null, unique]
-  name varchar [not null]
-  definition_version varchar [not null]
-  status varchar [not null]
-  effective_at timestamp [not null]
-}
-Table market_data.universe_memberships {
-  id uuid [pk]
   universe_id uuid [not null]
-  instrument_id uuid [not null]
-  effective_from timestamp [not null]
-  effective_to timestamp
-  source_event_id uuid [not null]
+
   indexes {
-    (universe_id, instrument_id, effective_from) [unique]
+    (strategy_version_id, universe_id) [pk]
+  }
+
+  Note: 'References the official universe identity, not a copied member list, so approved membership changes affect live bots prospectively.'
+}
+
+Table strategy.platform_templates {
+  id uuid [pk, default: `gen_random_uuid()`]
+  code varchar(80) [not null, unique]
+  mode strategy.strategy_mode [not null]
+  status varchar(30) [not null]
+  created_at timestamptz [not null]
+  retired_at timestamptz
+}
+
+Table strategy.platform_template_versions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  template_id uuid [not null]
+  version varchar(40) [not null]
+  catalog_version_id uuid [not null]
+  name_i18n jsonb [not null]
+  description_i18n jsonb [not null]
+  semantic_skeleton jsonb [not null, note: 'Structure only; legally sensitive user values remain empty.']
+  layout_document jsonb [not null]
+  content_hash varchar(128) [not null, unique]
+  published_at timestamptz [not null]
+  retired_at timestamptz
+
+  indexes {
+    (template_id, version) [unique]
   }
 }
-Table market_data.providers {
-  id uuid [pk]
-  code varchar [not null, unique]
-  name varchar [not null]
-  rights_version varchar [not null]
-  status varchar [not null]
+
+// -----------------------------------------------------------------------------
+// storage: authoritative manifests for immutable S3-compatible objects.
+// -----------------------------------------------------------------------------
+
+Table storage.objects {
+  id uuid [pk, default: `gen_random_uuid()`]
+  storage_class varchar(40) [not null]
+  bucket_code varchar(80) [not null]
+  object_key varchar(600) [not null]
+  provider_version_id varchar(300) [not null, note: 'Object-store versioning is mandatory for official evidence.']
+  content_sha256 varchar(128) [not null]
+  byte_size bigint [not null]
+  media_type varchar(120) [not null]
+  format_version varchar(40) [not null]
+  encryption_profile varchar(80) [not null]
+  created_at timestamptz [not null, default: `now()`]
+  verified_at timestamptz
+  retention_until timestamptz
+  legal_hold boolean [not null, default: false]
+  deleted_at timestamptz
+
+  indexes {
+    (bucket_code, object_key, provider_version_id) [unique]
+    (content_sha256)
+    (verified_at)
+    (retention_until)
+  }
+
+  Note: 'Object bytes are immutable. Deletion is a separately authorized retention action, never an overwrite.'
 }
+
+// -----------------------------------------------------------------------------
+// market_data: supported instruments, point-in-time universes, licensed feeds,
+// immutable dataset manifests, corporate actions, and batch ingestion evidence.
+// -----------------------------------------------------------------------------
+
+Table market_data.instruments {
+  id uuid [pk, default: `gen_random_uuid()`]
+  asset_type market_data.asset_type [not null]
+  primary_exchange_mic varchar(8) [not null]
+  currency_code char(3) [not null, default: 'USD']
+  fractional_trading_status varchar(30) [not null]
+  support_status varchar(30) [not null]
+  listed_on date
+  delisted_on date
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (support_status, asset_type)
+  }
+}
+
+Table market_data.instrument_symbols {
+  id uuid [pk, default: `gen_random_uuid()`]
+  instrument_id uuid [not null]
+  symbol varchar(32) [not null]
+  exchange_mic varchar(8) [not null]
+  effective_from date [not null]
+  effective_to date
+  change_reason_code varchar(80)
+
+  indexes {
+    (exchange_mic, symbol, effective_from) [unique]
+    (instrument_id, effective_from)
+  }
+
+  Note: 'Migration must prevent overlapping effective periods for the same instrument and exchange/symbol.'
+}
+
+Table market_data.official_universes {
+  id uuid [pk, default: `gen_random_uuid()`]
+  code varchar(80) [not null, unique]
+  name_i18n jsonb [not null]
+  universe_type varchar(40) [not null, note: 'DYNAMIC_INDEX or FIXED_PLATFORM_LIST.']
+  status varchar(30) [not null]
+  created_at timestamptz [not null]
+  retired_at timestamptz
+}
+
+Table market_data.universe_versions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  universe_id uuid [not null]
+  version varchar(40) [not null]
+  effective_from timestamptz [not null]
+  effective_to timestamptz
+  source_hash varchar(128) [not null]
+  published_at timestamptz [not null]
+
+  indexes {
+    (universe_id, version) [unique]
+    (universe_id, effective_from)
+  }
+}
+
+Table market_data.universe_members {
+  universe_version_id uuid [not null]
+  instrument_id uuid [not null]
+  membership_reason_code varchar(80) [not null]
+
+  indexes {
+    (universe_version_id, instrument_id) [pk]
+  }
+}
+
+Table market_data.trading_sessions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  exchange_mic varchar(8) [not null]
+  session_date date [not null]
+  opens_at timestamptz [not null]
+  closes_at timestamptz [not null]
+  session_type varchar(30) [not null, note: 'REGULAR, EARLY_CLOSE, or CLOSED.']
+  calendar_version varchar(40) [not null]
+
+  indexes {
+    (exchange_mic, session_date) [unique]
+  }
+}
+
+Table market_data.providers {
+  id uuid [pk, default: `gen_random_uuid()`]
+  code varchar(80) [not null, unique]
+  name varchar(160) [not null]
+  rights_version varchar(80) [not null, note: 'Exact provider and licensed rights remain an external evidence-dependent decision.']
+  status varchar(30) [not null]
+  created_at timestamptz [not null]
+}
+
 Table market_data.feeds {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   provider_id uuid [not null]
-  code varchar [not null]
-  data_kind varchar [not null]
-  resolution varchar [not null]
-  session_scope varchar [not null]
-  status varchar [not null]
+  code varchar(80) [not null]
+  data_kind varchar(40) [not null, note: 'QUOTE, TRADE, BAR, CORPORATE_ACTION, BORROW, or REFERENCE.']
+  resolution varchar(30) [not null]
+  session_scope varchar(30) [not null]
+  status varchar(30) [not null]
+
   indexes {
     (provider_id, code) [unique]
   }
 }
+
 Table market_data.dataset_manifests {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   feed_id uuid [not null]
   instrument_id uuid
-  data_layer varchar [not null, note: 'RAW, ADJUSTED or DERIVED.']
-  resolution varchar [not null]
-  period_start timestamp [not null]
-  period_end timestamp [not null]
+  data_layer varchar(30) [not null, note: 'RAW, ADJUSTED, REGULAR_1M, REGULAR_5M, or DERIVED.']
+  resolution varchar(30) [not null]
+  period_start timestamptz [not null]
+  period_end timestamptz [not null]
   revision_number int [not null]
-  as_of_at timestamp [not null]
-  processing_version varchar [not null]
-  quality_status varchar [not null]
+  as_of_at timestamptz [not null]
+  processing_version varchar(80) [not null]
+  quality_status varchar(30) [not null]
+  status market_data.dataset_status [not null]
   row_count bigint [not null]
-  manifest_hash varchar [not null, unique]
-  created_at timestamp [not null]
+  manifest_hash varchar(128) [not null, unique]
+  created_at timestamptz [not null, default: `now()`]
+  supersedes_manifest_id uuid
+
+  indexes {
+    (feed_id, instrument_id, data_layer, resolution, period_start, revision_number) [unique]
+    (status, period_end)
+  }
+
+  Note: 'Migration must enforce null-safe uniqueness when instrument_id is null for a multi-instrument dataset.'
 }
+
 Table market_data.dataset_objects {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   dataset_manifest_id uuid [not null]
-  object_kind varchar [not null]
-  logical_object_key varchar [not null, unique]
-  content_hash varchar [not null]
-  format_version varchar [not null]
-  byte_size bigint [not null]
+  object_id uuid [not null]
+  object_kind varchar(40) [not null]
+  partition_key varchar(200) [not null]
   row_count bigint [not null]
-  created_at timestamp [not null]
+  minimum_event_at timestamptz
+  maximum_event_at timestamptz
+
+  indexes {
+    (dataset_manifest_id, object_kind, partition_key) [unique]
+    (object_id) [unique]
+  }
 }
+
 Table market_data.dataset_lineage {
   derived_manifest_id uuid [not null]
   source_manifest_id uuid [not null]
-  relationship_type varchar [not null]
+  relationship_type varchar(40) [not null]
+
   indexes {
-    (derived_manifest_id, source_manifest_id) [pk]
+    (derived_manifest_id, source_manifest_id, relationship_type) [pk]
   }
 }
+
 Table market_data.corporate_actions {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   instrument_id uuid [not null]
-  action_type varchar [not null]
-  effective_at timestamp [not null]
-  confirmation_status varchar [not null]
-  source_document json [not null]
-  accounting_effect_document json
+  provider_event_key varchar(160) [not null]
+  action_type varchar(50) [not null]
+  announced_at timestamptz
+  effective_at timestamptz [not null]
+  payable_at timestamptz
+  status varchar(30) [not null]
+  terms_document jsonb [not null]
+  source_hash varchar(128) [not null]
   supersedes_action_id uuid
-  recorded_at timestamp [not null]
-}
-Table market_data.quality_incidents {
-  id uuid [pk]
-  dataset_manifest_id uuid
-  instrument_id uuid
-  incident_type varchar [not null]
-  period_start timestamp [not null]
-  period_end timestamp
-  status varchar [not null]
-  impact_document json [not null]
-  recorded_at timestamp [not null]
+  recorded_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (instrument_id, provider_event_key) [unique]
+    (effective_at, status)
+  }
 }
 
-// backtest: relational summaries plus immutable detail object manifests
-Table backtest.evaluation_periods {
-  id uuid [pk]
-  release_quarter varchar [not null, unique]
-  period_start timestamp [not null]
-  period_end timestamp [not null]
-  initial_cash_amount decimal [not null, note: 'USD 10,000 in current official model.']
-  settings_version varchar [not null]
-  published_at timestamp [not null]
+Table market_data.borrow_snapshots {
+  id uuid [pk, default: `gen_random_uuid()`]
+  instrument_id uuid [not null]
+  feed_id uuid [not null]
+  observed_at timestamptz [not null]
+  received_at timestamptz [not null]
+  available_quantity numeric(28,8)
+  annualized_rate numeric(18,10)
+  availability_status varchar(30) [not null]
+  source_hash varchar(128) [not null]
+
+  indexes {
+    (instrument_id, observed_at)
+  }
+
+  Note: 'Retention/partitioning is physical design. Exact snapshots used by official actions are pinned through bot events/evidence.'
 }
+
+Table market_data.quality_incidents {
+  id uuid [pk, default: `gen_random_uuid()`]
+  dataset_manifest_id uuid
+  instrument_id uuid
+  incident_type varchar(80) [not null]
+  severity varchar(20) [not null]
+  period_start timestamptz [not null]
+  period_end timestamptz
+  status varchar(30) [not null]
+  impact_document jsonb [not null]
+  detected_at timestamptz [not null]
+  resolved_at timestamptz
+
+  indexes {
+    (status, severity, detected_at)
+  }
+}
+
+Table market_data.pipeline_runs {
+  id uuid [pk, default: `gen_random_uuid()`]
+  pipeline_type varchar(60) [not null, note: 'INGEST, QUALITY_CHECK, ADJUST, REGULAR_SESSION_FILTER, or RESAMPLE.']
+  processing_version varchar(80) [not null]
+  status operations.work_status [not null]
+  idempotency_key varchar(200) [not null, unique]
+  scheduled_for timestamptz [not null]
+  requested_at timestamptz [not null]
+  started_at timestamptz
+  completed_at timestamptz
+  input_document jsonb [not null]
+  result_document jsonb
+  failure_code varchar(80)
+
+  indexes {
+    (pipeline_type, status, scheduled_for)
+  }
+
+  Note: 'Business execution history. An external scheduler/queue delivers work; this row never acts as the queue.'
+}
+
+Table market_data.pipeline_partitions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  pipeline_run_id uuid [not null]
+  instrument_id uuid
+  partition_key varchar(200) [not null]
+  status operations.work_status [not null]
+  result_manifest_id uuid
+  started_at timestamptz
+  completed_at timestamptz
+  failure_code varchar(80)
+  result_document jsonb
+
+  indexes {
+    (pipeline_run_id, partition_key) [unique]
+    (status, completed_at)
+  }
+}
+
+// -----------------------------------------------------------------------------
+// bot: immutable launch configuration, serialized official events, decision
+// summaries, current strategy state, and auditable continuation periods.
+// -----------------------------------------------------------------------------
+
+Table bot.bots {
+  id uuid [pk, default: `gen_random_uuid()`]
+  owner_account_id uuid [not null]
+  copied_from_bot_id uuid [note: 'Configuration lineage only; runtime state, cash, orders, positions, ledger, and performance are never copied.']
+  bot_kind bot.bot_kind [not null]
+  name varchar(120) [not null]
+  lifecycle_status bot.lifecycle_status [not null]
+  last_committed_event_sequence bigint [not null, default: 0, note: 'Serialization and optimistic-concurrency cursor for this bot official event stream.']
+  created_at timestamptz [not null, default: `now()`]
+  scheduled_start_at timestamptz
+  started_at timestamptz
+  stop_requested_at timestamptz
+  stopped_at timestamptz
+  stop_reason_code varchar(80)
+
+  indexes {
+    (owner_account_id, lifecycle_status, created_at)
+    (lifecycle_status, scheduled_start_at)
+  }
+
+  Note: 'There is no visibility column. Personal bots are private; room exposure is owned by competition.participations.'
+}
+
+Table bot.launch_configurations {
+  bot_id uuid [pk]
+  initial_cash_amount numeric(24,8) [not null]
+  currency_code char(3) [not null, default: 'USD']
+  broker_rules_version varchar(80) [not null]
+  accounting_rules_version varchar(80) [not null]
+  precision_rules_version varchar(80) [not null]
+  fee_configuration jsonb [not null]
+  slippage_configuration jsonb [not null]
+  portfolio_risk_policy jsonb [not null]
+  candidate_conflict_policy jsonb [not null]
+  shared_state_contract jsonb [not null]
+  configuration_hash varchar(128) [not null, unique]
+  locked_at timestamptz [not null]
+
+  Note: 'Immutable one-to-one launch contract. Room bots use room-locked values copied into this exact contract.'
+}
+
+Table bot.bot_strategies {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  strategy_version_id uuid [not null]
+  budget_limit_type varchar(30) [not null]
+  budget_limit_value numeric(24,10) [not null]
+  priority_rank int [note: 'User-visible priority only where Pro conflict/allocation policy requires it; never editor position or hidden evaluation order.']
+  allocation_policy jsonb [not null]
+  rebalance_policy jsonb [not null]
+  state_binding_document jsonb [not null]
+  configuration_hash varchar(128) [not null]
+
+  indexes {
+    (bot_id, strategy_version_id) [unique]
+    (bot_id, priority_rank) [unique]
+  }
+
+  Note: 'PostgreSQL permits multiple null priority ranks but rejects duplicate configured ranks for the same bot.'
+}
+
+Table bot.bot_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  event_sequence bigint [not null]
+  event_type varchar(80) [not null]
+  event_schema_version varchar(40) [not null]
+  causation_event_id uuid
+  correlation_id uuid [not null]
+  idempotency_key varchar(160) [not null]
+  occurred_at timestamptz [not null]
+  received_at timestamptz [not null]
+  committed_at timestamptz [not null, default: `now()`]
+  summary_document jsonb [not null]
+  market_dataset_manifest_id uuid
+  evidence_object_id uuid
+
+  indexes {
+    (bot_id, event_sequence) [unique]
+    (bot_id, idempotency_key) [unique]
+    (correlation_id)
+    (event_type, committed_at)
+  }
+
+  Note: 'Append-only official stream. event_sequence is gapless per bot and allocated in the same transaction as official effects.'
+}
+
+Table bot.evaluation_runs {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  trigger_event_id uuid [not null]
+  result_event_id uuid [unique]
+  status varchar(30) [not null]
+  input_state_hash varchar(128) [not null]
+  input_market_hash varchar(128) [not null]
+  candidate_set_hash varchar(128)
+  started_at timestamptz [not null]
+  completed_at timestamptz
+  failure_code varchar(80)
+  summary_document jsonb [not null]
+
+  indexes {
+    (bot_id, started_at)
+    (trigger_event_id) [unique]
+  }
+}
+
+Table bot.evaluation_strategy_results {
+  id uuid [pk, default: `gen_random_uuid()`]
+  evaluation_run_id uuid [not null]
+  bot_strategy_id uuid [not null]
+  status varchar(30) [not null]
+  active_trigger_count int [not null]
+  candidate_count int [not null]
+  state_change_count int [not null]
+  result_hash varchar(128) [not null]
+  failure_code varchar(80)
+  summary_document jsonb [not null]
+
+  indexes {
+    (evaluation_run_id, bot_strategy_id) [unique]
+  }
+}
+
+Table bot.runtime_state_values {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  bot_strategy_id uuid
+  state_definition_key varchar(160) [not null]
+  scope_type varchar(40) [not null, note: 'BOT, STRATEGY, INSTRUMENT, POSITION, or ORDER_GROUP.']
+  scope_id uuid
+  value_type varchar(30) [not null]
+  current_value jsonb [not null]
+  last_event_sequence bigint [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (bot_id, state_definition_key, scope_type, scope_id, bot_strategy_id) [unique]
+    (bot_id, last_event_sequence)
+  }
+
+  Note: 'Official current state remains PostgreSQL-owned. Redis/NoSQL may cache but cannot accept authoritative writes. Migration must enforce null-safe uniqueness for the optional scope and strategy identifiers.'
+}
+
+Table bot.runtime_state_changes {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_event_id uuid [not null]
+  runtime_state_value_id uuid [not null]
+  previous_value_hash varchar(128) [not null]
+  new_value jsonb [not null]
+  new_value_hash varchar(128) [not null]
+  change_reason_code varchar(80) [not null]
+
+  indexes {
+    (bot_event_id, runtime_state_value_id) [unique]
+  }
+
+  Note: 'Append-only evidence for every committed strategy-state mutation.'
+}
+
+Table bot.continuation_periods {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  basis_type varchar(40) [not null, note: 'ROOM_END, ROOM_WITHDRAWAL, FORCED_ROOM_END, or USER_RENEWAL.']
+  basis_record_id uuid [not null]
+  period_start_at timestamptz [not null]
+  due_at timestamptz [not null]
+  renewal_window_opens_at timestamptz [not null]
+  status varchar(30) [not null, note: 'PENDING, CONFIRMED, EXPIRED, or SUPERSEDED.']
+  confirmed_at timestamptz
+  expired_at timestamptz
+  supersedes_period_id uuid
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (bot_id, period_start_at) [unique]
+    (status, due_at)
+  }
+
+  Note: 'Append-only renewal history. A partial unique index must allow only one PENDING period per bot. A scheduled batch claims due rows and initiates the idempotent stop workflow.'
+}
+
+// -----------------------------------------------------------------------------
+// trading: official decision convergence, orders and append-only order events,
+// fills, reservations, double-entry ledger, FIFO lots, and rebuildable current
+// projections. Users never write orders directly.
+// -----------------------------------------------------------------------------
+
+Table trading.order_intent_batches {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  evaluation_run_id uuid [not null, unique]
+  source_event_id uuid [not null]
+  status varchar(30) [not null]
+  conflict_policy_hash varchar(128) [not null]
+  input_state_hash varchar(128) [not null]
+  result_hash varchar(128)
+  finalized_at timestamptz
+
+  indexes {
+    (bot_id, finalized_at)
+  }
+}
+
+Table trading.order_intents {
+  id uuid [pk, default: `gen_random_uuid()`]
+  batch_id uuid [not null]
+  bot_strategy_id uuid [not null]
+  instrument_id uuid [not null]
+  intent_key varchar(160) [not null]
+  side trading.order_side [not null]
+  position_effect trading.position_effect [not null]
+  order_type trading.order_type [not null]
+  time_in_force trading.time_in_force [not null]
+  requested_quantity numeric(28,8)
+  requested_notional numeric(24,8)
+  limit_price numeric(24,8)
+  stop_price numeric(24,8)
+  trailing_amount numeric(24,8)
+  trailing_percent numeric(18,10)
+  expires_at timestamptz
+  decision varchar(30) [not null, note: 'APPROVED, REJECTED, REDUCED, NETTED, or CONFLICTED.']
+  decision_reason_code varchar(80) [not null]
+  approved_quantity numeric(28,8)
+  approved_notional numeric(24,8)
+
+  indexes {
+    (batch_id, intent_key) [unique]
+    (instrument_id, decision)
+  }
+}
+
+Table trading.order_groups {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  group_type varchar(30) [not null, note: 'OCO, BRACKET, or MULTI_LEG.']
+  group_key varchar(160) [not null]
+  status varchar(30) [not null]
+  created_event_id uuid [not null]
+  closed_event_id uuid
+
+  indexes {
+    (bot_id, group_key) [unique]
+  }
+}
+
+Table trading.orders {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  source_intent_id uuid [not null, unique]
+  instrument_id uuid [not null]
+  order_group_id uuid
+  replaces_order_id uuid
+  side trading.order_side [not null]
+  position_effect trading.position_effect [not null]
+  order_type trading.order_type [not null]
+  time_in_force trading.time_in_force [not null]
+  requested_quantity numeric(28,8) [not null]
+  requested_notional numeric(24,8)
+  limit_price numeric(24,8)
+  stop_price numeric(24,8)
+  trailing_amount numeric(24,8)
+  trailing_percent numeric(18,10)
+  expires_at timestamptz [not null]
+  accepted_event_id uuid [not null, unique]
+  accepted_at timestamptz [not null]
+  contract_hash varchar(128) [not null, unique]
+
+  indexes {
+    (bot_id, accepted_at)
+    (instrument_id, accepted_at)
+    (order_group_id)
+  }
+
+  Note: 'Immutable order contract. Status and remaining quantity come from append-only order_events and order_state_projections.'
+}
+
+Table trading.order_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  order_id uuid [not null]
+  bot_event_id uuid [not null, unique]
+  order_event_sequence int [not null]
+  event_type varchar(50) [not null]
+  resulting_status trading.order_status [not null]
+  quantity_delta numeric(28,8) [not null, default: 0]
+  remaining_quantity numeric(28,8) [not null]
+  reason_code varchar(80)
+  occurred_at timestamptz [not null]
+
+  indexes {
+    (order_id, order_event_sequence) [unique]
+    (resulting_status, occurred_at)
+  }
+}
+
+Table trading.order_state_projections {
+  order_id uuid [pk]
+  status trading.order_status [not null]
+  filled_quantity numeric(28,8) [not null]
+  remaining_quantity numeric(28,8) [not null]
+  reserved_cash numeric(24,8) [not null]
+  reserved_quantity numeric(28,8) [not null]
+  last_order_event_sequence int [not null]
+  last_bot_event_sequence bigint [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (status, updated_at)
+  }
+
+  Note: 'Rebuildable PostgreSQL read model. It must never override order_events.'
+}
+
+Table trading.fills {
+  id uuid [pk, default: `gen_random_uuid()`]
+  order_id uuid [not null]
+  bot_id uuid [not null]
+  instrument_id uuid [not null]
+  bot_event_id uuid [not null, unique]
+  fill_sequence int [not null]
+  quantity numeric(28,8) [not null]
+  reference_price numeric(24,8) [not null]
+  fill_price numeric(24,8) [not null]
+  gross_amount numeric(24,8) [not null]
+  fee_amount numeric(24,8) [not null]
+  slippage_amount numeric(24,8) [not null]
+  liquidity_document jsonb [not null]
+  filled_at timestamptz [not null]
+  reversal_of_fill_id uuid
+
+  indexes {
+    (order_id, fill_sequence) [unique]
+    (bot_id, filled_at)
+  }
+
+  Note: 'Immutable. Corrections and reversals are new fills/events that reference the original.'
+}
+
+Table trading.fill_allocations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  fill_id uuid [not null]
+  bot_strategy_id uuid [not null]
+  source_intent_id uuid [not null]
+  allocated_quantity numeric(28,8) [not null]
+  allocated_gross_amount numeric(24,8) [not null]
+  allocated_fee_amount numeric(24,8) [not null]
+  allocation_rule_hash varchar(128) [not null]
+
+  indexes {
+    (fill_id, bot_strategy_id, source_intent_id) [unique]
+  }
+}
+
+Table trading.ledger_accounts {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  account_code varchar(160) [not null]
+  account_type varchar(40) [not null]
+  currency_code char(3) [not null]
+  instrument_id uuid
+  normal_balance varchar(10) [not null, note: 'DEBIT or CREDIT.']
+  created_at timestamptz [not null]
+
+  indexes {
+    (bot_id, account_code) [unique]
+  }
+}
+
+Table trading.ledger_transactions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  bot_event_id uuid [not null, unique]
+  transaction_type varchar(50) [not null]
+  source_type varchar(50) [not null]
+  source_id uuid [not null]
+  reversal_of_transaction_id uuid
+  accounting_rules_version varchar(80) [not null]
+  occurred_at timestamptz [not null]
+  description_code varchar(80) [not null]
+  transaction_hash varchar(128) [not null, unique]
+
+  indexes {
+    (bot_id, occurred_at)
+    (source_type, source_id)
+  }
+
+  Note: 'Append-only header. A deferred database constraint must require every transaction to balance exactly to zero.'
+}
+
+Table trading.ledger_entries {
+  id uuid [pk, default: `gen_random_uuid()`]
+  transaction_id uuid [not null]
+  ledger_account_id uuid [not null]
+  entry_sequence int [not null]
+  amount numeric(30,10) [not null, note: 'Signed exact currency amount.']
+  quantity numeric(30,10)
+  bot_strategy_id uuid
+  memo_code varchar(80)
+
+  indexes {
+    (transaction_id, entry_sequence) [unique]
+    (ledger_account_id, transaction_id)
+  }
+}
+
+Table trading.position_lots {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  bot_strategy_id uuid [not null]
+  instrument_id uuid [not null]
+  opening_fill_id uuid [not null]
+  position_side varchar(10) [not null, note: 'LONG or SHORT.']
+  opened_quantity numeric(28,8) [not null]
+  opening_unit_cost numeric(24,8) [not null]
+  opened_at timestamptz [not null]
+
+  indexes {
+    (bot_id, instrument_id, opened_at)
+    (opening_fill_id, bot_strategy_id) [unique]
+  }
+
+  Note: 'Immutable opening lot. Remaining quantity is derived from lot_movements.'
+}
+
+Table trading.lot_movements {
+  id uuid [pk, default: `gen_random_uuid()`]
+  position_lot_id uuid [not null]
+  bot_event_id uuid [not null]
+  movement_sequence int [not null]
+  movement_type varchar(40) [not null, note: 'CLOSE, CORPORATE_ACTION, CORRECTION, or REVERSAL.']
+  quantity_delta numeric(28,8) [not null]
+  cost_basis_delta numeric(24,8) [not null]
+  realized_pnl numeric(24,8) [not null]
+  source_fill_id uuid
+  corporate_action_id uuid
+  occurred_at timestamptz [not null]
+
+  indexes {
+    (position_lot_id, movement_sequence) [unique]
+    (bot_event_id, position_lot_id) [unique]
+  }
+}
+
+Table trading.position_projections {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  instrument_id uuid [not null]
+  net_quantity numeric(28,8) [not null]
+  average_cost numeric(24,8)
+  realized_pnl numeric(24,8) [not null]
+  last_valuation_price numeric(24,8)
+  last_valuation_at timestamptz
+  valuation_status varchar(30) [not null]
+  last_bot_event_sequence bigint [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (bot_id, instrument_id) [unique]
+  }
+
+  Note: 'Rebuildable current bot-wide net position; lot and ledger records remain authoritative.'
+}
+
+Table trading.strategy_position_projections {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_strategy_id uuid [not null]
+  instrument_id uuid [not null]
+  attributed_quantity numeric(28,8) [not null]
+  attributed_cost numeric(24,8) [not null]
+  realized_pnl numeric(24,8) [not null]
+  last_bot_event_sequence bigint [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (bot_strategy_id, instrument_id) [unique]
+  }
+}
+
+// -----------------------------------------------------------------------------
+// backtest: exactly one automatic official run per immutable strategy version.
+// Heavy details live in immutable S3 objects; summaries and manifests stay RDB.
+// -----------------------------------------------------------------------------
+
+Table backtest.evaluation_periods {
+  id uuid [pk, default: `gen_random_uuid()`]
+  release_quarter char(7) [not null, unique, note: 'ET calendar quarter, e.g. 2026-Q3.']
+  period_start timestamptz [not null]
+  period_end timestamptz [not null]
+  calendar_version varchar(80) [not null]
+  published_at timestamptz [not null]
+  period_hash varchar(128) [not null, unique]
+}
+
+Table backtest.official_settings {
+  id uuid [pk, default: `gen_random_uuid()`]
+  version varchar(40) [not null, unique]
+  initial_cash_amount numeric(24,8) [not null]
+  currency_code char(3) [not null, default: 'USD']
+  calculation_model_version varchar(80) [not null]
+  accounting_rules_version varchar(80) [not null]
+  execution_model_version varchar(80) [not null]
+  precision_rules_version varchar(80) [not null]
+  fee_configuration jsonb [not null]
+  slippage_configuration jsonb [not null]
+  settings_hash varchar(128) [not null, unique]
+  published_at timestamptz [not null]
+  retired_at timestamptz
+}
+
 Table backtest.runs {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   owner_account_id uuid [not null]
   strategy_version_id uuid [not null, unique]
   evaluation_period_id uuid [not null]
-  status varchar [not null]
-  catalog_version varchar [not null]
-  calculation_model_version varchar [not null]
-  cost_model_version varchar [not null]
-  started_at timestamp
-  completed_at timestamp
-  failure_code varchar
-  failure_detail_document json
-  created_at timestamp [not null]
+  official_settings_id uuid [not null]
+  status backtest.run_status [not null]
+  unavailable_reason_code varchar(80)
+  failure_code varchar(80)
+  failure_document jsonb
+  queued_at timestamptz [not null, default: `now()`]
+  started_at timestamptz
+  completed_at timestamptz
+  result_hash varchar(128)
+
+  indexes {
+    (status, queued_at)
+    (owner_account_id, queued_at)
+  }
+
+  Note: 'One row is created in the strategy-release transaction. Heavy execution starts asynchronously and is never user-cancellable.'
 }
+
+Table backtest.run_attempts {
+  id uuid [pk, default: `gen_random_uuid()`]
+  run_id uuid [not null]
+  attempt_number int [not null]
+  worker_execution_id varchar(160)
+  status operations.work_status [not null]
+  started_at timestamptz [not null]
+  heartbeat_at timestamptz
+  completed_at timestamptz
+  failure_code varchar(80)
+
+  indexes {
+    (run_id, attempt_number) [unique]
+  }
+
+  Note: 'Internal retries remain attempts of the same official run, never a second run for the strategy version.'
+}
+
 Table backtest.input_bundles {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   run_id uuid [not null, unique]
-  bundle_hash varchar [not null, unique]
-  locked_at timestamp [not null]
+  bundle_hash varchar(128) [not null]
+  as_of_at timestamptz [not null]
+  locked_at timestamptz [not null]
 }
+
 Table backtest.input_datasets {
   input_bundle_id uuid [not null]
   dataset_manifest_id uuid [not null]
-  purpose varchar [not null]
+  purpose_code varchar(60) [not null]
+
   indexes {
-    (input_bundle_id, dataset_manifest_id, purpose) [pk]
+    (input_bundle_id, dataset_manifest_id, purpose_code) [pk]
   }
 }
+
 Table backtest.monthly_judgment_summaries {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   run_id uuid [not null]
-  et_year int [not null]
-  et_month int [not null]
+  et_year smallint [not null]
+  et_month smallint [not null]
   evaluation_count bigint [not null]
+  active_branch_count bigint [not null]
   trade_event_count bigint [not null]
-  summary_hash varchar [not null]
+  data_gap_count bigint [not null]
+  summary_hash varchar(128) [not null]
+
   indexes {
     (run_id, et_year, et_month) [unique]
   }
 }
+
 Table backtest.failure_condition_counts {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   monthly_summary_id uuid [not null]
-  flow_or_branch_key varchar [not null]
-  first_failure_condition_key varchar [not null]
+  flow_or_branch_key varchar(160) [not null]
+  first_failure_condition_key varchar(160) [not null]
   occurrence_count bigint [not null]
+
   indexes {
     (monthly_summary_id, flow_or_branch_key, first_failure_condition_key) [unique]
   }
 }
+
 Table backtest.performance_summaries {
-  id uuid [pk]
-  run_id uuid [not null]
-  metric_version varchar [not null]
-  summary_document json [not null]
-  source_set_hash varchar [not null]
-  calculated_at timestamp [not null]
-  superseded_by_id uuid
-}
-Table backtest.detail_object_manifests {
-  id uuid [pk]
-  run_id uuid [not null]
-  strategy_version_id uuid [not null]
-  record_type varchar [not null]
-  et_year int [not null]
-  et_month int [not null]
-  logical_object_key varchar [not null, unique]
-  file_format varchar [not null]
-  schema_version varchar [not null]
-  row_count bigint [not null]
-  byte_size bigint [not null]
-  content_hash varchar [not null]
-  created_at timestamp [not null]
-  supersedes_manifest_id uuid
-  indexes {
-    (run_id, record_type, et_year, et_month, content_hash) [unique]
-  }
-  Note: 'High-volume trade, replay-ledger, position and calculation rows live outside the main RDB.'
+  id uuid [pk, default: `gen_random_uuid()`]
+  run_id uuid [not null, unique]
+  metric_catalog_version varchar(80) [not null]
+  summary_document jsonb [not null]
+  source_set_hash varchar(128) [not null]
+  calculated_at timestamptz [not null]
+
+  Note: 'Queryable compact result created only for COMPLETED runs; heavy calculation series remain object-backed.'
 }
 
-// competition: room lifecycle, scoring and bot-only leaderboard
-Table competition.rooms {
-  id uuid [pk]
-  creator_account_id uuid [not null]
-  room_type varchar [not null]
-  name varchar [not null]
-  status varchar [not null]
-  created_at timestamp [not null]
-  cancelled_at timestamp
-  cancellation_reason varchar
+Table backtest.detail_manifests {
+  id uuid [pk, default: `gen_random_uuid()`]
+  run_id uuid [not null]
+  object_id uuid [not null, unique]
+  record_type varchar(60) [not null, note: 'ORDER, FILL, REJECTION, LEDGER, LOT, POSITION, or CALCULATION_SERIES.']
+  et_year smallint [not null]
+  et_month smallint [not null]
+  schema_version varchar(40) [not null]
+  row_count bigint [not null]
+  minimum_event_at timestamptz
+  maximum_event_at timestamptz
+  source_set_hash varchar(128) [not null]
+  supersedes_manifest_id uuid
+  created_at timestamptz [not null]
+
+  indexes {
+    (run_id, record_type, et_year, et_month, source_set_hash) [unique]
+  }
 }
-Table competition.room_schedules {
-  room_id uuid [pk]
-  recruitment_start_at timestamp [not null]
-  submission_start_at timestamp [not null]
-  submission_end_at timestamp [not null]
-  evaluation_start_at timestamp [not null]
-  evaluation_end_at timestamp [not null]
-  result_finalized_at timestamp
+
+// -----------------------------------------------------------------------------
+// performance: reproducible live-bot performance read models. Compact official
+// snapshots stay relational; dense equity/valuation series live in S3 objects.
+// Scheduled/event-driven batches may build these only from committed bot events
+// and balanced ledgers.
+// -----------------------------------------------------------------------------
+
+Table performance.bot_snapshots {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  snapshot_type varchar(30) [not null, note: 'CURRENT, DAILY, ROOM_BOUNDARY, or FINAL.']
+  as_of_event_sequence bigint [not null]
+  as_of_at timestamptz [not null]
+  metric_catalog_version varchar(80) [not null]
+  valuation_status varchar(30) [not null]
+  evaluated_duration_seconds bigint [not null]
+  platform_outage_seconds bigint [not null]
+  metrics_document jsonb [not null]
+  source_set_hash varchar(128) [not null]
+  calculated_at timestamptz [not null]
+
+  indexes {
+    (bot_id, snapshot_type, as_of_event_sequence) [unique]
+    (bot_id, as_of_at)
+  }
+
+  Note: 'Append-only official derived snapshot. CURRENT is selected by query/projection, not overwritten in place.'
 }
-Table competition.room_rules {
-  room_id uuid [pk]
-  initial_cash_amount decimal [not null]
-  participant_limit int [not null]
-  minimum_operation_duration_seconds bigint [not null]
-  minimum_fill_count int [not null]
-  start_policy varchar [not null]
-  scoring_template_version_id uuid [not null]
-  tunable_parameters_document json [not null]
-  locked_at timestamp [not null]
+
+Table performance.series_manifests {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  object_id uuid [not null, unique]
+  series_type varchar(50) [not null, note: 'EQUITY, CASH, EXPOSURE, DRAWDOWN, or VALUATION_QUALITY.']
+  period_start timestamptz [not null]
+  period_end timestamptz [not null]
+  schema_version varchar(40) [not null]
+  point_count bigint [not null]
+  source_set_hash varchar(128) [not null]
+  created_at timestamptz [not null]
+  supersedes_manifest_id uuid
+
+  indexes {
+    (bot_id, series_type, period_start, period_end, source_set_hash) [unique]
+  }
 }
+
+// -----------------------------------------------------------------------------
+// competition: public/secret anonymous bot rooms, locked rules, independent
+// room bots, evaluation segments, and reproducible batch-computed leaderboards.
+// -----------------------------------------------------------------------------
+
 Table competition.scoring_templates {
-  id uuid [pk]
-  code varchar [not null, unique]
-  template_type varchar [not null]
-  status varchar [not null]
-  created_at timestamp [not null]
+  id uuid [pk, default: `gen_random_uuid()`]
+  code varchar(80) [not null, unique]
+  template_type varchar(30) [not null, note: 'SINGLE_METRIC or COMPOSITE.']
+  status varchar(30) [not null]
+  created_at timestamptz [not null]
+  retired_at timestamptz
 }
+
 Table competition.scoring_template_versions {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   scoring_template_id uuid [not null]
-  version varchar [not null]
-  calculation_document json [not null]
-  allowed_parameter_document json [not null]
-  calculation_hash varchar [not null]
-  verified_at timestamp [not null]
+  version varchar(40) [not null]
+  calculation_document jsonb [not null]
+  allowed_parameters_document jsonb [not null]
+  calculation_hash varchar(128) [not null, unique]
+  metric_catalog_version varchar(80) [not null]
+  verified_at timestamptz [not null]
+  published_at timestamptz [not null]
+
   indexes {
     (scoring_template_id, version) [unique]
   }
 }
-Table competition.participations {
-  id uuid [pk]
-  room_id uuid [not null]
-  bot_id uuid [not null]
-  owner_account_id uuid [not null]
-  anonymous_alias varchar [not null]
-  status varchar [not null]
-  submitted_at timestamp [not null]
-  expelled_at timestamp
-  expulsion_reason varchar
-  post_room_choice varchar
-  choice_recorded_at timestamp
-  choice_locked_at timestamp
+
+Table competition.rooms {
+  id uuid [pk, default: `gen_random_uuid()`]
+  creator_account_id uuid
+  room_origin varchar(30) [not null, note: 'PLATFORM or USER.']
+  access_type competition.room_access_type [not null]
+  name varchar(120) [not null]
+  description text
+  status competition.room_status [not null]
+  content_moderation_status varchar(30) [not null]
+  created_at timestamptz [not null, default: `now()`]
+  recruiting_started_at timestamptz
+  cancelled_at timestamptz
+  cancellation_reason_code varchar(80)
+  invalidated_at timestamptz
+  invalidation_reason_code varchar(80)
+
   indexes {
-    (room_id, bot_id) [unique]
-    (room_id, anonymous_alias) [unique]
-  }
-}
-Table competition.evaluation_segments {
-  id uuid [pk]
-  participation_id uuid [not null]
-  evaluation_start_at timestamp [not null]
-  evaluation_end_at timestamp [not null]
-  initial_state_hash varchar [not null]
-  final_state_hash varchar
-  virtual_liquidation_document json [note: 'Performance-only; never mutates the bot ledger.']
-  finalized_at timestamp
-}
-Table competition.leaderboard_snapshots {
-  id uuid [pk]
-  room_id uuid [not null]
-  scoring_template_version_id uuid [not null]
-  as_of_at timestamp [not null]
-  status varchar [not null]
-  source_set_hash varchar [not null]
-}
-Table competition.leaderboard_entries {
-  id uuid [pk]
-  snapshot_id uuid [not null]
-  participation_id uuid [not null]
-  rank int
-  score decimal
-  eligibility_status varchar [not null]
-  calculation_document json [not null]
-  indexes {
-    (snapshot_id, participation_id) [unique]
+    (status, access_type, created_at)
+    (creator_account_id, created_at)
   }
 }
 
-// operations: RBAC, notification, support, audit and delivery
+Table competition.room_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  room_id uuid [not null]
+  event_sequence int [not null]
+  event_type varchar(60) [not null]
+  resulting_status competition.room_status [not null]
+  reason_code varchar(80)
+  occurred_at timestamptz [not null]
+  payload_document jsonb [not null]
+
+  indexes {
+    (room_id, event_sequence) [unique]
+  }
+
+  Note: 'Append-only room lifecycle evidence; rooms.status is the current projection guarded by these transitions.'
+}
+
+Table competition.room_invitations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  room_id uuid [not null]
+  issued_by_account_id uuid [not null]
+  credential_type varchar(20) [not null, note: 'LINK or CODE.']
+  credential_digest varchar(128) [not null, unique, note: 'Invite link token and invite code plaintext are never stored.']
+  issued_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  revoked_at timestamptz
+  revocation_reason_code varchar(80)
+
+  indexes {
+    (room_id, revoked_at, expires_at)
+  }
+
+  Note: 'Only the secret-room creator may issue or revoke before submission closes. All active invitations expire when submission closes or the room ends earlier.'
+}
+
+Table competition.room_schedules {
+  room_id uuid [pk]
+  recruitment_start_at timestamptz [not null]
+  submission_start_at timestamptz [not null]
+  submission_end_at timestamptz [not null]
+  evaluation_start_at timestamptz [not null]
+  evaluation_end_at timestamptz [not null]
+  finalized_at timestamptz
+  schedule_hash varchar(128) [not null]
+
+  Note: 'Migration CHECKs must enforce chronological ordering. Rows become immutable when recruitment starts.'
+}
+
+Table competition.room_rules {
+  room_id uuid [pk]
+  initial_cash_amount numeric(24,8) [not null]
+  currency_code char(3) [not null, default: 'USD']
+  participant_limit int [not null]
+  per_account_bot_limit int [not null]
+  stopped_bot_slot_policy varchar(30) [not null]
+  minimum_operation_seconds bigint [not null]
+  minimum_fill_count int [not null]
+  late_submission_policy varchar(40) [not null]
+  scoring_template_version_id uuid [not null]
+  scoring_parameters jsonb [not null]
+  fee_configuration jsonb [not null]
+  slippage_configuration jsonb [not null]
+  rules_hash varchar(128) [not null, unique]
+  locked_at timestamptz [not null]
+}
+
+Table competition.participations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  room_id uuid [not null]
+  bot_id uuid [not null, unique]
+  owner_account_id uuid [not null]
+  anonymous_alias varchar(40) [not null]
+  status competition.participation_status [not null]
+  submitted_at timestamptz [not null]
+  evaluation_started_at timestamptz
+  withdrawn_at timestamptz
+  withdrawal_reason_code varchar(80)
+  expelled_at timestamptz
+  expulsion_reason_code varchar(80)
+  post_room_action varchar(30) [note: 'CONTINUE_PRIVATE or STOP; null means STOP at the deadline.']
+  action_recorded_at timestamptz
+  action_locked_at timestamptz
+
+  indexes {
+    (room_id, anonymous_alias) [unique]
+    (room_id, owner_account_id, status)
+  }
+
+  Note: 'The room bot is created independently with empty state; an already-running personal bot is never attached.'
+}
+
+Table competition.participation_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  participation_id uuid [not null]
+  event_sequence int [not null]
+  event_type varchar(50) [not null]
+  reason_code varchar(80)
+  occurred_at timestamptz [not null]
+  payload_document jsonb [not null]
+
+  indexes {
+    (participation_id, event_sequence) [unique]
+  }
+}
+
+Table competition.evaluation_segments {
+  id uuid [pk, default: `gen_random_uuid()`]
+  participation_id uuid [not null]
+  segment_number int [not null]
+  evaluation_start_at timestamptz [not null]
+  evaluation_end_at timestamptz [not null]
+  initial_bot_event_sequence bigint [not null]
+  final_bot_event_sequence bigint
+  initial_state_hash varchar(128) [not null]
+  final_state_hash varchar(128)
+  virtual_liquidation_document jsonb
+  source_set_hash varchar(128)
+  finalized_at timestamptz
+
+  indexes {
+    (participation_id, segment_number) [unique]
+  }
+
+  Note: 'Virtual liquidation is performance-only and must never create live bot fills or ledger entries.'
+}
+
+Table competition.leaderboard_snapshots {
+  id uuid [pk, default: `gen_random_uuid()`]
+  room_id uuid [not null]
+  scoring_template_version_id uuid [not null]
+  snapshot_type varchar(30) [not null, note: 'PROVISIONAL or FINAL.']
+  as_of_at timestamptz [not null]
+  status varchar(30) [not null]
+  source_set_hash varchar(128) [not null]
+  created_at timestamptz [not null]
+
+  indexes {
+    (room_id, snapshot_type, as_of_at) [unique]
+  }
+
+  Note: 'Official snapshot remains PostgreSQL-owned; NoSQL may expose a rebuildable low-latency copy.'
+}
+
+Table competition.leaderboard_entries {
+  id uuid [pk, default: `gen_random_uuid()`]
+  snapshot_id uuid [not null]
+  participation_id uuid [not null]
+  performance_snapshot_id uuid [not null]
+  rank int
+  is_joint_rank boolean [not null, default: false]
+  score numeric(30,12)
+  eligibility_status varchar(30) [not null]
+  eligibility_reason_code varchar(80)
+  tie_break_document jsonb [not null]
+  calculation_document jsonb [not null]
+
+  indexes {
+    (snapshot_id, participation_id) [unique]
+    (snapshot_id, rank)
+  }
+}
+
+// -----------------------------------------------------------------------------
+// operations: separate operator identities/RBAC, notifications/cases, immutable
+// audit, transactional outbox, and rebuildable external projection progress.
+// -----------------------------------------------------------------------------
+
 Table operations.operator_accounts {
-  id uuid [pk]
-  external_identity_key varchar [not null, unique]
-  status varchar [not null]
-  mfa_verified_at timestamp
-  created_at timestamp [not null]
+  id uuid [pk, default: `gen_random_uuid()`]
+  external_identity_key_hmac varchar(128) [not null, unique]
+  status varchar(30) [not null]
+  mfa_enrolled_at timestamptz [not null]
+  last_mfa_verified_at timestamptz
+  created_at timestamptz [not null]
+  disabled_at timestamptz
 }
+
 Table operations.roles {
-  id uuid [pk]
-  code varchar [not null, unique]
-  rank int [not null]
-  status varchar [not null]
+  id uuid [pk, default: `gen_random_uuid()`]
+  code varchar(80) [not null, unique]
+  hierarchy_rank int [not null]
+  status varchar(30) [not null]
 }
+
 Table operations.permissions {
-  id uuid [pk]
-  code varchar [not null, unique]
-  description varchar [not null]
+  id uuid [pk, default: `gen_random_uuid()`]
+  code varchar(120) [not null, unique]
+  description varchar(500) [not null]
+  sensitivity varchar(30) [not null]
 }
+
 Table operations.role_permissions {
   role_id uuid [not null]
   permission_id uuid [not null]
+
   indexes {
     (role_id, permission_id) [pk]
   }
 }
+
 Table operations.operator_role_assignments {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   operator_account_id uuid [not null]
   role_id uuid [not null]
   granted_by_operator_id uuid [not null]
-  granted_at timestamp [not null]
-  revoked_at timestamp
-  revocation_reason varchar
+  granted_at timestamptz [not null]
+  expires_at timestamptz
+  revoked_by_operator_id uuid
+  revoked_at timestamptz
+  revocation_reason_code varchar(80)
+
+  indexes {
+    (operator_account_id, role_id, granted_at) [unique]
+    (expires_at)
+  }
 }
+
 Table operations.notification_preferences {
-  id uuid [pk]
+  id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
   bot_id uuid
-  event_type varchar [not null]
-  channel varchar [not null]
+  event_type varchar(80) [not null]
+  channel varchar(20) [not null]
   enabled boolean [not null]
+  updated_at timestamptz [not null]
+
   indexes {
     (account_id, bot_id, event_type, channel) [unique]
   }
-}
-Table operations.notifications {
-  id uuid [pk]
-  account_id uuid [not null]
-  bot_id uuid
-  notification_type varchar [not null]
-  mandatory boolean [not null]
-  payload_document json [not null]
-  created_at timestamp [not null]
-  read_at timestamp
-}
-Table operations.delivery_attempts {
-  id uuid [pk]
-  notification_id uuid [not null]
-  channel varchar [not null]
-  attempt_number int [not null]
-  status varchar [not null]
-  attempted_at timestamp [not null]
-  failure_code varchar
-  indexes {
-    (notification_id, channel, attempt_number) [unique]
-  }
-}
-Table operations.cases {
-  id uuid [pk]
-  account_id uuid [not null]
-  case_type varchar [not null]
-  status varchar [not null]
-  subject varchar [not null]
-  created_at timestamp [not null]
-  closed_at timestamp
-}
-Table operations.case_events {
-  id uuid [pk]
-  case_id uuid [not null]
-  actor_type varchar [not null]
-  actor_id uuid [not null]
-  event_type varchar [not null]
-  payload_document json [not null]
-  created_at timestamp [not null]
-}
-Table operations.audit_events {
-  id uuid [pk]
-  actor_type varchar [not null]
-  actor_id uuid [not null]
-  action_type varchar [not null]
-  target_type varchar [not null]
-  target_id uuid [not null]
-  reason varchar [not null]
-  before_hash varchar
-  after_hash varchar
-  occurred_at timestamp [not null]
-  idempotency_key varchar [not null, unique]
-  Note: 'Immutable. Human operators cannot read customer strategy document contents.'
-}
-Table operations.evidence_objects {
-  id uuid [pk]
-  owner_domain varchar [not null]
-  owner_record_id uuid [not null]
-  evidence_type varchar [not null]
-  logical_object_key varchar [not null, unique]
-  content_hash varchar [not null]
-  format_version varchar [not null]
-  byte_size bigint [not null]
-  created_at timestamp [not null]
-}
-Table operations.outbox_messages {
-  id uuid [pk]
-  owner_domain varchar [not null]
-  aggregate_id uuid [not null]
-  event_type varchar [not null]
-  payload_document json [not null]
-  idempotency_key varchar [not null, unique]
-  created_at timestamp [not null]
-  delivered_at timestamp
-  attempt_count int [not null]
-  last_failure_code varchar
+
+  Note: 'Mandatory operational notices ignore opt-out preferences. Migration must use NULLS NOT DISTINCT or a partial unique index so account-wide preferences cannot duplicate when bot_id is null.'
 }
 
+Table operations.notifications {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  bot_id uuid
+  notification_type varchar(80) [not null]
+  mandatory boolean [not null]
+  locale varchar(5) [not null]
+  payload_document jsonb [not null]
+  idempotency_key varchar(160) [not null, unique]
+  created_at timestamptz [not null, default: `now()`]
+  read_at timestamptz
+  expires_at timestamptz
+
+  indexes {
+    (account_id, read_at, created_at)
+  }
+}
+
+Table operations.delivery_attempts {
+  id uuid [pk, default: `gen_random_uuid()`]
+  notification_id uuid [not null]
+  channel varchar(20) [not null]
+  attempt_number int [not null]
+  status operations.work_status [not null]
+  attempted_at timestamptz [not null]
+  provider_message_key varchar(200)
+  failure_code varchar(80)
+  next_attempt_at timestamptz
+
+  indexes {
+    (notification_id, channel, attempt_number) [unique]
+    (status, next_attempt_at)
+  }
+}
+
+Table operations.cases {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  case_type varchar(60) [not null]
+  status varchar(30) [not null]
+  subject varchar(200) [not null]
+  created_at timestamptz [not null, default: `now()`]
+  closed_at timestamptz
+  resolution_code varchar(80)
+
+  indexes {
+    (account_id, status, created_at)
+  }
+}
+
+Table operations.case_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  case_id uuid [not null]
+  event_sequence int [not null]
+  actor_type varchar(30) [not null]
+  actor_id uuid [not null]
+  event_type varchar(60) [not null]
+  payload_document jsonb [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (case_id, event_sequence) [unique]
+  }
+}
+
+Table operations.audit_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  actor_type varchar(30) [not null]
+  actor_id uuid [not null]
+  action_type varchar(100) [not null]
+  target_domain varchar(40) [not null]
+  target_id uuid [not null]
+  reason_code varchar(80) [not null]
+  correlation_id uuid [not null]
+  idempotency_key varchar(160) [not null, unique]
+  before_hash varchar(128)
+  after_hash varchar(128)
+  evidence_object_id uuid
+  occurred_at timestamptz [not null]
+  recorded_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (target_domain, target_id, occurred_at)
+    (actor_type, actor_id, occurred_at)
+    (correlation_id)
+  }
+
+  Note: 'Append-only. Audit payloads must not copy private strategy source, holdings, or credentials.'
+}
+
+Table operations.outbox_messages {
+  id uuid [pk, default: `gen_random_uuid()`]
+  owner_domain varchar(40) [not null]
+  aggregate_id uuid [not null]
+  aggregate_sequence bigint
+  event_type varchar(100) [not null]
+  event_schema_version varchar(40) [not null]
+  payload_document jsonb [not null]
+  idempotency_key varchar(160) [not null, unique]
+  created_at timestamptz [not null, default: `now()`]
+  published_at timestamptz
+  publish_attempt_count int [not null, default: 0]
+  next_attempt_at timestamptz
+  last_failure_code varchar(80)
+
+  indexes {
+    (published_at, next_attempt_at)
+    (owner_domain, aggregate_id, aggregate_sequence)
+  }
+
+  Note: 'Created atomically with domain changes. External publishers may deliver more than once; consumers must be idempotent.'
+}
+
+Table operations.projection_checkpoints {
+  id uuid [pk, default: `gen_random_uuid()`]
+  projection_name varchar(100) [not null]
+  target_store varchar(40) [not null, note: 'NOSQL, SEARCH, CACHE, or POSTGRES_READ_MODEL.']
+  shard_key varchar(160) [not null]
+  source_domain varchar(40) [not null]
+  last_source_sequence bigint
+  last_source_time timestamptz
+  projection_version varchar(40) [not null]
+  status varchar(30) [not null]
+  updated_at timestamptz [not null]
+  failure_code varchar(80)
+
+  indexes {
+    (projection_name, target_store, shard_key) [unique]
+    (status, updated_at)
+  }
+
+  Note: 'External NoSQL/search/cache content is disposable and rebuilt from PostgreSQL plus verified S3 manifests.'
+}
+
+// -----------------------------------------------------------------------------
 // References
-Ref: identity.login_methods.account_id > identity.accounts.id
+// -----------------------------------------------------------------------------
+
+Ref: identity.account_emails.account_id > identity.accounts.id
+Ref: identity.login_identities.account_id > identity.accounts.id
+Ref: identity.login_identities.account_email_id > identity.account_emails.id
+Ref: identity.password_credentials.login_identity_id > identity.login_identities.id
 Ref: identity.sessions.account_id > identity.accounts.id
-Ref: identity.consents.account_id > identity.accounts.id
+Ref: identity.sessions.authenticated_by_login_identity_id > identity.login_identities.id
+Ref: identity.password_reset_requests.account_id > identity.accounts.id
+Ref: identity.password_reset_requests.account_email_id > identity.account_emails.id
+Ref: identity.password_reset_requests.login_identity_id > identity.login_identities.id
+Ref: identity.recovery_code_sets.account_id > identity.accounts.id
+Ref: identity.recovery_codes.recovery_code_set_id > identity.recovery_code_sets.id
+Ref: identity.account_consents.account_id > identity.accounts.id
+Ref: identity.account_consents.policy_version_id > identity.policy_versions.id
 Ref: identity.account_sanctions.account_id > identity.accounts.id
-Ref: identity.account_sanctions.operation_audit_event_id > operations.audit_events.id
+Ref: identity.account_sanctions.applied_by_operator_id > operations.operator_accounts.id
+Ref: identity.account_sanctions.lifted_by_operator_id > operations.operator_accounts.id
+
 Ref: strategy.strategy_drafts.owner_account_id > identity.accounts.id
-Ref: strategy.strategy_drafts.source_draft_id > strategy.strategy_drafts.id
+Ref: strategy.strategy_drafts.copied_from_draft_id > strategy.strategy_drafts.id
+Ref: strategy.strategy_drafts.copied_from_version_id > strategy.strategy_versions.id
+Ref: strategy.strategy_drafts.catalog_version_id > strategy.catalog_versions.id
+Ref: strategy.draft_edit_leases.draft_id > strategy.strategy_drafts.id
+Ref: strategy.draft_edit_leases.session_id > identity.sessions.id
 Ref: strategy.validation_runs.draft_id > strategy.strategy_drafts.id
+Ref: strategy.validation_runs.requested_by_account_id > identity.accounts.id
+Ref: strategy.validation_runs.catalog_version_id > strategy.catalog_versions.id
 Ref: strategy.strategy_versions.owner_account_id > identity.accounts.id
 Ref: strategy.strategy_versions.source_draft_id > strategy.strategy_drafts.id
 Ref: strategy.strategy_versions.validation_run_id > strategy.validation_runs.id
+Ref: strategy.strategy_versions.copied_from_version_id > strategy.strategy_versions.id
+Ref: strategy.strategy_versions.catalog_version_id > strategy.catalog_versions.id
 Ref: strategy.component_drafts.owner_account_id > identity.accounts.id
+Ref: strategy.component_drafts.copied_from_version_id > strategy.component_versions.id
+Ref: strategy.component_drafts.catalog_version_id > strategy.catalog_versions.id
 Ref: strategy.component_versions.owner_account_id > identity.accounts.id
 Ref: strategy.component_versions.source_draft_id > strategy.component_drafts.id
+Ref: strategy.component_versions.catalog_version_id > strategy.catalog_versions.id
 Ref: strategy.version_components.strategy_version_id > strategy.strategy_versions.id
 Ref: strategy.version_components.component_version_id > strategy.component_versions.id
 Ref: strategy.version_instruments.strategy_version_id > strategy.strategy_versions.id
 Ref: strategy.version_instruments.instrument_id > market_data.instruments.id
+Ref: strategy.version_universes.strategy_version_id > strategy.strategy_versions.id
+Ref: strategy.version_universes.universe_id > market_data.official_universes.id
+Ref: strategy.platform_template_versions.template_id > strategy.platform_templates.id
+Ref: strategy.platform_template_versions.catalog_version_id > strategy.catalog_versions.id
+
+Ref: market_data.instrument_symbols.instrument_id > market_data.instruments.id
+Ref: market_data.universe_versions.universe_id > market_data.official_universes.id
+Ref: market_data.universe_members.universe_version_id > market_data.universe_versions.id
+Ref: market_data.universe_members.instrument_id > market_data.instruments.id
+Ref: market_data.feeds.provider_id > market_data.providers.id
+Ref: market_data.dataset_manifests.feed_id > market_data.feeds.id
+Ref: market_data.dataset_manifests.instrument_id > market_data.instruments.id
+Ref: market_data.dataset_manifests.supersedes_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.dataset_objects.dataset_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.dataset_objects.object_id > storage.objects.id
+Ref: market_data.dataset_lineage.derived_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.dataset_lineage.source_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.corporate_actions.instrument_id > market_data.instruments.id
+Ref: market_data.corporate_actions.supersedes_action_id > market_data.corporate_actions.id
+Ref: market_data.borrow_snapshots.instrument_id > market_data.instruments.id
+Ref: market_data.borrow_snapshots.feed_id > market_data.feeds.id
+Ref: market_data.quality_incidents.dataset_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.quality_incidents.instrument_id > market_data.instruments.id
+Ref: market_data.pipeline_partitions.pipeline_run_id > market_data.pipeline_runs.id
+Ref: market_data.pipeline_partitions.instrument_id > market_data.instruments.id
+Ref: market_data.pipeline_partitions.result_manifest_id > market_data.dataset_manifests.id
+
 Ref: bot.bots.owner_account_id > identity.accounts.id
-Ref: bot.bots.source_bot_id > bot.bots.id
+Ref: bot.bots.copied_from_bot_id > bot.bots.id
+Ref: bot.launch_configurations.bot_id > bot.bots.id
 Ref: bot.bot_strategies.bot_id > bot.bots.id
 Ref: bot.bot_strategies.strategy_version_id > strategy.strategy_versions.id
 Ref: bot.bot_events.bot_id > bot.bots.id
-Ref: bot.bot_events.parent_event_id > bot.bot_events.id
-Ref: bot.bot_events.strategy_version_id > strategy.strategy_versions.id
+Ref: bot.bot_events.causation_event_id > bot.bot_events.id
 Ref: bot.bot_events.market_dataset_manifest_id > market_data.dataset_manifests.id
-Ref: bot.strategy_runtime_states.bot_strategy_id > bot.bot_strategies.id
-Ref: bot.continuation_deadlines.bot_id > bot.bots.id
-Ref: bot.continuation_deadlines.basis_event_id > bot.bot_events.id
-Ref: bot.continuation_deadlines.superseded_by_id > bot.continuation_deadlines.id
-Ref: trading.order_candidate_batches.bot_id > bot.bots.id
-Ref: trading.order_candidate_batches.bot_event_id > bot.bot_events.id
-Ref: trading.order_candidate_batches.strategy_version_id > strategy.strategy_versions.id
-Ref: trading.order_candidates.batch_id > trading.order_candidate_batches.id
-Ref: trading.order_candidates.bot_strategy_id > bot.bot_strategies.id
-Ref: trading.order_candidates.instrument_id > market_data.instruments.id
+Ref: bot.bot_events.evidence_object_id > storage.objects.id
+Ref: bot.evaluation_runs.bot_id > bot.bots.id
+Ref: bot.evaluation_runs.trigger_event_id > bot.bot_events.id
+Ref: bot.evaluation_runs.result_event_id > bot.bot_events.id
+Ref: bot.evaluation_strategy_results.evaluation_run_id > bot.evaluation_runs.id
+Ref: bot.evaluation_strategy_results.bot_strategy_id > bot.bot_strategies.id
+Ref: bot.runtime_state_values.bot_id > bot.bots.id
+Ref: bot.runtime_state_values.bot_strategy_id > bot.bot_strategies.id
+Ref: bot.runtime_state_changes.bot_event_id > bot.bot_events.id
+Ref: bot.runtime_state_changes.runtime_state_value_id > bot.runtime_state_values.id
+Ref: bot.continuation_periods.bot_id > bot.bots.id
+Ref: bot.continuation_periods.supersedes_period_id > bot.continuation_periods.id
+
+Ref: trading.order_intent_batches.bot_id > bot.bots.id
+Ref: trading.order_intent_batches.evaluation_run_id > bot.evaluation_runs.id
+Ref: trading.order_intent_batches.source_event_id > bot.bot_events.id
+Ref: trading.order_intents.batch_id > trading.order_intent_batches.id
+Ref: trading.order_intents.bot_strategy_id > bot.bot_strategies.id
+Ref: trading.order_intents.instrument_id > market_data.instruments.id
+Ref: trading.order_groups.bot_id > bot.bots.id
+Ref: trading.order_groups.created_event_id > bot.bot_events.id
+Ref: trading.order_groups.closed_event_id > bot.bot_events.id
 Ref: trading.orders.bot_id > bot.bots.id
-Ref: trading.orders.candidate_id > trading.order_candidates.id
+Ref: trading.orders.source_intent_id > trading.order_intents.id
 Ref: trading.orders.instrument_id > market_data.instruments.id
-Ref: trading.orders.replaced_order_id > trading.orders.id
-Ref: trading.order_reservations.order_id > trading.orders.id
+Ref: trading.orders.order_group_id > trading.order_groups.id
+Ref: trading.orders.replaces_order_id > trading.orders.id
+Ref: trading.orders.accepted_event_id > bot.bot_events.id
+Ref: trading.order_events.order_id > trading.orders.id
+Ref: trading.order_events.bot_event_id > bot.bot_events.id
+Ref: trading.order_state_projections.order_id > trading.orders.id
 Ref: trading.fills.order_id > trading.orders.id
 Ref: trading.fills.bot_id > bot.bots.id
 Ref: trading.fills.instrument_id > market_data.instruments.id
-Ref: trading.strategy_fill_allocations.fill_id > trading.fills.id
-Ref: trading.strategy_fill_allocations.bot_strategy_id > bot.bot_strategies.id
+Ref: trading.fills.bot_event_id > bot.bot_events.id
+Ref: trading.fills.reversal_of_fill_id > trading.fills.id
+Ref: trading.fill_allocations.fill_id > trading.fills.id
+Ref: trading.fill_allocations.bot_strategy_id > bot.bot_strategies.id
+Ref: trading.fill_allocations.source_intent_id > trading.order_intents.id
 Ref: trading.ledger_accounts.bot_id > bot.bots.id
 Ref: trading.ledger_accounts.instrument_id > market_data.instruments.id
 Ref: trading.ledger_transactions.bot_id > bot.bots.id
-Ref: trading.ledger_transactions.reversal_of_id > trading.ledger_transactions.id
+Ref: trading.ledger_transactions.bot_event_id > bot.bot_events.id
+Ref: trading.ledger_transactions.reversal_of_transaction_id > trading.ledger_transactions.id
 Ref: trading.ledger_entries.transaction_id > trading.ledger_transactions.id
 Ref: trading.ledger_entries.ledger_account_id > trading.ledger_accounts.id
 Ref: trading.ledger_entries.bot_strategy_id > bot.bot_strategies.id
@@ -833,51 +2087,60 @@ Ref: trading.position_lots.bot_id > bot.bots.id
 Ref: trading.position_lots.bot_strategy_id > bot.bot_strategies.id
 Ref: trading.position_lots.instrument_id > market_data.instruments.id
 Ref: trading.position_lots.opening_fill_id > trading.fills.id
-Ref: trading.lot_consumptions.position_lot_id > trading.position_lots.id
-Ref: trading.lot_consumptions.closing_fill_id > trading.fills.id
-Ref: market_data.universe_memberships.universe_id > market_data.official_universes.id
-Ref: market_data.universe_memberships.instrument_id > market_data.instruments.id
-Ref: market_data.feeds.provider_id > market_data.providers.id
-Ref: market_data.dataset_manifests.feed_id > market_data.feeds.id
-Ref: market_data.dataset_manifests.instrument_id > market_data.instruments.id
-Ref: market_data.dataset_objects.dataset_manifest_id > market_data.dataset_manifests.id
-Ref: market_data.dataset_lineage.derived_manifest_id > market_data.dataset_manifests.id
-Ref: market_data.dataset_lineage.source_manifest_id > market_data.dataset_manifests.id
-Ref: market_data.corporate_actions.instrument_id > market_data.instruments.id
-Ref: market_data.corporate_actions.supersedes_action_id > market_data.corporate_actions.id
-Ref: market_data.quality_incidents.dataset_manifest_id > market_data.dataset_manifests.id
-Ref: market_data.quality_incidents.instrument_id > market_data.instruments.id
+Ref: trading.lot_movements.position_lot_id > trading.position_lots.id
+Ref: trading.lot_movements.bot_event_id > bot.bot_events.id
+Ref: trading.lot_movements.source_fill_id > trading.fills.id
+Ref: trading.lot_movements.corporate_action_id > market_data.corporate_actions.id
+Ref: trading.position_projections.bot_id > bot.bots.id
+Ref: trading.position_projections.instrument_id > market_data.instruments.id
+Ref: trading.strategy_position_projections.bot_strategy_id > bot.bot_strategies.id
+Ref: trading.strategy_position_projections.instrument_id > market_data.instruments.id
+
 Ref: backtest.runs.owner_account_id > identity.accounts.id
 Ref: backtest.runs.strategy_version_id > strategy.strategy_versions.id
 Ref: backtest.runs.evaluation_period_id > backtest.evaluation_periods.id
+Ref: backtest.runs.official_settings_id > backtest.official_settings.id
+Ref: backtest.run_attempts.run_id > backtest.runs.id
 Ref: backtest.input_bundles.run_id > backtest.runs.id
 Ref: backtest.input_datasets.input_bundle_id > backtest.input_bundles.id
 Ref: backtest.input_datasets.dataset_manifest_id > market_data.dataset_manifests.id
 Ref: backtest.monthly_judgment_summaries.run_id > backtest.runs.id
 Ref: backtest.failure_condition_counts.monthly_summary_id > backtest.monthly_judgment_summaries.id
 Ref: backtest.performance_summaries.run_id > backtest.runs.id
-Ref: backtest.performance_summaries.superseded_by_id > backtest.performance_summaries.id
-Ref: backtest.detail_object_manifests.run_id > backtest.runs.id
-Ref: backtest.detail_object_manifests.strategy_version_id > strategy.strategy_versions.id
-Ref: backtest.detail_object_manifests.supersedes_manifest_id > backtest.detail_object_manifests.id
+Ref: backtest.detail_manifests.run_id > backtest.runs.id
+Ref: backtest.detail_manifests.object_id > storage.objects.id
+Ref: backtest.detail_manifests.supersedes_manifest_id > backtest.detail_manifests.id
+
+Ref: performance.bot_snapshots.bot_id > bot.bots.id
+Ref: performance.series_manifests.bot_id > bot.bots.id
+Ref: performance.series_manifests.object_id > storage.objects.id
+Ref: performance.series_manifests.supersedes_manifest_id > performance.series_manifests.id
+
+Ref: competition.scoring_template_versions.scoring_template_id > competition.scoring_templates.id
 Ref: competition.rooms.creator_account_id > identity.accounts.id
+Ref: competition.room_events.room_id > competition.rooms.id
+Ref: competition.room_invitations.room_id > competition.rooms.id
+Ref: competition.room_invitations.issued_by_account_id > identity.accounts.id
 Ref: competition.room_schedules.room_id > competition.rooms.id
 Ref: competition.room_rules.room_id > competition.rooms.id
 Ref: competition.room_rules.scoring_template_version_id > competition.scoring_template_versions.id
-Ref: competition.scoring_template_versions.scoring_template_id > competition.scoring_templates.id
 Ref: competition.participations.room_id > competition.rooms.id
 Ref: competition.participations.bot_id > bot.bots.id
 Ref: competition.participations.owner_account_id > identity.accounts.id
+Ref: competition.participation_events.participation_id > competition.participations.id
 Ref: competition.evaluation_segments.participation_id > competition.participations.id
 Ref: competition.leaderboard_snapshots.room_id > competition.rooms.id
 Ref: competition.leaderboard_snapshots.scoring_template_version_id > competition.scoring_template_versions.id
 Ref: competition.leaderboard_entries.snapshot_id > competition.leaderboard_snapshots.id
 Ref: competition.leaderboard_entries.participation_id > competition.participations.id
+Ref: competition.leaderboard_entries.performance_snapshot_id > performance.bot_snapshots.id
+
 Ref: operations.role_permissions.role_id > operations.roles.id
 Ref: operations.role_permissions.permission_id > operations.permissions.id
 Ref: operations.operator_role_assignments.operator_account_id > operations.operator_accounts.id
 Ref: operations.operator_role_assignments.role_id > operations.roles.id
 Ref: operations.operator_role_assignments.granted_by_operator_id > operations.operator_accounts.id
+Ref: operations.operator_role_assignments.revoked_by_operator_id > operations.operator_accounts.id
 Ref: operations.notification_preferences.account_id > identity.accounts.id
 Ref: operations.notification_preferences.bot_id > bot.bots.id
 Ref: operations.notifications.account_id > identity.accounts.id
@@ -885,15 +2148,18 @@ Ref: operations.notifications.bot_id > bot.bots.id
 Ref: operations.delivery_attempts.notification_id > operations.notifications.id
 Ref: operations.cases.account_id > identity.accounts.id
 Ref: operations.case_events.case_id > operations.cases.id
+Ref: operations.audit_events.evidence_object_id > storage.objects.id
 
 DiagramView Default {
   Schemas {
     identity
     strategy
+    storage
+    market_data
     bot
     trading
-    market_data
     backtest
+    performance
     competition
     operations
   }
