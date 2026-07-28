@@ -200,7 +200,7 @@ Idea2Strategy는 사용자가 시각적으로 만든 결정론적 전략을 서�
 - 예정 DBML 반영:
   - 비율은 부동소수점이 아니라 정수 basis point 또는 동등한 고정 정밀도 값으로 저장하고 `0..10000` 범위를 강제한다.
   - 파티션 상한 합계는 단일 행 `CHECK`만으로 강제할 수 없으므로 완성된 봇 집합 생성 트랜잭션과 지연 제약 트리거로 검증한다.
-  - 주문 생성 전에 파티션·봇 순서로 자금을 예약하는 `trading.capital_reservations`를 두고 주문의 종료·거절·체결에 따라 멱등적으로 해제 또는 원장 전환한다. `strategy_id`는 예산 경계가 아니라 발생 전략 귀속만 기록한다.
+  - 주문 생성 전에 파티션·봇 순서로 현금·보유수량·숏 차입·담보를 예약하는 `trading.resource_reservations`를 두고 주문의 종료·거절·체결에 따라 추가 전용 `reservation_events`로 멱등적으로 소비 또는 해제한다. `flow_id`는 예산 경계가 아니라 발생 Flow 귀속만 기록한다.
   - 공식 복식 원장은 봇 단위 정본을 유지하되 파티션 예산과 전략 발생 귀속을 함께 기록하고, 파티션 현재 사용액 Projection은 원장과 활성 예약에서 재구성할 수 있게 한다.
   - 전략별 예산 컬럼과 `trading.strategy_budget_projections`는 두지 않는다.
 - 불변 조건:
@@ -226,7 +226,7 @@ Idea2Strategy는 사용자가 시각적으로 만든 결정론적 전략을 서�
   - 정확한 `buffer_bps` 값은 스키마 상수로 하드코딩하지 않고 불변 정책 버전 데이터로 관리하며 주문은 승인 당시 버전을 고정한다.
 - 예정 DBML 반영:
   - `trading.buying_power_buffer_policy_versions`에 버전, `buffer_bps`, 반올림 규칙 버전, 유효 기간, 규칙 해시와 게시 시각을 둔다.
-  - `trading.capital_reservations`에 전략, 파티션, 봇, 주문 의도, 기준 호가 금액, 고정 슬리피지 금액, 예상 수수료, 완충액, 총 예약액, 가격·데이터 버전, 완충 규칙 버전, 상태와 해제·원장 전환 참조를 둔다.
+  - `trading.resource_reservations`에 Flow, 파티션, 봇, 주문 의도, 자원 종류, 기준 호가 금액, 고정 슬리피지 금액, 예상 수수료, 완충액, 예약 금액 또는 수량, 가격·데이터 버전, 완충·숏 규칙 버전과 현재 상태를 둔다. 모든 소비·해제는 `reservation_events`, 주문 배분은 `order_reservation_allocations`, 보유 로트 예약은 `reservation_lot_allocations`에 남긴다.
   - `trading.orders`에 주문 시점 예약 근거와 고정 슬리피지 규칙 버전을 잠근다.
   - `trading.fills`에는 체결 기준 가격, 고정 슬리피지 금액, 실제 수수료와 최종 체결 금액을 분리해 기록하고 Buying Power 완충액을 기록하지 않는다.
   - 주문 승인, 예약 생성과 공식 봇 사건을 같은 PostgreSQL 트랜잭션에서 확정한다.

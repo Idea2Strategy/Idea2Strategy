@@ -145,6 +145,21 @@ Enum trading.position_effect {
   CLOSE_SHORT
 }
 
+Enum trading.intent_origin_type {
+  FLOW_EVALUATION
+  SYSTEM_STOP_LIQUIDATION
+  SYSTEM_FORCED_BUY_IN
+  CORPORATE_ACTION
+}
+
+Enum trading.intent_decision {
+  APPROVED
+  REJECTED
+  REDUCED
+  NETTED
+  CONFLICTED
+}
+
 Enum trading.order_type {
   MARKET
   LIMIT
@@ -175,6 +190,76 @@ Enum trading.reservation_status {
   CONSUMED
   RELEASED
   CANCELLED
+}
+
+Enum trading.reservation_resource_type {
+  CASH_BUYING_POWER
+  POSITION_QUANTITY
+  SHORT_BORROW_QUANTITY
+  SHORT_COLLATERAL_CASH
+  SHORT_SALE_PROCEEDS
+}
+
+Enum trading.reservation_event_type {
+  CREATED
+  REDUCED_BY_NETTING
+  ALLOCATED_TO_ORDER
+  CONSUMED_BY_FILL
+  RELEASED_BY_FILL
+  RELEASED_BY_CANCEL
+  RELEASED_BY_EXPIRY
+  RELEASED_BY_REJECTION
+  CANCELLED
+}
+
+Enum trading.order_group_type {
+  OCO
+  BRACKET
+  MULTI_LEG
+}
+
+Enum trading.order_group_status {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+Enum trading.order_group_member_role {
+  ENTRY
+  TAKE_PROFIT
+  STOP_LOSS
+  LEG
+}
+
+Enum trading.trailing_offset_type {
+  AMOUNT
+  PERCENT
+}
+
+Enum trading.ledger_direction {
+  DEBIT
+  CREDIT
+}
+
+Enum trading.lot_side {
+  LONG
+  SHORT
+}
+
+Enum trading.lot_movement_type {
+  OPEN
+  CLOSE
+  CORPORATE_ACTION_ADJUSTMENT
+  CORRECTION
+  REVERSAL
+}
+
+Enum trading.short_action_type {
+  BORROW_RECALL
+  COLLATERAL_DEFICIT
+  PLATFORM_STOP
 }
 
 Enum backtest.run_status {
@@ -1328,7 +1413,7 @@ Table bot.launch_configurations {
   broker_rules_version varchar(80) [not null]
   accounting_rules_version varchar(80) [not null]
   precision_rules_version varchar(80) [not null]
-  fee_configuration jsonb [not null]
+  fee_policy_id uuid [not null]
   slippage_rate_bps int [not null, note: '고정 5 bps. 매수는 +, 매도는 -.']
   buying_power_buffer_policy_id uuid [not null]
   candidate_conflict_policy jsonb [not null]
@@ -1341,8 +1426,8 @@ Table bot.launch_configurations {
 
   Note: 'bot.launch_snapshots·파티션·완성 Flow와 원자적으로 삽입. 초기 가상 자본은 양수 USD, 봇별 격리이며 입금·출금·증액 불가. 사용자 정의 위험 통제는 Flow의 RISK_POLICY Element에만 존재. 실행 설정은 생성 시점부터 불변이며 의미 변경·삭제는 항상 거부.'
 
-  Records (bot_id, initial_cash_amount, currency_code, broker_rules_version, accounting_rules_version, precision_rules_version, fee_configuration, slippage_rate_bps, buying_power_buffer_policy_id, candidate_conflict_policy, configuration_hash) {
-    '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', '1.0.0', '1.0.0', '1.0.0', '{"type":"RATE_BPS","rateBps":20,"minimumFee":"0"}', 5, '00000000-0000-4000-8000-000000000001', '{"sameInstrumentOpposite":"NET","tieBreaker":"PARTITION_POSITION","budgetOverflow":"REDUCE"}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  Records (bot_id, initial_cash_amount, currency_code, broker_rules_version, accounting_rules_version, precision_rules_version, fee_policy_id, slippage_rate_bps, buying_power_buffer_policy_id, candidate_conflict_policy, configuration_hash) {
+    '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', '1.0.0', '1.0.0', '1.0.0', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', '{"sameInstrumentOpposite":"NET","tieBreaker":"PARTITION_POSITION","budgetOverflow":"REDUCE"}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   }
 }
 
@@ -1595,6 +1680,11 @@ Table trading.buying_power_buffer_policy_versions {
   effective_to timestamptz
   published_at timestamptz [not null]
 
+  checks {
+    `buffer_bps >= 0` [name: 'buying_power_buffer_bps_nonnegative']
+    `effective_to IS NULL OR effective_to > effective_from` [name: 'buying_power_buffer_effective_range']
+  }
+
   indexes {
     (policy_code, version) [unique]
     (policy_code, effective_from)
@@ -1605,6 +1695,52 @@ Table trading.buying_power_buffer_policy_versions {
   Records (id, policy_code, version, buffer_bps, rounding_rules_version, rules_hash, effective_from, effective_to, published_at) {
     '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', 1, '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null, '2026-07-27T09:00:00+09:00'
   }
+}
+
+Table trading.fee_policy_versions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  policy_code varchar(80) [not null]
+  version varchar(40) [not null]
+  fee_rate_bps int [not null, note: '공식 통합 가상 거래 수수료 0.2% = 20 bps.']
+  calculation_rules_version varchar(40) [not null]
+  rules_hash varchar(128) [not null, unique]
+  effective_from timestamptz [not null]
+  effective_to timestamptz
+  published_at timestamptz [not null]
+
+  indexes {
+    (policy_code, version) [unique]
+    (policy_code, effective_from)
+  }
+
+  checks {
+    `fee_rate_bps = 20` [name: 'official_fee_twenty_bps']
+    `effective_to IS NULL OR effective_to > effective_from` [name: 'fee_policy_effective_range']
+  }
+
+  Note: '모든 롱·숏 매수·매도의 각 부분 체결에 동일하게 적용하는 불변 플랫폼 정책. 사용자가 변경할 수 없고 과거 체결은 당시 policy id를 고정한다.'
+}
+
+Table trading.short_risk_policy_versions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  policy_code varchar(80) [not null]
+  version varchar(40) [not null]
+  rules_document jsonb [not null]
+  rules_hash varchar(128) [not null, unique]
+  effective_from timestamptz [not null]
+  effective_to timestamptz
+  published_at timestamptz [not null]
+
+  indexes {
+    (policy_code, version) [unique]
+    (policy_code, effective_from)
+  }
+
+  checks {
+    `effective_to IS NULL OR effective_to > effective_from` [name: 'short_risk_policy_effective_range']
+  }
+
+  Note: 'Regulation SHO Rule 201, 차입 가능성, 최초·유지 담보, 숏 매도대금 격리와 강제 바이인 규칙의 불변 플랫폼 버전. 미결정 수치는 rules_document의 승인된 새 버전으로만 도입한다.'
 }
 
 Table trading.order_intent_batches {
@@ -1618,7 +1754,13 @@ Table trading.order_intent_batches {
   result_hash varchar(128)
   finalized_at timestamptz
 
+  checks {
+    `status IN ('COLLECTING', 'FINALIZED', 'FAILED')` [name: 'intent_batch_status_valid']
+    `status <> 'FINALIZED' OR (finalized_at IS NOT NULL AND result_hash IS NOT NULL)` [name: 'intent_batch_finalized_complete']
+  }
+
   indexes {
+    (bot_id, id) [unique]
     (bot_id, source_event_id) [unique]
     (bot_id, finalized_at)
   }
@@ -1632,8 +1774,11 @@ Table trading.order_intent_batches {
 
 Table trading.order_intents {
   id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
   batch_id uuid [not null]
-  evaluation_run_id uuid [not null, note: '이 의도를 만든 Flow별 평가.']
+  source_event_id uuid [not null]
+  origin_type trading.intent_origin_type [not null]
+  evaluation_run_id uuid [note: 'FLOW_EVALUATION에서만 필수. 시스템 강제 청산·강제 바이인은 평가 실행 없이 공식 사건에서 생성한다.']
   partition_id uuid [not null]
   flow_id uuid [not null]
   instrument_id uuid [not null]
@@ -1646,72 +1791,110 @@ Table trading.order_intents {
   requested_notional numeric(24,8)
   approved_quantity numeric(28,8)
   approved_notional numeric(24,8)
-  netted_quantity numeric(28,8) [not null, default: 0]
+  post_netting_quantity numeric(28,8) [not null, default: 0, note: '상계로 제거된 양이 아니라 상계 후 실제 주문 대상으로 남은 수량.']
   final_quantity numeric(28,8)
   final_notional numeric(24,8)
   limit_price numeric(24,8)
   stop_price numeric(24,8)
-  decision varchar(30) [not null, note: '값은 APPROVED, REJECTED, REDUCED, NETTED, CONFLICTED.']
+  trailing_offset_type trading.trailing_offset_type
+  trailing_offset_value numeric(24,8)
+  requested_expires_at timestamptz
+  decision trading.intent_decision [not null]
   decision_reason_code varchar(80) [not null]
 
   indexes {
+    (bot_id, id) [unique]
     (batch_id, intent_key) [unique]
     (batch_id, instrument_id, side)
     (flow_id, instrument_id)
     (evaluation_run_id)
   }
 
-  Note: '원래 의도와 모든 축소/netting 결과는 불변. 파티션·Flow 소유는 복합 제약으로 일치해야 하며, evaluation_run_id가 각 의도를 그것을 만든 정확한 Flow별 평가에 귀속.'
-
-  Records (id, batch_id, evaluation_run_id, partition_id, flow_id, instrument_id, intent_key, side, position_effect, order_type, time_in_force, requested_quantity, requested_notional, approved_quantity, approved_notional, netted_quantity, final_quantity, final_notional, limit_price, stop_price, decision, decision_reason_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'BUY', 'OPEN_LONG', 'MARKET', 'DAY', 10.00000000, 100000.00000000, 10.00000000, 100000.00000000, 10.00000000, 10.00000000, 100000.00000000, 100.00000000, 100.00000000, 'review-example', 'REVIEW_EXAMPLE'
+  checks {
+    `(requested_quantity IS NOT NULL) <> (requested_notional IS NOT NULL)` [name: 'intent_exactly_one_requested_measure']
+    `requested_quantity IS NULL OR requested_quantity > 0` [name: 'intent_requested_quantity_positive']
+    `requested_notional IS NULL OR requested_notional > 0` [name: 'intent_requested_notional_positive']
+    `approved_quantity IS NULL OR approved_quantity >= 0` [name: 'intent_approved_quantity_nonnegative']
+    `approved_notional IS NULL OR approved_notional >= 0` [name: 'intent_approved_notional_nonnegative']
+    `post_netting_quantity >= 0` [name: 'intent_post_netting_quantity_nonnegative']
+    `final_quantity IS NULL OR final_quantity >= 0` [name: 'intent_final_quantity_nonnegative']
+    `final_notional IS NULL OR final_notional >= 0` [name: 'intent_final_notional_nonnegative']
+    `origin_type <> 'FLOW_EVALUATION' OR evaluation_run_id IS NOT NULL` [name: 'flow_intent_requires_evaluation']
+    `origin_type = 'FLOW_EVALUATION' OR evaluation_run_id IS NULL` [name: 'system_intent_has_no_evaluation']
+    `order_type <> 'LIMIT' OR limit_price IS NOT NULL` [name: 'intent_limit_price_required']
+    `order_type <> 'STOP' OR stop_price IS NOT NULL` [name: 'intent_stop_price_required']
+    `order_type <> 'STOP_LIMIT' OR (limit_price IS NOT NULL AND stop_price IS NOT NULL)` [name: 'intent_stop_limit_prices_required']
+    `order_type <> 'TRAILING_STOP' OR (trailing_offset_type IS NOT NULL AND trailing_offset_value > 0)` [name: 'intent_trailing_offset_required']
+    `order_type = 'TRAILING_STOP' OR (trailing_offset_type IS NULL AND trailing_offset_value IS NULL)` [name: 'intent_non_trailing_has_no_offset']
+    `order_type <> 'MARKET' OR (limit_price IS NULL AND stop_price IS NULL AND trailing_offset_type IS NULL AND time_in_force = 'DAY')` [name: 'intent_market_contract_valid']
+    `time_in_force <> 'GTD' OR requested_expires_at IS NOT NULL` [name: 'intent_gtd_expiry_required']
+    `(side = 'BUY' AND position_effect IN ('OPEN_LONG', 'CLOSE_SHORT')) OR (side = 'SELL' AND position_effect IN ('CLOSE_LONG', 'OPEN_SHORT'))` [name: 'intent_side_effect_compatible']
+    `decision NOT IN ('REJECTED', 'NETTED', 'CONFLICTED') OR (COALESCE(final_quantity, 0) = 0 AND COALESCE(final_notional, 0) = 0)` [name: 'intent_nonexecuting_decision_has_no_final']
   }
+
+  Note: 'Flow 또는 시스템 안전 절차가 만든 원래 의도와 승인·상계·최종 잔여 결과의 불변 기록. 같은 batch의 호환 가능한 종목·방향·주문 계약만 물리 주문으로 결합한다. 시스템 강제 바이인과 중단 청산도 별도 origin_type과 공식 source_event_id로 같은 주문·체결·원장 경로를 사용한다.'
 }
 
 Table trading.orders {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
   instrument_id uuid [not null]
-  order_group_id uuid
   replaces_order_id uuid
   order_key varchar(160) [not null]
   side trading.order_side [not null]
-  position_effect trading.position_effect [not null]
   order_type trading.order_type [not null]
   time_in_force trading.time_in_force [not null]
   requested_quantity numeric(28,8) [not null]
   requested_notional numeric(24,8)
   limit_price numeric(24,8)
   stop_price numeric(24,8)
+  trailing_offset_type trading.trailing_offset_type
+  trailing_offset_value numeric(24,8)
+  broker_rules_version varchar(80) [not null]
+  precision_rules_version varchar(80) [not null]
+  slippage_rate_bps int [not null]
+  fee_policy_id uuid [not null]
   accepted_event_id uuid [not null]
   accepted_at timestamptz [not null]
   expires_at timestamptz
   contract_hash varchar(128) [not null, unique]
 
   indexes {
+    (bot_id, id) [unique]
     (bot_id, order_key) [unique]
     (bot_id, accepted_at)
     (instrument_id, accepted_at)
-    (order_group_id)
   }
 
-  Note: '불변 물리 주문 계약. 현재 상태와 잔량은 order_events와 order_state_projections에서만 나온다.'
-
-  Records (id, bot_id, instrument_id, order_group_id, replaces_order_id, order_key, side, position_effect, order_type, time_in_force, requested_quantity, requested_notional, limit_price, stop_price, accepted_event_id, accepted_at, expires_at, contract_hash) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, 'REVIEW_EXAMPLE', 'BUY', 'OPEN_LONG', 'MARKET', 'DAY', 10.00000000, 100000.00000000, 100.00000000, 100.00000000, '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  checks {
+    `requested_quantity > 0` [name: 'order_requested_quantity_positive']
+    `requested_notional IS NULL OR requested_notional > 0` [name: 'order_requested_notional_positive']
+    `slippage_rate_bps = 5` [name: 'order_fixed_slippage_five_bps']
+    `order_type <> 'LIMIT' OR limit_price IS NOT NULL` [name: 'order_limit_price_required']
+    `order_type <> 'STOP' OR stop_price IS NOT NULL` [name: 'order_stop_price_required']
+    `order_type <> 'STOP_LIMIT' OR (limit_price IS NOT NULL AND stop_price IS NOT NULL)` [name: 'order_stop_limit_prices_required']
+    `order_type <> 'TRAILING_STOP' OR (trailing_offset_type IS NOT NULL AND trailing_offset_value > 0)` [name: 'order_trailing_offset_required']
+    `order_type = 'TRAILING_STOP' OR (trailing_offset_type IS NULL AND trailing_offset_value IS NULL)` [name: 'order_non_trailing_has_no_offset']
+    `order_type <> 'MARKET' OR (limit_price IS NULL AND stop_price IS NULL AND trailing_offset_type IS NULL AND time_in_force = 'DAY')` [name: 'order_market_contract_valid']
+    `time_in_force <> 'GTD' OR expires_at IS NOT NULL` [name: 'order_gtd_expiry_required']
+    `expires_at IS NULL OR expires_at > accepted_at` [name: 'order_expiry_after_acceptance']
+    `expires_at IS NULL OR expires_at <= accepted_at + interval '90 days'` [name: 'order_expiry_within_ninety_days']
   }
+
+  Note: '상계 후 실제 가상 브로커에 제출되는 불변 물리 주문 계약. position_effect는 여러 Flow 의도가 섞일 수 있어 주문에 중복 저장하지 않고 order_intent_allocations를 통해 보존한다. 현재 상태와 누적 체결량은 order_events와 projection에서만 얻는다.'
 }
 
 Table trading.order_groups {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
-  group_type varchar(30) [not null, note: '승인된 Element 카탈로그가 지원하는 경우 OCO, BRACKET, MULTI_LEG.']
+  group_type trading.order_group_type [not null]
   group_key varchar(160) [not null]
-  status varchar(30) [not null]
+  status trading.order_group_status [not null]
   created_event_id uuid [not null]
   closed_event_id uuid
 
   indexes {
+    (bot_id, id) [unique]
     (bot_id, group_key) [unique]
   }
 
@@ -1722,7 +1905,56 @@ Table trading.order_groups {
   }
 }
 
+Table trading.order_group_members {
+  bot_id uuid [not null]
+  order_group_id uuid [not null]
+  order_id uuid [not null, unique]
+  member_role trading.order_group_member_role [not null]
+  leg_sequence int [not null]
+  quantity_ratio numeric(18,8) [not null, default: 1]
+  activation_condition jsonb [not null]
+  cancellation_condition jsonb [not null]
+
+  indexes {
+    (order_group_id, order_id) [pk]
+    (order_group_id, leg_sequence) [unique]
+  }
+
+  checks {
+    `leg_sequence > 0` [name: 'order_group_leg_sequence_positive']
+    `quantity_ratio > 0` [name: 'order_group_quantity_ratio_positive']
+  }
+
+  Note: 'OCO·브래킷·멀티레그에서 각 주문의 역할, 순서, 활성화와 상호 취소 조건을 고정한다. 주문 하나는 동시에 둘 이상의 그룹에 속하지 않는다.'
+}
+
+Table trading.order_group_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  order_group_id uuid [not null]
+  bot_event_id uuid [not null, unique]
+  group_sequence bigint [not null]
+  previous_status trading.order_group_status
+  new_status trading.order_group_status [not null]
+  event_type varchar(50) [not null]
+  reason_code varchar(80)
+  occurred_at timestamptz [not null]
+  event_document jsonb [not null]
+
+  indexes {
+    (order_group_id, group_sequence) [unique]
+  }
+
+  checks {
+    `group_sequence > 0` [name: 'order_group_event_sequence_positive']
+  }
+
+  Note: '그룹의 활성화·상호 취소·완료·실패를 추가 전용으로 보존한다. order_groups.status는 이 이벤트의 현재 Projection이다.'
+}
+
 Table trading.order_intent_allocations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
   order_id uuid [not null]
   intent_id uuid [not null]
   allocated_quantity numeric(28,8) [not null]
@@ -1731,7 +1963,9 @@ Table trading.order_intent_allocations {
   allocation_rules_version varchar(40) [not null]
 
   indexes {
-    (order_id, intent_id) [pk]
+    (bot_id, id) [unique]
+    (order_id, intent_id) [unique]
+    (order_id, allocation_rank) [unique]
     (intent_id)
     (order_id, allocation_rank) [unique]
   }
@@ -1742,54 +1976,143 @@ Table trading.order_intent_allocations {
     `allocation_rank > 0` [name: 'order_intent_allocation_rank_positive']
   }
 
-  Note: '상계 후 실제 Order를 구성하는 Intent별 예정 배분의 불변 정본. 주문별 allocated_quantity 합계는 orders.requested_quantity와 일치해야 하며 Fill 배분은 반드시 이 행을 참조한다. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
-
-  Records (order_id, intent_id, allocated_quantity, allocated_notional, allocation_rank, allocation_rules_version) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 1, '1.0.0'
-  }
+  Note: '물리 주문 수량을 원래 Flow 의도에 결정론적으로 배분한 불변 관계. 같은 주문의 배분 합계는 주문 수량과 같고 한 의도의 여러 주문 배분 합계는 final_quantity를 넘지 않아야 하며 PostgreSQL 지연 제약 트리거로 강제한다.'
 }
 
-Table trading.capital_reservations {
+Table trading.resource_reservations {
   id uuid [pk, default: `gen_random_uuid()`]
+  reservation_key varchar(200) [not null, note: '의도·자원종류·통화 또는 종목을 정규화한 null 없는 멱등 키.']
   bot_id uuid [not null]
   partition_id uuid [not null]
   flow_id uuid [not null]
-  intent_id uuid [not null, unique]
-  order_id uuid
-  buffer_policy_id uuid [not null]
+  intent_id uuid [not null]
+  resource_type trading.reservation_resource_type [not null]
+  currency_code char(3)
+  instrument_id uuid
+  buffer_policy_id uuid
+  short_risk_policy_id uuid
   status trading.reservation_status [not null]
-  reference_price numeric(24,8) [not null]
-  reference_observed_at timestamptz [not null]
-  reference_market_hash varchar(128) [not null]
-  base_notional numeric(24,8) [not null]
-  fixed_slippage_amount numeric(24,8) [not null]
-  estimated_fee_amount numeric(24,8) [not null]
-  buffer_amount numeric(24,8) [not null]
-  reserved_amount numeric(24,8) [not null]
-  consumed_amount numeric(24,8) [not null, default: 0]
-  released_amount numeric(24,8) [not null, default: 0]
+  reference_price numeric(24,8)
+  reference_observed_at timestamptz
+  reference_market_hash varchar(128)
+  base_notional numeric(24,8)
+  fixed_slippage_amount numeric(24,8)
+  estimated_fee_amount numeric(24,8)
+  buffer_amount numeric(24,8)
+  reserved_amount numeric(24,8)
+  consumed_amount numeric(24,8) [default: 0]
+  released_amount numeric(24,8) [default: 0]
+  reserved_quantity numeric(28,8)
+  consumed_quantity numeric(28,8) [default: 0]
+  released_quantity numeric(28,8) [default: 0]
   created_event_id uuid [not null]
   created_at timestamptz [not null]
-  settled_event_id uuid
-  settled_at timestamptz
+  last_event_sequence bigint [not null, default: 1]
 
   indexes {
+    (bot_id, id) [unique]
+    (intent_id, reservation_key) [unique]
     (bot_id, status, created_at)
     (partition_id, status)
     (flow_id, status)
-    (id, intent_id) [unique]
-    (order_id, intent_id)
   }
 
-  Note: 'Intent별 구매력 예약. order_id가 채워지면 반드시 동일 Intent의 order_intent_allocations 행과 일치해야 한다. 버퍼는 구매력 예약에만 영향을 주고 체결가·PnL·성과에는 절대 반영되지 않는다. 예산 강제는 봇·파티션 상한만 사용하고 flow_id는 귀속용. 최종 가격/수수료 재확인은 어느 상한이든 초과하기 전에 축소하거나 거부해야 한다.'
-
-  Records (id, bot_id, partition_id, flow_id, intent_id, order_id, buffer_policy_id, status, reference_price, reference_observed_at, reference_market_hash, base_notional, fixed_slippage_amount, estimated_fee_amount, buffer_amount, reserved_amount, consumed_amount, released_amount, created_event_id, created_at, settled_event_id, settled_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACTIVE', 100.00000000, '2026-07-27T09:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
+  checks {
+    `(reserved_amount IS NOT NULL) <> (reserved_quantity IS NOT NULL)` [name: 'reservation_exactly_one_measure']
+    `reserved_amount IS NULL OR reserved_amount > 0` [name: 'reservation_amount_positive']
+    `reserved_quantity IS NULL OR reserved_quantity > 0` [name: 'reservation_quantity_positive']
+    `consumed_amount IS NULL OR consumed_amount >= 0` [name: 'reservation_consumed_amount_nonnegative']
+    `released_amount IS NULL OR released_amount >= 0` [name: 'reservation_released_amount_nonnegative']
+    `consumed_quantity IS NULL OR consumed_quantity >= 0` [name: 'reservation_consumed_quantity_nonnegative']
+    `released_quantity IS NULL OR released_quantity >= 0` [name: 'reservation_released_quantity_nonnegative']
+    `reserved_amount IS NULL OR consumed_amount + released_amount <= reserved_amount` [name: 'reservation_amount_not_exceeded']
+    `reserved_quantity IS NULL OR consumed_quantity + released_quantity <= reserved_quantity` [name: 'reservation_quantity_not_exceeded']
+    `resource_type <> 'CASH_BUYING_POWER' OR (currency_code IS NOT NULL AND buffer_policy_id IS NOT NULL AND reserved_amount IS NOT NULL)` [name: 'cash_reservation_evidence_required']
+    `resource_type NOT IN ('POSITION_QUANTITY', 'SHORT_BORROW_QUANTITY') OR (instrument_id IS NOT NULL AND reserved_quantity IS NOT NULL)` [name: 'quantity_reservation_instrument_required']
+    `resource_type NOT IN ('SHORT_COLLATERAL_CASH', 'SHORT_SALE_PROCEEDS') OR (currency_code IS NOT NULL AND reserved_amount IS NOT NULL)` [name: 'short_cash_reservation_amount_required']
+    `resource_type = 'CASH_BUYING_POWER' OR (buffer_policy_id IS NULL AND buffer_amount IS NULL)` [name: 'buffer_only_for_buying_power']
+    `resource_type NOT IN ('SHORT_BORROW_QUANTITY', 'SHORT_COLLATERAL_CASH', 'SHORT_SALE_PROCEEDS') OR short_risk_policy_id IS NOT NULL` [name: 'short_reservation_policy_required']
   }
+
+  Note: '주문 의도별 현금, Flow 소유 보유수량, 숏 차입수량, 숏 담보와 격리 매도대금을 원자적으로 예약하는 현재 Projection. order_id를 직접 소유하지 않으며 여러 주문으로의 배분은 order_reservation_allocations에 기록한다. Buying Power 버퍼는 CASH_BUYING_POWER 예약에만 포함되고 체결가·손익·성과에는 반영되지 않는다.'
+}
+
+Table trading.reservation_lot_allocations {
+  bot_id uuid [not null]
+  reservation_id uuid [not null]
+  position_lot_id uuid [not null]
+  reserved_quantity numeric(28,8) [not null]
+
+  indexes {
+    (reservation_id, position_lot_id) [pk]
+    (position_lot_id)
+  }
+
+  checks {
+    `reserved_quantity > 0` [name: 'reservation_lot_quantity_positive']
+  }
+
+  Note: 'POSITION_QUANTITY 예약이 Flow 귀속 FIFO 로트 중 어떤 잔량을 잠갔는지 고정한다. 활성 예약 합계가 로트의 현재 잔량을 넘지 않도록 지연 제약 트리거로 강제한다.'
+}
+
+Table trading.order_reservation_allocations {
+  bot_id uuid [not null]
+  reservation_id uuid [not null]
+  order_intent_allocation_id uuid [not null]
+  allocated_amount numeric(24,8)
+  allocated_quantity numeric(28,8)
+
+  indexes {
+    (reservation_id, order_intent_allocation_id) [pk]
+    (order_intent_allocation_id)
+  }
+
+  checks {
+    `(allocated_amount IS NOT NULL) <> (allocated_quantity IS NOT NULL)` [name: 'order_reservation_exactly_one_measure']
+    `allocated_amount IS NULL OR allocated_amount > 0` [name: 'order_reservation_amount_positive']
+    `allocated_quantity IS NULL OR allocated_quantity > 0` [name: 'order_reservation_quantity_positive']
+  }
+
+  Note: '하나의 의도 예약을 하나 이상의 물리 주문에 배분한다. 예약과 주문의 N:M 관계를 단일 nullable order_id로 축약하지 않는다.'
+}
+
+Table trading.reservation_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  reservation_id uuid [not null]
+  bot_event_id uuid [not null]
+  source_fill_allocation_id uuid
+  reservation_sequence bigint [not null]
+  event_type trading.reservation_event_type [not null]
+  consumed_amount_delta numeric(24,8)
+  released_amount_delta numeric(24,8)
+  consumed_quantity_delta numeric(28,8)
+  released_quantity_delta numeric(28,8)
+  status_after trading.reservation_status [not null]
+  occurred_at timestamptz [not null]
+  event_hash varchar(128) [not null]
+
+  indexes {
+    (bot_id, id) [unique]
+    (reservation_id, reservation_sequence) [unique]
+    (reservation_id, bot_event_id, event_type) [unique]
+    (source_fill_allocation_id, reservation_id)
+  }
+
+  checks {
+    `reservation_sequence > 0` [name: 'reservation_event_sequence_positive']
+    `consumed_amount_delta IS NULL OR consumed_amount_delta >= 0` [name: 'reservation_event_consumed_amount_nonnegative']
+    `released_amount_delta IS NULL OR released_amount_delta >= 0` [name: 'reservation_event_released_amount_nonnegative']
+    `consumed_quantity_delta IS NULL OR consumed_quantity_delta >= 0` [name: 'reservation_event_consumed_quantity_nonnegative']
+    `released_quantity_delta IS NULL OR released_quantity_delta >= 0` [name: 'reservation_event_released_quantity_nonnegative']
+  }
+
+  Note: '부분 체결·상계·취소·만료·거절마다 예약의 소비와 해제를 추가 전용으로 기록한다. resource_reservations의 누계와 상태는 이 이력에서 재구축 가능해야 한다.'
 }
 
 Table trading.order_events {
   id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
   order_id uuid [not null]
   bot_event_id uuid [not null, unique]
   order_sequence bigint [not null]
@@ -1802,6 +2125,10 @@ Table trading.order_events {
 
   indexes {
     (order_id, order_sequence) [unique]
+  }
+
+  checks {
+    `order_sequence > 0` [name: 'order_event_sequence_positive']
   }
 
   Note: '주문 이벤트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
@@ -1818,12 +2145,23 @@ Table trading.order_state_projections {
   remaining_quantity numeric(28,8) [not null]
   reserved_cash numeric(24,8) [not null]
   reserved_quantity numeric(28,8) [not null]
+  active_stop_price numeric(24,8)
+  trailing_reference_price numeric(24,8)
   last_order_event_sequence bigint [not null]
   last_bot_event_sequence bigint [not null]
   updated_at timestamptz [not null]
 
   indexes {
     (status, updated_at)
+  }
+
+  checks {
+    `filled_quantity >= 0` [name: 'order_projection_filled_nonnegative']
+    `remaining_quantity >= 0` [name: 'order_projection_remaining_nonnegative']
+    `reserved_cash >= 0` [name: 'order_projection_reserved_cash_nonnegative']
+    `reserved_quantity >= 0` [name: 'order_projection_reserved_quantity_nonnegative']
+    `active_stop_price IS NULL OR active_stop_price > 0` [name: 'order_projection_active_stop_positive']
+    `trailing_reference_price IS NULL OR trailing_reference_price > 0` [name: 'order_projection_trailing_reference_positive']
   }
 
   Note: '재구축 가능한 PostgreSQL 현재 주문 읽기 모델. 정본은 추가 전용 order_events.'
@@ -1848,65 +2186,66 @@ Table trading.fills {
   slippage_amount numeric(24,8) [not null]
   fill_price numeric(24,8) [not null]
   gross_amount numeric(24,8) [not null]
+  fee_policy_id uuid [not null]
+  fee_rate_bps int [not null]
+  fee_basis_amount numeric(24,8) [not null]
   fee_amount numeric(24,8) [not null]
-  net_amount numeric(24,8) [not null]
+  settlement_cash_delta numeric(24,8) [not null, note: '매수는 음수, 매도는 양수인 공식 현금 변동.']
   occurred_at timestamptz [not null]
   recorded_at timestamptz [not null, default: `now()`]
 
   indexes {
+    (bot_id, id) [unique]
     (order_id, provider_fill_key) [unique]
     (id, order_id) [unique]
     (bot_id, occurred_at)
     (instrument_id, occurred_at)
   }
 
-  Note: '불변 체결 증적. 고정 5 bps 슬리피지와 수수료는 구매력 재확인 후 최신 고정 참조 가격에 적용.'
-
-  Records (id, order_id, bot_id, bot_event_id, instrument_id, provider_fill_key, quantity, reference_price, reference_observed_at, reference_market_hash, slippage_rate_bps, slippage_amount, fill_price, gross_amount, fee_amount, net_amount, occurred_at, recorded_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 10.00000000, 100.00000000, '2026-07-27T09:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 5, 100000.00000000, 100.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  checks {
+    `quantity > 0` [name: 'fill_quantity_positive']
+    `reference_price > 0` [name: 'fill_reference_price_positive']
+    `slippage_rate_bps = 5` [name: 'fill_fixed_slippage_five_bps']
+    `slippage_amount >= 0` [name: 'fill_slippage_amount_nonnegative']
+    `fill_price > 0` [name: 'fill_price_positive']
+    `gross_amount > 0` [name: 'fill_gross_amount_positive']
+    `fee_rate_bps = 20` [name: 'fill_fee_twenty_bps']
+    `fee_basis_amount > 0` [name: 'fill_fee_basis_positive']
+    `fee_amount >= 0` [name: 'fill_fee_nonnegative']
   }
+
+  Note: '불변 가상 체결 증적. 부분 체결마다 최신 유효 참조가격에 고정 5 bps 슬리피지와 공식 20 bps 수수료를 독립 적용한다. Buying Power 버퍼는 기록하거나 체결가·손익에 반영하지 않는다. gross·fee·settlement 계산 일치는 정밀도 규칙 버전을 사용하는 지연 제약 트리거로 검증한다.'
 }
 
 Table trading.fill_allocations {
   id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
   fill_id uuid [not null]
-  order_id uuid [not null]
-  intent_id uuid [not null]
-  reservation_id uuid
-  partition_id uuid [not null]
-  flow_id uuid [not null]
+  order_intent_allocation_id uuid [not null]
   allocated_quantity numeric(28,8) [not null]
   allocated_gross_amount numeric(24,8) [not null]
   allocated_fee_amount numeric(24,8) [not null]
-  reservation_consumed_amount numeric(24,8) [not null]
-  reservation_released_amount numeric(24,8) [not null]
   allocation_rules_version varchar(40) [not null]
 
   indexes {
-    (fill_id, intent_id) [unique]
-    (order_id, intent_id)
-    (reservation_id, fill_id) [unique]
-    (flow_id, fill_id)
+    (bot_id, id) [unique]
+    (fill_id, order_intent_allocation_id) [unique]
+    (order_intent_allocation_id, fill_id)
   }
 
   checks {
     `allocated_quantity > 0` [name: 'fill_allocation_quantity_positive']
     `allocated_gross_amount > 0` [name: 'fill_allocation_gross_positive']
     `allocated_fee_amount >= 0` [name: 'fill_allocation_fee_nonnegative']
-    `reservation_consumed_amount >= 0` [name: 'fill_allocation_reservation_consumed_nonnegative']
-    `reservation_released_amount >= 0` [name: 'fill_allocation_reservation_released_nonnegative']
   }
 
-  Note: '실제 Fill을 사전에 확정된 Order-Intent 배분에 귀속하는 불변 정본. 구매력 예약이 필요한 의도는 같은 intent_id의 reservation_id를 반드시 참조하고, 현금 예약이 필요 없는 청산 의도는 null을 허용한다. Fill별 수량·총액·수수료 합계는 fills와 정확히 일치하고 Order-Intent별 누적 체결은 예정 배분을 초과할 수 없다. 미사용 버퍼는 해제되며 체결가·성과에 절대 반영되지 않는다.'
-
-  Records (id, fill_id, order_id, intent_id, reservation_id, partition_id, flow_id, allocated_quantity, allocated_gross_amount, allocated_fee_amount, reservation_consumed_amount, reservation_released_amount, allocation_rules_version) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '1.0.0'
-  }
+  Note: '물리 체결을 주문-의도 배분 단위로 다시 나눈 불변 관계. Flow·파티션·position_effect는 연결된 intent에서 유도하므로 중복 저장하지 않는다. 한 Fill의 수량·총액·수수료 배분 합계는 Fill과 정확히 같아야 한다.'
 }
 
 Table trading.ledger_accounts {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
+  account_key varchar(240) [not null, note: '봇 안에서 범위·계정유형·통화·종목을 정규화한 null 없는 안정 키.']
   partition_id uuid
   flow_id uuid
   account_type varchar(50) [not null]
@@ -1916,23 +2255,28 @@ Table trading.ledger_accounts {
   closed_at timestamptz
 
   indexes {
-    (bot_id, partition_id, flow_id, account_type, currency_code, instrument_id) [unique]
+    (bot_id, id) [unique]
+    (bot_id, account_key) [unique]
+    (bot_id, partition_id, flow_id)
   }
 
-  Note: 'null-safe 유일성과 유효한 범위 조합은 마이그레이션에서 강제. Flow 하위계정은 예산·로트 이전 없이 귀속만 지원.'
-
-  Records (id, bot_id, partition_id, flow_id, account_type, currency_code, instrument_id, created_at, closed_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'USD', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', null
+  checks {
+    `flow_id IS NULL OR partition_id IS NOT NULL` [name: 'ledger_flow_requires_partition']
+    `(currency_code IS NOT NULL) <> (instrument_id IS NOT NULL)` [name: 'ledger_account_exactly_one_unit']
+    `closed_at IS NULL OR closed_at > created_at` [name: 'ledger_account_close_after_create']
   }
+
+  Note: '복식 원장의 계정 차원. nullable 복합 UNIQUE 대신 account_key를 사용해 PostgreSQL NULL 의미와 무관하게 중복 계정을 차단한다. partition_id·flow_id는 account_key와 일치하도록 생성 함수와 제약 트리거가 검증한다.'
 }
 
 Table trading.ledger_transactions {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
   bot_event_id uuid [not null, unique]
-  source_fill_id uuid
   transaction_type varchar(60) [not null]
   transaction_key varchar(160) [not null]
+  source_type varchar(40) [not null]
+  source_id uuid [not null]
   currency_code char(3) [not null]
   reversal_of_transaction_id uuid
   occurred_at timestamptz [not null]
@@ -1940,27 +2284,23 @@ Table trading.ledger_transactions {
   description_code varchar(80) [not null]
 
   indexes {
+    (bot_id, id) [unique]
     (bot_id, transaction_key) [unique]
+    (bot_id, source_type, source_id) [unique]
     (bot_id, occurred_at)
-    (source_fill_id) [unique]
   }
 
-  Note: '추가 전용. 체결 회계 거래는 source_fill_id로 정확한 Fill을 직접 참조하고, 비체결 경제 사건은 null을 허용한다. 정정은 역분개 트랜잭션으로 하며 커밋된 분개는 재작성하지 않는다.'
-
-  Records (id, bot_id, bot_event_id, source_fill_id, transaction_type, transaction_key, currency_code, reversal_of_transaction_id, occurred_at, recorded_at, description_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'USD', null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'Fictional review sample'
-  }
+  Note: '추가 전용 회계 사건 헤더. source_type/source_id로 Fill, 차입비용, 기업행사, 초기자본 또는 정정을 직접 식별해 동일 경제 사건의 중복 원장 반영을 막는다. 정정은 원본을 수정하지 않고 역분개 트랜잭션으로 처리한다.'
 }
 
 Table trading.ledger_entries {
   id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
   transaction_id uuid [not null]
   ledger_account_id uuid [not null]
   fill_allocation_id uuid
-  partition_id uuid
-  flow_id uuid
   entry_sequence int [not null]
-  direction varchar(10) [not null, note: '값은 DEBIT 또는 CREDIT.']
+  direction trading.ledger_direction [not null]
   amount numeric(24,8) [not null]
   quantity numeric(28,8)
   entry_hash varchar(128) [not null]
@@ -1969,14 +2309,15 @@ Table trading.ledger_entries {
     (transaction_id, entry_sequence) [unique]
     (ledger_account_id, transaction_id)
     (fill_allocation_id, transaction_id)
-    (flow_id, transaction_id)
   }
 
-  Note: '체결 귀속 분개는 fill_allocation_id로 실제 배분을 직접 참조한다. 지연 제약 트리거가 커밋 시 통화 금액 균형, Fill 배분 합계와 파티션/Flow 소유 유효성을 강제해야 한다.'
-
-  Records (id, transaction_id, ledger_account_id, fill_allocation_id, partition_id, flow_id, entry_sequence, direction, amount, quantity, entry_hash) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'review-example', 100000.00000000, 10.00000000, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  checks {
+    `entry_sequence > 0` [name: 'ledger_entry_sequence_positive']
+    `amount > 0` [name: 'ledger_entry_amount_positive']
+    `quantity IS NULL OR quantity <> 0` [name: 'ledger_entry_quantity_nonzero']
   }
+
+  Note: '추가 전용 차변·대변 분개. partition/flow 귀속은 ledger_account에서 유도해 중복 불일치를 제거한다. PostgreSQL 지연 제약 트리거가 트랜잭션 커밋 시 차변 합계와 대변 합계, 통화, Bot 소유 및 최소 2개 분개를 검증한다.'
 }
 
 Table trading.position_lots {
@@ -1985,47 +2326,216 @@ Table trading.position_lots {
   partition_id uuid [not null]
   flow_id uuid [not null]
   instrument_id uuid [not null]
-  opening_fill_allocation_id uuid [not null]
+  opening_fill_allocation_id uuid [not null, unique]
+  lot_side trading.lot_side [not null]
   opened_quantity numeric(28,8) [not null]
-  remaining_quantity numeric(28,8) [not null]
   unit_cost numeric(24,8) [not null]
+  opened_cost_basis_amount numeric(24,8) [not null]
   opened_at timestamptz [not null]
-  closed_at timestamptz
 
   indexes {
+    (bot_id, id) [unique]
     (flow_id, instrument_id, opened_at)
     (bot_id, instrument_id, opened_at)
     (opening_fill_allocation_id) [unique]
   }
 
-  Note: '진입 체결 전체가 아니라 Flow에 실제 귀속된 fill_allocation에서 생성되는 포지션 로트. opened_quantity와 원가는 해당 배분 범위를 초과할 수 없다. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
-
-  Records (id, bot_id, partition_id, flow_id, instrument_id, opening_fill_allocation_id, opened_quantity, remaining_quantity, unit_cost, opened_at, closed_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 10.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00', null
+  checks {
+    `opened_quantity > 0` [name: 'position_lot_opened_quantity_positive']
+    `unit_cost >= 0` [name: 'position_lot_unit_cost_nonnegative']
+    `opened_cost_basis_amount >= 0` [name: 'position_lot_opened_basis_nonnegative']
   }
+
+  Note: 'Flow별 체결 배분으로 생성된 불변 FIFO 원가 묶음. 물리 Fill이 아니라 정확한 fill_allocation을 원천으로 사용해 병합 체결의 Flow 귀속을 잃지 않는다. 현재 잔량은 position_lot_projections에서만 관리한다.'
 }
 
 Table trading.lot_movements {
   id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
   position_lot_id uuid [not null]
   bot_event_id uuid [not null]
   source_fill_allocation_id uuid
   corporate_action_id uuid
-  movement_type varchar(40) [not null]
+  reverses_movement_id uuid
+  movement_type trading.lot_movement_type [not null]
   quantity_delta numeric(28,8) [not null]
+  cost_basis_delta numeric(24,8) [not null]
   remaining_after numeric(28,8) [not null]
+  cost_basis_after numeric(24,8) [not null]
   occurred_at timestamptz [not null]
 
   indexes {
+    (position_lot_id, id) [unique]
     (position_lot_id, bot_event_id) [unique]
     (source_fill_allocation_id, position_lot_id)
   }
 
-  Note: '청산 체결에 의한 로트 변동은 source_fill_allocation_id로 같은 Flow에 귀속된 실제 체결 배분을 참조한다. 기업행사 변동은 corporate_action_id를 사용한다. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
-
-  Records (id, position_lot_id, bot_event_id, source_fill_allocation_id, corporate_action_id, movement_type, quantity_delta, remaining_after, occurred_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 10.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00'
+  checks {
+    `quantity_delta <> 0` [name: 'lot_movement_quantity_nonzero']
+    `remaining_after >= 0` [name: 'lot_movement_remaining_nonnegative']
+    `cost_basis_after >= 0` [name: 'lot_movement_basis_nonnegative']
+    `NOT (source_fill_allocation_id IS NOT NULL AND corporate_action_id IS NOT NULL)` [name: 'lot_movement_source_not_ambiguous']
+    `movement_type NOT IN ('OPEN', 'CLOSE') OR source_fill_allocation_id IS NOT NULL` [name: 'fill_movement_source_required']
+    `movement_type <> 'CORPORATE_ACTION_ADJUSTMENT' OR corporate_action_id IS NOT NULL` [name: 'corporate_movement_source_required']
+    `movement_type <> 'REVERSAL' OR reverses_movement_id IS NOT NULL` [name: 'reversal_movement_source_required']
   }
+
+  Note: '개별 로트의 OPEN·FIFO CLOSE·기업행사 조정·정정·역분개를 추가 전용으로 보존한다. 잔량과 잔존 원가는 직전 movement의 after 값과 연속되어야 한다.'
+}
+
+Table trading.position_lot_projections {
+  position_lot_id uuid [pk]
+  remaining_quantity numeric(28,8) [not null]
+  remaining_cost_basis_amount numeric(24,8) [not null]
+  active_reserved_quantity numeric(28,8) [not null]
+  last_movement_id uuid [not null]
+  last_event_sequence bigint [not null]
+  closed_at timestamptz
+  updated_at timestamptz [not null]
+
+  checks {
+    `remaining_quantity >= 0` [name: 'lot_projection_remaining_nonnegative']
+    `remaining_cost_basis_amount >= 0` [name: 'lot_projection_basis_nonnegative']
+    `active_reserved_quantity >= 0 AND active_reserved_quantity <= remaining_quantity` [name: 'lot_projection_reservation_within_remaining']
+    `(remaining_quantity = 0) = (closed_at IS NOT NULL)` [name: 'lot_projection_closed_consistent']
+  }
+
+  Note: '재구축 가능한 로트 현재 상태. 동일 Flow의 FIFO 예약과 청산 조회를 빠르게 하며 정본은 position_lots와 lot_movements다.'
+}
+
+Table trading.short_trade_checks {
+  intent_id uuid [pk]
+  short_risk_policy_id uuid [not null]
+  borrow_observed_at timestamptz [not null]
+  borrow_source_hash varchar(128) [not null]
+  borrow_available boolean [not null]
+  borrow_available_quantity numeric(28,8) [not null]
+  borrow_fee_rate_bps numeric(12,6) [not null]
+  price_restriction_active boolean [not null]
+  restriction_effective_from timestamptz
+  restriction_effective_to timestamptz
+  reference_bid_price numeric(24,8)
+  required_initial_collateral_amount numeric(24,8) [not null]
+  required_maintenance_collateral_amount numeric(24,8) [not null]
+  decision_reason_code varchar(80) [not null]
+  evidence_hash varchar(128) [not null]
+
+  checks {
+    `borrow_available_quantity >= 0` [name: 'short_check_borrow_quantity_nonnegative']
+    `borrow_fee_rate_bps >= 0` [name: 'short_check_fee_nonnegative']
+    `required_initial_collateral_amount >= 0` [name: 'short_check_initial_collateral_nonnegative']
+    `required_maintenance_collateral_amount >= 0` [name: 'short_check_maintenance_collateral_nonnegative']
+  }
+
+  Note: 'OPEN_SHORT 의도 승인에 사용한 차입 가능성, Rule 201 가격 제한, 차입비용과 담보 요구량의 불변 판단 증적. 원본 고빈도 대차·호가 데이터는 market_data/S3에 두고 여기에는 정확한 관측시각과 해시만 고정한다.'
+}
+
+Table trading.short_position_obligations {
+  position_lot_id uuid [pk]
+  short_risk_policy_id uuid [not null]
+  borrowed_quantity numeric(28,8) [not null]
+  returned_quantity numeric(28,8) [not null, default: 0]
+  recalled_quantity numeric(28,8) [not null, default: 0]
+  segregated_proceeds_amount numeric(24,8) [not null]
+  collateral_required_amount numeric(24,8) [not null]
+  accrued_borrow_fee_amount numeric(24,8) [not null, default: 0]
+  last_assessed_at timestamptz [not null]
+  last_event_sequence bigint [not null]
+
+  checks {
+    `borrowed_quantity > 0` [name: 'short_obligation_borrowed_positive']
+    `returned_quantity >= 0 AND returned_quantity <= borrowed_quantity` [name: 'short_obligation_returned_valid']
+    `recalled_quantity >= 0 AND recalled_quantity <= borrowed_quantity - returned_quantity` [name: 'short_obligation_recalled_valid']
+    `segregated_proceeds_amount >= 0` [name: 'short_obligation_proceeds_nonnegative']
+    `collateral_required_amount >= 0` [name: 'short_obligation_collateral_nonnegative']
+    `accrued_borrow_fee_amount >= 0` [name: 'short_obligation_fee_nonnegative']
+  }
+
+  Note: 'SHORT lot별 차입 반환 의무, 재사용할 수 없는 매도대금, 현재 담보와 누적 차입비용의 Projection. 공식 변경은 예약·원장·short_borrow_fee_accruals·강제조치 사건에서 재구축한다.'
+}
+
+Table trading.short_obligation_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  position_lot_id uuid [not null]
+  bot_event_id uuid [not null]
+  obligation_sequence bigint [not null]
+  event_type varchar(50) [not null]
+  borrowed_quantity_delta numeric(28,8) [not null, default: 0]
+  returned_quantity_delta numeric(28,8) [not null, default: 0]
+  recalled_quantity_delta numeric(28,8) [not null, default: 0]
+  segregated_proceeds_delta numeric(24,8) [not null, default: 0]
+  collateral_required_after numeric(24,8) [not null]
+  occurred_at timestamptz [not null]
+  evidence_hash varchar(128) [not null]
+
+  indexes {
+    (position_lot_id, obligation_sequence) [unique]
+    (position_lot_id, bot_event_id, event_type) [unique]
+  }
+
+  checks {
+    `obligation_sequence > 0` [name: 'short_obligation_event_sequence_positive']
+    `borrowed_quantity_delta >= 0` [name: 'short_obligation_borrowed_delta_nonnegative']
+    `returned_quantity_delta >= 0` [name: 'short_obligation_returned_delta_nonnegative']
+    `recalled_quantity_delta >= 0` [name: 'short_obligation_recalled_delta_nonnegative']
+    `collateral_required_after >= 0` [name: 'short_obligation_collateral_after_nonnegative']
+  }
+
+  Note: 'SHORT lot의 차입·반환·회수·격리 매도대금·담보 변경을 추가 전용으로 보존한다. short_position_obligations는 이 사건과 원장으로부터 재구축한다.'
+}
+
+Table trading.short_borrow_fee_accruals {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  position_lot_id uuid [not null]
+  bot_event_id uuid [not null, unique]
+  ledger_transaction_id uuid [not null, unique]
+  period_start timestamptz [not null]
+  period_end timestamptz [not null]
+  fee_rate_bps numeric(12,6) [not null]
+  fee_basis_amount numeric(24,8) [not null]
+  accrued_fee_amount numeric(24,8) [not null]
+  calculation_hash varchar(128) [not null]
+
+  indexes {
+    (position_lot_id, period_start, period_end) [unique]
+  }
+
+  checks {
+    `period_end > period_start` [name: 'borrow_fee_period_valid']
+    `fee_rate_bps >= 0` [name: 'borrow_fee_rate_nonnegative']
+    `fee_basis_amount >= 0` [name: 'borrow_fee_basis_nonnegative']
+    `accrued_fee_amount >= 0` [name: 'borrow_fee_amount_nonnegative']
+  }
+
+  Note: '보유 중인 SHORT lot의 실제 대차비용을 기간별로 추가 전용 기록하고 공식 원장과 1:1 연결한다.'
+}
+
+Table trading.forced_liquidation_actions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  partition_id uuid [not null]
+  flow_id uuid [not null]
+  instrument_id uuid [not null]
+  source_event_id uuid [not null]
+  action_type trading.short_action_type [not null]
+  requested_quantity numeric(28,8) [not null]
+  generated_intent_id uuid [not null, unique]
+  reason_document jsonb [not null]
+  calculation_hash varchar(128) [not null]
+  created_at timestamptz [not null]
+
+  indexes {
+    (bot_id, source_event_id, instrument_id, action_type) [unique]
+    (flow_id, created_at)
+  }
+
+  checks {
+    `requested_quantity > 0` [name: 'forced_liquidation_quantity_positive']
+  }
+
+  Note: '차입 회수·담보 부족·봇 중단에 의해 플랫폼이 생성한 강제 청산 근거. 사용자 Flow 판단과 구분하면서 생성된 SYSTEM_* 주문 의도부터 체결·원장까지 동일 경로로 추적한다.'
 }
 
 Table trading.flow_position_projections {
@@ -2046,11 +2556,13 @@ Table trading.flow_position_projections {
     (partition_id, instrument_id)
   }
 
-  Note: '재구축 가능한 PostgreSQL 현재 Projection. 공식 이력은 체결, 로트 변동, 원장 분개.'
-
-  Records (flow_id, partition_id, bot_id, instrument_id, long_quantity, short_quantity, cost_basis_amount, last_event_sequence, projection_hash, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 10.00000000, 100000.00000000, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  checks {
+    `long_quantity >= 0` [name: 'flow_position_long_nonnegative']
+    `short_quantity >= 0` [name: 'flow_position_short_nonnegative']
+    `cost_basis_amount >= 0` [name: 'flow_position_basis_nonnegative']
   }
+
+  Note: '재구축 가능한 PostgreSQL 현재 Projection. 공식 이력은 체결, 로트 변동, 원장 분개.'
 }
 
 Table trading.position_projections {
@@ -2069,43 +2581,68 @@ Table trading.position_projections {
     (bot_id, instrument_id) [pk]
   }
 
+  checks {
+    `average_cost IS NULL OR average_cost >= 0` [name: 'position_projection_average_cost_nonnegative']
+    `last_valuation_price IS NULL OR last_valuation_price > 0` [name: 'position_projection_valuation_price_positive']
+  }
+
   Note: '전역 종목 수렴에 쓰는 재구축 가능한 봇 순포지션. 원장·로트 기록이 정본.'
 
-  Records (bot_id, instrument_id, net_quantity, average_cost, realized_pnl, last_valuation_price, last_valuation_at, valuation_status, last_bot_event_sequence, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 100000.00000000, 100.00000000, '2026-07-27T09:00:00+09:00', 'ACTIVE', 1, '2026-07-27T09:00:00+09:00'
-  }
 }
 
 Table trading.bot_budget_projections {
   bot_id uuid [pk]
+  currency_code char(3) [not null]
   available_cash_amount numeric(24,8) [not null]
   active_reservation_amount numeric(24,8) [not null]
   invested_amount numeric(24,8) [not null]
+  segregated_short_proceeds_amount numeric(24,8) [not null]
+  short_collateral_amount numeric(24,8) [not null]
+  valuation_at timestamptz [not null]
+  valuation_status varchar(30) [not null]
   last_event_sequence bigint [not null]
   projection_hash varchar(128) [not null]
   updated_at timestamptz [not null]
 
-  Note: '봇 예산 Projection 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
-
-  Records (bot_id, available_cash_amount, active_reservation_amount, invested_amount, last_event_sequence, projection_hash, updated_at) {
-    '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, 100000.00000000, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  checks {
+    `available_cash_amount >= 0` [name: 'bot_budget_available_nonnegative']
+    `active_reservation_amount >= 0` [name: 'bot_budget_reservation_nonnegative']
+    `invested_amount >= 0` [name: 'bot_budget_invested_nonnegative']
+    `segregated_short_proceeds_amount >= 0` [name: 'bot_budget_short_proceeds_nonnegative']
+    `short_collateral_amount >= 0` [name: 'bot_budget_short_collateral_nonnegative']
   }
+
+  Note: '공식 원장·활성 resource_reservations·현재 청산가능 호가 평가에서 재구축하는 봇 예산 Projection. 가용현금은 격리 숏 매도대금과 담보를 제외하며 정본으로 사용하지 않는다.'
 }
 
 Table trading.partition_budget_projections {
   partition_id uuid [pk]
+  bot_id uuid [not null]
+  currency_code char(3) [not null]
   budget_cap_amount numeric(24,8) [not null]
   active_reservation_amount numeric(24,8) [not null]
   invested_amount numeric(24,8) [not null]
+  segregated_short_proceeds_amount numeric(24,8) [not null]
+  short_collateral_amount numeric(24,8) [not null]
+  valuation_at timestamptz [not null]
+  valuation_status varchar(30) [not null]
   last_event_sequence bigint [not null]
   projection_hash varchar(128) [not null]
   updated_at timestamptz [not null]
 
-  Note: '파티션 예산 Projection 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
-
-  Records (partition_id, budget_cap_amount, active_reservation_amount, invested_amount, last_event_sequence, projection_hash, updated_at) {
-    '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, 100000.00000000, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  indexes {
+    (bot_id, partition_id) [unique]
   }
+
+  checks {
+    `budget_cap_amount > 0` [name: 'partition_budget_cap_positive']
+    `active_reservation_amount >= 0` [name: 'partition_budget_reservation_nonnegative']
+    `invested_amount >= 0` [name: 'partition_budget_invested_nonnegative']
+    `segregated_short_proceeds_amount >= 0` [name: 'partition_budget_short_proceeds_nonnegative']
+    `short_collateral_amount >= 0` [name: 'partition_budget_short_collateral_nonnegative']
+  }
+
+  Note: '파티션 상한 사용량의 재구축 가능한 Projection. bot_id를 명시해 테넌트·소유 범위를 보존하고, 현재 청산가능 가격의 보유액·활성 예약·격리 숏 대금·담보를 공식 계산 규칙대로 분리한다.'
 }
 
 // -----------------------------------------------------------------------------
@@ -2124,7 +2661,7 @@ Table backtest.runs {
   market_rules_version varchar(80) [not null]
   accounting_rules_version varchar(80) [not null]
   precision_rules_version varchar(80) [not null]
-  fee_rules_version varchar(80) [not null]
+  fee_policy_id uuid [not null]
   slippage_rate_bps int [not null]
   buying_power_buffer_policy_id uuid [not null]
   idempotency_key varchar(160) [not null, unique]
@@ -2141,8 +2678,8 @@ Table backtest.runs {
 
   Note: '검증된 불변 봇 집합체와 원자적으로 생성. 백테스트 지연·실패는 라이브 봇 생명주기와 원장을 절대 바꾸지 않는다.'
 
-  Records (id, bot_id, owner_account_id, configuration_hash, status, evaluation_start, evaluation_end, initial_cash_amount, market_rules_version, accounting_rules_version, precision_rules_version, fee_rules_version, slippage_rate_bps, buying_power_buffer_policy_id, idempotency_key, queued_at, started_at, completed_at, failure_code, result_hash) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'RUNNING', '2026-07-27', '2026-07-27', 100000.00000000, '1.0.0', '1.0.0', '1.0.0', '1.0.0', 5, '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  Records (id, bot_id, owner_account_id, configuration_hash, status, evaluation_start, evaluation_end, initial_cash_amount, market_rules_version, accounting_rules_version, precision_rules_version, fee_policy_id, slippage_rate_bps, buying_power_buffer_policy_id, idempotency_key, queued_at, started_at, completed_at, failure_code, result_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'RUNNING', '2026-07-27', '2026-07-27', 100000.00000000, '1.0.0', '1.0.0', '1.0.0', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   }
 }
 
@@ -2429,8 +2966,7 @@ Table competition.room_rules {
   eligibility_document jsonb [not null]
   market_scope_document jsonb [not null]
   scoring_parameters jsonb [not null]
-  fee_rules_version varchar(80) [not null]
-  fee_configuration jsonb [not null]
+  fee_policy_id uuid [not null]
   slippage_rate_bps int [not null, note: '고정 5 bps.']
   buying_power_buffer_policy_id uuid [not null]
   precision_rules_version varchar(80) [not null]
@@ -2439,8 +2975,8 @@ Table competition.room_rules {
 
   Note: '핵심 자격·정원 필드는 제약과 입장 잠금을 위해 관계형으로 유지하고, 확장 기준은 버전 관리 JSONB에 유지.'
 
-  Records (room_id, scoring_template_version_id, initial_cash_amount, currency_code, participant_limit, per_account_bot_limit, stopped_bot_slot_policy, minimum_operation_seconds, minimum_fill_count, late_submission_policy, eligibility_document, market_scope_document, scoring_parameters, fee_rules_version, fee_configuration, slippage_rate_bps, buying_power_buffer_policy_id, precision_rules_version, rules_hash, locked_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', 1, 1, 'REVIEW_EXAMPLE', 1, 1, 'REVIEW_EXAMPLE', '{"minAccountAgeDays":7,"requireVerifiedEmail":true}', '{"assetTypes":["STOCK","ETF"],"exchanges":["XNAS","XNYS"]}', '{"weights":{"return":0.4,"sharpe":0.3,"maxDrawdown":0.3}}', '1.0.0', '{"type":"RATE_BPS","rateBps":20,"minimumFee":"0"}', 5, '00000000-0000-4000-8000-000000000001', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  Records (room_id, scoring_template_version_id, initial_cash_amount, currency_code, participant_limit, per_account_bot_limit, stopped_bot_slot_policy, minimum_operation_seconds, minimum_fill_count, late_submission_policy, eligibility_document, market_scope_document, scoring_parameters, fee_policy_id, slippage_rate_bps, buying_power_buffer_policy_id, precision_rules_version, rules_hash, locked_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', 1, 1, 'REVIEW_EXAMPLE', 1, 1, 'REVIEW_EXAMPLE', '{"minAccountAgeDays":7,"requireVerifiedEmail":true}', '{"assetTypes":["STOCK","ETF"],"exchanges":["XNAS","XNYS"]}', '{"weights":{"return":0.4,"sharpe":0.3,"maxDrawdown":0.3}}', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -2967,6 +3503,7 @@ Ref: bot.bots.owner_account_id > identity.accounts.id
 Ref: bot.launch_snapshots.bot_id > bot.bots.id
 Ref: bot.launch_configurations.bot_id > bot.bots.id
 Ref: bot.launch_configurations.buying_power_buffer_policy_id > trading.buying_power_buffer_policy_versions.id
+Ref: bot.launch_configurations.fee_policy_id > trading.fee_policy_versions.id
 Ref: bot.bot_partitions.bot_id > bot.bots.id
 Ref: bot.flows.partition_id > bot.bot_partitions.id
 Ref: bot.flows.element_catalog_version_id > strategy.element_catalog_versions.id
@@ -2996,40 +3533,51 @@ Ref: bot.runtime_state_changes.(bot_id, bot_event_id) > bot.bot_events.(bot_id, 
 Ref: bot.runtime_state_changes.(bot_id, runtime_state_value_id) > bot.runtime_state_values.(bot_id, id)
 Ref: trading.order_intent_batches.bot_id > bot.bots.id
 Ref: trading.order_intent_batches.source_event_id > bot.bot_events.id
-Ref: trading.order_intents.batch_id > trading.order_intent_batches.id
-Ref: trading.order_intents.evaluation_run_id > bot.evaluation_runs.id
+Ref: trading.order_intents.(bot_id, batch_id) > trading.order_intent_batches.(bot_id, id)
+Ref: trading.order_intents.(bot_id, source_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.order_intents.(bot_id, evaluation_run_id) > bot.evaluation_runs.(bot_id, id)
+Ref: trading.order_intents.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
 Ref: trading.order_intents.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.order_intents.instrument_id > market_data.instruments.id
 Ref: trading.orders.bot_id > bot.bots.id
 Ref: trading.orders.instrument_id > market_data.instruments.id
-Ref: trading.orders.order_group_id > trading.order_groups.id
 Ref: trading.orders.replaces_order_id > trading.orders.id
-Ref: trading.orders.accepted_event_id > bot.bot_events.id
+Ref: trading.orders.fee_policy_id > trading.fee_policy_versions.id
+Ref: trading.orders.(bot_id, accepted_event_id) > bot.bot_events.(bot_id, id)
 Ref: trading.order_groups.bot_id > bot.bots.id
-Ref: trading.order_groups.created_event_id > bot.bot_events.id
-Ref: trading.order_groups.closed_event_id > bot.bot_events.id
-Ref: trading.order_intent_allocations.order_id > trading.orders.id
-Ref: trading.order_intent_allocations.intent_id > trading.order_intents.id
-Ref: trading.capital_reservations.bot_id > bot.bots.id
-Ref: trading.capital_reservations.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: trading.capital_reservations.(partition_id, flow_id) > bot.flows.(partition_id, id)
-Ref: trading.capital_reservations.intent_id > trading.order_intents.id
-Ref: trading.capital_reservations.order_id > trading.orders.id
-Ref: trading.capital_reservations.(order_id, intent_id) > trading.order_intent_allocations.(order_id, intent_id)
-Ref: trading.capital_reservations.buffer_policy_id > trading.buying_power_buffer_policy_versions.id
-Ref: trading.capital_reservations.created_event_id > bot.bot_events.id
-Ref: trading.capital_reservations.settled_event_id > bot.bot_events.id
-Ref: trading.order_events.order_id > trading.orders.id
-Ref: trading.order_events.bot_event_id > bot.bot_events.id
+Ref: trading.order_groups.(bot_id, created_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.order_groups.(bot_id, closed_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.order_group_members.(bot_id, order_group_id) > trading.order_groups.(bot_id, id)
+Ref: trading.order_group_members.(bot_id, order_id) > trading.orders.(bot_id, id)
+Ref: trading.order_group_events.(bot_id, order_group_id) > trading.order_groups.(bot_id, id)
+Ref: trading.order_group_events.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.order_intent_allocations.(bot_id, order_id) > trading.orders.(bot_id, id)
+Ref: trading.order_intent_allocations.(bot_id, intent_id) > trading.order_intents.(bot_id, id)
+Ref: trading.resource_reservations.bot_id > bot.bots.id
+Ref: trading.resource_reservations.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
+Ref: trading.resource_reservations.(partition_id, flow_id) > bot.flows.(partition_id, id)
+Ref: trading.resource_reservations.(bot_id, intent_id) > trading.order_intents.(bot_id, id)
+Ref: trading.resource_reservations.instrument_id > market_data.instruments.id
+Ref: trading.resource_reservations.buffer_policy_id > trading.buying_power_buffer_policy_versions.id
+Ref: trading.resource_reservations.short_risk_policy_id > trading.short_risk_policy_versions.id
+Ref: trading.resource_reservations.(bot_id, created_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.reservation_lot_allocations.(bot_id, reservation_id) > trading.resource_reservations.(bot_id, id)
+Ref: trading.reservation_lot_allocations.(bot_id, position_lot_id) > trading.position_lots.(bot_id, id)
+Ref: trading.order_reservation_allocations.(bot_id, reservation_id) > trading.resource_reservations.(bot_id, id)
+Ref: trading.order_reservation_allocations.(bot_id, order_intent_allocation_id) > trading.order_intent_allocations.(bot_id, id)
+Ref: trading.reservation_events.(bot_id, reservation_id) > trading.resource_reservations.(bot_id, id)
+Ref: trading.reservation_events.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.reservation_events.(bot_id, source_fill_allocation_id) > trading.fill_allocations.(bot_id, id)
+Ref: trading.order_events.(bot_id, order_id) > trading.orders.(bot_id, id)
+Ref: trading.order_events.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
 Ref: trading.order_state_projections.order_id > trading.orders.id
-Ref: trading.fills.order_id > trading.orders.id
+Ref: trading.fills.(bot_id, order_id) > trading.orders.(bot_id, id)
 Ref: trading.fills.bot_id > bot.bots.id
-Ref: trading.fills.bot_event_id > bot.bot_events.id
+Ref: trading.fills.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
 Ref: trading.fills.instrument_id > market_data.instruments.id
-Ref: trading.fill_allocations.(fill_id, order_id) > trading.fills.(id, order_id)
-Ref: trading.fill_allocations.(order_id, intent_id) > trading.order_intent_allocations.(order_id, intent_id)
-Ref: trading.fill_allocations.(reservation_id, intent_id) > trading.capital_reservations.(id, intent_id)
-Ref: trading.fill_allocations.(partition_id, flow_id) > bot.flows.(partition_id, id)
+Ref: trading.fills.fee_policy_id > trading.fee_policy_versions.id
+Ref: trading.fill_allocations.(bot_id, fill_id) > trading.fills.(bot_id, id)
+Ref: trading.fill_allocations.(bot_id, order_intent_allocation_id) > trading.order_intent_allocations.(bot_id, id)
 Ref: trading.ledger_accounts.bot_id > bot.bots.id
 Ref: trading.ledger_accounts.partition_id > bot.bot_partitions.id
 Ref: trading.ledger_accounts.flow_id > bot.flows.id
@@ -3037,24 +3585,38 @@ Ref: trading.ledger_accounts.(bot_id, partition_id) > bot.bot_partitions.(bot_id
 Ref: trading.ledger_accounts.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.ledger_accounts.instrument_id > market_data.instruments.id
 Ref: trading.ledger_transactions.bot_id > bot.bots.id
-Ref: trading.ledger_transactions.bot_event_id > bot.bot_events.id
-Ref: trading.ledger_transactions.source_fill_id > trading.fills.id
-Ref: trading.ledger_transactions.reversal_of_transaction_id > trading.ledger_transactions.id
-Ref: trading.ledger_entries.transaction_id > trading.ledger_transactions.id
-Ref: trading.ledger_entries.ledger_account_id > trading.ledger_accounts.id
-Ref: trading.ledger_entries.fill_allocation_id > trading.fill_allocations.id
-Ref: trading.ledger_entries.partition_id > bot.bot_partitions.id
-Ref: trading.ledger_entries.flow_id > bot.flows.id
-Ref: trading.ledger_entries.(partition_id, flow_id) > bot.flows.(partition_id, id)
+Ref: trading.ledger_transactions.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.ledger_transactions.(bot_id, reversal_of_transaction_id) > trading.ledger_transactions.(bot_id, id)
+Ref: trading.ledger_entries.(bot_id, transaction_id) > trading.ledger_transactions.(bot_id, id)
+Ref: trading.ledger_entries.(bot_id, ledger_account_id) > trading.ledger_accounts.(bot_id, id)
+Ref: trading.ledger_entries.(bot_id, fill_allocation_id) > trading.fill_allocations.(bot_id, id)
 Ref: trading.position_lots.bot_id > bot.bots.id
 Ref: trading.position_lots.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
 Ref: trading.position_lots.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.position_lots.instrument_id > market_data.instruments.id
-Ref: trading.position_lots.opening_fill_allocation_id > trading.fill_allocations.id
-Ref: trading.lot_movements.position_lot_id > trading.position_lots.id
-Ref: trading.lot_movements.bot_event_id > bot.bot_events.id
-Ref: trading.lot_movements.source_fill_allocation_id > trading.fill_allocations.id
+Ref: trading.position_lots.(bot_id, opening_fill_allocation_id) > trading.fill_allocations.(bot_id, id)
+Ref: trading.lot_movements.(bot_id, position_lot_id) > trading.position_lots.(bot_id, id)
+Ref: trading.lot_movements.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.lot_movements.(bot_id, source_fill_allocation_id) > trading.fill_allocations.(bot_id, id)
 Ref: trading.lot_movements.corporate_action_id > market_data.corporate_actions.id
+Ref: trading.lot_movements.(position_lot_id, reverses_movement_id) > trading.lot_movements.(position_lot_id, id)
+Ref: trading.position_lot_projections.position_lot_id > trading.position_lots.id
+Ref: trading.position_lot_projections.(position_lot_id, last_movement_id) > trading.lot_movements.(position_lot_id, id)
+Ref: trading.short_trade_checks.intent_id > trading.order_intents.id
+Ref: trading.short_trade_checks.short_risk_policy_id > trading.short_risk_policy_versions.id
+Ref: trading.short_position_obligations.position_lot_id > trading.position_lots.id
+Ref: trading.short_position_obligations.short_risk_policy_id > trading.short_risk_policy_versions.id
+Ref: trading.short_obligation_events.(bot_id, position_lot_id) > trading.position_lots.(bot_id, id)
+Ref: trading.short_obligation_events.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.short_borrow_fee_accruals.(bot_id, position_lot_id) > trading.position_lots.(bot_id, id)
+Ref: trading.short_borrow_fee_accruals.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.short_borrow_fee_accruals.(bot_id, ledger_transaction_id) > trading.ledger_transactions.(bot_id, id)
+Ref: trading.forced_liquidation_actions.bot_id > bot.bots.id
+Ref: trading.forced_liquidation_actions.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
+Ref: trading.forced_liquidation_actions.(partition_id, flow_id) > bot.flows.(partition_id, id)
+Ref: trading.forced_liquidation_actions.instrument_id > market_data.instruments.id
+Ref: trading.forced_liquidation_actions.(bot_id, source_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.forced_liquidation_actions.(bot_id, generated_intent_id) > trading.order_intents.(bot_id, id)
 Ref: trading.flow_position_projections.bot_id > bot.bots.id
 Ref: trading.flow_position_projections.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
 Ref: trading.flow_position_projections.(partition_id, flow_id) > bot.flows.(partition_id, id)
@@ -3062,11 +3624,12 @@ Ref: trading.flow_position_projections.instrument_id > market_data.instruments.i
 Ref: trading.position_projections.bot_id > bot.bots.id
 Ref: trading.position_projections.instrument_id > market_data.instruments.id
 Ref: trading.bot_budget_projections.bot_id > bot.bots.id
-Ref: trading.partition_budget_projections.partition_id > bot.bot_partitions.id
+Ref: trading.partition_budget_projections.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
 
 Ref: backtest.runs.bot_id > bot.bots.id
 Ref: backtest.runs.owner_account_id > identity.accounts.id
 Ref: backtest.runs.buying_power_buffer_policy_id > trading.buying_power_buffer_policy_versions.id
+Ref: backtest.runs.fee_policy_id > trading.fee_policy_versions.id
 Ref: backtest.run_attempts.run_id > backtest.runs.id
 Ref: backtest.input_bundles.run_id > backtest.runs.id
 Ref: backtest.input_datasets.input_bundle_id > backtest.input_bundles.id
@@ -3089,6 +3652,7 @@ Ref: competition.rooms.creator_account_id > identity.accounts.id
 Ref: competition.room_rules.room_id > competition.rooms.id
 Ref: competition.room_rules.scoring_template_version_id > competition.scoring_template_versions.id
 Ref: competition.room_rules.buying_power_buffer_policy_id > trading.buying_power_buffer_policy_versions.id
+Ref: competition.room_rules.fee_policy_id > trading.fee_policy_versions.id
 Ref: competition.room_events.room_id > competition.rooms.id
 Ref: competition.room_invitations.room_id > competition.rooms.id
 Ref: competition.room_invitations.issued_by_account_id > identity.accounts.id

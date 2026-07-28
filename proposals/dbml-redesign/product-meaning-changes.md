@@ -17,6 +17,21 @@
 기준 Stackcord fingerprint: `sha256:3cb632a0a1d1b75fd1e879be6da23c95d884a8250e4da3aba22f94cf5e59d7f2`
 DBML 초안: `proposals/dbml-redesign/schema.draft.dbml`
 
+Trading 운영 제약: `proposals/dbml-redesign/trading-production-readiness.md`
+
+## Trading 정합성 재구성 제안
+
+- 주문 의도는 Flow 평가뿐 아니라 봇 중단 청산·숏 강제 바이인·기업행사 시스템 조치도 같은 공식 경로에서 생성하되 `origin_type`으로 구분한다.
+- 하나의 물리 주문에 서로 다른 `position_effect`가 섞일 수 있으므로 `orders.position_effect`를 제거하고 원래 의미는 `order_intents`와 배분 관계에 보존한다.
+- 현금 전용 `capital_reservations`를 `resource_reservations`로 대체해 Buying Power, Flow 보유수량, 숏 차입수량, 숏 담보와 격리 매도대금을 함께 원자적으로 예약한다.
+- 예약은 Intent 소유로 유지하고 주문과의 N:M 배분 및 모든 소비·해제 사건을 별도 추가 전용 테이블에 기록한다.
+- OCO·브래킷·멀티레그 주문의 멤버 역할·활성화·상호 취소 조건과 그룹 사건을 명시한다.
+- Fill은 정확한 주문-의도 배분에 귀속하고, 공식 5 bps 슬리피지·20 bps 수수료 정책 버전과 계산 근거를 고정한다.
+- Ledger의 nullable 복합 유일성 대신 null 없는 `account_key`를 사용하고 모든 경제 사건의 source를 직접 식별한다. Entry의 중복 Partition/Flow 컬럼은 제거한다.
+- Position lot은 정확한 Fill allocation에서 생성되는 불변 원본으로 바꾸고, 현재 잔량은 별도 Projection, 변화는 추가 전용 movement로 관리한다.
+- Pro 숏의 차입·Rule 201·담보·격리 매도대금·차입비용·차입 회수와 강제 바이인 계보를 별도 테이블로 보존한다.
+- 합계 보존, 복식 원장 균형, FIFO, 예약 초과 방지는 PostgreSQL 지연 제약 트리거와 동일 트랜잭션 경계로 강제한다.
+
 ## 2026-07-28 Strategy 출시와 Bot 독립 스냅샷 제안
 
 사용자 확정 결정에 따라 Strategy는 수정 가능한 설계 원본이고, Bot은 Strategy 출시 시점의 검증된 상태를 복사해 만든 완전 독립 실행 객체다. 이 절은 아래 문서에 남아 있는 `Strategy가 Bot을 소유한다`, `bot_workspaces에서 Bot을 편집한다`, `Bot에서 원본 Strategy를 참조한다`는 이전 설명을 대체한다.
