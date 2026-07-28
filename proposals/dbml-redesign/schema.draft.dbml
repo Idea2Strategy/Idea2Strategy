@@ -1733,9 +1733,16 @@ Table trading.order_intent_allocations {
   indexes {
     (order_id, intent_id) [pk]
     (intent_id)
+    (order_id, allocation_rank) [unique]
   }
 
-  Note: '주문-의도 배분 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  checks {
+    `allocated_quantity > 0` [name: 'order_intent_allocation_quantity_positive']
+    `allocated_notional IS NULL OR allocated_notional > 0` [name: 'order_intent_allocation_notional_positive']
+    `allocation_rank > 0` [name: 'order_intent_allocation_rank_positive']
+  }
+
+  Note: '상계 후 실제 Order를 구성하는 Intent별 예정 배분의 불변 정본. 주문별 allocated_quantity 합계는 orders.requested_quantity와 일치해야 하며 Fill 배분은 반드시 이 행을 참조한다. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (order_id, intent_id, allocated_quantity, allocated_notional, allocation_rank, allocation_rules_version) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 1, '1.0.0'
@@ -1770,9 +1777,11 @@ Table trading.capital_reservations {
     (bot_id, status, created_at)
     (partition_id, status)
     (flow_id, status)
+    (id, intent_id) [unique]
+    (order_id, intent_id)
   }
 
-  Note: '버퍼는 구매력 예약에만 영향을 주고 체결가·PnL·성과에는 절대 반영되지 않는다. 예산 강제는 봇·파티션 상한만 사용하고 flow_id는 귀속용. 최종 가격/수수료 재확인은 어느 상한이든 초과하기 전에 축소하거나 거부해야 한다.'
+  Note: 'Intent별 구매력 예약. order_id가 채워지면 반드시 동일 Intent의 order_intent_allocations 행과 일치해야 한다. 버퍼는 구매력 예약에만 영향을 주고 체결가·PnL·성과에는 절대 반영되지 않는다. 예산 강제는 봇·파티션 상한만 사용하고 flow_id는 귀속용. 최종 가격/수수료 재확인은 어느 상한이든 초과하기 전에 축소하거나 거부해야 한다.'
 
   Records (id, bot_id, partition_id, flow_id, intent_id, order_id, buffer_policy_id, status, reference_price, reference_observed_at, reference_market_hash, base_notional, fixed_slippage_amount, estimated_fee_amount, buffer_amount, reserved_amount, consumed_amount, released_amount, created_event_id, created_at, settled_event_id, settled_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACTIVE', 100.00000000, '2026-07-27T09:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
@@ -1846,6 +1855,7 @@ Table trading.fills {
 
   indexes {
     (order_id, provider_fill_key) [unique]
+    (id, order_id) [unique]
     (bot_id, occurred_at)
     (instrument_id, occurred_at)
   }
@@ -1858,9 +1868,11 @@ Table trading.fills {
 }
 
 Table trading.fill_allocations {
+  id uuid [pk, default: `gen_random_uuid()`]
   fill_id uuid [not null]
+  order_id uuid [not null]
   intent_id uuid [not null]
-  reservation_id uuid [not null]
+  reservation_id uuid
   partition_id uuid [not null]
   flow_id uuid [not null]
   allocated_quantity numeric(28,8) [not null]
@@ -1871,15 +1883,24 @@ Table trading.fill_allocations {
   allocation_rules_version varchar(40) [not null]
 
   indexes {
-    (fill_id, intent_id) [pk]
+    (fill_id, intent_id) [unique]
+    (order_id, intent_id)
     (reservation_id, fill_id) [unique]
     (flow_id, fill_id)
   }
 
-  Note: '배분은 의도별 예약을 독립 정산. 미사용 버퍼는 해제되며 체결가·성과에 절대 반영되지 않는다.'
+  checks {
+    `allocated_quantity > 0` [name: 'fill_allocation_quantity_positive']
+    `allocated_gross_amount > 0` [name: 'fill_allocation_gross_positive']
+    `allocated_fee_amount >= 0` [name: 'fill_allocation_fee_nonnegative']
+    `reservation_consumed_amount >= 0` [name: 'fill_allocation_reservation_consumed_nonnegative']
+    `reservation_released_amount >= 0` [name: 'fill_allocation_reservation_released_nonnegative']
+  }
 
-  Records (fill_id, intent_id, reservation_id, partition_id, flow_id, allocated_quantity, allocated_gross_amount, allocated_fee_amount, reservation_consumed_amount, reservation_released_amount, allocation_rules_version) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '1.0.0'
+  Note: '실제 Fill을 사전에 확정된 Order-Intent 배분에 귀속하는 불변 정본. 구매력 예약이 필요한 의도는 같은 intent_id의 reservation_id를 반드시 참조하고, 현금 예약이 필요 없는 청산 의도는 null을 허용한다. Fill별 수량·총액·수수료 합계는 fills와 정확히 일치하고 Order-Intent별 누적 체결은 예정 배분을 초과할 수 없다. 미사용 버퍼는 해제되며 체결가·성과에 절대 반영되지 않는다.'
+
+  Records (id, fill_id, order_id, intent_id, reservation_id, partition_id, flow_id, allocated_quantity, allocated_gross_amount, allocated_fee_amount, reservation_consumed_amount, reservation_released_amount, allocation_rules_version) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '1.0.0'
   }
 }
 
@@ -1909,6 +1930,7 @@ Table trading.ledger_transactions {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
   bot_event_id uuid [not null, unique]
+  source_fill_id uuid
   transaction_type varchar(60) [not null]
   transaction_key varchar(160) [not null]
   currency_code char(3) [not null]
@@ -1920,12 +1942,13 @@ Table trading.ledger_transactions {
   indexes {
     (bot_id, transaction_key) [unique]
     (bot_id, occurred_at)
+    (source_fill_id) [unique]
   }
 
-  Note: '추가 전용. 정정은 역분개 트랜잭션으로 하며 커밋된 분개는 재작성하지 않는다.'
+  Note: '추가 전용. 체결 회계 거래는 source_fill_id로 정확한 Fill을 직접 참조하고, 비체결 경제 사건은 null을 허용한다. 정정은 역분개 트랜잭션으로 하며 커밋된 분개는 재작성하지 않는다.'
 
-  Records (id, bot_id, bot_event_id, transaction_type, transaction_key, currency_code, reversal_of_transaction_id, occurred_at, recorded_at, description_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'USD', null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'Fictional review sample'
+  Records (id, bot_id, bot_event_id, source_fill_id, transaction_type, transaction_key, currency_code, reversal_of_transaction_id, occurred_at, recorded_at, description_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'USD', null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'Fictional review sample'
   }
 }
 
@@ -1933,6 +1956,7 @@ Table trading.ledger_entries {
   id uuid [pk, default: `gen_random_uuid()`]
   transaction_id uuid [not null]
   ledger_account_id uuid [not null]
+  fill_allocation_id uuid
   partition_id uuid
   flow_id uuid
   entry_sequence int [not null]
@@ -1944,13 +1968,14 @@ Table trading.ledger_entries {
   indexes {
     (transaction_id, entry_sequence) [unique]
     (ledger_account_id, transaction_id)
+    (fill_allocation_id, transaction_id)
     (flow_id, transaction_id)
   }
 
-  Note: '지연 제약 트리거가 커밋 시 통화 금액 균형과 파티션/Flow 소유 유효성을 강제해야 한다.'
+  Note: '체결 귀속 분개는 fill_allocation_id로 실제 배분을 직접 참조한다. 지연 제약 트리거가 커밋 시 통화 금액 균형, Fill 배분 합계와 파티션/Flow 소유 유효성을 강제해야 한다.'
 
-  Records (id, transaction_id, ledger_account_id, partition_id, flow_id, entry_sequence, direction, amount, quantity, entry_hash) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'review-example', 100000.00000000, 10.00000000, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  Records (id, transaction_id, ledger_account_id, fill_allocation_id, partition_id, flow_id, entry_sequence, direction, amount, quantity, entry_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'review-example', 100000.00000000, 10.00000000, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   }
 }
 
@@ -1960,7 +1985,7 @@ Table trading.position_lots {
   partition_id uuid [not null]
   flow_id uuid [not null]
   instrument_id uuid [not null]
-  opening_fill_id uuid [not null]
+  opening_fill_allocation_id uuid [not null]
   opened_quantity numeric(28,8) [not null]
   remaining_quantity numeric(28,8) [not null]
   unit_cost numeric(24,8) [not null]
@@ -1970,11 +1995,12 @@ Table trading.position_lots {
   indexes {
     (flow_id, instrument_id, opened_at)
     (bot_id, instrument_id, opened_at)
+    (opening_fill_allocation_id) [unique]
   }
 
-  Note: '포지션 로트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  Note: '진입 체결 전체가 아니라 Flow에 실제 귀속된 fill_allocation에서 생성되는 포지션 로트. opened_quantity와 원가는 해당 배분 범위를 초과할 수 없다. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
-  Records (id, bot_id, partition_id, flow_id, instrument_id, opening_fill_id, opened_quantity, remaining_quantity, unit_cost, opened_at, closed_at) {
+  Records (id, bot_id, partition_id, flow_id, instrument_id, opening_fill_allocation_id, opened_quantity, remaining_quantity, unit_cost, opened_at, closed_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 10.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00', null
   }
 }
@@ -1983,7 +2009,7 @@ Table trading.lot_movements {
   id uuid [pk, default: `gen_random_uuid()`]
   position_lot_id uuid [not null]
   bot_event_id uuid [not null]
-  source_fill_id uuid
+  source_fill_allocation_id uuid
   corporate_action_id uuid
   movement_type varchar(40) [not null]
   quantity_delta numeric(28,8) [not null]
@@ -1992,12 +2018,12 @@ Table trading.lot_movements {
 
   indexes {
     (position_lot_id, bot_event_id) [unique]
-    (source_fill_id, position_lot_id)
+    (source_fill_allocation_id, position_lot_id)
   }
 
-  Note: '로트 변동 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  Note: '청산 체결에 의한 로트 변동은 source_fill_allocation_id로 같은 Flow에 귀속된 실제 체결 배분을 참조한다. 기업행사 변동은 corporate_action_id를 사용한다. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
-  Records (id, position_lot_id, bot_event_id, source_fill_id, corporate_action_id, movement_type, quantity_delta, remaining_after, occurred_at) {
+  Records (id, position_lot_id, bot_event_id, source_fill_allocation_id, corporate_action_id, movement_type, quantity_delta, remaining_after, occurred_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 10.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00'
   }
 }
@@ -2989,6 +3015,7 @@ Ref: trading.capital_reservations.(bot_id, partition_id) > bot.bot_partitions.(b
 Ref: trading.capital_reservations.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.capital_reservations.intent_id > trading.order_intents.id
 Ref: trading.capital_reservations.order_id > trading.orders.id
+Ref: trading.capital_reservations.(order_id, intent_id) > trading.order_intent_allocations.(order_id, intent_id)
 Ref: trading.capital_reservations.buffer_policy_id > trading.buying_power_buffer_policy_versions.id
 Ref: trading.capital_reservations.created_event_id > bot.bot_events.id
 Ref: trading.capital_reservations.settled_event_id > bot.bot_events.id
@@ -2999,9 +3026,9 @@ Ref: trading.fills.order_id > trading.orders.id
 Ref: trading.fills.bot_id > bot.bots.id
 Ref: trading.fills.bot_event_id > bot.bot_events.id
 Ref: trading.fills.instrument_id > market_data.instruments.id
-Ref: trading.fill_allocations.fill_id > trading.fills.id
-Ref: trading.fill_allocations.intent_id > trading.order_intents.id
-Ref: trading.fill_allocations.reservation_id > trading.capital_reservations.id
+Ref: trading.fill_allocations.(fill_id, order_id) > trading.fills.(id, order_id)
+Ref: trading.fill_allocations.(order_id, intent_id) > trading.order_intent_allocations.(order_id, intent_id)
+Ref: trading.fill_allocations.(reservation_id, intent_id) > trading.capital_reservations.(id, intent_id)
 Ref: trading.fill_allocations.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.ledger_accounts.bot_id > bot.bots.id
 Ref: trading.ledger_accounts.partition_id > bot.bot_partitions.id
@@ -3011,9 +3038,11 @@ Ref: trading.ledger_accounts.(partition_id, flow_id) > bot.flows.(partition_id, 
 Ref: trading.ledger_accounts.instrument_id > market_data.instruments.id
 Ref: trading.ledger_transactions.bot_id > bot.bots.id
 Ref: trading.ledger_transactions.bot_event_id > bot.bot_events.id
+Ref: trading.ledger_transactions.source_fill_id > trading.fills.id
 Ref: trading.ledger_transactions.reversal_of_transaction_id > trading.ledger_transactions.id
 Ref: trading.ledger_entries.transaction_id > trading.ledger_transactions.id
 Ref: trading.ledger_entries.ledger_account_id > trading.ledger_accounts.id
+Ref: trading.ledger_entries.fill_allocation_id > trading.fill_allocations.id
 Ref: trading.ledger_entries.partition_id > bot.bot_partitions.id
 Ref: trading.ledger_entries.flow_id > bot.flows.id
 Ref: trading.ledger_entries.(partition_id, flow_id) > bot.flows.(partition_id, id)
@@ -3021,10 +3050,10 @@ Ref: trading.position_lots.bot_id > bot.bots.id
 Ref: trading.position_lots.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
 Ref: trading.position_lots.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.position_lots.instrument_id > market_data.instruments.id
-Ref: trading.position_lots.opening_fill_id > trading.fills.id
+Ref: trading.position_lots.opening_fill_allocation_id > trading.fill_allocations.id
 Ref: trading.lot_movements.position_lot_id > trading.position_lots.id
 Ref: trading.lot_movements.bot_event_id > bot.bot_events.id
-Ref: trading.lot_movements.source_fill_id > trading.fills.id
+Ref: trading.lot_movements.source_fill_allocation_id > trading.fill_allocations.id
 Ref: trading.lot_movements.corporate_action_id > market_data.corporate_actions.id
 Ref: trading.flow_position_projections.bot_id > bot.bots.id
 Ref: trading.flow_position_projections.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
