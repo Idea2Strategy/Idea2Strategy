@@ -8,6 +8,27 @@
 기준 Stackcord fingerprint: `sha256:3cb632a0a1d1b75fd1e879be6da23c95d884a8250e4da3aba22f94cf5e59d7f2`
 DBML 초안: `proposals/dbml-redesign/schema.draft.dbml`
 
+## 2026-07-28 Strategy 출시와 Bot 독립 스냅샷 제안
+
+사용자 확정 결정에 따라 Strategy는 수정 가능한 설계 원본이고, Bot은 Strategy 출시 시점의 검증된 상태를 복사해 만든 완전 독립 실행 객체다. 이 절은 아래 문서에 남아 있는 `Strategy가 Bot을 소유한다`, `bot_workspaces에서 Bot을 편집한다`, `Bot에서 원본 Strategy를 참조한다`는 이전 설명을 대체한다.
+
+- Strategy 편집 현재값은 `strategy.strategies`와 1:1 `strategy.strategy_documents`가 소유한다.
+- `strategy_documents.semantic_document`에는 파티션 예산 상한, Flow, Element, edge, 매개변수와 선택 종목을 저장한다.
+- `strategy_documents.presentation_document`에는 파티션·Flow·Element 좌표, 크기, edge route와 viewport를 저장한다.
+- Strategy는 계속 수정 가능하며 사용자 Strategy 버전·커밋·출시 계보 테이블을 만들지 않는다.
+- 출시 전 완전성, JSON Schema, 안정 키 참조, 포트 타입, DAG, 파티션 예산 합, 종목 의존성과 필수 주문 경로를 검증한다.
+- 출시 트랜잭션은 새 `bot.bots`, `bot.launch_snapshots`, `bot.launch_configurations`, `bot.bot_partitions`, `bot.flows`, 종목·피처·시간 의존성을 원자적으로 생성한다.
+- Bot에는 원본 Strategy 식별자, 출처 FK, 복사 계보, 출시 버전 연결을 저장하지 않는다. 운영자와 사용자 모두 Bot만으로 원본 Strategy를 역추적할 수 없다.
+- 같은 Strategy를 여러 번 출시해도 각 Bot은 서로 독립이며 이후 Strategy 수정은 기존 Bot에 전파되지 않는다.
+- `bot.launch_snapshots`는 출시 당시 semantic과 presentation 증적을 1:1로 보존한다. Strategy 식별자는 스냅샷 JSON Schema에서 금지한다.
+- 출시된 Bot의 mode, 파티션 예산, Flow 의미, Element, 종목과 실행 설정은 불변이다.
+- Bot 이름, 파티션·Flow 설명과 좌표, Flow 내부 Element 레이아웃 같은 presentation은 수정할 수 있다. 현재 배치를 수정해도 불변 출시 스냅샷을 덮어쓰지 않는다.
+- `bot.bot_workspaces`는 제거한다. 미완성 편집 상태는 Strategy 문서만 소유한다.
+- Package는 Basic Strategy 문서에 완성 Flow를 복사하고 Template은 Pro Strategy 문서에 시작 골격을 복사한다. Package·Template 출처 역시 사용자 Strategy나 출시 Bot에 남기지 않는다.
+- `strategy.compiled_flow_plans`와 Element 카탈로그 참조는 원본 사용자 Strategy 계보가 아니라 재현 가능한 실행을 위한 content-addressed 플랫폼 인프라다.
+
+출시 실패는 일부 Bot 행을 남기지 않고 전체 트랜잭션을 롤백한다. 스냅샷과 정규화된 실행 계층 또는 `launch_configurations`의 해시가 불일치하면 Bot 실행을 시작하지 않는다.
+
 ## 2026-07-27 봇 실행 아키텍처 재설계 제안
 
 봇 하나마다 전용 실행 파일·프로세스·컨테이너·스레드를 서버에 상주시키는 구조는 사용하지 않는다. 봇은 PostgreSQL에 저장된 불변 실행 설정과 복구 가능한 런타임 상태 데이터이며, 이벤트가 발생했을 때 공용 Worker Pool이 관련 전략만 평가한다. 상시 실행 주체는 Market Data Consumer, Trigger Router, Schedule Event Producer, Evaluation Worker Pool, Order/Fill Processor, Settlement Worker, Outbox Publisher, Projection Builder뿐이고, 이들은 봇 수가 아니라 Queue 처리량에 따라 수평 확장한다.

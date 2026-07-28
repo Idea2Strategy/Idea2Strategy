@@ -6,9 +6,12 @@ Project Idea2Strategy_DBML_Redesign_Proposal {
   격리된 제안: 제품 권한 검토 완료 전에는 db/schema.dbml 정본을 대체하지 않는다.
 
   핵심 소유 구조:
-    계정 -> Strategy -> 봇 -> 파티션 -> 파티션 소유 Flow -> Element.
+    계정 -> 수정 가능한 Strategy 설계 원본.
+    계정 -> 독립 Bot 스냅샷 -> 파티션 -> 파티션 소유 Flow -> Element.
+    Strategy를 Bot으로 출시하면 검증된 당시 상태를 복사하고 두 객체 사이의
+    FK·출처·계보·버전 연결을 남기지 않는다. Bot에서는 원본 Strategy를 조회할 수 없다.
+    출시된 실행 의미는 불변이고 이름·설명·좌표·레이아웃 같은 presentation만 수정 가능하다.
     Flow의 Element·연결·매개변수는 하나의 PostgreSQL JSONB 집합체다.
-    복사는 항상 새 식별자의 완전 독립 행을 만들며 원본 FK·계보·버전 연결을 남기지 않는다.
 
   PostgreSQL 정본 소유: 생성 시점 불변 봇 설정과 예산, 공식 이벤트, 주문 의도,
   예약, 주문, 체결, 복식 원장, 현재 Projection, 불변 경계 스냅샷, 오브젝트
@@ -625,8 +628,8 @@ Table identity.account_sanction_events {
 }
 
 // -----------------------------------------------------------------------------
-// strategy: user-owned Strategy containers and platform-owned Flow building assets.
-// Runtime Flow instances are owned by bot partitions in the bot schema.
+// strategy: editable user Strategy sources and platform-owned Flow building assets.
+// Publishing copies a validated snapshot into bot; no Strategy-to-Bot provenance remains.
 // -----------------------------------------------------------------------------
 
 Table strategy.strategies {
@@ -642,14 +645,37 @@ Table strategy.strategies {
   deleted_at timestamptz
 
   indexes {
-    (owner_account_id, id, mode) [unique]
     (owner_account_id, deleted_at, archived_at, updated_at)
   }
 
-  Note: '사용자가 소유하는 최상위 Strategy 컨테이너. 하나 이상의 독립 Bot을 묶지만 실행 상태·예산·Flow 의미를 직접 소유하지 않는다. 복사하면 원본 참조 없는 새 Strategy와 새 Bot 계층을 생성한다.'
+  Note: '사용자가 계속 수정할 수 있는 Strategy 설계 원본의 식별·표시·수명주기 메타데이터. 실행 Bot을 소유하거나 연결하지 않는다. 출시 시 strategy_documents의 검증된 당시 상태를 독립 Bot 스냅샷으로 복사하며 Bot에는 원본 Strategy 식별자·출처·계보를 남기지 않는다. 이후 Strategy 수정은 기존 Bot에 전파되지 않는다.'
 
   Records (id, owner_account_id, mode, name, description, edit_sequence, created_at, updated_at, archived_at, deleted_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'RSI 전략 모음', '검토용 사용자 Strategy', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null
+  }
+}
+
+Table strategy.strategy_documents {
+  strategy_id uuid [pk]
+  semantic_document jsonb [not null, note: '파티션 예산 상한, Flow, Element, edge, 매개변수, 선택 종목을 포함하는 수정 가능한 Strategy 설계 의미. 편집 중에는 미완성 구조를 허용하되 schema에 맞게 파싱 가능해야 한다.']
+  presentation_document jsonb [not null, note: '파티션·Flow·Element 좌표, 크기, edge route, viewport 같은 UI 배치 정보. semantic_document와 동일한 안정 키를 참조한다.']
+  semantic_schema_version varchar(40) [not null]
+  presentation_schema_version varchar(40) [not null]
+  semantic_hash varchar(128) [not null]
+  presentation_hash varchar(128) [not null]
+  edit_sequence bigint [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (semantic_hash)
+    (updated_at)
+  }
+
+  Note: 'Strategy 편집기의 현재 문서 1개를 저장하는 1:1 집합체. 버전 계보가 아니라 낙관적 동시성으로 갱신되는 현재 설계다. 출시 서비스는 완전성·포트 타입·DAG·예산 합·필수 주문 경로를 검증한 동일 트랜잭션에서 독립 bot.bots, bot.launch_snapshots, bot.launch_configurations, bot.bot_partitions, bot.flows 및 파생 의존성 행을 생성한다. 생성 후 Strategy와 Bot 사이에는 어떤 참조도 없다.'
+
+  Records (strategy_id, semantic_document, presentation_document, semantic_schema_version, presentation_schema_version, semantic_hash, presentation_hash, edit_sequence, created_at, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '{"partitions":[{"key":"partition-1","budgetCapBps":5000,"flows":[{"key":"flow-1","elements":[],"edges":[],"instrumentIds":[]}]}]}', '{"partitions":{"partition-1":{"x":100,"y":100}},"flows":{"flow-1":{"x":300,"y":100}},"elements":{},"edgeRoutes":{},"viewport":{"x":0,"y":0,"zoom":1.0}}', '1.0.0', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -726,7 +752,7 @@ Table strategy.package_versions {
     (package_id, version) [unique]
   }
 
-  Note: 'Basic Package의 불변 완성 Flow 문서 버전. Package를 선택하면 검증된 flow_document를 새 bot.flows 행에 복사하고 계보 연결은 저장하지 않는다.'
+  Note: 'Basic Package의 불변 완성 Flow 문서 버전. Package를 선택하면 flow_document를 수정 가능한 strategy.strategy_documents 안의 새 독립 Flow로 복사하고 Package 출처나 계보 연결은 저장하지 않는다.'
 
   Records (id, package_id, version, element_catalog_version_id, name_i18n, description_i18n, flow_document, content_hash, published_at, retired_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '1.0.0', '00000000-0000-4000-8000-000000000001', '{"ko":"RSI 과매도 반등","en":"RSI Oversold Rebound"}', '{"ko":"Basic에서 바로 사용할 수 있는 완성 Flow","en":"Complete Flow for Basic mode"}', '{"elements":[{"key":"ind-1","type":"RSI","params":{"period":14}},{"key":"cond-1","type":"THRESHOLD","params":{"operator":"LT","value":30}}],"edges":[{"from":"ind-1.value","to":"cond-1.input"}]}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
@@ -763,7 +789,7 @@ Table strategy.template_versions {
     (template_id, version) [unique]
   }
 
-  Note: 'Pro Template의 불변 시작 골격 버전. 사용자가 완성한 결과는 새 bot.flows 행이며 Template 버전이나 복사 출처를 참조하지 않는다.'
+  Note: 'Pro Template의 불변 시작 골격 버전. 사용하면 수정 가능한 strategy.strategy_documents 안의 새 독립 Flow 골격으로 복사되며 Template 버전이나 복사 출처를 참조하지 않는다. 이후 사용자가 완성한 Strategy를 출시해야 독립 Bot 스냅샷이 생성된다.'
 
   Records (id, template_id, version, element_catalog_version_id, name_i18n, description_i18n, semantic_skeleton, content_hash, published_at, retired_at) {
     '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002', '1.0.0', '00000000-0000-4000-8000-000000000001', '{"ko":"페어 트레이딩","en":"Pair Trading"}', '{"ko":"Pro에서 수정해 완성하는 시작 Flow","en":"Starting Flow for Pro mode"}', '{"elements":[{"key":"spread-1","type":"PAIR_SPREAD","params":{}}],"edges":[]}', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '2026-07-27T09:00:00+09:00', null
@@ -1192,37 +1218,12 @@ Table market_data.stream_watermarks {
 }
 
 // -----------------------------------------------------------------------------
-// bot: editable workspace plus immutable execution aggregate.
+// bot: independent immutable execution snapshots with mutable presentation.
 // -----------------------------------------------------------------------------
-
-Table bot.bot_workspaces {
-  id uuid [pk, default: `gen_random_uuid()`]
-  owner_account_id uuid [not null]
-  strategy_id uuid [not null]
-  mode strategy.strategy_mode [not null]
-  name varchar(120) [not null]
-  workspace_document jsonb [not null, note: '편집 중 파티션·Flow의 semanticDocument와 layoutDocument를 함께 포함한다. 완성 전에는 누락·미연결 Element를 허용하지만 document_schema_version에 맞게 파싱 가능해야 한다.']
-  document_schema_version varchar(40) [not null]
-  edit_sequence bigint [not null, default: 0]
-  created_at timestamptz [not null, default: `now()`]
-  updated_at timestamptz [not null, default: `now()`]
-
-  indexes {
-    (strategy_id, updated_at)
-    (owner_account_id, updated_at)
-  }
-
-  Note: '자동 저장되는 미완성 편집 집합체. 빈 파티션과 미완성 Flow는 여기서만 허용. workspace_document는 각 Flow의 실행 의미 그래프와 UI 레이아웃 그래프를 분리해 포함하며 같은 안정 Element·엣지 키를 사용한다. 완성은 문서 전체의 JSON Schema, 키 참조, 포트 타입, DAG, 레이아웃 수치와 필수 최종 주문 처리 경로를 검증해 새 독립 봇 계층을 원자적으로 생성한다. 완성된 봇은 워크스페이스·원본 복사·버전·계보 참조를 남기지 않는다. edit_sequence는 낙관적 동시성 제어용.'
-
-  Records (id, owner_account_id, strategy_id, mode, name, workspace_document, document_schema_version, edit_sequence, created_at, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', '{"partitions":[{"name":"SPY 반등","budgetCapBps":5000,"flows":[{"name":"RSI 과매도 진입","complete":false,"semanticDocument":{"elements":[],"edges":[]},"layoutDocument":{"schemaVersion":"1.0.0","elements":{},"edgeRoutes":{},"groups":{},"viewport":{"x":0,"y":0,"zoom":1.0},"selectedElementKeys":[]}}]}]}', '1.0.0', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
-  }
-}
 
 Table bot.bots {
   id uuid [pk, default: `gen_random_uuid()`]
   owner_account_id uuid [not null]
-  strategy_id uuid [not null]
   mode strategy.strategy_mode [not null]
   name varchar(120) [not null]
   lifecycle_status bot.lifecycle_status [not null]
@@ -1241,7 +1242,6 @@ Table bot.bots {
   updated_at timestamptz [not null, default: `now()`]
 
   indexes {
-    (strategy_id, created_at)
     (owner_account_id, lifecycle_status, created_at)
     (lifecycle_status, execution_blocked_at, created_at)
     (owner_account_id, deleted_at, archived_at, created_at)
@@ -1251,10 +1251,32 @@ Table bot.bots {
     `execution_blocked_at IS NOT NULL OR (execution_block_reason_code IS NULL AND execution_block_event_id IS NULL)` [name: 'bot_block_fields_together']
   }
 
-  Note: '봇은 정확히 하나의 Strategy에 속하는 불변 시작 설정과 복구 가능한 런타임 데이터이며 상주 프로세스·컨테이너·스레드가 아니다. 상시 실행은 공용 서비스뿐. RUNNING은 새 트리거 평가 대상, STOPPING은 신규 등록을 막고 취소/체결/해제/정산을 마무리, STOPPED는 영구. 봇별 헬스 상태·하트비트는 없다: 전역 시장 데이터·파이프라인 문제는 market_data(stream_watermarks, quality_incidents)와 operations 소유이고 평가 전 실행 게이트가 참조하며 봇 행을 대량 갱신하지 않는다. execution_blocked_at은 봇별 nullable 차단 Projection. 차단 중에는 새 Flow 평가와 새 주문 의도 생성만 멈추고 미체결 주문 취소, 체결 반영, 예약 해제, 원장 기록, 정산, STOPPING 처리는 계속된다. 차단·해제는 추가 전용 공식 bot_events(BOT_EXECUTION_BLOCKED, BOT_EXECUTION_UNBLOCKED, SETTLEMENT_FAILED, LEDGER_INVARIANT_VIOLATED, STATE_REBUILD_COMPLETED)이며 execution_block_event_id가 차단 이벤트를 고정. 파티션 1개 이상, 각 파티션에 완성 Flow 1개 이상, 시작 검증 통과 후에만 RUNNING으로 직접 생성. mode는 부모 Strategy와 일치하고 실행 의미는 불변. name, archived_at, deleted_at은 설정 해시에서 제외되는 가변 필드. archived_at은 STOPPED 봇의 가역 숨김, deleted_at은 STOPPED와 정산 완료 후에만 허용되는 비가역 논리 삭제이며, 실행 중 봇 삭제는 멱등 정지-정산 워크플로를 먼저 수행. 물리 퍼지는 별도 보존·법무 프로세스이고 공식 주문·체결·원장·이벤트·증적을 연쇄 삭제하지 않는다. edit_sequence는 편집 필드 갱신 성공마다 1 증가(낙관적 동시성). 복사는 원본 계보 없는 독립 새 집합체이며 런타임 현금·상태·주문·포지션·원장·참가·성과를 복사하지 않는다. 운영 마이그레이션은 deleted_at IS NULL AND archived_at IS NULL 활성 목록과 execution_blocked_at IS NOT NULL 차단 봇에 partial index 권장.'
+  Note: '검증된 Strategy 당시 상태를 복사해 생성한 완전 독립 실행 Bot. 원본 Strategy 식별자·출처·계보·버전 관계를 저장하지 않아 어느 Strategy에서 출시됐는지 조회할 수 없다. 출시된 실행 의미와 mode는 불변이고 Bot 이름, 파티션·Flow 설명과 좌표 및 Flow 내부 layout 같은 presentation만 수정 가능하다. 상주 프로세스·컨테이너·스레드가 아니며 상시 실행은 공용 서비스뿐. RUNNING은 새 트리거 평가 대상, STOPPING은 신규 등록을 막고 취소/체결/해제/정산을 마무리, STOPPED는 영구. execution_blocked_at은 봇별 nullable 실행 차단 Projection이며 차단 중에도 미체결 주문 취소, 체결 반영, 예약 해제, 원장 기록과 정산은 계속된다. 파티션 1개 이상과 각 파티션의 완성 Flow 1개 이상을 검증한 뒤 Bot 스냅샷 계층을 원자적으로 생성한다. archived_at은 STOPPED Bot의 가역 숨김이고 deleted_at은 정산 완료 뒤의 논리 삭제다. 공식 주문·체결·원장·이벤트·증적은 연쇄 삭제하지 않는다.'
 
-  Records (id, owner_account_id, strategy_id, mode, name, lifecycle_status, lifecycle_changed_at, execution_blocked_at, execution_block_reason_code, execution_block_event_id, created_at, started_at, stop_requested_at, stopped_at, stop_reason_code, archived_at, deleted_at, edit_sequence, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', 'RUNNING', '2026-07-27T09:00:00+09:00', null, null, null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, 'REVIEW_EXAMPLE', null, null, 1, '2026-07-27T09:00:00+09:00'
+  Records (id, owner_account_id, mode, name, lifecycle_status, lifecycle_changed_at, execution_blocked_at, execution_block_reason_code, execution_block_event_id, created_at, started_at, stop_requested_at, stopped_at, stop_reason_code, archived_at, deleted_at, edit_sequence, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', 'RUNNING', '2026-07-27T09:00:00+09:00', null, null, null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, 'REVIEW_EXAMPLE', null, null, 1, '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table bot.launch_snapshots {
+  bot_id uuid [pk]
+  snapshot_schema_version varchar(40) [not null]
+  semantic_snapshot jsonb [not null, note: '출시 시점의 mode, 파티션 예산 상한, Flow, Element, edge, 매개변수, 선택 종목 및 실행 규칙을 포함한다. Strategy 식별자나 출처 정보는 포함할 수 없다.']
+  presentation_snapshot jsonb [not null, note: '출시 시점의 이름·설명·파티션·Flow·Element 배치를 보존한다. 출시 후 현재 presentation은 수정될 수 있지만 이 증적은 불변이다.']
+  semantic_hash varchar(128) [not null]
+  presentation_hash varchar(128) [not null]
+  snapshot_hash varchar(128) [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (semantic_hash)
+    (snapshot_hash)
+  }
+
+  Note: 'Bot 출시 당시 상태의 불변 1:1 증적. 정규화된 bot_partitions·flows·의존성·launch_configurations와 같은 트랜잭션에서 생성하며 snapshot_hash는 의미 스냅샷과 launch configuration을 함께 바인딩한다. 동일 Strategy에서 여러 번 출시해도 각 Bot은 독립 스냅샷만 가지며 원본 Strategy를 역추적할 수 없다. 현재 좌표·레이아웃 수정은 presentation_snapshot을 덮어쓰지 않는다.'
+
+  Records (bot_id, snapshot_schema_version, semantic_snapshot, presentation_snapshot, semantic_hash, presentation_hash, snapshot_hash, created_at) {
+    '00000000-0000-4000-8000-000000000001', '1.0.0', '{"mode":"BASIC","partitions":[{"key":"partition-1","budgetCapBps":5000,"flows":[{"key":"flow-1","elements":[],"edges":[],"instrumentIds":[]}]}]}', '{"bot":{"name":"Review Example"},"partitions":{"partition-1":{"x":100,"y":100}},"flows":{"flow-1":{"x":300,"y":100}},"elements":{}}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -1276,7 +1298,7 @@ Table bot.launch_configurations {
     `slippage_rate_bps = 5` [name: 'launch_fixed_slippage_five_bps']
   }
 
-  Note: '봇·파티션·완성 Flow와 원자적으로 삽입. 초기 가상 자본은 양수 USD, 봇별 격리이며 입금·출금·증액 불가. 사용자 정의 위험 통제는 Flow의 RISK_POLICY Element에만 존재. 실행 설정은 생성 시점부터 불변이며 의미 변경·삭제는 항상 거부.'
+  Note: 'bot.launch_snapshots·파티션·완성 Flow와 원자적으로 삽입. 초기 가상 자본은 양수 USD, 봇별 격리이며 입금·출금·증액 불가. 사용자 정의 위험 통제는 Flow의 RISK_POLICY Element에만 존재. 실행 설정은 생성 시점부터 불변이며 의미 변경·삭제는 항상 거부.'
 
   Records (bot_id, initial_cash_amount, currency_code, broker_rules_version, accounting_rules_version, precision_rules_version, fee_configuration, slippage_rate_bps, buying_power_buffer_policy_id, candidate_conflict_policy, configuration_hash) {
     '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', '1.0.0', '1.0.0', '1.0.0', '{"type":"RATE_BPS","rateBps":20,"minimumFee":"0"}', 5, '00000000-0000-4000-8000-000000000001', '{"sameInstrumentOpposite":"NET","tieBreaker":"PARTITION_POSITION","budgetOverflow":"REDUCE"}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -2840,6 +2862,7 @@ Ref: identity.account_sanction_events.actor_operator_id > operations.operator_ac
 Ref: identity.account_sanction_events.evidence_object_id > storage.objects.id
 
 Ref: strategy.strategies.owner_account_id > identity.accounts.id
+Ref: strategy.strategy_documents.strategy_id > strategy.strategies.id
 Ref: strategy.element_definitions.element_catalog_version_id > strategy.element_catalog_versions.id
 Ref: strategy.package_versions.package_id > strategy.packages.id
 Ref: strategy.package_versions.element_catalog_version_id > strategy.element_catalog_versions.id
@@ -2870,10 +2893,8 @@ Ref: market_data.quality_incidents.instrument_id > market_data.instruments.id
 Ref: market_data.quality_incidents.evidence_object_id > storage.objects.id
 Ref: market_data.stream_watermarks.feed_id > market_data.feeds.id
 
-Ref: bot.bot_workspaces.owner_account_id > identity.accounts.id
-Ref: bot.bot_workspaces.(owner_account_id, strategy_id, mode) > strategy.strategies.(owner_account_id, id, mode)
 Ref: bot.bots.owner_account_id > identity.accounts.id
-Ref: bot.bots.(owner_account_id, strategy_id, mode) > strategy.strategies.(owner_account_id, id, mode)
+Ref: bot.launch_snapshots.bot_id > bot.bots.id
 Ref: bot.launch_configurations.bot_id > bot.bots.id
 Ref: bot.launch_configurations.buying_power_buffer_policy_id > trading.buying_power_buffer_policy_versions.id
 Ref: bot.bot_partitions.bot_id > bot.bots.id
