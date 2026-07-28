@@ -192,9 +192,7 @@ Enum trading.reservation_status {
 Enum trading.reservation_resource_type {
   CASH_BUYING_POWER
   POSITION_QUANTITY
-  SHORT_BORROW_QUANTITY
   SHORT_COLLATERAL_CASH
-  SHORT_SALE_PROCEEDS
 }
 
 Enum trading.reservation_event_type {
@@ -255,10 +253,11 @@ Enum trading.lot_movement_type {
   REVERSAL
 }
 
-Enum trading.short_action_type {
-  BORROW_RECALL
-  COLLATERAL_DEFICIT
-  PLATFORM_STOP
+Enum trading.system_close_reason {
+  RISK_LIMIT_BREACH
+  BOT_STOP
+  COMPETITION_END
+  DATA_INTEGRITY_BLOCK
 }
 
 Enum backtest.run_status {
@@ -1743,7 +1742,32 @@ Table trading.short_risk_policy_versions {
     `effective_to IS NULL OR effective_to > effective_from` [name: 'short_risk_policy_effective_range']
   }
 
-  Note: 'Regulation SHO Rule 201, 차입 가능성, 최초·유지 담보, 숏 매도대금 격리와 강제 바이인 규칙의 불변 플랫폼 버전. 미결정 수치는 rules_document의 승인된 새 버전으로만 도입한다.'
+  Note: '가상 SHORT 포지션의 최초·유지 담보, 최대 노출·손실, Regulation SHO Rule 201 가격 제한과 시스템 청산 기준을 고정하는 불변 플랫폼 버전. 실제 주식 차입, 대여 가능 수량과 대여기관 회수는 모델링하지 않는다. 미결정 수치는 rules_document의 승인된 새 버전으로만 도입한다.'
+}
+
+Table trading.short_borrow_fee_policy_versions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  policy_code varchar(80) [not null]
+  version varchar(40) [not null]
+  annual_fee_rate_bps numeric(12,6) [not null]
+  day_count_basis varchar(20) [not null, note: 'ACT_365 등 승인된 연환산 기준.']
+  calculation_rules_version varchar(80) [not null]
+  rules_hash varchar(128) [not null, unique]
+  effective_from timestamptz [not null]
+  effective_to timestamptz
+  published_at timestamptz [not null]
+
+  indexes {
+    (policy_code, version) [unique]
+    (policy_code, effective_from)
+  }
+
+  checks {
+    `annual_fee_rate_bps >= 0` [name: 'short_borrow_fee_rate_nonnegative']
+    `effective_to IS NULL OR effective_to > effective_from` [name: 'short_borrow_fee_policy_effective_range']
+  }
+
+  Note: '실제 대차시장의 변동 금리가 아니라 플랫폼이 모든 가상 SHORT lot에 일관되게 적용하는 고정 연간 보유 비용 정책. 정확한 bps는 승인된 정책 버전으로만 도입하고 과거 비용 계산은 당시 policy id를 고정한다.'
 }
 
 Table trading.order_intent_batches {
@@ -2055,10 +2079,11 @@ Table trading.resource_reservations {
     `status <> 'SETTLED' OR ((reserved_amount IS NOT NULL AND consumed_amount > 0) OR (reserved_quantity IS NOT NULL AND consumed_quantity > 0))` [name: 'settled_reservation_has_consumption']
     `status <> 'RELEASED' OR (consumed_amount = 0 AND consumed_quantity = 0)` [name: 'released_reservation_has_no_consumption']
     `resource_type <> 'CASH_BUYING_POWER' OR (currency_code IS NOT NULL AND buffer_policy_id IS NOT NULL AND fee_policy_id IS NOT NULL AND reserved_amount IS NOT NULL)` [name: 'cash_reservation_evidence_required']
-    `resource_type NOT IN ('POSITION_QUANTITY', 'SHORT_BORROW_QUANTITY') OR (instrument_id IS NOT NULL AND reserved_quantity IS NOT NULL)` [name: 'quantity_reservation_instrument_required']
-    `resource_type NOT IN ('SHORT_COLLATERAL_CASH', 'SHORT_SALE_PROCEEDS') OR (currency_code IS NOT NULL AND reserved_amount IS NOT NULL)` [name: 'short_cash_reservation_amount_required']
+    `resource_type <> 'POSITION_QUANTITY' OR (instrument_id IS NOT NULL AND reserved_quantity IS NOT NULL)` [name: 'quantity_reservation_instrument_required']
+    `resource_type <> 'SHORT_COLLATERAL_CASH' OR (currency_code IS NOT NULL AND instrument_id IS NOT NULL AND reserved_amount IS NOT NULL)` [name: 'short_collateral_reservation_evidence_required']
     `resource_type = 'CASH_BUYING_POWER' OR (buffer_policy_id IS NULL AND fee_policy_id IS NULL AND buffer_amount IS NULL)` [name: 'cash_policies_only_for_buying_power']
-    `resource_type NOT IN ('SHORT_BORROW_QUANTITY', 'SHORT_COLLATERAL_CASH', 'SHORT_SALE_PROCEEDS') OR short_risk_policy_id IS NOT NULL` [name: 'short_reservation_policy_required']
+    `resource_type <> 'SHORT_COLLATERAL_CASH' OR short_risk_policy_id IS NOT NULL` [name: 'short_collateral_policy_required']
+    `resource_type = 'SHORT_COLLATERAL_CASH' OR short_risk_policy_id IS NULL` [name: 'short_policy_only_for_collateral']
   }
 
   Note: '파티션·Flow 주문 의도별 자원을 나타내는 mutable 현재 Projection. ACTIVE 상태에서는 소비·해제가 모두 0이다. 전량 Fill 시 한 번만 SETTLED로 전환해 실제 사용액을 소비하고 Buying Power 완충액·잔액을 동시에 해제한다. 취소·만료·거절·replacement 시 전액 RELEASED다. 금액·수량 모두 최종 consumed + released = reserved를 행 CHECK와 사건 합계 지연 트리거로 이중 강제한다.'
@@ -2334,7 +2359,7 @@ Table trading.ledger_accounts {
     `closed_at IS NULL OR closed_at > created_at` [name: 'ledger_account_close_after_create']
   }
 
-  Note: '복식 원장의 계정 차원. 거래용 계정은 반드시 Partition에 속하고 Flow 귀속 자산 계정은 flow_id도 가진다. Bot 전체 초기자본·미배정 현금 계정만 partition_id가 없을 수 있다. account_key와 제약 트리거가 scope 컬럼 일치를 검증한다.'
+  Note: '복식 원장의 계정 차원. 거래용 계정은 반드시 Partition에 속하고 Flow 귀속 자산 계정은 flow_id도 가진다. OPEN_SHORT Fill 매도대금은 일반 CASH가 아니라 SEGREGATED_SHORT_PROCEEDS 계정에 기록하며 CLOSE_SHORT 정산 전까지 새 주문의 Buying Power로 사용할 수 없다. Bot 전체 초기자본·미배정 현금 계정만 partition_id가 없을 수 있다. account_key와 제약 트리거가 scope 컬럼 일치를 검증한다.'
 }
 
 Table trading.ledger_transactions {
@@ -2482,85 +2507,65 @@ Table trading.position_lot_projections {
 Table trading.short_trade_checks {
   intent_id uuid [pk]
   short_risk_policy_id uuid [not null]
-  borrow_observed_at timestamptz [not null]
-  borrow_source_hash varchar(128) [not null]
-  borrow_available boolean [not null]
-  borrow_available_quantity numeric(28,8) [not null]
-  borrow_fee_rate_bps numeric(12,6) [not null]
-  price_restriction_active boolean [not null]
-  restriction_effective_from timestamptz
-  restriction_effective_to timestamptz
-  reference_bid_price numeric(24,8)
+  assessed_at timestamptz [not null]
+  reference_price numeric(24,8) [not null]
+  projected_short_quantity numeric(28,8) [not null]
+  projected_exposure_amount numeric(24,8) [not null]
   required_initial_collateral_amount numeric(24,8) [not null]
   required_maintenance_collateral_amount numeric(24,8) [not null]
+  rule_201_triggered boolean [not null]
+  rule_201_triggered_at timestamptz
+  prior_regular_close_price numeric(24,8) [not null]
+  national_best_bid_price numeric(24,8) [not null]
+  minimum_permitted_short_price numeric(24,8)
+  price_rule_observed_at timestamptz [not null]
+  price_rule_market_hash varchar(128) [not null]
+  liquidation_reference_price numeric(24,8)
+  approved boolean [not null]
   decision_reason_code varchar(80) [not null]
   evidence_hash varchar(128) [not null]
 
   checks {
-    `borrow_available_quantity >= 0` [name: 'short_check_borrow_quantity_nonnegative']
-    `borrow_fee_rate_bps >= 0` [name: 'short_check_fee_nonnegative']
+    `reference_price > 0` [name: 'short_check_reference_price_positive']
+    `projected_short_quantity > 0` [name: 'short_check_quantity_positive']
+    `projected_exposure_amount > 0` [name: 'short_check_exposure_positive']
     `required_initial_collateral_amount >= 0` [name: 'short_check_initial_collateral_nonnegative']
     `required_maintenance_collateral_amount >= 0` [name: 'short_check_maintenance_collateral_nonnegative']
+    `required_initial_collateral_amount >= required_maintenance_collateral_amount` [name: 'short_check_initial_not_below_maintenance']
+    `prior_regular_close_price > 0` [name: 'short_check_prior_close_positive']
+    `national_best_bid_price > 0` [name: 'short_check_nbb_positive']
+    `NOT rule_201_triggered OR (rule_201_triggered_at IS NOT NULL AND minimum_permitted_short_price > national_best_bid_price)` [name: 'short_check_rule_201_evidence_required']
+    `rule_201_triggered OR (rule_201_triggered_at IS NULL AND minimum_permitted_short_price IS NULL)` [name: 'short_check_no_rule_201_evidence_when_inactive']
+    `liquidation_reference_price IS NULL OR liquidation_reference_price > 0` [name: 'short_check_liquidation_price_positive']
   }
 
-  Note: 'OPEN_SHORT 의도 승인에 사용한 차입 가능성, Rule 201 가격 제한, 차입비용과 담보 요구량의 불변 판단 증적. 원본 고빈도 대차·호가 데이터는 market_data/S3에 두고 여기에는 정확한 관측시각과 해시만 고정한다.'
+  Note: 'OPEN_SHORT 의도 승인에 사용한 가상 Short 노출, 최초·유지 담보, Rule 201 가격 제한과 청산 기준의 불변 판단 증적. 전일 정규장 종가 대비 장중 10% 이상 하락해 Rule 201이 발동하면 유효한 national best bid보다 높은 가격에서만 가상 공매도 Fill을 허용하며, 고정 매도 슬리피지를 적용한 Fill 가격도 이 조건을 만족해야 한다. 실제 주식 차입, 대여 가능 수량과 대여기관 회수는 판단하거나 저장하지 않는다.'
 }
 
-Table trading.short_position_obligations {
-  position_lot_id uuid [pk]
-  short_risk_policy_id uuid [not null]
-  borrowed_quantity numeric(28,8) [not null]
-  returned_quantity numeric(28,8) [not null, default: 0]
-  recalled_quantity numeric(28,8) [not null, default: 0]
-  segregated_proceeds_amount numeric(24,8) [not null]
-  collateral_required_amount numeric(24,8) [not null]
-  accrued_borrow_fee_amount numeric(24,8) [not null, default: 0]
-  last_assessed_at timestamptz [not null]
-  last_event_sequence bigint [not null]
-
-  checks {
-    `borrowed_quantity > 0` [name: 'short_obligation_borrowed_positive']
-    `returned_quantity >= 0 AND returned_quantity <= borrowed_quantity` [name: 'short_obligation_returned_valid']
-    `recalled_quantity >= 0 AND recalled_quantity <= borrowed_quantity - returned_quantity` [name: 'short_obligation_recalled_valid']
-    `segregated_proceeds_amount >= 0` [name: 'short_obligation_proceeds_nonnegative']
-    `collateral_required_amount >= 0` [name: 'short_obligation_collateral_nonnegative']
-    `accrued_borrow_fee_amount >= 0` [name: 'short_obligation_fee_nonnegative']
-  }
-
-  Note: 'SHORT lot별 차입 반환 의무, 재사용할 수 없는 매도대금, 현재 담보와 누적 차입비용의 Projection. 공식 변경은 예약·원장·short_borrow_fee_accruals·강제조치 사건에서 재구축한다.'
-}
-
-Table trading.short_obligation_events {
+Table trading.system_close_actions {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
   partition_id uuid [not null]
-  position_lot_id uuid [not null]
-  bot_event_id uuid [not null]
-  obligation_sequence bigint [not null]
-  event_type varchar(50) [not null]
-  borrowed_quantity_delta numeric(28,8) [not null, default: 0]
-  returned_quantity_delta numeric(28,8) [not null, default: 0]
-  recalled_quantity_delta numeric(28,8) [not null, default: 0]
-  segregated_proceeds_delta numeric(24,8) [not null, default: 0]
-  collateral_required_after numeric(24,8) [not null]
-  occurred_at timestamptz [not null]
-  evidence_hash varchar(128) [not null]
+  flow_id uuid [not null]
+  instrument_id uuid [not null]
+  source_event_id uuid [not null]
+  reason_type trading.system_close_reason [not null]
+  requested_quantity numeric(28,8) [not null]
+  generated_intent_id uuid [not null, unique]
+  reason_document jsonb [not null]
+  calculation_hash varchar(128) [not null]
+  created_at timestamptz [not null]
 
   indexes {
-    (bot_id, partition_id, id) [unique]
-    (position_lot_id, obligation_sequence) [unique]
-    (position_lot_id, bot_event_id, event_type) [unique]
+    (bot_id, source_event_id, instrument_id, reason_type) [unique]
+    (flow_id, created_at)
   }
 
   checks {
-    `obligation_sequence > 0` [name: 'short_obligation_event_sequence_positive']
-    `borrowed_quantity_delta >= 0` [name: 'short_obligation_borrowed_delta_nonnegative']
-    `returned_quantity_delta >= 0` [name: 'short_obligation_returned_delta_nonnegative']
-    `recalled_quantity_delta >= 0` [name: 'short_obligation_recalled_delta_nonnegative']
-    `collateral_required_after >= 0` [name: 'short_obligation_collateral_after_nonnegative']
+    `requested_quantity > 0` [name: 'system_close_quantity_positive']
   }
 
-  Note: 'SHORT lot의 차입·반환·회수·격리 매도대금·담보 변경을 추가 전용으로 보존한다. short_position_obligations는 이 사건과 원장으로부터 재구축한다.'
+  Note: '가상 Position의 위험 한도 위반, Bot 중단, 대회 종료 또는 데이터 무결성 차단에 따라 플랫폼이 생성한 강제 청산 근거. 실제 대여기관 회수 사건은 만들지 않는다. 데이터 무결성 차단은 청산 필요성을 기록하되 유효한 최신 가격 전에는 Fill을 만들지 않는다. 사용자 Flow 판단과 구분하며 생성된 SYSTEM_* 주문 의도부터 파티션 전용 Order·전량 Fill·원장까지 동일 경로로 추적한다.'
 }
 
 Table trading.short_borrow_fee_accruals {
@@ -2569,10 +2574,12 @@ Table trading.short_borrow_fee_accruals {
   partition_id uuid [not null]
   position_lot_id uuid [not null]
   bot_event_id uuid [not null, unique]
+  short_borrow_fee_policy_id uuid [not null]
   ledger_transaction_id uuid [not null, unique]
   period_start timestamptz [not null]
   period_end timestamptz [not null]
-  fee_rate_bps numeric(12,6) [not null]
+  annual_fee_rate_bps numeric(12,6) [not null]
+  day_count_basis varchar(20) [not null]
   fee_basis_amount numeric(24,8) [not null]
   accrued_fee_amount numeric(24,8) [not null]
   calculation_hash varchar(128) [not null]
@@ -2583,39 +2590,13 @@ Table trading.short_borrow_fee_accruals {
   }
 
   checks {
-    `period_end > period_start` [name: 'borrow_fee_period_valid']
-    `fee_rate_bps >= 0` [name: 'borrow_fee_rate_nonnegative']
-    `fee_basis_amount >= 0` [name: 'borrow_fee_basis_nonnegative']
-    `accrued_fee_amount >= 0` [name: 'borrow_fee_amount_nonnegative']
+    `period_end > period_start` [name: 'short_borrow_fee_period_valid']
+    `annual_fee_rate_bps >= 0` [name: 'short_borrow_fee_rate_nonnegative']
+    `fee_basis_amount >= 0` [name: 'short_borrow_fee_basis_nonnegative']
+    `accrued_fee_amount >= 0` [name: 'short_borrow_fee_amount_nonnegative']
   }
 
-  Note: '보유 중인 SHORT lot의 실제 대차비용을 기간별로 추가 전용 기록하고 공식 원장과 1:1 연결한다.'
-}
-
-Table trading.forced_liquidation_actions {
-  id uuid [pk, default: `gen_random_uuid()`]
-  bot_id uuid [not null]
-  partition_id uuid [not null]
-  flow_id uuid [not null]
-  instrument_id uuid [not null]
-  source_event_id uuid [not null]
-  action_type trading.short_action_type [not null]
-  requested_quantity numeric(28,8) [not null]
-  generated_intent_id uuid [not null, unique]
-  reason_document jsonb [not null]
-  calculation_hash varchar(128) [not null]
-  created_at timestamptz [not null]
-
-  indexes {
-    (bot_id, source_event_id, instrument_id, action_type) [unique]
-    (flow_id, created_at)
-  }
-
-  checks {
-    `requested_quantity > 0` [name: 'forced_liquidation_quantity_positive']
-  }
-
-  Note: '차입 회수·담보 부족·봇 중단에 의해 플랫폼이 생성한 강제 청산 근거. 사용자 Flow 판단과 구분하면서 생성된 SYSTEM_* 주문 의도부터 체결·원장까지 동일 경로로 추적한다.'
+  Note: '열린 가상 SHORT lot에 플랫폼 고정 연간 대차료를 기간별로 추가 전용 계산하고 공식 원장과 1:1 연결한다. 실제 대차시장 금리가 아니며 policy id, 적용 bps, day-count와 계산 해시를 고정한다. PostgreSQL 마이그레이션은 같은 lot의 비용 기간이 겹치지 않도록 exclusion constraint를 둔다.'
 }
 
 Table trading.flow_position_projections {
@@ -3692,19 +3673,16 @@ Ref: trading.position_lot_projections.position_lot_id > trading.position_lots.id
 Ref: trading.position_lot_projections.(position_lot_id, last_movement_id) > trading.lot_movements.(position_lot_id, id)
 Ref: trading.short_trade_checks.intent_id > trading.order_intents.id
 Ref: trading.short_trade_checks.short_risk_policy_id > trading.short_risk_policy_versions.id
-Ref: trading.short_position_obligations.position_lot_id > trading.position_lots.id
-Ref: trading.short_position_obligations.short_risk_policy_id > trading.short_risk_policy_versions.id
-Ref: trading.short_obligation_events.(bot_id, partition_id, position_lot_id) > trading.position_lots.(bot_id, partition_id, id)
-Ref: trading.short_obligation_events.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.system_close_actions.bot_id > bot.bots.id
+Ref: trading.system_close_actions.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
+Ref: trading.system_close_actions.(partition_id, flow_id) > bot.flows.(partition_id, id)
+Ref: trading.system_close_actions.instrument_id > market_data.instruments.id
+Ref: trading.system_close_actions.(bot_id, source_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.system_close_actions.(bot_id, partition_id, generated_intent_id) > trading.order_intents.(bot_id, partition_id, id)
 Ref: trading.short_borrow_fee_accruals.(bot_id, partition_id, position_lot_id) > trading.position_lots.(bot_id, partition_id, id)
 Ref: trading.short_borrow_fee_accruals.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
+Ref: trading.short_borrow_fee_accruals.short_borrow_fee_policy_id > trading.short_borrow_fee_policy_versions.id
 Ref: trading.short_borrow_fee_accruals.(bot_id, partition_id, ledger_transaction_id) > trading.ledger_transactions.(bot_id, partition_id, id)
-Ref: trading.forced_liquidation_actions.bot_id > bot.bots.id
-Ref: trading.forced_liquidation_actions.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: trading.forced_liquidation_actions.(partition_id, flow_id) > bot.flows.(partition_id, id)
-Ref: trading.forced_liquidation_actions.instrument_id > market_data.instruments.id
-Ref: trading.forced_liquidation_actions.(bot_id, source_event_id) > bot.bot_events.(bot_id, id)
-Ref: trading.forced_liquidation_actions.(bot_id, partition_id, generated_intent_id) > trading.order_intents.(bot_id, partition_id, id)
 Ref: trading.flow_position_projections.bot_id > bot.bots.id
 Ref: trading.flow_position_projections.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
 Ref: trading.flow_position_projections.(partition_id, flow_id) > bot.flows.(partition_id, id)
