@@ -14,6 +14,7 @@ const requiredTables = [
   'buying_power_buffer_policy_versions',
   'fee_policy_versions',
   'short_risk_policy_versions',
+  'short_borrow_fee_policy_versions',
   'order_intent_batches',
   'order_intents',
   'orders',
@@ -33,10 +34,8 @@ const requiredTables = [
   'lot_movements',
   'position_lot_projections',
   'short_trade_checks',
-  'short_position_obligations',
-  'short_obligation_events',
+  'system_close_actions',
   'short_borrow_fee_accruals',
-  'forced_liquidation_actions',
   'flow_position_projections',
   'partition_position_projections',
   'bot_budget_projections',
@@ -57,6 +56,14 @@ const forbiddenPatterns = [
   /\bPARTIALLY_CONSUMED\b/,
   /\bnetted_quantity\b/,
   /Table trading\.position_projections\s*\{/,
+  /Table trading\.short_position_obligations\s*\{/,
+  /Table trading\.short_obligation_events\s*\{/,
+  /Table trading\.forced_liquidation_actions\s*\{/,
+  /\bSHORT_BORROW_QUANTITY\b/,
+  /\bSHORT_SALE_PROCEEDS\b/,
+  /\bBORROW_RECALL\b/,
+  /\bborrow_available_quantity\b/,
+  /\bborrow_fee_rate_bps\b/,
 ];
 
 for (const pattern of forbiddenPatterns) {
@@ -95,6 +102,35 @@ requireFields('ledger_transactions', ['bot_id', 'partition_id', 'source_type', '
 requireFields('ledger_entries', ['bot_id', 'partition_id', 'order_intent_allocation_id']);
 requireFields('position_lots', ['bot_id', 'partition_id', 'flow_id', 'opening_order_intent_allocation_id']);
 requireFields('lot_movements', ['bot_id', 'partition_id', 'source_order_intent_allocation_id']);
+requireFields('short_trade_checks', [
+  'intent_id',
+  'short_risk_policy_id',
+  'projected_short_quantity',
+  'projected_exposure_amount',
+  'required_initial_collateral_amount',
+  'required_maintenance_collateral_amount',
+  'rule_201_triggered',
+  'prior_regular_close_price',
+  'national_best_bid_price',
+  'price_rule_market_hash',
+  'approved',
+]);
+requireFields('system_close_actions', [
+  'bot_id',
+  'partition_id',
+  'flow_id',
+  'reason_type',
+  'generated_intent_id',
+]);
+requireFields('short_borrow_fee_accruals', [
+  'bot_id',
+  'partition_id',
+  'position_lot_id',
+  'short_borrow_fee_policy_id',
+  'ledger_transaction_id',
+  'annual_fee_rate_bps',
+  'accrued_fee_amount',
+]);
 
 const requiredFragments = [
   '"orderSizePercent":40',
@@ -113,6 +149,11 @@ const requiredFragments = [
   "Ref: trading.ledger_entries.(bot_id, partition_id, order_intent_allocation_id) > trading.order_intent_allocations.(bot_id, partition_id, id)",
   "Ref: trading.position_lots.(bot_id, partition_id, opening_order_intent_allocation_id) > trading.order_intent_allocations.(bot_id, partition_id, id)",
   "Ref: trading.partition_position_projections.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)",
+  "Ref: trading.system_close_actions.(bot_id, partition_id, generated_intent_id) > trading.order_intents.(bot_id, partition_id, id)",
+  "Ref: trading.short_borrow_fee_accruals.short_borrow_fee_policy_id > trading.short_borrow_fee_policy_versions.id",
+  'segregated_short_proceeds_amount',
+  'SEGREGATED_SHORT_PROCEEDS',
+  'rule_201_triggered',
 ];
 
 for (const fragment of requiredFragments) {
