@@ -19,7 +19,9 @@ Project Idea2Strategy_DBML_Redesign_Proposal {
 
   S3 호환 스토리지 정본 소유: 대용량 시장 데이터와 백테스트·성과 상세.
   표 형식 오브젝트는 Parquet(이 초안에서는 UNCOMPRESSED 명시)이고,
-  ET 월요일 기준 주 단위 논리 파티션 안의 불변 마이크로배치 파트로 저장한다.
+  ET 달력 기준 DAY/WEEK/MONTH/YEAR 불변 파티션을 지원한다. 수집 원본은
+  일·마이크로배치로 게시하고, 읽기 최적화 객체는 원본 계보를 보존한 채
+  주·월·연 단위로 컴팩션할 수 있다.
 
   스트림 인프라는 실시간 시장 데이터 전달만 담당한다. NoSQL은 재생성 가능한
   핫/읽기 Projection만 가진다. 외부 큐·스케줄러는 작업 전달만 하고 도메인
@@ -122,6 +124,13 @@ Enum market_data.dataset_status {
   QUARANTINED
   SUPERSEDED
   DELETED
+}
+
+Enum market_data.partition_granularity {
+  DAY
+  WEEK
+  MONTH
+  YEAR
 }
 
 Enum trading.order_side {
@@ -998,7 +1007,9 @@ Table market_data.dataset_objects {
   dataset_manifest_id uuid [not null]
   object_id uuid [not null]
   object_kind varchar(40) [not null]
-  week_start_date date [not null, note: '주 시작일은 ET 월요일.']
+  partition_granularity market_data.partition_granularity [not null]
+  partition_start date [not null, note: 'ET 달력 기준 포함 시작일.']
+  partition_end date [not null, note: 'ET 달력 기준 미포함 종료일.']
   period_start timestamptz [not null]
   period_end timestamptz [not null]
   shard_key varchar(120) [not null]
@@ -1008,14 +1019,20 @@ Table market_data.dataset_objects {
   max_instrument_id uuid
 
   indexes {
-    (dataset_manifest_id, object_kind, week_start_date, shard_key, part_number) [unique]
-    (week_start_date, period_start)
+    (dataset_manifest_id, object_kind, partition_granularity, partition_start, partition_end, shard_key, part_number) [unique]
+    (partition_granularity, partition_start, partition_end)
+    (dataset_manifest_id, period_start, period_end)
   }
 
-  Note: '오브젝트는 ET 주 경계를 넘지 않는다. 마이크로배치 파트 컴팩션은 계보를 남기는 새 데이터셋 리비전으로만 허용.'
+  checks {
+    `partition_end > partition_start` [name: 'dataset_object_partition_order']
+    `period_end > period_start` [name: 'dataset_object_period_order']
+  }
 
-  Records (id, dataset_manifest_id, object_id, object_kind, week_start_date, period_start, period_end, shard_key, part_number, row_count, min_instrument_id, max_instrument_id) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 'REVIEW_EXAMPLE', 1, 1, null, null
+  Note: '오브젝트는 ET 기준 일·주·월·연 파티션을 지원한다. 주 경계는 월요일, 월 경계는 매월 1일, 연 경계는 1월 1일이며 partition_end는 미포함이다. 마이크로배치나 작은 파티션을 더 큰 파티션으로 컴팩션할 때 원본을 덮어쓰지 않고 새 오브젝트·새 데이터셋 리비전·명시적 오브젝트 계보를 만든다. 하나의 공개 Manifest는 같은 shard와 시간 범위에 겹치는 표현을 동시에 포함하지 않는다.'
+
+  Records (id, dataset_manifest_id, object_id, object_kind, partition_granularity, partition_start, partition_end, period_start, period_end, shard_key, part_number, row_count, min_instrument_id, max_instrument_id) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'WEEK', '2026-07-27', '2026-08-03', '2026-07-27T09:00:00+09:00', '2026-07-31T16:00:00+09:00', 'REVIEW_EXAMPLE', 1, 1, null, null
   }
 }
 
@@ -1032,6 +1049,30 @@ Table market_data.dataset_lineage {
 
   Records (derived_manifest_id, source_manifest_id, relation_type) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE'
+  }
+}
+
+Table market_data.dataset_object_lineage {
+  derived_dataset_object_id uuid [not null]
+  source_dataset_object_id uuid [not null]
+  pipeline_run_id uuid [not null]
+  relation_type varchar(40) [not null, note: '컴팩션은 COMPACTED_FROM.']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (derived_dataset_object_id, source_dataset_object_id, relation_type) [pk]
+    (source_dataset_object_id)
+    (pipeline_run_id)
+  }
+
+  checks {
+    `derived_dataset_object_id <> source_dataset_object_id` [name: 'dataset_object_lineage_no_self_reference']
+  }
+
+  Note: '일·주·월 파티션에서 주·월·연 파티션을 생성한 정확한 파일 단위 계보를 보존한다. 컴팩션 결과는 불변 새 오브젝트이며 이미 잠긴 백테스트 Manifest의 기존 오브젝트 선택을 바꾸지 않는다.'
+
+  Records (derived_dataset_object_id, source_dataset_object_id, pipeline_run_id, relation_type, created_at) {
+    '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'COMPACTED_FROM', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -2879,6 +2920,9 @@ Ref: market_data.dataset_objects.dataset_manifest_id > market_data.dataset_manif
 Ref: market_data.dataset_objects.object_id > storage.objects.id
 Ref: market_data.dataset_lineage.derived_manifest_id > market_data.dataset_manifests.id
 Ref: market_data.dataset_lineage.source_manifest_id > market_data.dataset_manifests.id
+Ref: market_data.dataset_object_lineage.derived_dataset_object_id > market_data.dataset_objects.id
+Ref: market_data.dataset_object_lineage.source_dataset_object_id > market_data.dataset_objects.id
+Ref: market_data.dataset_object_lineage.pipeline_run_id > market_data.pipeline_runs.id
 Ref: market_data.feature_definitions.element_catalog_version_id > strategy.element_catalog_versions.id
 Ref: market_data.feature_materializations.feature_definition_id > market_data.feature_definitions.id
 Ref: market_data.feature_materializations.instrument_id > market_data.instruments.id

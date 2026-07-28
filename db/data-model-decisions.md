@@ -378,26 +378,30 @@ Idea2Strategy는 사용자가 시각적으로 만든 결정론적 전략을 서�
   - 비용 또는 처리량 목표를 충족하지 못하면 기존 객체는 보존하고 새 개정부터 버전이 고정된 압축 코덱을 도입한다.
   - 이 성능 검증이 끝나기 전에는 무압축 선택만으로 production-ready가 입증됐다고 표현하지 않는다.
 
-### DMD-016 — S3 Parquet 주 단위 논리 분할
+### DMD-016 — S3 Parquet 다단계 논리 분할과 불변 Compaction
 
 - 상태: 확정
-- 사용자 결정: 시장 데이터와 백테스트 상세 Parquet 객체를 주 단위로 나눈다.
+- 최신 사용자 결정: 시장 데이터 수집 객체를 일 단위로 게시할 수 있고, 누적된 작은 파일은 ET 달력 기준 주·월·연 단위로 불변 Compaction하여 장기 백테스트의 파일 열기 비용을 줄인다. 이전의 주 단위 전용 결정은 이 결정으로 대체한다.
 - 결정:
-  - 모든 주 경계는 미국 동부 시각 ET를 사용하고 `week_start_date`는 해당 주의 월요일 날짜로 고정한다.
-  - 휴장일이나 단축 거래일이 있어도 달력상 월요일 경계를 유지하며 데이터셋 매니페스트가 실제 포함 거래일과 관측 기간을 기록한다.
-  - 하나의 Parquet 객체가 두 주를 걸치지 않는다.
-  - 주 단위는 논리 파티션이며 한 주 전체를 반드시 하나의 거대 파일로 만들지 않는다.
-  - 실시간 수집 데이터는 주 경로 아래에 여러 불변 마이크로배치 `part` 객체로 계속 게시하여 주말까지 S3 확정을 미루지 않는다.
-  - 주간 데이터가 목표 객체 크기를 넘으면 같은 주 안에서 결정론적인 `shard` 또는 `part`로 나눈다.
-  - 작은 마이크로배치의 주간 compaction이 필요하면 원본을 덮어쓰지 않고 새 최적화 객체, 새 데이터셋 개정과 명시적 계보를 만든다.
+  - 시장 데이터 객체는 `DAY`, `WEEK`, `MONTH`, `YEAR` 논리 파티션을 지원한다.
+  - 모든 경계는 미국 동부 시각 ET 달력을 사용한다. 일은 해당 날짜, 주는 월요일, 월은 1일, 연은 1월 1일에 시작하며 종료 경계는 미포함이다.
+  - 실시간 수집 데이터는 불변 마이크로배치 또는 일 단위 `part` 객체로 계속 게시하며 주·월·연 마감까지 S3 게시를 미루지 않는다.
+  - 작은 객체가 누적되면 배치가 일→주, 주→월, 월→연 또는 검증된 동등 경로로 새 최적화 객체를 생성한다.
+  - Compaction은 원본 객체를 덮어쓰지 않고 새 저장 객체, 새 데이터셋 개정, Manifest 계보와 파일 단위 계보를 만든다.
+  - 이미 실행된 백테스트는 잠근 Manifest와 객체를 계속 사용하며 Compaction 이후의 객체로 소급 교체하지 않는다.
+  - 하나의 공개 Manifest는 같은 `shard_key`와 관측 기간에 겹치는 일·주·월·연 표현을 함께 선택하지 않는다. 필요한 범위에서 가장 큰 검증 완료 파티션을 사용하고 경계 구간만 더 작은 파티션으로 채울 수 있다.
+  - 700개 이상 종목은 종목마다 파일을 만들지 않고 결정론적인 종목 shard에 배치한다. shard 수와 목표 객체 크기는 대표 10년 백테스트의 파일 열기 수, 범위 읽기, 처리량과 재작성 비용을 측정해 정한다.
+  - 휴장일이나 단축 거래일이 있어도 달력 경계를 유지하며 Manifest와 객체 메타데이터가 실제 포함 거래일과 관측 기간을 기록한다.
 - 논리 키:
-  - 시장 데이터: `dataset/revision/layer/resolution/week_start_date/shard/part`
+  - 시장 데이터: `dataset/revision/layer/resolution/granularity/partition_start/partition_end/shard/part`
   - 백테스트 상세: `run_id/record_type/week_start_date/part`
   - 객체 키 문자열은 탐색 보조 수단이며 PostgreSQL 매니페스트의 객체 ID, 버전과 내용 해시가 권위 있는 참조다.
 - 예정 DBML 반영:
-  - 시장 데이터와 백테스트 상세 매니페스트에 `week_start_date`, `period_start`, `period_end`, `shard_key`, `part_number`, 행 수와 객체 참조를 둔다.
-  - `period_start < period_end`와 두 시각이 같은 ET 주에 속한다는 검증을 ingestion 계층과 데이터베이스 제약 함수로 강제한다.
-  - 동일 데이터셋 개정·주·shard·part의 중복 게시를 유일성 제약과 멱등성 키로 차단한다.
+  - 시장 데이터 객체 연결에는 `partition_granularity`, `partition_start`, `partition_end`, `period_start`, `period_end`, `shard_key`, `part_number`, 행 수와 객체 참조를 둔다.
+  - `market_data.dataset_object_lineage`가 Compaction 결과 객체와 모든 입력 객체 및 실행 파이프라인을 연결한다.
+  - `partition_start < partition_end`, `period_start < period_end`와 선택한 ET 달력 경계 정합성을 ingestion 계층과 데이터베이스 제약 함수로 강제한다.
+  - 동일 데이터셋 개정·granularity·partition·shard·part의 중복 게시를 유일성 제약과 멱등성 키로 차단한다.
+  - 같은 Manifest 안에서 동일 shard의 관측 기간이 겹치지 않는다는 조건은 PostgreSQL exclusion constraint 또는 게시 트랜잭션 검증으로 강제한다.
 
 ### DMD-017 — 초기 PostgreSQL 물리 파티션 미도입
 
@@ -696,5 +700,6 @@ Idea2Strategy는 사용자가 시각적으로 만든 결정론적 전략을 서�
 | 2026-07-23 | 실시간 전달은 Stream, 불변 시장 데이터 정본은 S3, 최근 조회는 재생성 가능한 NoSQL Projection으로 확정 | 질문 9 답변 `A` |
 | 2026-07-23 | S3 대용량 표 형식 객체를 Parquet와 명시적 UNCOMPRESSED 코덱으로 우선 확정 | 질문 10 수정 답변 |
 | 2026-07-23 | S3 Parquet 객체를 ET 월요일 기준 주 단위 논리 파티션과 주 내부 불변 part로 분할하도록 확정 | 질문 11 사용자 직접 답변 |
+| 2026-07-28 | 시장 데이터의 주 단위 전용 파티션을 DAY/WEEK/MONTH/YEAR 계층형 불변 Compaction으로 대체하고 Manifest·Object 계보로 백테스트 재현성을 유지하도록 확정 | 사용자의 연·월·일 묶음 및 파일 읽기 최적화 요청 |
 | 2026-07-23 | 초기 PostgreSQL에는 물리 파티션을 두지 않고 부하·보존 임계값 확인 후 도입 여부를 재평가하도록 확정 | 질문 12 답변 `D` |
 | 2026-07-23 | 현재 성과는 사건 기반 PostgreSQL Projection, 공식 성과는 ET 일일·수명주기 경계 불변 스냅샷으로 확정 | 질문 13 답변 `A` |
