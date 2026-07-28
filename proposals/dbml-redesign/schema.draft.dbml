@@ -6,8 +6,8 @@ Project Idea2Strategy_DBML_Redesign_Proposal {
   격리된 제안: 제품 권한 검토 완료 전에는 db/schema.dbml 정본을 대체하지 않는다.
 
   핵심 소유 구조:
-    계정 -> 봇 -> 파티션 -> 파티션 소유 전략.
-    전략의 블록·연결·매개변수는 하나의 PostgreSQL JSONB 집합체다.
+    계정 -> Strategy -> 봇 -> 파티션 -> 파티션 소유 Flow -> Element.
+    Flow의 Element·연결·매개변수는 하나의 PostgreSQL JSONB 집합체다.
     복사는 항상 새 식별자의 완전 독립 행을 만들며 원본 FK·계보·버전 연결을 남기지 않는다.
 
   PostgreSQL 정본 소유: 생성 시점 불변 봇 설정과 예산, 공식 이벤트, 주문 의도,
@@ -27,9 +27,9 @@ Project Idea2Strategy_DBML_Redesign_Proposal {
   Producer, Evaluation Worker Pool, Order/Fill Processor, Settlement Worker,
   Outbox Publisher, Projection Builder) 봇 수가 아니라 큐 처리량에 따라
   수평 확장한다. 흐름: 시장/시간/체결/기업행사 이벤트 -> Trigger Router
-  (strategy_instruments, strategy_feature_requirements, strategy_time_triggers
-  로 관련 전략만 조회, 전체 봇 스캔 금지) -> 봇별 bot_events 적재 ->
-  bot_id 파티션 at-least-once 큐의 전략별 evaluation_runs -> 공용 Evaluation
+  (flow_instruments, flow_feature_requirements, flow_time_triggers
+  로 관련 Flow만 조회, 전체 봇 스캔 금지) -> 봇별 bot_events 적재 ->
+  bot_id 파티션 at-least-once 큐의 Flow별 evaluation_runs -> 공용 Evaluation
   Worker -> 주문 의도·이벤트·outbox를 한 트랜잭션으로 저장. 지연·차단 해소
   후에는 최신만 평가하고 대체된 트리거는 SKIPPED로만 기록한다.
 
@@ -625,11 +625,35 @@ Table identity.account_sanction_events {
 }
 
 // -----------------------------------------------------------------------------
-// strategy: platform-owned typed block catalog only.
-// User strategies are owned by bot partitions in the bot schema.
+// strategy: user-owned Strategy containers and platform-owned Flow building assets.
+// Runtime Flow instances are owned by bot partitions in the bot schema.
 // -----------------------------------------------------------------------------
 
-Table strategy.catalog_versions {
+Table strategy.strategies {
+  id uuid [pk, default: `gen_random_uuid()`]
+  owner_account_id uuid [not null]
+  mode strategy.strategy_mode [not null]
+  name varchar(120) [not null]
+  description text
+  edit_sequence bigint [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  archived_at timestamptz
+  deleted_at timestamptz
+
+  indexes {
+    (owner_account_id, id, mode) [unique]
+    (owner_account_id, deleted_at, archived_at, updated_at)
+  }
+
+  Note: '사용자가 소유하는 최상위 Strategy 컨테이너. 하나 이상의 독립 Bot을 묶지만 실행 상태·예산·Flow 의미를 직접 소유하지 않는다. 복사하면 원본 참조 없는 새 Strategy와 새 Bot 계층을 생성한다.'
+
+  Records (id, owner_account_id, mode, name, description, edit_sequence, created_at, updated_at, archived_at, deleted_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'RSI 전략 모음', '검토용 사용자 Strategy', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null
+  }
+}
+
+Table strategy.element_catalog_versions {
   id uuid [pk, default: `gen_random_uuid()`]
   language_version varchar(40) [not null]
   schema_version varchar(40) [not null]
@@ -643,33 +667,91 @@ Table strategy.catalog_versions {
     (language_version, schema_version, catalog_version) [unique]
   }
 
-  Note: '블록 카탈로그 버전 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  Note: 'Flow를 구성할 수 있는 Element 정의 집합의 불변 카탈로그 버전. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, language_version, schema_version, catalog_version, data_requirement_version, definition_hash, published_at, retired_at) {
     '00000000-0000-4000-8000-000000000001', '1.0.0', '1.0.0', '1.0.0', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
   }
 }
 
-Table strategy.platform_templates {
+Table strategy.element_definitions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  element_catalog_version_id uuid [not null]
+  element_code varchar(120) [not null]
+  element_kind varchar(50) [not null]
+  parameter_schema jsonb [not null]
+  input_port_schema jsonb [not null]
+  output_port_schema jsonb [not null]
+  execution_contract jsonb [not null]
+  definition_hash varchar(128) [not null, unique]
+
+  indexes {
+    (element_catalog_version_id, element_code) [unique]
+  }
+
+  Note: 'PRICE_DATA, RSI, CONDITION, ORDER, RISK_POLICY처럼 Flow에 배치할 수 있는 Element의 타입·포트·매개변수·실행 계약을 정의한다. 사용자 Flow 안의 Element 인스턴스와 분리된 플랫폼 정의다.'
+
+  Records (id, element_catalog_version_id, element_code, element_kind, parameter_schema, input_port_schema, output_port_schema, execution_contract, definition_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'RSI', 'INDICATOR', '{"type":"object","properties":{"period":{"type":"integer","minimum":1}},"required":["period"]}', '{"series":{"type":"NUMBER_SERIES"}}', '{"value":{"type":"NUMBER"}}', '{"runtime":"SHARED_FEATURE","deterministic":true}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  }
+}
+
+Table strategy.packages {
   id uuid [pk, default: `gen_random_uuid()`]
   code varchar(80) [not null, unique]
-  mode strategy.strategy_mode [not null]
   status varchar(30) [not null]
   created_at timestamptz [not null]
   retired_at timestamptz
 
-  Note: '플랫폼 템플릿 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  Note: 'Basic 사용자에게 플랫폼이 완성된 형태로 제공하는 Flow Package의 식별자. 사용 시 독립 Flow로 복사되며 원본 Package FK를 남기지 않는다.'
 
-  Records (id, code, mode, status, created_at, retired_at) {
-    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'BASIC', 'ACTIVE', '2026-07-27T09:00:00+09:00', null
+  Records (id, code, status, created_at, retired_at) {
+    '00000000-0000-4000-8000-000000000001', 'RSI_OVERSOLD_PACKAGE', 'ACTIVE', '2026-07-27T09:00:00+09:00', null
   }
 }
 
-Table strategy.platform_template_versions {
+Table strategy.package_versions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  package_id uuid [not null]
+  version varchar(40) [not null]
+  element_catalog_version_id uuid [not null]
+  name_i18n jsonb [not null]
+  description_i18n jsonb [not null]
+  flow_document jsonb [not null]
+  content_hash varchar(128) [not null, unique]
+  published_at timestamptz [not null]
+  retired_at timestamptz
+
+  indexes {
+    (package_id, version) [unique]
+  }
+
+  Note: 'Basic Package의 불변 완성 Flow 문서 버전. Package를 선택하면 검증된 flow_document를 새 bot.flows 행에 복사하고 계보 연결은 저장하지 않는다.'
+
+  Records (id, package_id, version, element_catalog_version_id, name_i18n, description_i18n, flow_document, content_hash, published_at, retired_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '1.0.0', '00000000-0000-4000-8000-000000000001', '{"ko":"RSI 과매도 반등","en":"RSI Oversold Rebound"}', '{"ko":"Basic에서 바로 사용할 수 있는 완성 Flow","en":"Complete Flow for Basic mode"}', '{"elements":[{"key":"ind-1","type":"RSI","params":{"period":14}},{"key":"cond-1","type":"THRESHOLD","params":{"operator":"LT","value":30}}],"edges":[{"from":"ind-1.value","to":"cond-1.input"}]}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
+  }
+}
+
+Table strategy.templates {
+  id uuid [pk, default: `gen_random_uuid()`]
+  code varchar(80) [not null, unique]
+  status varchar(30) [not null]
+  created_at timestamptz [not null]
+  retired_at timestamptz
+
+  Note: 'Pro 사용자에게 Pair Trading 같은 시작 구조로 제공하는 Flow Template의 식별자. 사용 후 만들어진 Flow는 Template과 연결되지 않는 독립 객체다.'
+
+  Records (id, code, status, created_at, retired_at) {
+    '00000000-0000-4000-8000-000000000002', 'PAIR_TRADING_TEMPLATE', 'ACTIVE', '2026-07-27T09:00:00+09:00', null
+  }
+}
+
+Table strategy.template_versions {
   id uuid [pk, default: `gen_random_uuid()`]
   template_id uuid [not null]
   version varchar(40) [not null]
-  catalog_version_id uuid [not null]
+  element_catalog_version_id uuid [not null]
   name_i18n jsonb [not null]
   description_i18n jsonb [not null]
   semantic_skeleton jsonb [not null]
@@ -681,16 +763,16 @@ Table strategy.platform_template_versions {
     (template_id, version) [unique]
   }
 
-  Note: '플랫폼 템플릿 버전 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  Note: 'Pro Template의 불변 시작 골격 버전. 사용자가 완성한 결과는 새 bot.flows 행이며 Template 버전이나 복사 출처를 참조하지 않는다.'
 
-  Records (id, template_id, version, catalog_version_id, name_i18n, description_i18n, semantic_skeleton, content_hash, published_at, retired_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '1.0.0', '00000000-0000-4000-8000-000000000001', '{"ko":"RSI 과매도 반등","en":"RSI Oversold Rebound"}', '{"ko":"RSI 30 미만에서 진입하는 기본 템플릿","en":"Entry template for RSI below 30"}', '{"blocks":[{"key":"ind-1","type":"RSI","params":{"period":14}},{"key":"cond-1","type":"THRESHOLD","params":{"operator":"LT","value":30}}],"edges":[{"from":"ind-1.value","to":"cond-1.input"}]}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
+  Records (id, template_id, version, element_catalog_version_id, name_i18n, description_i18n, semantic_skeleton, content_hash, published_at, retired_at) {
+    '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002', '1.0.0', '00000000-0000-4000-8000-000000000001', '{"ko":"페어 트레이딩","en":"Pair Trading"}', '{"ko":"Pro에서 수정해 완성하는 시작 Flow","en":"Starting Flow for Pro mode"}', '{"elements":[{"key":"spread-1","type":"PAIR_SPREAD","params":{}}],"edges":[]}', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '2026-07-27T09:00:00+09:00', null
   }
 }
 
-Table strategy.compiled_execution_plans {
+Table strategy.compiled_flow_plans {
   id uuid [pk, default: `gen_random_uuid()`]
-  catalog_version_id uuid [not null]
+  element_catalog_version_id uuid [not null]
   semantic_hash varchar(128) [not null]
   compiler_version varchar(80) [not null]
   required_feature_set_hash varchar(128) [not null]
@@ -699,14 +781,14 @@ Table strategy.compiled_execution_plans {
   created_at timestamptz [not null, default: `now()`]
 
   indexes {
-    (catalog_version_id, semantic_hash, compiler_version) [unique]
+    (element_catalog_version_id, semantic_hash, compiler_version) [unique]
     (required_feature_set_hash)
   }
 
-  Note: '의미상 동일한 전략들이 공유하는 content-addressing 서버 실행 계획. 재사용 사용자 전략·버전 계보·복사 관계가 아닌 인프라 캐시. 컴파일러는 타입 블록을 검증해 봇별 최소 명령만 산출하고, 공통 시장 계산은 required_feature_set_hash로 표현되어 봇 Worker 밖에서 실행된다.'
+  Note: '의미상 동일한 Flow들이 공유하는 content-addressing 서버 실행 계획. 재사용 사용자 Flow·버전 계보·복사 관계가 아닌 인프라 캐시. 컴파일러는 타입이 지정된 Element를 검증해 봇별 최소 명령만 산출하고, 공통 시장 계산은 required_feature_set_hash로 표현되어 봇 Worker 밖에서 실행된다.'
 
-  Records (id, catalog_version_id, semantic_hash, compiler_version, required_feature_set_hash, plan_document, plan_hash, created_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"steps":[{"op":"LOAD_FEATURE","feature":"RSI:period=14:1m"},{"op":"COMPARE","operator":"LT","value":30},{"op":"EMIT_INTENT","side":"BUY","budgetBps":2500}]}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  Records (id, element_catalog_version_id, semantic_hash, compiler_version, required_feature_set_hash, plan_document, plan_hash, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"steps":[{"op":"LOAD_FEATURE","feature":"RSI:period=14:1m"},{"op":"COMPARE","operator":"LT","value":30},{"op":"EMIT_INTENT","side":"BUY"}]}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -929,7 +1011,7 @@ Table market_data.dataset_lineage {
 
 Table market_data.feature_definitions {
   id uuid [pk, default: `gen_random_uuid()`]
-  catalog_version_id uuid [not null]
+  element_catalog_version_id uuid [not null]
   feature_code varchar(120) [not null]
   calculator_version varchar(80) [not null]
   resolution varchar(30) [not null]
@@ -940,7 +1022,7 @@ Table market_data.feature_definitions {
   created_at timestamptz [not null, default: `now()`]
 
   indexes {
-    (catalog_version_id, feature_code, calculator_version, resolution, definition_hash) [unique]
+    (element_catalog_version_id, feature_code, calculator_version, resolution, definition_hash) [unique]
   }
 
   checks {
@@ -949,7 +1031,7 @@ Table market_data.feature_definitions {
 
   Note: '봇과 무관한 결정적 시장 계산(예: SMA(20))의 불변 정본 정의. definition_hash는 계산기 코드 버전, 정규화 매개변수, resolution, 출력 타입, 히스토리 요구량, 캘린더·정밀도 의미를 포함. 사용자 예산·포지션·런타임 상태·비공개 전략 식별자는 이 해시와 공유 계산 경계에 절대 들어가지 않는다.'
 
-  Records (id, catalog_version_id, feature_code, calculator_version, resolution, normalized_parameters, output_value_type, required_history_points, definition_hash, created_at) {
+  Records (id, element_catalog_version_id, feature_code, calculator_version, resolution, normalized_parameters, output_value_type, required_history_points, definition_hash, created_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', '1m', '{"period":14}', 'REVIEW_EXAMPLE', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
@@ -1116,33 +1198,36 @@ Table market_data.stream_watermarks {
 Table bot.bot_workspaces {
   id uuid [pk, default: `gen_random_uuid()`]
   owner_account_id uuid [not null]
+  strategy_id uuid [not null]
   mode strategy.strategy_mode [not null]
   name varchar(120) [not null]
-  workspace_document jsonb [not null, note: '편집 중 파티션·전략의 semanticDocument와 layoutDocument를 함께 포함한다. 완성 전에는 누락·미연결 요소를 허용하지만 document_schema_version에 맞게 파싱 가능해야 한다.']
+  workspace_document jsonb [not null, note: '편집 중 파티션·Flow의 semanticDocument와 layoutDocument를 함께 포함한다. 완성 전에는 누락·미연결 Element를 허용하지만 document_schema_version에 맞게 파싱 가능해야 한다.']
   document_schema_version varchar(40) [not null]
   edit_sequence bigint [not null, default: 0]
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null, default: `now()`]
 
   indexes {
+    (strategy_id, updated_at)
     (owner_account_id, updated_at)
   }
 
-  Note: '자동 저장되는 미완성 편집 집합체. 빈 파티션과 미완성 전략은 여기서만 허용. workspace_document는 각 전략의 실행 의미 그래프와 UI 레이아웃 그래프를 분리해 포함하며 같은 안정 요소·엣지 키를 사용한다. 완성은 문서 전체의 JSON Schema, 키 참조, 포트 타입, DAG, 레이아웃 수치와 필수 최종 주문 처리 경로를 검증해 새 독립 봇 계층을 원자적으로 생성한다. 완성된 봇은 워크스페이스·원본 복사·버전·계보 참조를 남기지 않는다. edit_sequence는 낙관적 동시성 제어용.'
+  Note: '자동 저장되는 미완성 편집 집합체. 빈 파티션과 미완성 Flow는 여기서만 허용. workspace_document는 각 Flow의 실행 의미 그래프와 UI 레이아웃 그래프를 분리해 포함하며 같은 안정 Element·엣지 키를 사용한다. 완성은 문서 전체의 JSON Schema, 키 참조, 포트 타입, DAG, 레이아웃 수치와 필수 최종 주문 처리 경로를 검증해 새 독립 봇 계층을 원자적으로 생성한다. 완성된 봇은 워크스페이스·원본 복사·버전·계보 참조를 남기지 않는다. edit_sequence는 낙관적 동시성 제어용.'
 
-  Records (id, owner_account_id, mode, name, workspace_document, document_schema_version, edit_sequence, created_at, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', '{"partitions":[{"name":"SPY 반등","budgetCapBps":5000,"strategies":[{"name":"RSI 과매도 진입","complete":false,"semanticDocument":{"blocks":[],"edges":[]},"layoutDocument":{"schemaVersion":"1.0.0","elements":{},"edgeRoutes":{},"groups":{},"viewport":{"x":0,"y":0,"zoom":1.0},"selectedElementKeys":[]}}]}]}', '1.0.0', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  Records (id, owner_account_id, strategy_id, mode, name, workspace_document, document_schema_version, edit_sequence, created_at, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', '{"partitions":[{"name":"SPY 반등","budgetCapBps":5000,"flows":[{"name":"RSI 과매도 진입","complete":false,"semanticDocument":{"elements":[],"edges":[]},"layoutDocument":{"schemaVersion":"1.0.0","elements":{},"edgeRoutes":{},"groups":{},"viewport":{"x":0,"y":0,"zoom":1.0},"selectedElementKeys":[]}}]}]}', '1.0.0', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
 Table bot.bots {
   id uuid [pk, default: `gen_random_uuid()`]
   owner_account_id uuid [not null]
+  strategy_id uuid [not null]
   mode strategy.strategy_mode [not null]
   name varchar(120) [not null]
   lifecycle_status bot.lifecycle_status [not null]
   lifecycle_changed_at timestamptz [not null]
-  execution_blocked_at timestamptz [note: 'nullable 실행 차단 Projection. NULL이면 정상. 이 봇에만 국한된 손상(런타임 상태 손상, 이벤트 시퀀스 갭, 예약·원장 불일치, 정산 실패, 복구 불가 블록 평가 오류)에서만 설정.']
+  execution_blocked_at timestamptz [note: 'nullable 실행 차단 Projection. NULL이면 정상. 이 봇에만 국한된 손상(런타임 상태 손상, 이벤트 시퀀스 갭, 예약·원장 불일치, 정산 실패, 복구 불가 Element 평가 오류)에서만 설정.']
   execution_block_reason_code varchar(80)
   execution_block_event_id uuid
   created_at timestamptz [not null, default: `now()`]
@@ -1156,6 +1241,7 @@ Table bot.bots {
   updated_at timestamptz [not null, default: `now()`]
 
   indexes {
+    (strategy_id, created_at)
     (owner_account_id, lifecycle_status, created_at)
     (lifecycle_status, execution_blocked_at, created_at)
     (owner_account_id, deleted_at, archived_at, created_at)
@@ -1165,10 +1251,10 @@ Table bot.bots {
     `execution_blocked_at IS NOT NULL OR (execution_block_reason_code IS NULL AND execution_block_event_id IS NULL)` [name: 'bot_block_fields_together']
   }
 
-  Note: '봇은 불변 시작 설정과 복구 가능한 런타임 데이터이며 상주 프로세스·컨테이너·스레드가 아니다. 상시 실행은 공용 서비스뿐. RUNNING은 새 트리거 평가 대상, STOPPING은 신규 등록을 막고 취소/체결/해제/정산을 마무리, STOPPED는 영구. 봇별 헬스 상태·하트비트는 없다: 전역 시장 데이터·파이프라인 문제는 market_data(stream_watermarks, quality_incidents)와 operations 소유이고 평가 전 실행 게이트가 참조하며 봇 행을 대량 갱신하지 않는다. execution_blocked_at은 봇별 nullable 차단 Projection. 차단 중에는 새 전략 평가와 새 주문 의도 생성만 멈추고 미체결 주문 취소, 체결 반영, 예약 해제, 원장 기록, 정산, STOPPING 처리는 계속된다. 차단·해제는 추가 전용 공식 bot_events(BOT_EXECUTION_BLOCKED, BOT_EXECUTION_UNBLOCKED, SETTLEMENT_FAILED, LEDGER_INVARIANT_VIOLATED, STATE_REBUILD_COMPLETED)이며 execution_block_event_id가 차단 이벤트를 고정. 파티션 1개 이상, 각 파티션에 완성 전략 1개 이상, 시작 검증 통과 후에만 RUNNING으로 직접 생성. mode와 실행 의미는 불변. name, archived_at, deleted_at은 설정 해시에서 제외되는 가변 필드. archived_at은 STOPPED 봇의 가역 숨김, deleted_at은 STOPPED와 정산 완료 후에만 허용되는 비가역 논리 삭제이며, 실행 중 봇 삭제는 멱등 정지-정산 워크플로를 먼저 수행. 물리 퍼지는 별도 보존·법무 프로세스이고 공식 주문·체결·원장·이벤트·증적을 연쇄 삭제하지 않는다. edit_sequence는 편집 필드 갱신 성공마다 1 증가(낙관적 동시성). 복사는 원본 계보 없는 독립 새 집합체이며 런타임 현금·상태·주문·포지션·원장·참가·성과를 복사하지 않는다. 운영 마이그레이션은 deleted_at IS NULL AND archived_at IS NULL 활성 목록과 execution_blocked_at IS NOT NULL 차단 봇에 partial index 권장.'
+  Note: '봇은 정확히 하나의 Strategy에 속하는 불변 시작 설정과 복구 가능한 런타임 데이터이며 상주 프로세스·컨테이너·스레드가 아니다. 상시 실행은 공용 서비스뿐. RUNNING은 새 트리거 평가 대상, STOPPING은 신규 등록을 막고 취소/체결/해제/정산을 마무리, STOPPED는 영구. 봇별 헬스 상태·하트비트는 없다: 전역 시장 데이터·파이프라인 문제는 market_data(stream_watermarks, quality_incidents)와 operations 소유이고 평가 전 실행 게이트가 참조하며 봇 행을 대량 갱신하지 않는다. execution_blocked_at은 봇별 nullable 차단 Projection. 차단 중에는 새 Flow 평가와 새 주문 의도 생성만 멈추고 미체결 주문 취소, 체결 반영, 예약 해제, 원장 기록, 정산, STOPPING 처리는 계속된다. 차단·해제는 추가 전용 공식 bot_events(BOT_EXECUTION_BLOCKED, BOT_EXECUTION_UNBLOCKED, SETTLEMENT_FAILED, LEDGER_INVARIANT_VIOLATED, STATE_REBUILD_COMPLETED)이며 execution_block_event_id가 차단 이벤트를 고정. 파티션 1개 이상, 각 파티션에 완성 Flow 1개 이상, 시작 검증 통과 후에만 RUNNING으로 직접 생성. mode는 부모 Strategy와 일치하고 실행 의미는 불변. name, archived_at, deleted_at은 설정 해시에서 제외되는 가변 필드. archived_at은 STOPPED 봇의 가역 숨김, deleted_at은 STOPPED와 정산 완료 후에만 허용되는 비가역 논리 삭제이며, 실행 중 봇 삭제는 멱등 정지-정산 워크플로를 먼저 수행. 물리 퍼지는 별도 보존·법무 프로세스이고 공식 주문·체결·원장·이벤트·증적을 연쇄 삭제하지 않는다. edit_sequence는 편집 필드 갱신 성공마다 1 증가(낙관적 동시성). 복사는 원본 계보 없는 독립 새 집합체이며 런타임 현금·상태·주문·포지션·원장·참가·성과를 복사하지 않는다. 운영 마이그레이션은 deleted_at IS NULL AND archived_at IS NULL 활성 목록과 execution_blocked_at IS NOT NULL 차단 봇에 partial index 권장.'
 
-  Records (id, owner_account_id, mode, name, lifecycle_status, lifecycle_changed_at, execution_blocked_at, execution_block_reason_code, execution_block_event_id, created_at, started_at, stop_requested_at, stopped_at, stop_reason_code, archived_at, deleted_at, edit_sequence, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', 'RUNNING', '2026-07-27T09:00:00+09:00', null, null, null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, 'REVIEW_EXAMPLE', null, null, 1, '2026-07-27T09:00:00+09:00'
+  Records (id, owner_account_id, strategy_id, mode, name, lifecycle_status, lifecycle_changed_at, execution_blocked_at, execution_block_reason_code, execution_block_event_id, created_at, started_at, stop_requested_at, stopped_at, stop_reason_code, archived_at, deleted_at, edit_sequence, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', 'RUNNING', '2026-07-27T09:00:00+09:00', null, null, null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, 'REVIEW_EXAMPLE', null, null, 1, '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -1190,7 +1276,7 @@ Table bot.launch_configurations {
     `slippage_rate_bps = 5` [name: 'launch_fixed_slippage_five_bps']
   }
 
-  Note: '봇·파티션·완성 전략과 원자적으로 삽입. 초기 가상 자본은 양수 USD, 봇별 격리이며 입금·출금·증액 불가. 사용자 정의 위험 통제는 전략 RISK_POLICY 블록에만 존재. 실행 설정은 생성 시점부터 불변이며 의미 변경·삭제는 항상 거부.'
+  Note: '봇·파티션·완성 Flow와 원자적으로 삽입. 초기 가상 자본은 양수 USD, 봇별 격리이며 입금·출금·증액 불가. 사용자 정의 위험 통제는 Flow의 RISK_POLICY Element에만 존재. 실행 설정은 생성 시점부터 불변이며 의미 변경·삭제는 항상 거부.'
 
   Records (bot_id, initial_cash_amount, currency_code, broker_rules_version, accounting_rules_version, precision_rules_version, fee_configuration, slippage_rate_bps, buying_power_buffer_policy_id, candidate_conflict_policy, configuration_hash) {
     '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', '1.0.0', '1.0.0', '1.0.0', '{"type":"RATE_BPS","rateBps":20,"minimumFee":"0"}', 5, '00000000-0000-4000-8000-000000000001', '{"sameInstrumentOpposite":"NET","tieBreaker":"PARTITION_POSITION","budgetOverflow":"REDUCE"}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -1220,20 +1306,20 @@ Table bot.bot_partitions {
     `budget_cap_bps > 0 AND budget_cap_bps <= 10000` [name: 'partition_budget_cap_range']
   }
 
-  Note: '완성된 파티션은 최대 100%의 불변 양수 예산 상한과 1개 이상의 전략 블록 그룹을 소유하며, 형제 상한 합은 지연 집계 제약으로 100% 이하 검증. 종목이나 별도 위험 정책 문서는 소유하지 않는다. 파티션이 최하위 예산 경계라 자식 전략들은 이 상한을 공유하고 개별 할당은 없다. 위험 통제는 각 전략 semantic_document의 RISK_POLICY 블록. 형제 파티션 간 차입 금지. name, description, position_x, position_y는 configuration_hash에서 제외되는 편집 필드이고 좌표 겹침 허용, id는 결정적 조회 타이브레이커. edit_sequence는 0에서 시작해 편집 필드 갱신 성공마다 정확히 1 증가(낙관적 동시성), updated_at은 그 커밋 시각. (bot_id, id)는 복합 PK나 버전이 아닌 대체 소유 키. 복사/붙여넣기는 원본 참조 없는 독립 새 행과 자식을 생성.'
+  Note: '완성된 파티션은 최대 100%의 불변 양수 예산 상한과 1개 이상의 Flow를 소유하며, 형제 상한 합은 지연 집계 제약으로 100% 이하 검증. 종목이나 별도 위험 정책 문서는 소유하지 않는다. 파티션이 최하위 예산 경계라 자식 Flow들은 이 상한을 공유하고 개별 할당은 없다. 위험 통제는 각 Flow semantic_document의 RISK_POLICY Element. 형제 파티션 간 차입 금지. name, description, position_x, position_y는 configuration_hash에서 제외되는 편집 필드이고 좌표 겹침 허용, id는 결정적 조회 타이브레이커. edit_sequence는 0에서 시작해 편집 필드 갱신 성공마다 정확히 1 증가(낙관적 동시성), updated_at은 그 커밋 시각. (bot_id, id)는 복합 PK나 버전이 아닌 대체 소유 키. 복사/붙여넣기는 원본 참조 없는 독립 새 행과 자식을 생성.'
 
   Records (id, bot_id, name, description, budget_cap_bps, position_x, position_y, configuration_hash, edit_sequence, created_at, updated_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'Fictional review sample', 5000, 100000.00000000, 100000.00000000, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
-Table bot.strategies {
+Table bot.flows {
   id uuid [pk, default: `gen_random_uuid()`]
   partition_id uuid [not null]
   name varchar(120) [not null]
   description text
-  block_catalog_version_id uuid [not null]
-  execution_plan_id uuid [not null]
+  element_catalog_version_id uuid [not null]
+  compiled_flow_plan_id uuid [not null]
   position_x numeric(14,4) [not null]
   position_y numeric(14,4) [not null]
   semantic_document jsonb [not null]
@@ -1252,41 +1338,41 @@ Table bot.strategies {
     (semantic_hash)
   }
 
-  Note: '전략은 정확히 하나의 파티션이 소유하는 완결 블록 그룹 집합체이며 재사용 라이브러리 항목이나 버전 엔티티가 아니다. BASIC/PRO 모드는 봇에서 상속. 예산 할당 경계는 파티션뿐이고 런타임 행의 strategy_id는 귀속 기록용. name, description, position_x, position_y, layout_document와 layout_schema_version은 semantic_hash·configuration_hash에서 제외되는 편집 필드, 좌표 겹침 허용, id는 결정적 조회 타이브레이커. edit_sequence는 0에서 시작해 이름·설명·좌표·레이아웃 같은 편집 필드 갱신 성공마다 정확히 1 증가, updated_at은 그 커밋 시각. 블록·포트·안정 키를 가진 엣지·매개변수·의미 그룹·RISK_POLICY 블록은 semantic_document 하나의 불변 실행 의미 JSONB 집합체다. layout_document는 같은 안정 요소·엣지 키를 참조하는 UI 전용 JSONB이며 layout_schema_version으로 해석 규칙을 선택하고 layout_hash로 무결성을 확인한다. 레이아웃 변경은 실행 계획, 의미 검증, 백테스트 또는 configuration_hash를 변경하지 않는다. configuration_hash는 블록 카탈로그 버전과 semantic_hash만 바인딩. (partition_id, id)는 복합 런타임 FK용 대체 소유 키. 복사/붙여넣기는 원본 참조 없는 독립 새 행 생성.'
+  Note: 'Flow는 정확히 하나의 파티션이 소유하는 완결 Element 그래프이며 재사용 라이브러리 항목이나 버전 엔티티가 아니다. BASIC/PRO 모드는 봇에서 상속. 예산 할당 경계는 파티션뿐이고 런타임 행의 flow_id는 귀속 기록용. name, description, position_x, position_y, layout_document와 layout_schema_version은 semantic_hash·configuration_hash에서 제외되는 편집 필드, 좌표 겹침 허용, id는 결정적 조회 타이브레이커. edit_sequence는 0에서 시작해 이름·설명·좌표·레이아웃 같은 편집 필드 갱신 성공마다 정확히 1 증가, updated_at은 그 커밋 시각. Element·포트·안정 키를 가진 엣지·매개변수·의미 그룹·RISK_POLICY Element는 semantic_document 하나의 불변 실행 의미 JSONB 집합체다. layout_document는 같은 안정 Element·엣지 키를 참조하는 UI 전용 JSONB이며 layout_schema_version으로 해석 규칙을 선택하고 layout_hash로 무결성을 확인한다. 레이아웃 변경은 실행 계획, 의미 검증, 백테스트 또는 configuration_hash를 변경하지 않는다. configuration_hash는 Element 카탈로그 버전과 semantic_hash만 바인딩. (partition_id, id)는 복합 런타임 FK용 대체 소유 키. 복사/붙여넣기는 원본 참조 없는 독립 새 행 생성.'
 
-  Records (id, partition_id, name, description, block_catalog_version_id, execution_plan_id, position_x, position_y, semantic_document, layout_document, layout_schema_version, semantic_hash, layout_hash, configuration_hash, edit_sequence, created_at, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'Fictional review sample', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, '{"blocks":[{"key":"data-1","type":"PRICE_DATA","params":{"resolution":"1m"}},{"key":"ind-1","type":"RSI","params":{"period":14}},{"key":"cond-1","type":"THRESHOLD","params":{"operator":"LT","value":30}},{"key":"order-1","type":"MARKET_BUY","params":{"budgetBps":2500}},{"key":"risk-1","type":"RISK_POLICY","params":{"maxPositionBps":5000}}],"edges":[{"key":"edge-1","from":"data-1.series","to":"ind-1.input"},{"key":"edge-2","from":"ind-1.value","to":"cond-1.input"},{"key":"edge-3","from":"cond-1.true","to":"order-1.trigger"}]}', '{"schemaVersion":"1.0.0","elements":{"data-1":{"x":80,"y":120,"width":180,"height":96},"ind-1":{"x":340,"y":120,"width":180,"height":96},"cond-1":{"x":600,"y":120,"width":180,"height":120},"order-1":{"x":860,"y":80,"width":180,"height":96},"risk-1":{"x":860,"y":260,"width":180,"height":96}},"edgeRoutes":{"edge-3":{"waypoints":[{"x":820,"y":180}]}},"groups":{},"viewport":{"x":0,"y":0,"zoom":1.0},"selectedElementKeys":[]}', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  Records (id, partition_id, name, description, element_catalog_version_id, compiled_flow_plan_id, position_x, position_y, semantic_document, layout_document, layout_schema_version, semantic_hash, layout_hash, configuration_hash, edit_sequence, created_at, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'Fictional review sample', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, '{"elements":[{"key":"data-1","type":"PRICE_DATA","params":{"resolution":"1m"}},{"key":"ind-1","type":"RSI","params":{"period":14}},{"key":"cond-1","type":"THRESHOLD","params":{"operator":"LT","value":30}},{"key":"order-1","type":"MARKET_BUY","params":{}},{"key":"risk-1","type":"RISK_POLICY","params":{"maxPositionBps":5000}}],"edges":[{"key":"edge-1","from":"data-1.series","to":"ind-1.input"},{"key":"edge-2","from":"ind-1.value","to":"cond-1.input"},{"key":"edge-3","from":"cond-1.true","to":"order-1.trigger"}]}', '{"schemaVersion":"1.0.0","elements":{"data-1":{"x":80,"y":120,"width":180,"height":96},"ind-1":{"x":340,"y":120,"width":180,"height":96},"cond-1":{"x":600,"y":120,"width":180,"height":120},"order-1":{"x":860,"y":80,"width":180,"height":96},"risk-1":{"x":860,"y":260,"width":180,"height":96}},"edgeRoutes":{"edge-3":{"waypoints":[{"x":820,"y":180}]}},"groups":{},"viewport":{"x":0,"y":0,"zoom":1.0},"selectedElementKeys":[]}', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
-Table bot.strategy_instruments {
-  strategy_id uuid [not null]
+Table bot.flow_instruments {
+  flow_id uuid [not null]
   instrument_id uuid [not null]
 
   indexes {
-    (strategy_id, instrument_id) [pk]
+    (flow_id, instrument_id) [pk]
   }
 
-  Note: '완성된 전략 semantic_document가 요구하는 명시적 종목의 불변 집합. 종목의 매매/참조 역할은 그 문서의 타입 블록과 엣지로 한 번 정의되며 여기에 가변 역할로 중복 저장하지 않는다. 전략과 원자적으로 삽입. 시작 검증은 종목 1개 이상과 추출된 의존성-행의 정확한 일치를 요구. 향후 유니버스 선택은 현재 범위 밖이며 제품 지원 시 별도 검토된 모델·마이그레이션으로 도입해야 한다.'
+  Note: '완성된 Flow semantic_document가 요구하는 명시적 종목의 불변 집합. 종목의 매매/참조 역할은 그 문서의 타입 Element과 엣지로 한 번 정의되며 여기에 가변 역할로 중복 저장하지 않는다. Flow와 원자적으로 삽입. 시작 검증은 종목 1개 이상과 추출된 의존성-행의 정확한 일치를 요구. 향후 유니버스 선택은 현재 범위 밖이며 제품 지원 시 별도 검토된 모델·마이그레이션으로 도입해야 한다.'
 
-  Records (strategy_id, instrument_id) {
+  Records (flow_id, instrument_id) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
   }
 }
 
-Table bot.strategy_feature_requirements {
-  strategy_id uuid [not null]
+Table bot.flow_feature_requirements {
+  flow_id uuid [not null]
   instrument_id uuid [not null]
   feature_definition_id uuid [not null]
 
   indexes {
-    (strategy_id, instrument_id, feature_definition_id) [pk]
-    (feature_definition_id, instrument_id, strategy_id)
+    (flow_id, instrument_id, feature_definition_id) [pk]
+    (feature_definition_id, instrument_id, flow_id)
   }
 
-  Note: '완성 시 전략 semantic_document에서 추출한 불변 의존성 집합. 사용자 작성 상태가 아니며 예산도 부여하지 않는다. 역방향 인덱스로 서버가 동일 피처·종목 기준으로 활성 전략을 묶어 공통 계산을 한 번 수행하고 여러 봇 평가로 팬아웃.'
+  Note: '완성 시 Flow semantic_document에서 추출한 불변 의존성 집합. 사용자 작성 상태가 아니며 예산도 부여하지 않는다. 역방향 인덱스로 서버가 동일 피처·종목 기준으로 활성 Flow을 묶어 공통 계산을 한 번 수행하고 여러 봇 평가로 팬아웃.'
 
-  Records (strategy_id, instrument_id, feature_definition_id) {
+  Records (flow_id, instrument_id, feature_definition_id) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001'
   }
 }
@@ -1322,19 +1408,19 @@ Table bot.bot_events {
   }
 }
 
-Table bot.strategy_time_triggers {
-  strategy_id uuid [not null]
+Table bot.flow_time_triggers {
+  flow_id uuid [not null]
   trigger_type bot.time_trigger_type [not null]
   schedule_key varchar(40) [not null, note: '값은 SCHEDULE이면 ONE_MINUTE 같은 Interval 키, 세션 트리거면 고정값 NONE.']
 
   indexes {
-    (strategy_id, trigger_type, schedule_key) [pk]
-    (trigger_type, schedule_key, strategy_id)
+    (flow_id, trigger_type, schedule_key) [pk]
+    (trigger_type, schedule_key, flow_id)
   }
 
-  Note: '완성된 전략 semantic_document에서 서버가 추출한 시간·세션 트리거 의존성 Projection. 사용자 작성이 아니고 제2의 정본도 아니다. 종목·피처 트리거 의존성은 strategy_instruments와 strategy_feature_requirements에 유지(중복 테이블 없음). 역방향 인덱스가 Trigger Router 조회에 답한다: MARKET_OPEN이나 ONE_MINUTE 이벤트는 구독한 전략만 찾아 RUNNING 비차단 봇과 조인하며, 시장 전체 이벤트가 전체 봇을 스캔하지 않는다.'
+  Note: '완성된 Flow semantic_document에서 서버가 추출한 시간·세션 트리거 의존성 Projection. 사용자 작성이 아니고 제2의 정본도 아니다. 종목·피처 트리거 의존성은 flow_instruments와 flow_feature_requirements에 유지(중복 테이블 없음). 역방향 인덱스가 Trigger Router 조회에 답한다: MARKET_OPEN이나 ONE_MINUTE 이벤트는 구독한 Flow만 찾아 RUNNING 비차단 봇과 조인하며, 시장 전체 이벤트가 전체 봇을 스캔하지 않는다.'
 
-  Records (strategy_id, trigger_type, schedule_key) {
+  Records (flow_id, trigger_type, schedule_key) {
     '00000000-0000-4000-8000-000000000001', 'SCHEDULE', 'ONE_MINUTE'
   }
 }
@@ -1343,7 +1429,7 @@ Table bot.evaluation_runs {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
   partition_id uuid [not null]
-  strategy_id uuid [not null]
+  flow_id uuid [not null]
   trigger_event_id uuid [not null]
   result_event_id uuid [unique]
   feature_snapshot_batch_id uuid
@@ -1365,9 +1451,9 @@ Table bot.evaluation_runs {
   failure_code varchar(80)
 
   indexes {
-    (trigger_event_id, strategy_id) [unique]
+    (trigger_event_id, flow_id) [unique]
     (bot_id, id) [unique]
-    (strategy_id, queued_at)
+    (flow_id, queued_at)
     (bot_id, queued_at)
     (status, lease_expires_at)
     (feature_snapshot_batch_id, feature_snapshot_key)
@@ -1378,9 +1464,9 @@ Table bot.evaluation_runs {
     `status <> 'SUCCEEDED' OR (completed_at IS NOT NULL AND result_hash IS NOT NULL)` [name: 'evaluation_success_complete']
   }
 
-  Note: '트리거 이벤트당 전략당 1행: 평가 큐, 사용자 노출 판단 로그, idempotency의 단위. 유일한 (trigger_event_id, strategy_id) 쌍이 상류 bot_events (bot_id, idempotency_key), 하류 order_intent_batches (bot_id, source_event_id)와 함께 at-least-once 재전달을 끝까지 안전하게 만든다. runtime_state_values가 전략 범위라 같은 봇의 전략 평가는 공용 워커에서 병렬 가능하며, 봇 수준 예산·충돌 해소·이벤트 적용은 bot_id advisory lock 아래 주문 의도 배치 경계에서 직렬화되고 큐는 bot_id로 파티셔닝. 행은 라우팅 시 PENDING으로 등록. 시장 데이터 평가는 배치·키·해시로 불변 공유 피처 스냅샷 하나를 고정(공통 지표를 봇별 재계산하지 않음), MARKET_OPEN/MARKET_CLOSE/SCHEDULE 평가는 스냅샷 없이 가능. 최신만 평가하는 캐치업 정책에서 지연·차단 중 대체된 트리거는 failure_code CATCHUP_SUPERSEDED의 SKIPPED로만 기록되고 오래된 가격으로 평가되지 않는다. 마이그레이션은 전략당 PENDING/RUNNING 1행을 허용하는 partial unique index 추가.'
+  Note: '트리거 이벤트당 Flow당 1행: 평가 큐, 사용자 노출 판단 로그, idempotency의 단위. 유일한 (trigger_event_id, flow_id) 쌍이 상류 bot_events (bot_id, idempotency_key), 하류 order_intent_batches (bot_id, source_event_id)와 함께 at-least-once 재전달을 끝까지 안전하게 만든다. runtime_state_values가 Flow 범위라 같은 봇의 Flow 평가는 공용 워커에서 병렬 가능하며, 봇 수준 예산·충돌 해소·이벤트 적용은 bot_id advisory lock 아래 주문 의도 배치 경계에서 직렬화되고 큐는 bot_id로 파티셔닝. 행은 라우팅 시 PENDING으로 등록. 시장 데이터 평가는 배치·키·해시로 불변 공유 피처 스냅샷 하나를 고정(공통 지표를 봇별 재계산하지 않음), MARKET_OPEN/MARKET_CLOSE/SCHEDULE 평가는 스냅샷 없이 가능. 최신만 평가하는 캐치업 정책에서 지연·차단 중 대체된 트리거는 failure_code CATCHUP_SUPERSEDED의 SKIPPED로만 기록되고 오래된 가격으로 평가되지 않는다. 마이그레이션은 Flow당 PENDING/RUNNING 1행을 허용하는 partial unique index 추가.'
 
-  Records (id, bot_id, partition_id, strategy_id, trigger_event_id, result_event_id, feature_snapshot_batch_id, feature_snapshot_key, feature_snapshot_hash, status, attempt_count, lease_expires_at, input_state_hash, input_market_hash, candidate_set_hash, candidate_count, state_change_count, result_hash, summary_document, queued_at, started_at, completed_at, failure_code) {
+  Records (id, bot_id, partition_id, flow_id, trigger_event_id, result_event_id, feature_snapshot_batch_id, feature_snapshot_key, feature_snapshot_hash, status, attempt_count, lease_expires_at, input_state_hash, input_market_hash, candidate_set_hash, candidate_count, state_change_count, result_hash, summary_document, queued_at, started_at, completed_at, failure_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'SUCCEEDED', 1, '2026-07-27T09:01:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"decision":"ORDER_INTENT","firstFailedCondition":null,"notes":"RSI 28.4 < 30"}', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
   }
 }
@@ -1389,9 +1475,9 @@ Table bot.runtime_state_values {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
   partition_id uuid [not null]
-  strategy_id uuid [not null]
+  flow_id uuid [not null]
   instrument_id uuid
-  block_instance_key varchar(160) [not null]
+  element_instance_key varchar(160) [not null]
   state_definition_key varchar(160) [not null]
   value_type bot.runtime_value_type [not null]
   current_value jsonb [not null]
@@ -1400,13 +1486,13 @@ Table bot.runtime_state_values {
 
   indexes {
     (bot_id, id) [unique]
-    (bot_id, partition_id, strategy_id, block_instance_key, state_definition_key, instrument_id) [unique]
+    (bot_id, partition_id, flow_id, element_instance_key, state_definition_key, instrument_id) [unique]
     (bot_id, last_event_sequence)
   }
 
-  Note: '평가 간 유지가 필요한 공식 봇 전용 전략 상태만 PostgreSQL이 소유. 명시적 봇/파티션/전략 소유가 봇 간 누출을 방지하고, instrument_id는 전략 전역 상태에서만 null. 공유 가격·캔들·지표·캘린더·피처 값은 여기 금지이며 market_data 공유 계산이나 일회성 캐시 소관. instrument_id의 null-safe 유일성은 마이그레이션에서 강제.'
+  Note: '평가 간 유지가 필요한 공식 봇 전용 Flow 상태만 PostgreSQL이 소유. 명시적 봇/파티션/Flow 소유가 봇 간 누출을 방지하고, instrument_id는 Flow 전역 상태에서만 null. 공유 가격·캔들·지표·캘린더·피처 값은 여기 금지이며 market_data 공유 계산이나 일회성 캐시 소관. instrument_id의 null-safe 유일성은 마이그레이션에서 강제.'
 
-  Records (id, bot_id, partition_id, strategy_id, instrument_id, block_instance_key, state_definition_key, value_type, current_value, last_event_sequence, updated_at) {
+  Records (id, bot_id, partition_id, flow_id, instrument_id, element_instance_key, state_definition_key, value_type, current_value, last_event_sequence, updated_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'DECIMAL', '{"value":28.4}', 1, '2026-07-27T09:00:00+09:00'
   }
 }
@@ -1474,7 +1560,7 @@ Table trading.order_intent_batches {
     (bot_id, finalized_at)
   }
 
-  Note: '한 트리거 이벤트의 전략별 평가 산출물이 결합되는 봇 수준 경계: 예산 상한, netting, 불변 충돌 정책이 여기서 bot_id advisory lock 아래 같은 봇의 다른 이벤트와 직렬화되어 적용. (bot_id, source_event_id) 유일 키가 at-least-once 재전달의 중복 배치 생성을 방지.'
+  Note: '한 트리거 이벤트의 Flow별 평가 산출물이 결합되는 봇 수준 경계: 예산 상한, netting, 불변 충돌 정책이 여기서 bot_id advisory lock 아래 같은 봇의 다른 이벤트와 직렬화되어 적용. (bot_id, source_event_id) 유일 키가 at-least-once 재전달의 중복 배치 생성을 방지.'
 
   Records (id, bot_id, source_event_id, status, conflict_policy_hash, allocation_rules_version, input_state_hash, result_hash, finalized_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACTIVE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
@@ -1484,9 +1570,9 @@ Table trading.order_intent_batches {
 Table trading.order_intents {
   id uuid [pk, default: `gen_random_uuid()`]
   batch_id uuid [not null]
-  evaluation_run_id uuid [not null, note: '이 의도를 만든 전략별 평가.']
+  evaluation_run_id uuid [not null, note: '이 의도를 만든 Flow별 평가.']
   partition_id uuid [not null]
-  strategy_id uuid [not null]
+  flow_id uuid [not null]
   instrument_id uuid [not null]
   intent_key varchar(160) [not null]
   side trading.order_side [not null]
@@ -1508,13 +1594,13 @@ Table trading.order_intents {
   indexes {
     (batch_id, intent_key) [unique]
     (batch_id, instrument_id, side)
-    (strategy_id, instrument_id)
+    (flow_id, instrument_id)
     (evaluation_run_id)
   }
 
-  Note: '원래 의도와 모든 축소/netting 결과는 불변. 파티션·전략 소유는 복합 제약으로 일치해야 하며, evaluation_run_id가 각 의도를 그것을 만든 정확한 전략별 평가에 귀속.'
+  Note: '원래 의도와 모든 축소/netting 결과는 불변. 파티션·Flow 소유는 복합 제약으로 일치해야 하며, evaluation_run_id가 각 의도를 그것을 만든 정확한 Flow별 평가에 귀속.'
 
-  Records (id, batch_id, evaluation_run_id, partition_id, strategy_id, instrument_id, intent_key, side, position_effect, order_type, time_in_force, requested_quantity, requested_notional, approved_quantity, approved_notional, netted_quantity, final_quantity, final_notional, limit_price, stop_price, decision, decision_reason_code) {
+  Records (id, batch_id, evaluation_run_id, partition_id, flow_id, instrument_id, intent_key, side, position_effect, order_type, time_in_force, requested_quantity, requested_notional, approved_quantity, approved_notional, netted_quantity, final_quantity, final_notional, limit_price, stop_price, decision, decision_reason_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'BUY', 'OPEN_LONG', 'MARKET', 'DAY', 10.00000000, 100000.00000000, 10.00000000, 100000.00000000, 10.00000000, 10.00000000, 100000.00000000, 100.00000000, 100.00000000, 'review-example', 'REVIEW_EXAMPLE'
   }
 }
@@ -1556,7 +1642,7 @@ Table trading.orders {
 Table trading.order_groups {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
-  group_type varchar(30) [not null, note: '승인된 블록 카탈로그가 지원하는 경우 OCO, BRACKET, MULTI_LEG.']
+  group_type varchar(30) [not null, note: '승인된 Element 카탈로그가 지원하는 경우 OCO, BRACKET, MULTI_LEG.']
   group_key varchar(160) [not null]
   status varchar(30) [not null]
   created_event_id uuid [not null]
@@ -1566,7 +1652,7 @@ Table trading.order_groups {
     (bot_id, group_key) [unique]
   }
 
-  Note: '운영 안전한 그룹 생명주기를 위해 존재하며, 지원 전략 블록 카탈로그가 정확히 승인될 때까지 예약된 테이블.'
+  Note: '운영 안전한 그룹 생명주기를 위해 존재하며, 지원 Flow Element 카탈로그가 정확히 승인될 때까지 예약된 테이블.'
 
   Records (id, bot_id, group_type, group_key, status, created_event_id, closed_event_id) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'ACTIVE', '00000000-0000-4000-8000-000000000001', null
@@ -1597,7 +1683,7 @@ Table trading.capital_reservations {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
   partition_id uuid [not null]
-  strategy_id uuid [not null]
+  flow_id uuid [not null]
   intent_id uuid [not null, unique]
   order_id uuid
   buffer_policy_id uuid [not null]
@@ -1620,12 +1706,12 @@ Table trading.capital_reservations {
   indexes {
     (bot_id, status, created_at)
     (partition_id, status)
-    (strategy_id, status)
+    (flow_id, status)
   }
 
-  Note: '버퍼는 구매력 예약에만 영향을 주고 체결가·PnL·성과에는 절대 반영되지 않는다. 예산 강제는 봇·파티션 상한만 사용하고 strategy_id는 귀속용. 최종 가격/수수료 재확인은 어느 상한이든 초과하기 전에 축소하거나 거부해야 한다.'
+  Note: '버퍼는 구매력 예약에만 영향을 주고 체결가·PnL·성과에는 절대 반영되지 않는다. 예산 강제는 봇·파티션 상한만 사용하고 flow_id는 귀속용. 최종 가격/수수료 재확인은 어느 상한이든 초과하기 전에 축소하거나 거부해야 한다.'
 
-  Records (id, bot_id, partition_id, strategy_id, intent_id, order_id, buffer_policy_id, status, reference_price, reference_observed_at, reference_market_hash, base_notional, fixed_slippage_amount, estimated_fee_amount, buffer_amount, reserved_amount, consumed_amount, released_amount, created_event_id, created_at, settled_event_id, settled_at) {
+  Records (id, bot_id, partition_id, flow_id, intent_id, order_id, buffer_policy_id, status, reference_price, reference_observed_at, reference_market_hash, base_notional, fixed_slippage_amount, estimated_fee_amount, buffer_amount, reserved_amount, consumed_amount, released_amount, created_event_id, created_at, settled_event_id, settled_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACTIVE', 100.00000000, '2026-07-27T09:00:00+09:00', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00'
   }
 }
@@ -1713,7 +1799,7 @@ Table trading.fill_allocations {
   intent_id uuid [not null]
   reservation_id uuid [not null]
   partition_id uuid [not null]
-  strategy_id uuid [not null]
+  flow_id uuid [not null]
   allocated_quantity numeric(28,8) [not null]
   allocated_gross_amount numeric(24,8) [not null]
   allocated_fee_amount numeric(24,8) [not null]
@@ -1724,12 +1810,12 @@ Table trading.fill_allocations {
   indexes {
     (fill_id, intent_id) [pk]
     (reservation_id, fill_id) [unique]
-    (strategy_id, fill_id)
+    (flow_id, fill_id)
   }
 
   Note: '배분은 의도별 예약을 독립 정산. 미사용 버퍼는 해제되며 체결가·성과에 절대 반영되지 않는다.'
 
-  Records (fill_id, intent_id, reservation_id, partition_id, strategy_id, allocated_quantity, allocated_gross_amount, allocated_fee_amount, reservation_consumed_amount, reservation_released_amount, allocation_rules_version) {
+  Records (fill_id, intent_id, reservation_id, partition_id, flow_id, allocated_quantity, allocated_gross_amount, allocated_fee_amount, reservation_consumed_amount, reservation_released_amount, allocation_rules_version) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 100000.00000000, 100000.00000000, 100000.00000000, 100000.00000000, '1.0.0'
   }
 }
@@ -1738,7 +1824,7 @@ Table trading.ledger_accounts {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
   partition_id uuid
-  strategy_id uuid
+  flow_id uuid
   account_type varchar(50) [not null]
   currency_code char(3)
   instrument_id uuid
@@ -1746,12 +1832,12 @@ Table trading.ledger_accounts {
   closed_at timestamptz
 
   indexes {
-    (bot_id, partition_id, strategy_id, account_type, currency_code, instrument_id) [unique]
+    (bot_id, partition_id, flow_id, account_type, currency_code, instrument_id) [unique]
   }
 
-  Note: 'null-safe 유일성과 유효한 범위 조합은 마이그레이션에서 강제. 전략 하위계정은 예산·로트 이전 없이 귀속만 지원.'
+  Note: 'null-safe 유일성과 유효한 범위 조합은 마이그레이션에서 강제. Flow 하위계정은 예산·로트 이전 없이 귀속만 지원.'
 
-  Records (id, bot_id, partition_id, strategy_id, account_type, currency_code, instrument_id, created_at, closed_at) {
+  Records (id, bot_id, partition_id, flow_id, account_type, currency_code, instrument_id, created_at, closed_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'USD', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', null
   }
 }
@@ -1785,7 +1871,7 @@ Table trading.ledger_entries {
   transaction_id uuid [not null]
   ledger_account_id uuid [not null]
   partition_id uuid
-  strategy_id uuid
+  flow_id uuid
   entry_sequence int [not null]
   direction varchar(10) [not null, note: '값은 DEBIT 또는 CREDIT.']
   amount numeric(24,8) [not null]
@@ -1795,12 +1881,12 @@ Table trading.ledger_entries {
   indexes {
     (transaction_id, entry_sequence) [unique]
     (ledger_account_id, transaction_id)
-    (strategy_id, transaction_id)
+    (flow_id, transaction_id)
   }
 
-  Note: '지연 제약 트리거가 커밋 시 통화 금액 균형과 파티션/전략 소유 유효성을 강제해야 한다.'
+  Note: '지연 제약 트리거가 커밋 시 통화 금액 균형과 파티션/Flow 소유 유효성을 강제해야 한다.'
 
-  Records (id, transaction_id, ledger_account_id, partition_id, strategy_id, entry_sequence, direction, amount, quantity, entry_hash) {
+  Records (id, transaction_id, ledger_account_id, partition_id, flow_id, entry_sequence, direction, amount, quantity, entry_hash) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'review-example', 100000.00000000, 10.00000000, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   }
 }
@@ -1809,7 +1895,7 @@ Table trading.position_lots {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
   partition_id uuid [not null]
-  strategy_id uuid [not null]
+  flow_id uuid [not null]
   instrument_id uuid [not null]
   opening_fill_id uuid [not null]
   opened_quantity numeric(28,8) [not null]
@@ -1819,13 +1905,13 @@ Table trading.position_lots {
   closed_at timestamptz
 
   indexes {
-    (strategy_id, instrument_id, opened_at)
+    (flow_id, instrument_id, opened_at)
     (bot_id, instrument_id, opened_at)
   }
 
   Note: '포지션 로트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
-  Records (id, bot_id, partition_id, strategy_id, instrument_id, opening_fill_id, opened_quantity, remaining_quantity, unit_cost, opened_at, closed_at) {
+  Records (id, bot_id, partition_id, flow_id, instrument_id, opening_fill_id, opened_quantity, remaining_quantity, unit_cost, opened_at, closed_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 10.00000000, 100000.00000000, '2026-07-27T09:00:00+09:00', null
   }
 }
@@ -1853,8 +1939,8 @@ Table trading.lot_movements {
   }
 }
 
-Table trading.strategy_position_projections {
-  strategy_id uuid [not null]
+Table trading.flow_position_projections {
+  flow_id uuid [not null]
   partition_id uuid [not null]
   bot_id uuid [not null]
   instrument_id uuid [not null]
@@ -1866,14 +1952,14 @@ Table trading.strategy_position_projections {
   updated_at timestamptz [not null]
 
   indexes {
-    (strategy_id, instrument_id) [pk]
+    (flow_id, instrument_id) [pk]
     (bot_id, instrument_id)
     (partition_id, instrument_id)
   }
 
   Note: '재구축 가능한 PostgreSQL 현재 Projection. 공식 이력은 체결, 로트 변동, 원장 분개.'
 
-  Records (strategy_id, partition_id, bot_id, instrument_id, long_quantity, short_quantity, cost_basis_amount, last_event_sequence, projection_hash, updated_at) {
+  Records (flow_id, partition_id, bot_id, instrument_id, long_quantity, short_quantity, cost_basis_amount, last_event_sequence, projection_hash, updated_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 10.00000000, 10.00000000, 100000.00000000, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
@@ -2753,9 +2839,13 @@ Ref: identity.account_sanction_events.sanction_id > identity.account_sanctions.i
 Ref: identity.account_sanction_events.actor_operator_id > operations.operator_accounts.id
 Ref: identity.account_sanction_events.evidence_object_id > storage.objects.id
 
-Ref: strategy.platform_template_versions.template_id > strategy.platform_templates.id
-Ref: strategy.platform_template_versions.catalog_version_id > strategy.catalog_versions.id
-Ref: strategy.compiled_execution_plans.catalog_version_id > strategy.catalog_versions.id
+Ref: strategy.strategies.owner_account_id > identity.accounts.id
+Ref: strategy.element_definitions.element_catalog_version_id > strategy.element_catalog_versions.id
+Ref: strategy.package_versions.package_id > strategy.packages.id
+Ref: strategy.package_versions.element_catalog_version_id > strategy.element_catalog_versions.id
+Ref: strategy.template_versions.template_id > strategy.templates.id
+Ref: strategy.template_versions.element_catalog_version_id > strategy.element_catalog_versions.id
+Ref: strategy.compiled_flow_plans.element_catalog_version_id > strategy.element_catalog_versions.id
 
 Ref: market_data.instrument_symbols.instrument_id > market_data.instruments.id
 Ref: market_data.feeds.provider_id > market_data.providers.id
@@ -2766,7 +2856,7 @@ Ref: market_data.dataset_objects.dataset_manifest_id > market_data.dataset_manif
 Ref: market_data.dataset_objects.object_id > storage.objects.id
 Ref: market_data.dataset_lineage.derived_manifest_id > market_data.dataset_manifests.id
 Ref: market_data.dataset_lineage.source_manifest_id > market_data.dataset_manifests.id
-Ref: market_data.feature_definitions.catalog_version_id > strategy.catalog_versions.id
+Ref: market_data.feature_definitions.element_catalog_version_id > strategy.element_catalog_versions.id
 Ref: market_data.feature_materializations.feature_definition_id > market_data.feature_definitions.id
 Ref: market_data.feature_materializations.instrument_id > market_data.instruments.id
 Ref: market_data.feature_materializations.pipeline_run_id > market_data.pipeline_runs.id
@@ -2781,33 +2871,35 @@ Ref: market_data.quality_incidents.evidence_object_id > storage.objects.id
 Ref: market_data.stream_watermarks.feed_id > market_data.feeds.id
 
 Ref: bot.bot_workspaces.owner_account_id > identity.accounts.id
+Ref: bot.bot_workspaces.(owner_account_id, strategy_id, mode) > strategy.strategies.(owner_account_id, id, mode)
 Ref: bot.bots.owner_account_id > identity.accounts.id
+Ref: bot.bots.(owner_account_id, strategy_id, mode) > strategy.strategies.(owner_account_id, id, mode)
 Ref: bot.launch_configurations.bot_id > bot.bots.id
 Ref: bot.launch_configurations.buying_power_buffer_policy_id > trading.buying_power_buffer_policy_versions.id
 Ref: bot.bot_partitions.bot_id > bot.bots.id
-Ref: bot.strategies.partition_id > bot.bot_partitions.id
-Ref: bot.strategies.block_catalog_version_id > strategy.catalog_versions.id
-Ref: bot.strategies.execution_plan_id > strategy.compiled_execution_plans.id
-Ref: bot.strategy_instruments.strategy_id > bot.strategies.id
-Ref: bot.strategy_instruments.instrument_id > market_data.instruments.id
-Ref: bot.strategy_feature_requirements.strategy_id > bot.strategies.id
-Ref: bot.strategy_feature_requirements.(strategy_id, instrument_id) > bot.strategy_instruments.(strategy_id, instrument_id)
-Ref: bot.strategy_feature_requirements.feature_definition_id > market_data.feature_definitions.id
+Ref: bot.flows.partition_id > bot.bot_partitions.id
+Ref: bot.flows.element_catalog_version_id > strategy.element_catalog_versions.id
+Ref: bot.flows.compiled_flow_plan_id > strategy.compiled_flow_plans.id
+Ref: bot.flow_instruments.flow_id > bot.flows.id
+Ref: bot.flow_instruments.instrument_id > market_data.instruments.id
+Ref: bot.flow_feature_requirements.flow_id > bot.flows.id
+Ref: bot.flow_feature_requirements.(flow_id, instrument_id) > bot.flow_instruments.(flow_id, instrument_id)
+Ref: bot.flow_feature_requirements.feature_definition_id > market_data.feature_definitions.id
 Ref: bot.bots.execution_block_event_id > bot.bot_events.id
 Ref: bot.bot_events.bot_id > bot.bots.id
 Ref: bot.bot_events.causation_event_id > bot.bot_events.id
 Ref: bot.bot_events.market_dataset_manifest_id > market_data.dataset_manifests.id
 Ref: bot.bot_events.evidence_object_id > storage.objects.id
-Ref: bot.strategy_time_triggers.strategy_id > bot.strategies.id
+Ref: bot.flow_time_triggers.flow_id > bot.flows.id
 Ref: bot.evaluation_runs.bot_id > bot.bots.id
 Ref: bot.evaluation_runs.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: bot.evaluation_runs.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
+Ref: bot.evaluation_runs.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: bot.evaluation_runs.(bot_id, trigger_event_id) > bot.bot_events.(bot_id, id)
 Ref: bot.evaluation_runs.(bot_id, result_event_id) > bot.bot_events.(bot_id, id)
 Ref: bot.evaluation_runs.feature_snapshot_batch_id > market_data.feature_snapshot_batches.id
 Ref: bot.runtime_state_values.bot_id > bot.bots.id
 Ref: bot.runtime_state_values.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: bot.runtime_state_values.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
+Ref: bot.runtime_state_values.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: bot.runtime_state_values.instrument_id > market_data.instruments.id
 Ref: bot.runtime_state_changes.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
 Ref: bot.runtime_state_changes.(bot_id, runtime_state_value_id) > bot.runtime_state_values.(bot_id, id)
@@ -2815,7 +2907,7 @@ Ref: trading.order_intent_batches.bot_id > bot.bots.id
 Ref: trading.order_intent_batches.source_event_id > bot.bot_events.id
 Ref: trading.order_intents.batch_id > trading.order_intent_batches.id
 Ref: trading.order_intents.evaluation_run_id > bot.evaluation_runs.id
-Ref: trading.order_intents.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
+Ref: trading.order_intents.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.order_intents.instrument_id > market_data.instruments.id
 Ref: trading.orders.bot_id > bot.bots.id
 Ref: trading.orders.instrument_id > market_data.instruments.id
@@ -2829,7 +2921,7 @@ Ref: trading.order_intent_allocations.order_id > trading.orders.id
 Ref: trading.order_intent_allocations.intent_id > trading.order_intents.id
 Ref: trading.capital_reservations.bot_id > bot.bots.id
 Ref: trading.capital_reservations.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: trading.capital_reservations.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
+Ref: trading.capital_reservations.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.capital_reservations.intent_id > trading.order_intents.id
 Ref: trading.capital_reservations.order_id > trading.orders.id
 Ref: trading.capital_reservations.buffer_policy_id > trading.buying_power_buffer_policy_versions.id
@@ -2845,12 +2937,12 @@ Ref: trading.fills.instrument_id > market_data.instruments.id
 Ref: trading.fill_allocations.fill_id > trading.fills.id
 Ref: trading.fill_allocations.intent_id > trading.order_intents.id
 Ref: trading.fill_allocations.reservation_id > trading.capital_reservations.id
-Ref: trading.fill_allocations.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
+Ref: trading.fill_allocations.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.ledger_accounts.bot_id > bot.bots.id
 Ref: trading.ledger_accounts.partition_id > bot.bot_partitions.id
-Ref: trading.ledger_accounts.strategy_id > bot.strategies.id
+Ref: trading.ledger_accounts.flow_id > bot.flows.id
 Ref: trading.ledger_accounts.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: trading.ledger_accounts.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
+Ref: trading.ledger_accounts.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.ledger_accounts.instrument_id > market_data.instruments.id
 Ref: trading.ledger_transactions.bot_id > bot.bots.id
 Ref: trading.ledger_transactions.bot_event_id > bot.bot_events.id
@@ -2858,21 +2950,21 @@ Ref: trading.ledger_transactions.reversal_of_transaction_id > trading.ledger_tra
 Ref: trading.ledger_entries.transaction_id > trading.ledger_transactions.id
 Ref: trading.ledger_entries.ledger_account_id > trading.ledger_accounts.id
 Ref: trading.ledger_entries.partition_id > bot.bot_partitions.id
-Ref: trading.ledger_entries.strategy_id > bot.strategies.id
-Ref: trading.ledger_entries.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
+Ref: trading.ledger_entries.flow_id > bot.flows.id
+Ref: trading.ledger_entries.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.position_lots.bot_id > bot.bots.id
 Ref: trading.position_lots.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: trading.position_lots.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
+Ref: trading.position_lots.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.position_lots.instrument_id > market_data.instruments.id
 Ref: trading.position_lots.opening_fill_id > trading.fills.id
 Ref: trading.lot_movements.position_lot_id > trading.position_lots.id
 Ref: trading.lot_movements.bot_event_id > bot.bot_events.id
 Ref: trading.lot_movements.source_fill_id > trading.fills.id
 Ref: trading.lot_movements.corporate_action_id > market_data.corporate_actions.id
-Ref: trading.strategy_position_projections.bot_id > bot.bots.id
-Ref: trading.strategy_position_projections.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
-Ref: trading.strategy_position_projections.(partition_id, strategy_id) > bot.strategies.(partition_id, id)
-Ref: trading.strategy_position_projections.instrument_id > market_data.instruments.id
+Ref: trading.flow_position_projections.bot_id > bot.bots.id
+Ref: trading.flow_position_projections.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
+Ref: trading.flow_position_projections.(partition_id, flow_id) > bot.flows.(partition_id, id)
+Ref: trading.flow_position_projections.instrument_id > market_data.instruments.id
 Ref: trading.position_projections.bot_id > bot.bots.id
 Ref: trading.position_projections.instrument_id > market_data.instruments.id
 Ref: trading.bot_budget_projections.bot_id > bot.bots.id
