@@ -1118,7 +1118,7 @@ Table bot.bot_workspaces {
   owner_account_id uuid [not null]
   mode strategy.strategy_mode [not null]
   name varchar(120) [not null]
-  workspace_document jsonb [not null]
+  workspace_document jsonb [not null, note: '편집 중 파티션·전략의 semanticDocument와 layoutDocument를 함께 포함한다. 완성 전에는 누락·미연결 요소를 허용하지만 document_schema_version에 맞게 파싱 가능해야 한다.']
   document_schema_version varchar(40) [not null]
   edit_sequence bigint [not null, default: 0]
   created_at timestamptz [not null, default: `now()`]
@@ -1128,10 +1128,10 @@ Table bot.bot_workspaces {
     (owner_account_id, updated_at)
   }
 
-  Note: '자동 저장되는 미완성 편집 집합체. 빈 파티션과 미완성 전략은 여기서만 허용. 완성은 문서 전체를 검증해 새 독립 봇 계층을 원자적으로 생성하며, 완성된 봇은 워크스페이스·원본 복사·버전·계보 참조를 남기지 않는다. edit_sequence는 낙관적 동시성 제어용.'
+  Note: '자동 저장되는 미완성 편집 집합체. 빈 파티션과 미완성 전략은 여기서만 허용. workspace_document는 각 전략의 실행 의미 그래프와 UI 레이아웃 그래프를 분리해 포함하며 같은 안정 요소·엣지 키를 사용한다. 완성은 문서 전체의 JSON Schema, 키 참조, 포트 타입, DAG, 레이아웃 수치와 필수 최종 주문 처리 경로를 검증해 새 독립 봇 계층을 원자적으로 생성한다. 완성된 봇은 워크스페이스·원본 복사·버전·계보 참조를 남기지 않는다. edit_sequence는 낙관적 동시성 제어용.'
 
   Records (id, owner_account_id, mode, name, workspace_document, document_schema_version, edit_sequence, created_at, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', '{"partitions":[{"name":"SPY 반등","budgetCapBps":5000,"strategies":[{"name":"RSI 과매도 진입","complete":false,"blocks":[]}]}]}', '1.0.0', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', '{"partitions":[{"name":"SPY 반등","budgetCapBps":5000,"strategies":[{"name":"RSI 과매도 진입","complete":false,"semanticDocument":{"blocks":[],"edges":[]},"layoutDocument":{"schemaVersion":"1.0.0","elements":{},"edgeRoutes":{},"groups":{},"viewport":{"x":0,"y":0,"zoom":1.0},"selectedElementKeys":[]}}]}]}', '1.0.0', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -1237,7 +1237,10 @@ Table bot.strategies {
   position_x numeric(14,4) [not null]
   position_y numeric(14,4) [not null]
   semantic_document jsonb [not null]
+  layout_document jsonb [not null, note: '요소별 좌표·크기, 그룹 배치·접힘, 선택 상태, edge routing hint, viewport와 zoom을 저장하는 UI 전용 문서. 요소 키와 엣지 키는 semantic_document의 안정 식별자를 참조해야 한다.']
+  layout_schema_version varchar(40) [not null]
   semantic_hash varchar(128) [not null]
+  layout_hash varchar(128) [not null]
   configuration_hash varchar(128) [not null]
   edit_sequence bigint [not null, default: 0]
   created_at timestamptz [not null, default: `now()`]
@@ -1249,10 +1252,10 @@ Table bot.strategies {
     (semantic_hash)
   }
 
-  Note: '전략은 정확히 하나의 파티션이 소유하는 완결 블록 그룹 집합체이며 재사용 라이브러리 항목이나 버전 엔티티가 아니다. BASIC/PRO 모드는 봇에서 상속. 예산 할당 경계는 파티션뿐이고 런타임 행의 strategy_id는 귀속 기록용. name, description, position_x, position_y는 semantic_hash·configuration_hash에서 제외되는 편집 필드, 좌표 겹침 허용, id는 결정적 조회 타이브레이커. edit_sequence는 0에서 시작해 편집 필드 갱신 성공마다 정확히 1 증가, updated_at은 그 커밋 시각. 블록·포트·엣지·매개변수·의미 그룹·RISK_POLICY 블록은 하나의 불변 의미 JSONB 집합체. 블록별 좌표·크기·뷰포트·줌·선택·접힘 등 UI 레이아웃 상태는 저장하지 않으며 클라이언트가 의미 그래프에서 결정적으로 배치를 유도. configuration_hash는 블록 카탈로그 버전과 semantic_hash만 바인딩. (partition_id, id)는 복합 런타임 FK용 대체 소유 키. 복사/붙여넣기는 원본 참조 없는 독립 새 행 생성.'
+  Note: '전략은 정확히 하나의 파티션이 소유하는 완결 블록 그룹 집합체이며 재사용 라이브러리 항목이나 버전 엔티티가 아니다. BASIC/PRO 모드는 봇에서 상속. 예산 할당 경계는 파티션뿐이고 런타임 행의 strategy_id는 귀속 기록용. name, description, position_x, position_y, layout_document와 layout_schema_version은 semantic_hash·configuration_hash에서 제외되는 편집 필드, 좌표 겹침 허용, id는 결정적 조회 타이브레이커. edit_sequence는 0에서 시작해 이름·설명·좌표·레이아웃 같은 편집 필드 갱신 성공마다 정확히 1 증가, updated_at은 그 커밋 시각. 블록·포트·안정 키를 가진 엣지·매개변수·의미 그룹·RISK_POLICY 블록은 semantic_document 하나의 불변 실행 의미 JSONB 집합체다. layout_document는 같은 안정 요소·엣지 키를 참조하는 UI 전용 JSONB이며 layout_schema_version으로 해석 규칙을 선택하고 layout_hash로 무결성을 확인한다. 레이아웃 변경은 실행 계획, 의미 검증, 백테스트 또는 configuration_hash를 변경하지 않는다. configuration_hash는 블록 카탈로그 버전과 semantic_hash만 바인딩. (partition_id, id)는 복합 런타임 FK용 대체 소유 키. 복사/붙여넣기는 원본 참조 없는 독립 새 행 생성.'
 
-  Records (id, partition_id, name, description, block_catalog_version_id, execution_plan_id, position_x, position_y, semantic_document, semantic_hash, configuration_hash, edit_sequence, created_at, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'Fictional review sample', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, '{"blocks":[{"key":"data-1","type":"PRICE_DATA","params":{"resolution":"1m"}},{"key":"ind-1","type":"RSI","params":{"period":14}},{"key":"cond-1","type":"THRESHOLD","params":{"operator":"LT","value":30}},{"key":"order-1","type":"MARKET_BUY","params":{"budgetBps":2500}},{"key":"risk-1","type":"RISK_POLICY","params":{"maxPositionBps":5000}}],"edges":[{"from":"data-1.series","to":"ind-1.input"},{"from":"ind-1.value","to":"cond-1.input"},{"from":"cond-1.true","to":"order-1.trigger"}]}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  Records (id, partition_id, name, description, block_catalog_version_id, execution_plan_id, position_x, position_y, semantic_document, layout_document, layout_schema_version, semantic_hash, layout_hash, configuration_hash, edit_sequence, created_at, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'Fictional review sample', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 100000.00000000, '{"blocks":[{"key":"data-1","type":"PRICE_DATA","params":{"resolution":"1m"}},{"key":"ind-1","type":"RSI","params":{"period":14}},{"key":"cond-1","type":"THRESHOLD","params":{"operator":"LT","value":30}},{"key":"order-1","type":"MARKET_BUY","params":{"budgetBps":2500}},{"key":"risk-1","type":"RISK_POLICY","params":{"maxPositionBps":5000}}],"edges":[{"key":"edge-1","from":"data-1.series","to":"ind-1.input"},{"key":"edge-2","from":"ind-1.value","to":"cond-1.input"},{"key":"edge-3","from":"cond-1.true","to":"order-1.trigger"}]}', '{"schemaVersion":"1.0.0","elements":{"data-1":{"x":80,"y":120,"width":180,"height":96},"ind-1":{"x":340,"y":120,"width":180,"height":96},"cond-1":{"x":600,"y":120,"width":180,"height":120},"order-1":{"x":860,"y":80,"width":180,"height":96},"risk-1":{"x":860,"y":260,"width":180,"height":96}},"edgeRoutes":{"edge-3":{"waypoints":[{"x":820,"y":180}]}},"groups":{},"viewport":{"x":0,"y":0,"zoom":1.0},"selectedElementKeys":[]}', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 

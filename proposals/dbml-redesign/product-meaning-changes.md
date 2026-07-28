@@ -84,8 +84,10 @@ DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교�
 - 같은 파티션 또는 다른 파티션의 여러 전략이 같은 종목을 선택할 수 있다.
 - `bot.strategy_instruments`는 완성된 `semantic_document`에서 추출한 불변 종목 의존성 집합이다. 종목의 매매·참조 용도는 타입이 지정된 블록과 연결이 이미 소유하므로 관계 테이블에 역할 문자열을 중복 저장하지 않는다.
 - 파티션과 전략은 `display_order`가 아니라 각각의 `position_x`, `position_y`로 배치한다. 좌표 중복은 허용하고 `id`는 동일 좌표 조회의 결정적 타이브레이커로만 사용한다.
-- 개별 전략 안의 블록 좌표·크기·viewport·zoom·접힘·선택 상태는 저장하지 않는다. PostgreSQL에는 블록 ID, 포트, 연결, 매개변수, 의미 그룹과 `RISK_POLICY`로 구성된 의미 그래프만 저장하고, 클라이언트가 이 그래프에서 결정론적으로 화면 배치를 계산한다.
-- 플랫폼 전략 템플릿도 UI 전용 레이아웃을 저장하지 않고 의미 골격만 제공한다. 따라서 UI 렌더러와 자동 배치 알고리즘을 바꿔도 저장된 전략이나 템플릿을 마이그레이션하지 않는다.
+- 개별 전략 안의 요소 좌표·크기, 그룹 배치·접힘, 선택 상태, edge routing hint, viewport와 zoom은 `layout_document`에 저장한다. 요소·엣지 키는 실행 의미를 가진 `semantic_document`의 안정 식별자를 참조한다.
+- `layout_document`와 `layout_hash`는 UI 화면 복원만 담당하며 의미 해시, 실행 구성 해시, 실행 계획, 검증과 백테스트에 영향을 주지 않는다. 자동 배치는 새 흐름이나 레이아웃이 없는 과거 데이터의 초기값 생성·복구에만 사용한다.
+- 편집 중 `bot_workspaces.workspace_document`도 각 전략의 의미 문서와 레이아웃 문서를 분리해 포함하며, 완성 시 안정 요소·엣지 키 참조와 `layout_schema_version`을 검증한다.
+- 플랫폼 전략 템플릿은 의미 골격만 제공할 수 있으며, 템플릿으로 흐름을 만들 때 생성된 초기 레이아웃을 새 흐름의 `layout_document`에 저장한다.
 
 ### 3. 예산 계층
 

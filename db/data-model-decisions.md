@@ -260,7 +260,7 @@ Idea2Strategy는 사용자가 시각적으로 만든 결정론적 전략을 서�
 - 사용자 선택: 질문 5의 `A`
 - 결정:
   - 블록, 포트, 연결, 타입 지정 매개변수와 실행 의미가 있는 그룹은 전략 단위 `semantic_document JSONB`에 하나의 aggregate로 저장한다.
-  - 전략 내부 블록의 화면 좌표, 크기, viewport, zoom, 접힘과 선택 상태처럼 실행에 영향을 주지 않는 UI 정보는 저장하지 않는다. 클라이언트가 의미 그래프에서 결정론적으로 배치를 계산한다. 이 항목은 DMD-030의 사용자 보정으로 기존 레이아웃 문서 저장 결정을 대체한다.
+  - 전략 내부 요소의 화면 좌표, 크기, viewport, zoom, 그룹 배치·접힘, 선택 상태와 edge routing hint는 별도 `layout_document JSONB`에 저장한다. 실행 의미를 가진 `semantic_document`와 분리하며, 자세한 규칙은 DMD-030을 따른다.
   - 봇 캔버스에서 파티션과 전략 카드의 배치는 관계형 컬럼 `position_x`, `position_y`로 저장하며 `display_order`를 사용하지 않는다.
   - 블록마다 관계형 행을 만들거나 NoSQL에 별도 변경 가능한 전략 정본을 두지 않는다.
   - 저장할 때 카탈로그 버전에 맞는 JSON Schema, 타입, DAG, 필수 최종 주문 처리 경로와 제품 정책을 검증한다.
@@ -598,21 +598,24 @@ Idea2Strategy는 사용자가 시각적으로 만든 결정론적 전략을 서�
   - 활성 목록은 `deleted_at IS NULL AND archived_at IS NULL` 조건을 사용하고 운영 마이그레이션에서 이 조건의 부분 인덱스를 생성한다.
   - 삭제 요청·중단 완료·논리 삭제 확정은 감사 또는 공식 사건으로 남기며 재시도에도 같은 결과가 나도록 멱등 처리한다.
 
-### DMD-030 — 블록 UI 레이아웃 비영속화와 메타데이터 명칭 통일
+### DMD-030 — 흐름 UI 레이아웃 영속화와 실행 의미 분리
 
 - 상태: 확정된 DBML 재설계 입력, 제품 정본 조정 전 제안
-- 사용자 선택: 2026-07-27 직접 보정
+- 사용자 선택: 2026-07-28 직접 보정. 2026-07-27의 레이아웃 비영속화 결정을 대체한다.
 - 결정:
-  - 전략 블록의 좌표, 크기, viewport, zoom, 선택과 접힘 같은 UI 전용 상태는 PostgreSQL, NoSQL 또는 객체 저장소의 전략 정본에 저장하지 않는다.
-  - 전략 정본은 안정적인 블록 식별자, 타입 지정 포트, 연결, 매개변수, 의미 그룹과 `RISK_POLICY`를 포함하는 의미 그래프만 저장한다.
-  - 클라이언트는 의미 그래프에 대해 버전 독립적인 결정론적 자동 배치를 수행한다. UI 렌더러나 배치 알고리즘 변경은 전략 데이터 마이그레이션이나 실행 구성 해시 변경을 요구하지 않는다.
-  - 플랫폼 템플릿도 의미 골격만 저장하며 UI 전용 레이아웃 문서를 배포하지 않는다.
+  - 흐름 요소의 좌표·크기, 그룹 배치·접힘, 선택 상태, edge routing hint, viewport와 zoom을 PostgreSQL의 `layout_document JSONB`에 저장해 사용자가 편집한 그래프 화면을 그대로 복원한다.
+  - `layout_document`의 요소·엣지 키는 `semantic_document`의 안정 식별자를 참조해야 하며, 존재하지 않는 키·중복 키·유효하지 않은 수치와 지원하지 않는 레이아웃 스키마는 저장 검증에서 거절한다.
+  - 편집 중 `bot_workspaces.workspace_document`도 각 전략의 `semanticDocument`와 `layoutDocument`를 분리해 포함한다. 완성된 흐름에는 모든 의미 요소의 유효한 레이아웃이 있어야 하며 dangling layout 참조는 허용하지 않는다.
+  - 실행 의미는 안정적인 요소 식별자, 타입 지정 포트, 연결, 매개변수, 의미 그룹과 `RISK_POLICY`를 포함하는 `semantic_document`만 소유한다.
+  - 레이아웃은 별도 `layout_hash`로 무결성을 확인하고 `semantic_hash`, `configuration_hash`, 실행 계획, 의미 검증과 백테스트 결과에는 영향을 주지 않는다.
+  - 자동 배치는 새 흐름이나 레이아웃이 없는 과거 데이터를 위한 초기값 생성·복구 수단으로만 사용하며, 저장된 사용자 레이아웃을 임의로 덮어쓰지 않는다.
+  - 플랫폼 템플릿은 의미 골격만 제공할 수 있으며, 인스턴스 생성 시 자동 배치한 레이아웃을 새 흐름의 `layout_document`에 저장한다.
   - 봇 캔버스에서 파티션과 전략 카드의 `position_x`, `position_y`는 사용자가 수정 가능하다고 별도로 확정한 aggregate 메타데이터이므로 유지한다.
   - 봇, 파티션과 전략의 수정 가능한 필드 동시성 컬럼은 모두 `edit_sequence`, 갱신 시각은 `updated_at`으로 통일한다.
 - DBML 반영:
-  - `bot.strategies`와 `strategy.platform_template_versions`에서 `layout_document`를 제거하고 전략에서 `layout_hash`도 제거한다.
+  - `bot.strategies`에 `layout_document`, `layout_schema_version`과 `layout_hash`를 둔다.
   - `bot.strategies.configuration_hash`는 `block_catalog_version_id`와 `semantic_hash`의 규정된 정규 표현만 결합한다.
-  - `bot.strategies`의 수정 동시성 컬럼과 일반 갱신 시각을 각각 `edit_sequence`, `updated_at`으로 통일한다.
+  - 레이아웃 갱신도 `bot.strategies.edit_sequence`를 증가시키고 `updated_at`을 변경한다.
 
 ### DMD-031 — 명시적 전략 종목만 지원하고 Universe 선제 모델 제거
 
