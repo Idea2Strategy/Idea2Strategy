@@ -21,16 +21,18 @@ Trading 운영 제약: `proposals/dbml-redesign/trading-production-readiness.md`
 
 ## Trading 정합성 재구성 제안
 
-- 주문 의도는 Flow 평가뿐 아니라 봇 중단 청산·숏 강제 바이인·기업행사 시스템 조치도 같은 공식 경로에서 생성하되 `origin_type`으로 구분한다.
-- 하나의 물리 주문에 서로 다른 `position_effect`가 섞일 수 있으므로 `orders.position_effect`를 제거하고 원래 의미는 `order_intents`와 배분 관계에 보존한다.
-- 현금 전용 `capital_reservations`를 `resource_reservations`로 대체해 Buying Power, Flow 보유수량, 숏 차입수량, 숏 담보와 격리 매도대금을 함께 원자적으로 예약한다.
-- 예약은 Intent 소유로 유지하고 주문과의 N:M 배분 및 모든 소비·해제 사건을 별도 추가 전용 테이블에 기록한다.
-- OCO·브래킷·멀티레그 주문의 멤버 역할·활성화·상호 취소 조건과 그룹 사건을 명시한다.
-- Fill은 정확한 주문-의도 배분에 귀속하고, 공식 5 bps 슬리피지·20 bps 수수료 정책 버전과 계산 근거를 고정한다.
-- Ledger의 nullable 복합 유일성 대신 null 없는 `account_key`를 사용하고 모든 경제 사건의 source를 직접 식별한다. Entry의 중복 Partition/Flow 컬럼은 제거한다.
-- Position lot은 정확한 Fill allocation에서 생성되는 불변 원본으로 바꾸고, 현재 잔량은 별도 Projection, 변화는 추가 전용 movement로 관리한다.
-- Pro 숏의 차입·Rule 201·담보·격리 매도대금·차입비용·차입 회수와 강제 바이인 계보를 별도 테이블로 보존한다.
-- 합계 보존, 복식 원장 균형, FIFO, 예약 초과 방지는 PostgreSQL 지연 제약 트리거와 동일 트랜잭션 경계로 강제한다.
+- 2026-07-28 사용자 보정에 따라 Bot이 아니라 Partition을 주문 통합·상계·예산·예약·보유수량·원장·lot의 최상위 거래 격리 경계로 바꾼다.
+- `order_intent_batches`, Order, Allocation, Fill과 모든 하류 체결 경로에 `(bot_id, partition_id)`를 전달하고 복합 FK로 다른 Partition 연결을 차단한다.
+- 같은 Partition 내부 Flow Intent만 하나의 Order로 통합하며 `order_intent_allocations`가 Flow 귀속의 유일 주문 단계 관계다.
+- 부분 체결을 폐지한다. Order는 정상 Fill 없이 REJECTED/CANCELLED/EXPIRED 또는 정확히 한 정상 Fill로 전량 FILLED만 가능하다.
+- `fill_allocations`를 제거하고 Ledger Entry, Position Lot, Lot Movement는 `order_intent_allocation_id`를 통해 Flow 귀속을 유지한다.
+- `resource_reservations`는 ACTIVE에서 종료 상태로 한 번만 전이한다. Fill 시 실제 사용액을 소비하고 Buying Power 버퍼와 차액을 동시에 해제해 최종 `consumed + released = reserved`를 강제한다.
+- 매수·매도 주문 Element의 주문 규모는 퍼센트만 허용한다. 매수는 실행 시점 Partition 가용 현금, 매도는 해당 Flow의 예약되지 않은 매도 가능 수량을 기준으로 하며 마지막 정상 전량 Fill부터 설정된 최소 재활성화 기간이 지나야 같은 Element가 새 Intent를 만들 수 있다.
+- Order 생성 전 축소를 원칙으로 하고, 이미 OPEN인 지정가·스탑 주문은 원본 취소·예약 전액 해제 후 더 작은 replacement Order와 새 예약을 만든다.
+- 정상 Fill 정정은 두 번째 Fill이 아니라 `fill_adjustments` CORRECTION/REVERSAL과 원장·lot 조정 사건으로 기록한다.
+- Bot 전체 순포지션 읽기 모델을 `partition_position_projections`로 바꿔 다른 Partition 보유량을 주문 가능 수량으로 상계하지 않는다.
+- 고정 5 bps 슬리피지, 20 bps 수수료, Pro 숏의 차입·담보·강제 바이인 구조는 유지하되 모두 Partition 격리 경계를 따른다.
+- 정확한 합계, 상태 전이, 원장 균형, FIFO, Fill 존재 조건은 PostgreSQL 지연 제약 트리거와 동일 트랜잭션 경계로 강제한다.
 
 ## 2026-07-28 Strategy 출시와 Bot 독립 스냅샷 제안
 
@@ -60,20 +62,20 @@ Trading 운영 제약: `proposals/dbml-redesign/trading-production-readiness.md`
 사용자 확정 결정(2026-07-27 A/B 질문):
 
 1. **트리거 이벤트 정본 = 봇별 `bot_events`만 (A).** 전역 트리거 테이블은 두지 않는다. Trigger Router가 라우팅된 봇마다 결정적 `idempotency_key`(전역 이벤트 식별 내장, 예: `PRICE:AAPL:<bar-close>` / `SCHEDULE:ONE_MINUTE:<minute>`)로 bot_events를 append하며, `(bot_id, idempotency_key)` 유니크가 at-least-once 재전달을 흡수한다.
-2. **평가 단위 = 전략×트리거 (B).** `bot.evaluation_runs`가 전략 단위 행이 되고 기존 `evaluation_strategy_results`는 흡수·삭제된다. 판단 기록의 제품 단위도 전략별 평가다. 같은 봇의 전략 평가는 병렬 실행 가능(런타임 상태가 전략 소유라 서로소)하고, 봇 수준 예산·충돌 해소·이벤트 적용은 `order_intent_batches` `(bot_id, source_event_id)` 경계에서 bot_id advisory lock으로 직렬화한다.
+2. **평가 단위 = Flow×트리거 (B).** `bot.evaluation_runs`가 Flow 단위 행이고 판단 기록의 제품 단위도 Flow별 평가다. 같은 봇의 Flow 평가는 병렬 실행 가능하지만 예산·충돌 해소·상계 적용은 파티션별 `order_intent_batches`와 `(bot_id, partition_id)` advisory lock 경계에서 직렬화한다.
 3. **지연·차단 해소 후 재개 = 최신만 평가 (A).** 밀린 트리거는 `SKIPPED`(`CATCHUP_SUPERSEDED`)로 기록만 남기고 과거 가격으로는 절대 평가하지 않는다. `operations.work_status`에 `SKIPPED`를 추가했다.
 
-서버가 선택한 동시성 조합(제품 의미 불변): Queue partition key = `bot_id` + 전략당 활성(PENDING/RUNNING) 평가 1개 부분 유니크 + 적용 시점 bot_id advisory lock. Worker 승계는 `evaluation_runs.lease_expires_at` 만료로 판정한다.
+서버가 선택한 동시성 조합(제품 의미 불변): Queue partition key = `(bot_id, partition_id)` + Flow당 활성(PENDING/RUNNING) 평가 1개 부분 유니크 + 적용 시점 `(bot_id, partition_id)` advisory lock. Worker 승계는 `evaluation_runs.lease_expires_at` 만료로 판정한다.
 
 헬스 모델 분리:
 
 - **인프라·파이프라인(전역)**: `market_data.stream_watermarks`(신규, 재생성 가능 Projection) + `quality_incidents` + operations 관측이 소유한다. 평가 직전 실행 게이트가 이를 읽으며, 전역 장애가 bot 행을 일괄 갱신하는 일은 없다.
-- **봇별 실행 차단**: `bot.bots.health_status` enum(HEALTHY/ACTION_REQUIRED/DATA_DEGRADED/SETTLEMENT_FAILED)을 제거하고 nullable Projection `execution_blocked_at` / `execution_block_reason_code` / `execution_block_event_id`로 대체한다. 정상 = `execution_blocked_at IS NULL`. 차단·해제 공식 이력은 append-only bot_events(`BOT_EXECUTION_BLOCKED`, `BOT_EXECUTION_UNBLOCKED`, `SETTLEMENT_FAILED`, `LEDGER_INVARIANT_VIOLATED`, `STATE_REBUILD_COMPLETED`)로 남는다. 차단 중에도 기존 주문 취소·체결 반영·예약 해제·원장·정산·STOPPING 처리는 계속된다.
+- **봇별 실행 차단**: `bot.bots.health_status` enum(HEALTHY/ACTION_REQUIRED/DATA_DEGRADED/SETTLEMENT_FAILED)을 제거하고 nullable Projection `execution_blocked_at` / `execution_block_reason_code` / `execution_block_event_id`로 대체한다. 정상 = `execution_blocked_at IS NULL`. 차단·해제 공식 이력은 append-only bot_events(`BOT_EXECUTION_BLOCKED`, `BOT_EXECUTION_UNBLOCKED`, `SETTLEMENT_FAILED`, `LEDGER_INVARIANT_VIOLATED`, `STATE_REBUILD_COMPLETED`)로 남는다. 차단 중에도 기존 미체결 주문을 취소하지 않고 체결·만료·거절 등 이후 결과와 예약 해제·원장·정산·STOPPING 처리를 계속한다.
 - `lifecycle_status`의 의미를 재정의한다: RUNNING은 "새 트리거 발생 시 평가 대상이 될 수 있음"이지 프로세스 실행이 아니다. heartbeat/process_id/worker_id/last_alive_at 류 컬럼은 금지한다.
 
 Trigger Dependency는 두 번째 정본이 아니라 완성 시 `semantic_document`에서 서버가 검증·추출한 관계형 Projection이다. 종목·피처 의존성은 기존 `bot.strategy_instruments`와 `bot.strategy_feature_requirements`를 재사용하고, 비종목(시간·세션) 트리거만 신규 `bot.strategy_time_triggers`(MARKET_OPEN/MARKET_CLOSE/SCHEDULE + schedule_key)가 담는다. 시장 이벤트마다 전체 봇·전략을 조회하지 않는다.
 
-DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교체, evaluation_runs 재구조화(전략 소유 복합 FK, queued_at/attempt_count/lease_expires_at, 스냅샷 컬럼 nullable), evaluation_strategy_results 삭제, order_intent_batches를 `(bot_id, source_event_id)` 유니크의 봇 수준 충돌 경계로 변경, order_intents에 evaluation_run_id 추가, strategy_time_triggers·stream_watermarks 신설.
+DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교체, evaluation_runs 재구조화(Flow 소유 복합 FK, queued_at/attempt_count/lease_expires_at, 스냅샷 컬럼 nullable), evaluation_strategy_results 삭제, order_intent_batches를 `(bot_id, partition_id, source_event_id)` 유니크의 파티션 충돌 경계로 변경, order_intents에 evaluation_run_id 추가, flow_time_triggers·stream_watermarks 신설.
 
 ## 2026-07-27 identity 재구성 제안
 
@@ -153,7 +155,7 @@ DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교�
 - 별도 Buying Power 완충액은 미체결 자금 예약에만 사용하고 체결가격, 손익과 성과에는 반영하지 않는다.
 - 완충액은 플랫폼이 관리하는 버전 고정 `buffer_bps`를 기준 주문금액에 적용해 계산한다.
 - 체결 시 최신 유효 가격에 고정 슬리피지와 수수료를 적용해 다시 검사한다.
-- 예약이 남으면 차액을 해제하고 부족하면 체결 전에 수량을 축소하거나 주문을 거절한다.
+- 전량 Fill에서는 실제 사용액을 소비하고 완충액·남은 차액을 같은 최종 사건에서 해제한다. 부족하면 최초 Order 생성 전에 수량을 축소·거절하고, 이미 OPEN인 주문은 취소 후 더 작은 replacement Order로 교체한다.
 
 추가 근거가 필요한 항목:
 
@@ -165,9 +167,10 @@ DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교�
 
 - 같은 평가 주기의 전략들은 동일한 입력 스냅샷을 사용한다.
 - 전략별 원래 주문 의도와 판단 근거는 보존한다.
-- 봇·종목 단위로 같은 방향 의도는 합산하고 반대 방향은 결정론적으로 상계한다.
-- 상계 후 실제 체결분만 승인된 의도에 따라 전략·파티션으로 귀속한다.
-- 상계는 예산, 현금, 포지션 lot 또는 손익을 형제 범위로 이전하지 않는다.
+- `(bot_id, partition_id, 종목, 주문계약)` 단위로 같은 방향 의도는 합산하고 반대 방향은 결정론적으로 상계한다.
+- 서로 다른 Partition 또는 Bot의 Intent는 같은 사용자 소유라도 통합하지 않는다.
+- 상계 후 하나의 정상 전량 Fill은 Order Allocation에 따라 같은 Partition의 Flow로 귀속한다.
+- 상계는 예산, 현금, position lot 또는 손익을 형제 Partition으로 이전하지 않는다.
 
 ### 6. 완성된 구성으로 봇 생성
 
@@ -176,7 +179,7 @@ DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교�
 - 봇의 실행 수명주기와 운영 건강 상태는 별도로 저장한다. 실행 상태 변화와 데이터 지연·조치 필요·정산 실패가 서로를 덮어쓰지 않는다.
 - 봇, 실행 설정, 파티션, 전략과 관계형 의존성은 한 트랜잭션에서 새 식별자로 삽입한다.
 - 봇은 완성도와 실행 가능성 검증을 모두 통과한 생성 트랜잭션이 커밋되면 즉시 `RUNNING`으로 시작한다. 수명주기는 `RUNNING -> STOPPING -> STOPPED`만 사용하며 `WAITING`, `PAUSED`, `DRAFT`, `LOCKING`, `ENDED` 상태는 두지 않는다. `STOPPED`는 영구 종료다.
-- 데이터 지연·조치 필요·정산 실패가 발생해도 수명주기는 `RUNNING`으로 유지하고 `health_status`만 변경한다. 건강 상태가 `HEALTHY`가 아닌 동안 신규 전략 평가와 신규 주문 생성을 차단하되 기존 주문의 취소·체결과 필요한 정산은 계속 처리한다. 원인이 해소되어 정상 상태가 확인되면 자동으로 신규 평가를 재개한다.
+- 데이터 지연·조치 필요·정산 실패가 발생해도 수명주기는 `RUNNING`으로 유지하고 실행 차단 Projection만 변경한다. 차단 중에는 신규 전략 평가와 신규 주문 생성을 막되 기존 미체결 주문은 취소하지 않고 그 주문의 체결·만료·거절 등 이후 결과와 필요한 정산을 계속 처리한다. 원인이 해소되어 정상 상태가 확인되면 자동으로 신규 평가를 재개한다.
 - 종료된 봇을 일반 목록에서 되돌릴 수 있게 숨기는 것은 실행 상태가 아니라 `archived_at`으로 관리한다.
 - 사용자의 삭제는 `deleted_at`을 기록하는 논리 삭제로 처리한다. 보관 후 삭제와 즉시 삭제를 모두 허용하지만, 실행 중 삭제 요청은 먼저 멱등적인 중단·정산 절차를 거쳐 `STOPPED`가 된 뒤에만 삭제를 확정한다. 삭제된 봇은 사용자가 복구할 수 없으며 실제 물리 제거와 공식 주문·체결·원장·사건·증거의 보존은 별도 보존·법적 정책으로 관리한다.
 - 생성된 실행 의미는 처음부터 불변이며 별도의 `locked_at`이나 잠금 사건을 두지 않는다. 다만 봇 이름과 알림 설정, 파티션·전략의 `description`, `position_x`, `position_y`는 실행 의미를 바꾸지 않는 표시·운영 정보로서 수정할 수 있다.
