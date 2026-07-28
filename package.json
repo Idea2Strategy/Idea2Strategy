@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dbml:validate": "node scripts/validate-dbml.mjs db/schema.dbml",
+    "dbml:validate:trading-proposal": "node scripts/validate-trading-dbml.mjs proposals/dbml-redesign/schema.draft.dbml",
     "dbdiagram": "dbdiagram"
   },
   "devDependencies": {
