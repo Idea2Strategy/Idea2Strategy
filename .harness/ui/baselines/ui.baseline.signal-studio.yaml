@@ -1,0 +1,15 @@
+schema_version: 1
+id: ui.baseline.signal-studio
+workspace_id: workspace.ui
+workspace_commit: 6669f5833613fba225fc4dd455ebef2e8b99c72b
+workspace_remote: https://github.com/Idea2Strategy/Idea2Strategy-ui.git
+source_ids: []
+source_fingerprints: {}
+mapped_refs:
+    - ui.backtest.results
+    - ui.bot.operations
+    - ui.room.lifecycle
+    - ui.strategy.authoring
+consumers:
+    - workspace.root
+fingerprint: sha256:bc5a83e994c7fb6973552fddd929ca6f97fdefeffc44723328b031309e98b48b
