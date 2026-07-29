@@ -2,34 +2,64 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.clone-readiness",
-      "work_id": "work.clone-readiness",
-      "definition_fingerprint": "sha256:007e725aeded65f342f5cc4e3826f3f197fc7ea6f9b691ed80c83453323f1e7a",
-      "status": "done",
-      "owner": "clone-readiness-bootstrap",
-      "branch": "fix/clone-readiness",
+      "id": "claim.dbml-business-alignment",
+      "work_id": "work.dbml-business-alignment",
+      "definition_fingerprint": "sha256:d2a3190aa17f3426561354779e4e98d1edd0e7455f6fbff7f64dbc85ba76e8ad",
+      "status": "in_progress",
+      "owner": "dbml-business-alignment",
+      "branch": "feature/dbml-business-alignment",
       "repository": "repository.github.root",
       "paths": [
-        ".harness/work/definitions/work.clone-readiness.yaml",
-        "README.md",
-        "docs/superpowers/plans/2026-07-22-clone-readiness.md",
-        "docs/superpowers/specs/2026-07-22-clone-readiness-design.md",
-        "scripts/initialize-local-harness.ps1",
-        "scripts/test-local-harness.ps1"
+        "package.json",
+        "proposals/dbml-redesign",
+        "scripts/validate-competition-dbml.mjs",
+        "scripts/validate-dbml.mjs",
+        "scripts/validate-trading-dbml.mjs"
       ],
-      "policy_ids": [],
-      "scenario_ids": [],
+      "policy_ids": [
+        "policy.execution.server-only",
+        "policy.privacy.strategy-private",
+        "policy.user.no-direct-orders"
+      ],
+      "scenario_ids": [
+        "scenario.bot.evaluate",
+        "scenario.room.finish",
+        "scenario.strategy.release"
+      ],
       "contract_ids": [],
-      "db_entities": [],
-      "migration_slots": [],
-      "ui_flows": [],
+      "db_entities": [
+        "backtest.*",
+        "bot.bots",
+        "competition.*",
+        "performance.*",
+        "trading.*"
+      ],
+      "migration_slots": [
+        "postgresql.logical-dbml-redesign"
+      ],
+      "ui_flows": [
+        "ui.backtest.results",
+        "ui.bot.operations",
+        "ui.room.lifecycle"
+      ],
       "dependency_majors": [],
       "stable_ids": [
-        "decision.dependencies.evidence-based"
+        "capability.backtest.automatic",
+        "capability.bot.server-execution",
+        "capability.room.bot-comparison",
+        "policy.execution.server-only",
+        "policy.privacy.strategy-private",
+        "policy.user.no-direct-orders",
+        "quality.auditability",
+        "quality.failure-safety",
+        "quality.reproducibility",
+        "scenario.bot.evaluate",
+        "scenario.room.finish",
+        "scenario.strategy.release"
       ],
       "root_pointer": false,
-      "starts_at": "2026-07-22T05:10:40.2643492Z",
-      "expires_at": "2026-07-23T05:10:40.1206962Z"
+      "starts_at": "2026-07-29T04:18:21.2847066Z",
+      "expires_at": "2026-07-30T04:18:21.1645859Z"
     }
   ]
 }
