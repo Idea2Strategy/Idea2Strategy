@@ -18,10 +18,10 @@ const requiredTables = [
   'order_intent_batches',
   'order_intents',
   'orders',
-  'order_intent_allocations',
+  'order_components',
   'resource_reservations',
-  'reservation_lot_allocations',
-  'order_reservation_allocations',
+  'position_lot_reservations',
+  'order_component_reservations',
   'reservation_events',
   'order_events',
   'order_state_projections',
@@ -49,6 +49,12 @@ for (const tableName of requiredTables) {
 const forbiddenPatterns = [
   /Table trading\.capital_reservations\s*\{/,
   /Table trading\.fill_allocations\s*\{/,
+  /Table trading\.order_intent_allocations\s*\{/,
+  /Table trading\.reservation_lot_allocations\s*\{/,
+  /Table trading\.order_reservation_allocations\s*\{/,
+  /\border_intent_allocation_id\b/,
+  /\bopening_order_intent_allocation_id\b/,
+  /\bsource_order_intent_allocation_id\b/,
   /\bfill_allocation_id\b/,
   /\bsource_fill_allocation_id\b/,
   /\bopening_fill_allocation_id\b/,
@@ -80,7 +86,15 @@ const requireFields = (tableName, fieldNames) => {
 
 requireFields('order_intent_batches', ['bot_id', 'partition_id', 'source_event_id']);
 requireFields('orders', ['bot_id', 'partition_id', 'replaces_order_id', 'requested_quantity']);
-requireFields('order_intent_allocations', ['bot_id', 'partition_id', 'order_id', 'intent_id']);
+requireFields('order_components', [
+  'bot_id',
+  'partition_id',
+  'order_id',
+  'intent_id',
+  'component_quantity',
+  'component_sequence',
+  'composition_rules_version',
+]);
 requireFields('resource_reservations', [
   'bot_id',
   'partition_id',
@@ -93,15 +107,29 @@ requireFields('resource_reservations', [
   'consumed_quantity',
   'released_quantity',
 ]);
+requireFields('position_lot_reservations', [
+  'bot_id',
+  'partition_id',
+  'flow_id',
+  'reservation_id',
+  'position_lot_id',
+  'reserved_quantity',
+]);
+requireFields('order_component_reservations', [
+  'bot_id',
+  'partition_id',
+  'reservation_id',
+  'order_component_id',
+]);
 requireFields('reservation_events', ['bot_id', 'partition_id', 'source_fill_id', 'event_key']);
 requireFields('order_events', ['bot_id', 'partition_id', 'order_id', 'order_sequence']);
 requireFields('order_state_projections', ['bot_id', 'partition_id', 'order_id']);
 requireFields('fills', ['bot_id', 'partition_id', 'order_id', 'provider_fill_key']);
 requireFields('fill_adjustments', ['bot_id', 'partition_id', 'fill_id', 'adjustment_type']);
 requireFields('ledger_transactions', ['bot_id', 'partition_id', 'source_type', 'source_id']);
-requireFields('ledger_entries', ['bot_id', 'partition_id', 'order_intent_allocation_id']);
-requireFields('position_lots', ['bot_id', 'partition_id', 'flow_id', 'opening_order_intent_allocation_id']);
-requireFields('lot_movements', ['bot_id', 'partition_id', 'source_order_intent_allocation_id']);
+requireFields('ledger_entries', ['bot_id', 'partition_id', 'order_component_id']);
+requireFields('position_lots', ['bot_id', 'partition_id', 'flow_id', 'opening_order_component_id']);
+requireFields('lot_movements', ['bot_id', 'partition_id', 'source_order_component_id']);
 requireFields('short_trade_checks', [
   'intent_id',
   'short_risk_policy_id',
@@ -136,6 +164,8 @@ const requiredFragments = [
   '"orderSizePercent":40',
   '"minReactivationIntervalSeconds":1800',
   'LAST_SUCCESSFUL_FILL_AT',
+  'CANCELLED는 사용자·봇 중지·운영자 조작으로 만들 수 없고',
+  '기존 미체결 주문을 취소하지 않은 채',
   "slippage_rate_bps = 5",
   "fee_rate_bps = 20",
   "status = 'ACTIVE' OR consumed_amount + released_amount = reserved_amount",
@@ -143,11 +173,16 @@ const requiredFragments = [
   "Ref: trading.order_intent_batches.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)",
   "Ref: trading.order_intents.(bot_id, partition_id, batch_id) > trading.order_intent_batches.(bot_id, partition_id, id)",
   "Ref: trading.orders.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)",
-  "Ref: trading.order_intent_allocations.(bot_id, partition_id, order_id) > trading.orders.(bot_id, partition_id, id)",
-  "Ref: trading.order_intent_allocations.(bot_id, partition_id, intent_id) > trading.order_intents.(bot_id, partition_id, id)",
+  "Ref: trading.order_components.(bot_id, partition_id, order_id) > trading.orders.(bot_id, partition_id, id)",
+  "Ref: trading.order_components.(bot_id, partition_id, intent_id) > trading.order_intents.(bot_id, partition_id, id)",
+  "Ref: trading.position_lot_reservations.(bot_id, partition_id, flow_id, reservation_id) > trading.resource_reservations.(bot_id, partition_id, flow_id, id)",
+  "Ref: trading.position_lot_reservations.(bot_id, partition_id, flow_id, position_lot_id) > trading.position_lots.(bot_id, partition_id, flow_id, id)",
+  "Ref: trading.order_component_reservations.(bot_id, partition_id, reservation_id) > trading.resource_reservations.(bot_id, partition_id, id)",
+  "Ref: trading.order_component_reservations.(bot_id, partition_id, order_component_id) > trading.order_components.(bot_id, partition_id, id)",
   "Ref: trading.fills.(bot_id, partition_id, order_id) > trading.orders.(bot_id, partition_id, id)",
-  "Ref: trading.ledger_entries.(bot_id, partition_id, order_intent_allocation_id) > trading.order_intent_allocations.(bot_id, partition_id, id)",
-  "Ref: trading.position_lots.(bot_id, partition_id, opening_order_intent_allocation_id) > trading.order_intent_allocations.(bot_id, partition_id, id)",
+  "Ref: trading.ledger_entries.(bot_id, partition_id, order_component_id) > trading.order_components.(bot_id, partition_id, id)",
+  "Ref: trading.position_lots.(bot_id, partition_id, opening_order_component_id) > trading.order_components.(bot_id, partition_id, id)",
+  "Ref: trading.lot_movements.(bot_id, partition_id, source_order_component_id) > trading.order_components.(bot_id, partition_id, id)",
   "Ref: trading.partition_position_projections.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)",
   "Ref: trading.system_close_actions.(bot_id, partition_id, generated_intent_id) > trading.order_intents.(bot_id, partition_id, id)",
   "Ref: trading.short_borrow_fee_accruals.short_borrow_fee_policy_id > trading.short_borrow_fee_policy_versions.id",
@@ -188,16 +223,16 @@ const rowsFor = (tableName) => {
 
 const nearlyEqual = (left, right) => Math.abs(Number(left) - Number(right)) < 1e-8;
 const orderRows = new Map(rowsFor('orders').map((row) => [row.id, row]));
-const allocationRows = rowsFor('order_intent_allocations');
+const componentRows = rowsFor('order_components');
 for (const order of orderRows.values()) {
   if (Number.isInteger(Number(order.requested_quantity))) {
     throw new Error(`Records order quantity must demonstrate fractional-share execution: ${order.id}`);
   }
-  const allocated = allocationRows
+  const componentQuantity = componentRows
     .filter((row) => row.order_id === order.id)
-    .reduce((sum, row) => sum + Number(row.allocated_quantity), 0);
-  if (!nearlyEqual(allocated, order.requested_quantity)) {
-    throw new Error(`Records allocation sum does not match order quantity: ${order.id}`);
+    .reduce((sum, row) => sum + Number(row.component_quantity), 0);
+  if (!nearlyEqual(componentQuantity, order.requested_quantity)) {
+    throw new Error(`Records component sum does not match order quantity: ${order.id}`);
   }
 }
 

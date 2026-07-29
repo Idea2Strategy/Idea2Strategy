@@ -13,7 +13,7 @@
 - 작성일: 2026-07-23
 - 기준 저장소: `Idea2Strategy/Idea2Strategy`
 - 기준 브랜치: `develop`
-- 기준 커밋: `6a53eb36a0cc9769f0220c8e3ea4a7d26036f34c`
+- 기준 커밋: `ec871c3a` (`origin/develop`, 2026-07-29 fetch 기준)
 기준 Stackcord fingerprint: `sha256:3cb632a0a1d1b75fd1e879be6da23c95d884a8250e4da3aba22f94cf5e59d7f2`
 DBML 초안: `proposals/dbml-redesign/schema.draft.dbml`
 
@@ -22,10 +22,10 @@ Trading 운영 제약: `proposals/dbml-redesign/trading-production-readiness.md`
 ## Trading 정합성 재구성 제안
 
 - 2026-07-28 사용자 보정에 따라 Bot이 아니라 Partition을 주문 통합·상계·예산·예약·보유수량·원장·lot의 최상위 거래 격리 경계로 바꾼다.
-- `order_intent_batches`, Order, Allocation, Fill과 모든 하류 체결 경로에 `(bot_id, partition_id)`를 전달하고 복합 FK로 다른 Partition 연결을 차단한다.
-- 같은 Partition 내부 Flow Intent만 하나의 Order로 통합하며 `order_intent_allocations`가 Flow 귀속의 유일 주문 단계 관계다.
+- `order_intent_batches`, Order, Order Component, Fill과 모든 하류 체결 경로에 `(bot_id, partition_id)`를 전달하고 복합 FK로 다른 Partition 연결을 차단한다.
+- 같은 Partition 내부 Flow Intent만 하나의 Order로 통합하며 `order_components`가 Flow 귀속의 유일 주문 단계 관계다.
 - 부분 체결을 폐지한다. Order는 정상 Fill 없이 REJECTED/CANCELLED/EXPIRED 또는 정확히 한 정상 Fill로 전량 FILLED만 가능하다.
-- `fill_allocations`를 제거하고 Ledger Entry, Position Lot, Lot Movement는 `order_intent_allocation_id`를 통해 Flow 귀속을 유지한다.
+- `fill_allocations`를 제거하고 Ledger Entry, Position Lot, Lot Movement는 `order_component_id`를 통해 Flow 귀속을 유지한다.
 - `resource_reservations`는 ACTIVE에서 종료 상태로 한 번만 전이한다. Fill 시 실제 사용액을 소비하고 Buying Power 버퍼와 차액을 동시에 해제해 최종 `consumed + released = reserved`를 강제한다.
 - 매수·매도 주문 Element의 주문 규모는 퍼센트만 허용한다. 매수는 실행 시점 Partition 가용 현금, 매도는 해당 Flow의 예약되지 않은 매도 가능 수량을 기준으로 하며 마지막 정상 전량 Fill부터 설정된 최소 재활성화 기간이 지나야 같은 Element가 새 Intent를 만들 수 있다.
 - Order 생성 전 축소를 원칙으로 하고, 이미 OPEN인 지정가·스탑 주문은 원본 취소·예약 전액 해제 후 더 작은 replacement Order와 새 예약을 만든다.
@@ -73,7 +73,7 @@ Trading 운영 제약: `proposals/dbml-redesign/trading-production-readiness.md`
 - **봇별 실행 차단**: `bot.bots.health_status` enum(HEALTHY/ACTION_REQUIRED/DATA_DEGRADED/SETTLEMENT_FAILED)을 제거하고 nullable Projection `execution_blocked_at` / `execution_block_reason_code` / `execution_block_event_id`로 대체한다. 정상 = `execution_blocked_at IS NULL`. 차단·해제 공식 이력은 append-only bot_events(`BOT_EXECUTION_BLOCKED`, `BOT_EXECUTION_UNBLOCKED`, `SETTLEMENT_FAILED`, `LEDGER_INVARIANT_VIOLATED`, `STATE_REBUILD_COMPLETED`)로 남는다. 차단 중에도 기존 미체결 주문을 취소하지 않고 체결·만료·거절 등 이후 결과와 예약 해제·원장·정산·STOPPING 처리를 계속한다.
 - `lifecycle_status`의 의미를 재정의한다: RUNNING은 "새 트리거 발생 시 평가 대상이 될 수 있음"이지 프로세스 실행이 아니다. heartbeat/process_id/worker_id/last_alive_at 류 컬럼은 금지한다.
 
-Trigger Dependency는 두 번째 정본이 아니라 완성 시 `semantic_document`에서 서버가 검증·추출한 관계형 Projection이다. 종목·피처 의존성은 기존 `bot.strategy_instruments`와 `bot.strategy_feature_requirements`를 재사용하고, 비종목(시간·세션) 트리거만 신규 `bot.strategy_time_triggers`(MARKET_OPEN/MARKET_CLOSE/SCHEDULE + schedule_key)가 담는다. 시장 이벤트마다 전체 봇·전략을 조회하지 않는다.
+Trigger Dependency는 두 번째 정본이 아니라 완성 시 `semantic_document`에서 서버가 검증·추출한 관계형 Projection이다. 종목·피처 의존성은 `bot.flow_instruments`와 `bot.flow_feature_requirements`, 비종목 시간·세션 트리거는 `bot.flow_time_triggers`(MARKET_OPEN/MARKET_CLOSE/SCHEDULE + schedule_key)가 담는다. 시장 이벤트마다 전체 Bot·Flow를 조회하지 않는다.
 
 DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교체, evaluation_runs 재구조화(Flow 소유 복합 FK, queued_at/attempt_count/lease_expires_at, 스냅샷 컬럼 nullable), evaluation_strategy_results 삭제, order_intent_batches를 `(bot_id, partition_id, source_event_id)` 유니크의 파티션 충돌 경계로 변경, order_intents에 evaluation_run_id 추가, flow_time_triggers·stream_watermarks 신설.
 
@@ -106,35 +106,35 @@ DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교�
 
 ## 제안된 제품 의미
 
-### 1. 봇·파티션·전략 계층
+### 1. Strategy·Bot·Partition·Flow 계층
 
-2026-07-27 봇 스키마 재검토 질문 1의 `A`로, 제안 구조는 `봇 1 ─ N 파티션 1 ─ N 전략(블록 묶음)`으로 다시 확정했다.
+현재 확정 구조는 `Strategy 설계 원본 → 독립 Bot 스냅샷 → Partition → Flow → Element`다.
 
-- 전략은 정확히 하나의 파티션에 종속된다.
-- 완성된 봇에는 최소 하나의 파티션이 있고, 각 파티션에는 최소 하나의 완성된 전략이 있어야 한다. 빈 봇과 빈 파티션은 편집 워크스페이스에서만 허용한다.
-- 전략은 파티션이 직접 소유하는 블록 묶음이며 독립 라이브러리 항목이나 버전 관리 대상이 아니다.
-- 다른 파티션이 같은 전략 행 또는 블록 묶음을 공유하거나 재사용하지 않는다.
-- `BASIC` 또는 `PRO` 모드는 봇 전체가 하나만 가지며 같은 봇의 모든 파티션과 전략은 해당 모드의 작성·검증 규칙을 따른다. 한 봇 안에서 두 모드를 혼합하지 않는다.
-- 봇·파티션·전략을 복사할 때는 새 식별자로 단순 복제하며 원본과의 FK, 계보 또는 버전 연결을 남기지 않는다.
+- Strategy는 수정 가능한 독립 설계 원본이며 `strategy.strategy_documents`가 semantic과 presentation을 소유한다.
+- 완성된 Bot에는 최소 하나의 Partition이 있고 각 Partition에는 최소 하나의 완성된 Flow가 있어야 한다.
+- Flow는 정확히 하나의 Partition에 종속된 Element 묶음이며 다른 Partition과 행을 공유하지 않는다.
+- `BASIC` 또는 `PRO` 모드는 Strategy와 그 Strategy로 생성되는 Bot 전체가 하나만 가지며 Bot 내부에서 혼합하지 않는다.
+- Strategy를 Bot으로 출시할 때 현재 검증 상태를 새 Bot 계층으로 복사하고 원본 Strategy FK·식별자·계보를 남기지 않는다.
+- Bot·Partition·Flow를 복사할 때도 새 식별자로 단순 복제하며 원본과의 연결을 남기지 않는다.
 - 원본 런타임 상태, 현금, 주문, 체결, 포지션, 원장과 성과는 복사하지 않는다.
-- 편집 중인 미완성 구성은 별도 `bot_workspaces`의 단일 JSONB 문서로 자동 저장한다. 워크스페이스는 봇이나 전략의 버전이 아니며, 완성·검증 후 새 봇 계층을 원자적으로 생성할 때 원본 FK나 계보를 남기지 않는다.
+- 편집 중인 미완성 구성은 Strategy 문서만 소유하며 `bot_workspaces`는 두지 않는다.
 
 현재 정본과의 차이:
 
-- 현재 정본은 계정 소유의 독립 전략 작업본·출시 버전·재사용 흐름을 전제로 한다.
-- 제안은 전략을 파티션 종속 구성으로 바꾸므로 전략 라이브러리, 출시 여정, 복사와 자동 백테스트 의미를 함께 재검토해야 한다.
+- 현재 정본은 불변 Strategy 출시 버전과 그 버전당 단일 자동 백테스트를 전제로 한다.
+- 제안은 수정 가능한 Strategy 원본과 출처 없는 독립 Bot 스냅샷을 구분하므로 출시 여정, 복사, 자동 백테스트 의미를 함께 바꿔야 한다.
 
 ### 2. 종목 선택 책임
 
-- 파티션은 종목을 직접 소유하지 않고 예산 상한, 캔버스 좌표와 내부 전략 실행 범위를 소유한다. 별도 위험 정책 컬럼은 두지 않으며 위험 통제는 각 전략의 `RISK_POLICY` 블록으로 구성한다.
-- 현재 제품에서는 각 전략이 개별 종목을 명시적으로 선택한다. Universe 기반 선택은 향후 실제 기능이 확정될 때 별도 모델·무결성 규칙·마이그레이션으로 도입하며 현재 초안에 선제 저장하지 않는다.
-- 같은 파티션 또는 다른 파티션의 여러 전략이 같은 종목을 선택할 수 있다.
-- `bot.strategy_instruments`는 완성된 `semantic_document`에서 추출한 불변 종목 의존성 집합이다. 종목의 매매·참조 용도는 타입이 지정된 블록과 연결이 이미 소유하므로 관계 테이블에 역할 문자열을 중복 저장하지 않는다.
-- 파티션과 전략은 `display_order`가 아니라 각각의 `position_x`, `position_y`로 배치한다. 좌표 중복은 허용하고 `id`는 동일 좌표 조회의 결정적 타이브레이커로만 사용한다.
-- 개별 전략 안의 요소 좌표·크기, 그룹 배치·접힘, 선택 상태, edge routing hint, viewport와 zoom은 `layout_document`에 저장한다. 요소·엣지 키는 실행 의미를 가진 `semantic_document`의 안정 식별자를 참조한다.
+- Partition은 종목을 직접 소유하지 않고 예산 상한, 캔버스 좌표와 내부 Flow 실행 범위를 소유한다. 별도 위험 정책 컬럼은 두지 않으며 위험 통제는 각 Flow의 `RISK_POLICY` Element로 구성한다.
+- 현재 제품에서는 각 Flow가 개별 종목을 명시적으로 선택한다. Universe 기반 선택은 향후 실제 기능이 확정될 때 별도 모델·무결성 규칙·마이그레이션으로 도입하며 현재 초안에 선제 저장하지 않는다.
+- 같은 Partition 또는 다른 Partition의 여러 Flow가 같은 종목을 선택할 수 있다.
+- `bot.flow_instruments`는 완성된 `semantic_document`에서 추출한 불변 종목 의존성 집합이다. 종목의 매매·참조 용도는 타입이 지정된 Element와 연결이 이미 소유하므로 관계 테이블에 역할 문자열을 중복 저장하지 않는다.
+- Partition과 Flow는 `display_order`가 아니라 각각의 `position_x`, `position_y`로 배치한다. 좌표 중복은 허용하고 `id`는 동일 좌표 조회의 결정적 타이브레이커로만 사용한다.
+- 개별 Flow 안의 Element 좌표·크기, 그룹 배치·접힘, 선택 상태, edge routing hint, viewport와 zoom은 presentation 문서에 저장한다. Element·edge 키는 실행 의미를 가진 `semantic_document`의 안정 식별자를 참조한다.
 - `layout_document`와 `layout_hash`는 UI 화면 복원만 담당하며 의미 해시, 실행 구성 해시, 실행 계획, 검증과 백테스트에 영향을 주지 않는다. 자동 배치는 새 흐름이나 레이아웃이 없는 과거 데이터의 초기값 생성·복구에만 사용한다.
-- 편집 중 `bot_workspaces.workspace_document`도 각 전략의 의미 문서와 레이아웃 문서를 분리해 포함하며, 완성 시 안정 요소·엣지 키 참조와 `layout_schema_version`을 검증한다.
-- 플랫폼 전략 템플릿은 의미 골격만 제공할 수 있으며, 템플릿으로 흐름을 만들 때 생성된 초기 레이아웃을 새 흐름의 `layout_document`에 저장한다.
+- Strategy 편집 문서는 semantic과 presentation을 분리하고, 완성 시 안정 Element·edge 키 참조와 schema version을 검증한다.
+- Basic Package는 완성 Flow를 복사하고 Pro Template은 시작 골격을 복사하지만 생성된 Strategy나 Bot에 출처 관계를 남기지 않는다.
 
 ### 3. 예산 계층
 
@@ -142,8 +142,8 @@ DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교�
 - 다른 초기 자본으로 운용하려면 새 봇을 생성한다.
 - 봇 초기 자본을 기준으로 파티션별 백분율 상한을 둔다.
 - 파티션 상한 합계는 100% 이하이며 미배정 자금은 봇 현금으로 남는다.
-- 예산은 파티션까지만 할당하며 Basic·Pro 모두 하위 전략에는 예산이나 상한을 배정하지 않는다.
-- 같은 파티션의 모든 전략은 해당 파티션의 하나의 예산 경계를 공유한다.
+- 예산은 Partition까지만 할당하며 Basic·Pro 모두 하위 Flow에는 예산이나 상한을 배정하지 않는다.
+- 같은 Partition의 모든 Flow는 해당 Partition의 하나의 예산 경계를 공유한다.
 - 사용하지 않은 예산을 형제 파티션이 빌려 쓰지 않는다.
 - 파티션에 귀속된 보유 금액과 미체결 주문 예약액을 파티션 상한 사용량에 포함한다.
 
@@ -169,25 +169,25 @@ DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교�
 - 전략별 원래 주문 의도와 판단 근거는 보존한다.
 - `(bot_id, partition_id, 종목, 주문계약)` 단위로 같은 방향 의도는 합산하고 반대 방향은 결정론적으로 상계한다.
 - 서로 다른 Partition 또는 Bot의 Intent는 같은 사용자 소유라도 통합하지 않는다.
-- 상계 후 하나의 정상 전량 Fill은 Order Allocation에 따라 같은 Partition의 Flow로 귀속한다.
+- 상계 후 하나의 정상 전량 Fill은 Order Component에 따라 같은 Partition의 Flow로 귀속한다.
 - 상계는 예산, 현금, position lot 또는 손익을 형제 Partition으로 이전하지 않는다.
 
 ### 6. 완성된 구성으로 봇 생성
 
-- 별도의 봇 구성·파티션·전략 버전 테이블을 만들지 않는다.
-- 봇은 포함된 모든 전략이 완성되고 출시 검증을 통과한 뒤에만 생성한다.
+- 별도의 Bot 구성·Partition·Flow 버전 테이블을 만들지 않는다.
+- Bot은 포함된 모든 Flow가 완성되고 출시 검증을 통과한 뒤에만 생성한다.
 - 봇의 실행 수명주기와 운영 건강 상태는 별도로 저장한다. 실행 상태 변화와 데이터 지연·조치 필요·정산 실패가 서로를 덮어쓰지 않는다.
-- 봇, 실행 설정, 파티션, 전략과 관계형 의존성은 한 트랜잭션에서 새 식별자로 삽입한다.
+- Bot, 실행 설정, Partition, Flow와 관계형 의존성은 한 트랜잭션에서 새 식별자로 삽입한다.
 - 봇은 완성도와 실행 가능성 검증을 모두 통과한 생성 트랜잭션이 커밋되면 즉시 `RUNNING`으로 시작한다. 수명주기는 `RUNNING -> STOPPING -> STOPPED`만 사용하며 `WAITING`, `PAUSED`, `DRAFT`, `LOCKING`, `ENDED` 상태는 두지 않는다. `STOPPED`는 영구 종료다.
 - 데이터 지연·조치 필요·정산 실패가 발생해도 수명주기는 `RUNNING`으로 유지하고 실행 차단 Projection만 변경한다. 차단 중에는 신규 전략 평가와 신규 주문 생성을 막되 기존 미체결 주문은 취소하지 않고 그 주문의 체결·만료·거절 등 이후 결과와 필요한 정산을 계속 처리한다. 원인이 해소되어 정상 상태가 확인되면 자동으로 신규 평가를 재개한다.
 - 종료된 봇을 일반 목록에서 되돌릴 수 있게 숨기는 것은 실행 상태가 아니라 `archived_at`으로 관리한다.
 - 사용자의 삭제는 `deleted_at`을 기록하는 논리 삭제로 처리한다. 보관 후 삭제와 즉시 삭제를 모두 허용하지만, 실행 중 삭제 요청은 먼저 멱등적인 중단·정산 절차를 거쳐 `STOPPED`가 된 뒤에만 삭제를 확정한다. 삭제된 봇은 사용자가 복구할 수 없으며 실제 물리 제거와 공식 주문·체결·원장·사건·증거의 보존은 별도 보존·법적 정책으로 관리한다.
-- 생성된 실행 의미는 처음부터 불변이며 별도의 `locked_at`이나 잠금 사건을 두지 않는다. 다만 봇 이름과 알림 설정, 파티션·전략의 `description`, `position_x`, `position_y`는 실행 의미를 바꾸지 않는 표시·운영 정보로서 수정할 수 있다.
-- 수정 가능한 표시·운영 정보는 실행 구성 해시와 전략 의미 해시에서 제외한다. 좌표·설명 수정은 새 버전이나 새 봇·파티션·전략을 만들지 않는다.
+- 생성된 실행 의미는 처음부터 불변이며 별도의 `locked_at`이나 잠금 사건을 두지 않는다. 다만 Bot 이름과 알림 설정, Partition·Flow의 `description`, `position_x`, `position_y` 및 Flow 내부 presentation은 실행 의미를 바꾸지 않는 표시·운영 정보로서 수정할 수 있다.
+- 수정 가능한 표시·운영 정보는 실행 구성 해시와 Flow 의미 해시에서 제외한다. 좌표·설명 수정은 새 버전이나 새 Bot·Partition·Flow를 만들지 않는다.
 - 봇의 `edit_sequence`는 버전 이력이나 복사 계보가 아니라 이름·보관·삭제 같은 수정 가능 필드의 동시 수정 충돌을 막는 0부터 시작하는 낙관적 잠금 번호다. 수정이 성공할 때마다 정확히 1 증가하며 `updated_at`에 해당 commit 시각을 기록한다.
 - 파티션도 같은 원칙으로 `edit_sequence`와 `updated_at`을 사용하여 이름·설명·좌표의 동시 수정을 보호한다.
-- 전략 역시 `edit_sequence`와 `updated_at`을 사용하여 이름·설명·파티션 캔버스 좌표의 동시 수정을 보호한다.
-- 복사·붙여넣기는 새 독립 집합을 만들 뿐 원본 봇·파티션·전략과의 연결을 보존하지 않는다.
+- Flow 역시 `edit_sequence`와 `updated_at`을 사용하여 이름·설명·Partition 캔버스 좌표의 동시 수정을 보호한다.
+- 복사·붙여넣기는 새 독립 집합을 만들 뿐 원본 Bot·Partition·Flow와의 연결을 보존하지 않는다.
 - 봇에는 `PERSONAL`, `ROOM` 같은 종류를 두지 않는다. 모든 봇은 계정이 소유하는 동일한 객체이며 방·대회 참여는 `competition` 스키마의 별도 참가 관계가 관리한다.
 - 방 참가 종료·탈퇴는 참가 관계의 수명주기만 끝내며 봇을 중단하거나 별도 연장 상태로 전환하지 않는다.
 
@@ -199,15 +199,17 @@ DBML 반영: `proposals/dbml-redesign/schema.draft.dbml`에서 bots 컬럼 교�
 ### 7. 공식 자동 백테스트
 
 - 공식 자동 백테스트는 개별 전략이 아니라 잠긴 봇 전체 구성을 입력으로 한다.
-- 잠긴 봇마다 최대 한 번 생성한다.
-- 모든 파티션, 파티션 예산, 전략 블록 묶음, 동일 종목 상계, Buying Power, 슬리피지, 수수료와 회계 규칙을 함께 재현한다.
+- 봇 생성 시 최초 자동 백테스트 한 건을 생성한다.
+- 생성 이후에도 사용자가 같은 봇에 다른 평가 기간을 지정하여 백테스트를 여러 번 실행할 수 있다.
+- 각 실행은 평가 기간, 초기 자금, 구성 해시와 정책 버전을 별도로 고정하며 동일 요청의 재시도만 멱등 키로 중복 방지한다.
+- 모든 Partition, Partition 예산, Flow·Element 그래프, 동일 종목 상계, Buying Power, 슬리피지, 수수료와 회계 규칙을 함께 재현한다.
 - 대용량 거래·재생 원장·포지션·계산 시계열은 S3 불변 객체에 두고 PostgreSQL에는 실행 상태, 잠긴 입력, 요약과 무결성 매니페스트를 둔다.
 - 라이브 봇의 현금·주문·원장과 백테스트 상태를 공유하지 않는다.
 
 현재 정본과의 차이:
 
-- 현재 정본은 출시 전략 버전당 최대 한 번의 공식 자동 백테스트를 요구한다.
-- 자동 백테스트 UI, 출시 실패, 백테스트 불가, 보관과 조회 관계를 봇 전체 구성 기준으로 다시 작성해야 한다.
+- 현재 정본의 출시 전략 버전당 최대 한 번 규칙을 봇 생성 시 자동 실행 한 건과 이후 기간별 추가 실행을 허용하는 규칙으로 바꿔야 한다.
+- 자동 백테스트 UI는 한 봇의 실행 이력을 평가 기간별로 조회·비교할 수 있어야 하며, 출시 실패, 백테스트 불가, 보관 관계도 봇 전체 구성 기준으로 다시 작성해야 한다.
 
 ### 8. 백테스트와 봇 실행의 독립성
 
