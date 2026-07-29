@@ -5,7 +5,7 @@
       "id": "claim.dbml-business-alignment",
       "work_id": "work.dbml-business-alignment",
       "definition_fingerprint": "sha256:d2a3190aa17f3426561354779e4e98d1edd0e7455f6fbff7f64dbc85ba76e8ad",
-      "status": "in_progress",
+      "status": "review",
       "owner": "dbml-business-alignment",
       "branch": "feature/dbml-business-alignment",
       "repository": "repository.github.root",
