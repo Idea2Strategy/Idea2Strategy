@@ -4,6 +4,9 @@
   "scripts": {
     "dbml:validate": "node scripts/validate-dbml.mjs db/schema.dbml",
     "dbml:validate:trading-proposal": "node scripts/validate-trading-dbml.mjs proposals/dbml-redesign/schema.draft.dbml",
+    "dbml:validate:competition-proposal": "node scripts/validate-competition-dbml.mjs proposals/dbml-redesign/schema.draft.dbml",
+    "dbml:validate:backtest-performance-proposal": "node scripts/validate-backtest-performance-dbml.mjs proposals/dbml-redesign/schema.draft.dbml",
+    "proposal:validate:boundary": "node scripts/validate-proposal-boundary.mjs origin/develop",
     "dbdiagram": "dbdiagram"
   },
   "devDependencies": {

@@ -21,7 +21,7 @@
 4. 같은 Partition 안에서만 충돌 처리·상계·통합하고 최종 실행 수량을 확정한다.
 5. Partition 예산·Flow 소유 FIFO lot·숏 자원을 검사하고 `resource_reservations`를 만든다.
 6. 최신 유효 가격으로 5 bps 고정 슬리피지와 20 bps 수수료를 재계산한다. 부족하면 Order 생성 전에 수량을 축소하거나 거절한다.
-7. 불변 Order, `order_intent_allocations`, `order_reservation_allocations`, 최초 Order Event와 Outbox를 한 트랜잭션으로 커밋한다.
+7. 불변 Order, `order_components`, `order_component_reservations`, 최초 Order Event와 Outbox를 한 트랜잭션으로 커밋한다.
 8. 정상 체결 시 Order 수량과 같은 Fill 한 건, FILLED 사건, 예약 최종 정산, 원장, lot movement와 Projection watermark를 한 멱등 트랜잭션으로 커밋한다.
 9. 취소·만료·거절·replacement는 Fill을 만들지 않고 해당 예약을 전액 해제한다.
 
@@ -38,25 +38,25 @@
 
 ## DBML에서 직접 강제하는 조건
 
-- `orders`, `order_intent_batches`, `order_intent_allocations`, `fills`에 `partition_id NOT NULL`을 둔다.
+- `orders`, `order_intent_batches`, `order_components`, `fills`에 `partition_id NOT NULL`을 둔다.
 - 부모가 제공하는 `(bot_id, partition_id, id)` UNIQUE와 자식의 같은 복합 FK로 파티션 불일치를 차단한다.
 - Batch FK는 `(bot_id, partition_id, batch_id)`라 다른 Partition Intent를 담을 수 없다.
-- Allocation은 Order와 Intent 양쪽에 `(bot_id, partition_id, ...)` 복합 FK를 사용한다.
+- Order Component는 Order와 Intent 양쪽에 `(bot_id, partition_id, ...)` 복합 FK를 사용한다.
 - 정상 Fill은 `UNIQUE(order_id)`이며 `(bot_id, partition_id, order_id)`로 Order를 참조한다.
 - `PARTIALLY_FILLED`, `PARTIALLY_CONSUMED` enum 값을 제거했다.
 - 예약 종료 상태는 금액·수량 모두 `consumed + released = reserved` CHECK를 만족해야 한다.
 - ACTIVE 예약은 소비·해제가 모두 0이고, SETTLED 예약은 실제 소비량이 양수이며, RELEASED 예약은 소비량이 0이다.
-- `reservation_lot_allocations`는 Reservation과 Lot 양쪽에 `(bot_id, partition_id, flow_id, ...)` 복합 FK를 사용한다.
+- `position_lot_reservations`는 Reservation과 Lot 양쪽에 `(bot_id, partition_id, flow_id, ...)` 복합 FK를 사용한다.
 - replacement는 동일 Partition Order만 참조하고 한 원본 Order당 후속 Order를 최대 하나로 제한한다.
-- `fill_allocations`는 제거했다. 하류 Flow 귀속은 `order_intent_allocation_id`로 유지한다.
+- `fill_allocations`는 제거했다. 하류 Flow 귀속은 `order_component_id`로 유지한다.
 - Bot 전체 `position_projections`는 `partition_position_projections`로 바꿔 주문 가능 보유량을 Partition별로 계산한다.
 
 ## PostgreSQL migration trigger가 필요한 조건
 
 DBML CHECK와 FK만으로 교차 행·시간 순서 불변식을 표현할 수 없으므로 다음은 `DEFERRABLE INITIALLY DEFERRED` constraint trigger로 구현한다.
 
-1. **Order Allocation 보존**
-   - Order별 `SUM(allocated_quantity) = orders.requested_quantity`.
+1. **Order Component 보존**
+   - Order별 `SUM(component_quantity) = orders.requested_quantity`.
    - Intent별 배분 합계가 `final_quantity`를 넘지 않고 Batch 최종화 시 정확히 일치.
    - Order·Intent의 instrument, side, order contract가 통합 가능한지 확인.
 2. **전량 Fill과 상태 전이**
@@ -66,20 +66,20 @@ DBML CHECK와 FK만으로 교차 행·시간 순서 불변식을 표현할 수 �
    - 허용 전이 밖의 Order Event, sequence gap, 같은 idempotency event의 재적용을 거절.
 3. **예약 보존과 일회 정산**
    - Reservation Event를 sequence 순으로 접은 합계가 mutable Reservation 누계·상태와 일치.
-   - SETTLED_BY_FILL은 같은 Partition Fill과 해당 Order Allocation에 연결된 Reservation만 사용.
+   - SETTLED_BY_FILL은 같은 Partition Fill과 해당 Order Component에 연결된 Reservation만 사용.
    - Fill 하나가 Reservation을 두 번 정산하거나 종료 Reservation을 다시 소비·해제하지 못함.
 4. **원장**
    - `source_type = 'FILL'`이면 같은 Partition 정상 Fill이 반드시 존재.
-   - Fill Transaction의 Entry는 같은 Partition Account와 해당 Order의 `order_intent_allocation_id`만 참조.
+   - Fill Transaction의 Entry는 같은 Partition Account와 해당 Order의 `order_component_id`만 참조.
    - Flow별 gross·fee·settlement 배분 합계가 Fill 총액과 정확히 일치.
    - 같은 통화의 차변·대변 합계가 같고 최소 2개 Entry가 존재.
 5. **Position Lot**
-   - opening allocation의 Intent가 OPEN_LONG 또는 OPEN_SHORT이고 그 Order에 정상 Fill이 존재해야 Lot 생성 가능.
-   - OPEN·CLOSE movement의 allocation이 같은 Partition이며 CLOSE는 같은 Flow FIFO lot만 소비.
+   - opening component의 Intent가 OPEN_LONG 또는 OPEN_SHORT이고 그 Order에 정상 Fill이 존재해야 Lot 생성 가능.
+   - OPEN·CLOSE movement의 component가 같은 Partition이며 CLOSE는 같은 Flow FIFO lot만 소비.
    - 활성 lot 예약 합계가 남은 수량을 초과하지 않고 movement의 after 값이 이전 값과 연속.
 6. **replacement**
    - 원본 Order가 같은 트랜잭션 또는 이전 사건에서 CANCELLED로 끝난 뒤에만 replacement 접수.
-   - 원본 예약은 전액 RELEASED되고 replacement는 새 Reservation·Allocation을 사용.
+   - 원본 예약은 전액 RELEASED되고 replacement는 새 Reservation·Order Component를 사용.
 7. **정정·반전**
    - `fill_adjustments.REVERSAL`은 원 Fill의 경제 효과를 정확히 반대로 기록하고 한 번만 적용.
    - CORRECTION은 Fill 수량을 바꾸지 않으며 원장·lot 조정 사건과 같은 트랜잭션에서 커밋.
@@ -104,15 +104,15 @@ DBML CHECK와 FK만으로 교차 행·시간 순서 불변식을 표현할 수 �
 - 슬리피지는 매수 `+5 bps`, 매도 `-5 bps`이며 Fill 기준가격에 한 번 적용한다.
 - 수수료는 슬리피지 적용 후 gross의 `20 bps`다.
 - Buying Power 버퍼는 예약액 계산에서만 통화 저장 정밀도 단위로 보수적으로 올림하고 Fill·수수료·손익에는 포함하지 않는다.
-- Flow 금액 배분은 수량 비율의 정확한 몫을 계산하고 저장 단위 미만 잔여를 largest-remainder 방식으로 배분한다. 동률은 `allocation_rank ASC`가 우선한다.
-- `precision_rules_version`과 `allocation_rules_version`이 위 규칙을 고정한다.
+- Flow 금액 구성은 수량 비율의 정확한 몫을 계산하고 저장 단위 미만 잔여를 largest-remainder 방식으로 나눈다. 동률은 `component_sequence ASC`가 우선한다.
+- `precision_rules_version`과 `composition_rules_version`이 위 규칙을 고정한다.
 - 종목별 최소 수량·가격 tick과 최종 법률·회계 검토가 아직 정본에서 미결정이므로 실제 배포 전 승인된 정책 버전이 필요하다.
 
 ## append-only와 mutable Projection
 
 추가 전용 정본:
 
-- `order_intents`, `orders`, `order_intent_allocations`
+- `order_intents`, `orders`, `order_components`
 - `order_events`, `fills`, `fill_adjustments`
 - `reservation_events`
 - `ledger_transactions`, `ledger_entries`
@@ -149,23 +149,23 @@ append-only 테이블은 일반 UPDATE/DELETE 권한을 제거하고 correction/
 ### 일반 주문 성공
 
 - P1 Flow A가 AAPL `2.00000000`주, Flow B가 `1.12110526`주 BUY Intent를 만든다.
-- P1 Batch만 두 Intent를 모아 Order `3.12110526`주와 같은 합계의 Allocation 두 건을 만든다.
+- P1 Batch만 두 Intent를 모아 Order `3.12110526`주와 같은 합계의 Order Component 두 건을 만든다.
 - 기준가 100, Fill가 100.05, gross 312.26658126, 수수료 0.62453316이라면 실제 소비는 312.89111442다.
 - 예시 예약 312.92240353 중 312.89111442를 소비하고 버퍼 0.03128911을 같은 SETTLED_BY_FILL 사건에서 해제한다.
-- Fill은 `3.12110526`주 한 건뿐이며 원장·lot은 두 Allocation을 기준으로 Flow A/B에 결정적으로 귀속된다.
+- Fill은 `3.12110526`주 한 건뿐이며 원장·lot은 두 Order Component를 기준으로 Flow A/B에 결정적으로 귀속된다.
 
 ### 예산 부족 사전 축소
 
 - Flow가 가용 예산의 40%로 계산한 `3.12110526`주를 요청했지만 최신 가격 재검사에서 P1 예산으로 `2.80411573`주만 가능하다.
 - Intent에는 requested `3.12110526`, approved/final `2.80411573`과 REDUCED 사유를 보존한다.
-- 처음부터 Order·Allocation·Reservation을 `2.80411573`주 기준으로 만들고 정상 Fill도 정확히 `2.80411573`주 한 건만 생성한다.
+- 처음부터 Order·Order Component·Reservation을 `2.80411573`주 기준으로 만들고 정상 Fill도 정확히 `2.80411573`주 한 건만 생성한다.
 - Order `3.12110526`주에 Fill `2.80411573`주를 연결하지 않는다.
 
 ### 대기 지정가 주문 replacement
 
 - 기존 P1 LIMIT Order `3.12110526`주가 OPEN 상태다.
 - 자동 재검사 결과 P1 예산으로 `2.80411573`주만 가능하면 원본을 시스템이 CANCELLED 처리하고 예약을 전액 해제한다.
-- `replaces_order_id = 원본`인 새 `2.80411573`주 Order와 새 예약·Allocation을 만든다.
+- `replaces_order_id = 원본`인 새 `2.80411573`주 Order와 새 예약·Order Component를 만든다.
 - 새 Order는 `2.80411573`주 전량 Fill 또는 미체결 종료만 가능하다. 사용자, Bot 중지, 운영자는 이 전이를 직접 요청할 수 없다.
 
 ### 취소·만료·거절
@@ -193,20 +193,31 @@ append-only 테이블은 일반 UPDATE/DELETE 권한을 제거하고 correction/
 ## rollback
 
 - 8단계 전: 새 쓰기를 중단하고 애플리케이션을 이전 버전으로 되돌린 뒤 새 nullable 컬럼·shadow 테이블을 제거할 수 있다.
-- 8~10단계: 새 구조 쓰기를 중단하고 보존한 이전 테이블·컬럼으로 전환한다. 전량 Fill은 Order Allocation 비율로 이전 `fill_allocations`를 결정적으로 재구성할 수 있다.
+- 8~10단계: 새 구조 쓰기를 중단하고 보존한 이전 테이블·컬럼으로 전환한다. 전량 Fill은 Order Component 비율로 이전 `fill_allocations`를 결정적으로 재구성할 수 있다.
 - 10단계 후: 자동 down migration을 제공하지 않는다. 새 거래를 차단하고 검증된 snapshot/PITR로 복구한 뒤 Outbox를 재처리한다.
 - 어떤 rollback도 Fill, 원장, lot 사건을 임의 삭제하거나 재작성하지 않는다.
 
 ## 제거·이름 변경 영향
 
 - 제거: `trading.fill_allocations`, `PARTIALLY_FILLED`, `PARTIALLY_CONSUMED`.
+- 테이블 이름 변경:
+  - `order_intent_allocations` → `order_components`
+  - `reservation_lot_allocations` → `position_lot_reservations`
+  - `order_reservation_allocations` → `order_component_reservations`
+- 직관성에 맞춘 컬럼 이름 변경:
+  - `allocated_quantity` → `component_quantity`
+  - `allocated_notional` → `component_notional`
+  - `allocation_rank` → `component_sequence`
+  - `allocation_rules_version` → `composition_rules_version`
+  - 모든 하류 `order_intent_allocation_id` 계열 → `order_component_id` 계열
 - 컬럼 교체:
   - `reservation_events.source_fill_allocation_id` → `source_fill_id`
-  - `ledger_entries.fill_allocation_id` → `order_intent_allocation_id`
-  - `position_lots.opening_fill_allocation_id` → `opening_order_intent_allocation_id`
-  - `lot_movements.source_fill_allocation_id` → `source_order_intent_allocation_id`
+  - `ledger_entries.fill_allocation_id` → `order_component_id`
+  - `position_lots.opening_fill_allocation_id` → `opening_order_component_id`
+  - `lot_movements.source_fill_allocation_id` → `source_order_component_id`
 - 이름 변경: `position_projections` → `partition_position_projections`.
 - 추가: `fill_adjustments`는 정상 Fill과 분리된 correction/reversal 사건이다.
+- 아직 운영 migration이 없다면 최종 이름으로 바로 생성한다. 이미 구 이름이 배포됐다면 PostgreSQL `ALTER TABLE ... RENAME`과 `ALTER TABLE ... RENAME COLUMN`을 같은 migration에서 수행하고, 애플리케이션·Projection builder·trigger·index/constraint 이름을 동시에 전환한다. 데이터 복사나 재작성은 하지 않는다.
 - 코드·API·Projection builder·성과 계산·알림·UI의 부분 체결 상태와 기존 FK 이름을 함께 제거해야 한다. 현재 UI에 부분 체결 문구가 남아 있으므로 DB만 먼저 배포하면 안 된다.
 
 ## 남아 있는 위험과 배포 차단 사항

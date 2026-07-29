@@ -268,15 +268,31 @@ Enum backtest.run_status {
   UNAVAILABLE
 }
 
+Enum performance.snapshot_type {
+  ET_DAILY_CLOSE
+  ROOM_START
+  ROOM_END
+  BOT_STOP
+  LEADERBOARD_CUTOFF
+}
+
 Enum competition.room_status {
   DRAFT
   RECRUITING
-  SUBMISSION
-  WAITING
   EVALUATING
   ENDED
   CANCELLED
   INVALIDATED
+}
+
+Enum competition.competition_type {
+  LIVE_PAPER
+  BACKTEST
+}
+
+Enum competition.organizer_type {
+  PLATFORM
+  USER
 }
 
 Enum competition.room_access_type {
@@ -285,11 +301,28 @@ Enum competition.room_access_type {
 }
 
 Enum competition.participation_status {
-  WAITING
+  REGISTERED
   ACTIVE
+  EVALUATING
   WITHDRAWN
   EXPELLED
   COMPLETED
+  EVALUATION_FAILED
+}
+
+Enum competition.leaderboard_status {
+  PUBLISHED
+  FINAL
+}
+
+Enum competition.invitation_credential_type {
+  LINK
+  CODE
+}
+
+Enum competition.post_room_action {
+  CONTINUE_PRIVATE
+  STOP
 }
 
 Enum operations.work_status {
@@ -1356,7 +1389,8 @@ Table bot.bots {
   execution_block_reason_code varchar(80)
   execution_block_event_id uuid
   created_at timestamptz [not null, default: `now()`]
-  started_at timestamptz [not null]
+  execution_eligible_from timestamptz [not null]
+  started_at timestamptz
   stop_requested_at timestamptz
   stopped_at timestamptz
   stop_reason_code varchar(80)
@@ -1368,17 +1402,19 @@ Table bot.bots {
   indexes {
     (owner_account_id, lifecycle_status, created_at)
     (lifecycle_status, execution_blocked_at, created_at)
+    (lifecycle_status, execution_eligible_from, created_at)
     (owner_account_id, deleted_at, archived_at, created_at)
   }
 
   checks {
     `execution_blocked_at IS NOT NULL OR (execution_block_reason_code IS NULL AND execution_block_event_id IS NULL)` [name: 'bot_block_fields_together']
+    `started_at IS NULL OR started_at >= execution_eligible_from` [name: 'bot_actual_start_after_eligibility']
   }
 
-  Note: '검증된 Strategy 당시 상태를 복사해 생성한 완전 독립 실행 Bot. 원본 Strategy 식별자·출처·계보·버전 관계를 저장하지 않아 어느 Strategy에서 출시됐는지 조회할 수 없다. 출시된 실행 의미와 mode는 불변이고 Bot 이름, 파티션·Flow 설명과 좌표 및 Flow 내부 layout 같은 presentation만 수정 가능하다. 상주 프로세스·컨테이너·스레드가 아니며 상시 실행은 공용 서비스뿐. RUNNING은 새 트리거 평가 대상, STOPPING은 신규 평가·주문 등록만 막고 기존 미체결 주문은 취소하지 않은 채 체결·만료·거절 등 결과와 예약 해제·정산을 마무리하며, STOPPED는 영구다. execution_blocked_at은 봇별 nullable 실행 차단 Projection이며 차단 중에도 기존 미체결 주문을 취소하지 않고 그 주문의 이후 결과, 예약 해제, 원장 기록과 정산은 계속 반영한다. 파티션 1개 이상과 각 파티션의 완성 Flow 1개 이상을 검증한 뒤 Bot 스냅샷 계층을 원자적으로 생성한다. archived_at은 STOPPED Bot의 가역 숨김이고 deleted_at은 정산 완료 뒤의 논리 삭제다. 공식 주문·체결·원장·이벤트·증적은 연쇄 삭제하지 않는다.'
+  Note: '검증된 Strategy 당시 상태를 복사해 생성한 완전 독립 실행 Bot. 원본 Strategy 식별자·출처·계보·버전 관계를 저장하지 않아 어느 Strategy에서 출시됐는지 조회할 수 없다. 출시된 실행 의미와 mode는 불변이고 Bot 이름, 파티션·Flow 설명과 좌표 및 Flow 내부 layout 같은 presentation만 수정 가능하다. RUNNING이어도 now()가 execution_eligible_from보다 이르면 평가하지 않으며 별도 waiting·scheduled 상태는 만들지 않는다. 개인 Bot은 즉시, 평가 전에 생성된 대회 Bot은 대회 평가 시작부터 실행 가능하고, 이미 진행 중인 공식 BACKTEST 대회 Bot은 입력 잠금 완료 뒤 Competition 백테스트 실행기로만 보낸다. Competition 관계가 BACKTEST인 Bot은 라이브 Trigger Router가 절대 평가하지 않는다. started_at은 실제 첫 실행이 시작될 때만 설정한다. STOPPING은 신규 평가·신규 주문 등록만 막고 기존 미체결 주문을 취소하지 않은 채 결과·예약 해제·정산을 마무리하며 STOPPED는 영구다. 파티션 1개 이상과 각 파티션의 완성 Flow 1개 이상을 검증한 뒤 Bot 스냅샷 계층을 원자적으로 생성한다. archived_at은 STOPPED Bot의 가역 숨김이고 deleted_at은 정산 완료 뒤의 논리 삭제다.'
 
-  Records (id, owner_account_id, mode, name, lifecycle_status, lifecycle_changed_at, execution_blocked_at, execution_block_reason_code, execution_block_event_id, created_at, started_at, stop_requested_at, stopped_at, stop_reason_code, archived_at, deleted_at, edit_sequence, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Review Example', 'RUNNING', '2026-07-27T09:00:00+09:00', null, null, null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, 'REVIEW_EXAMPLE', null, null, 1, '2026-07-27T09:00:00+09:00'
+  Records (id, owner_account_id, mode, name, lifecycle_status, lifecycle_changed_at, execution_blocked_at, execution_block_reason_code, execution_block_event_id, created_at, execution_eligible_from, started_at, stop_requested_at, stopped_at, stop_reason_code, archived_at, deleted_at, edit_sequence, updated_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Official Backtest Bot', 'RUNNING', '2026-07-28T10:00:00+09:00', null, null, null, '2026-07-28T10:00:00+09:00', '2026-07-28T10:00:00+09:00', '2026-07-28T10:00:01+09:00', null, null, null, null, null, 0, '2026-07-28T10:00:00+09:00'
   }
 }
 
@@ -1777,7 +1813,7 @@ Table trading.order_intent_batches {
   source_event_id uuid [not null]
   status varchar(30) [not null]
   conflict_policy_hash varchar(128) [not null]
-  allocation_rules_version varchar(40) [not null]
+  composition_rules_version varchar(40) [not null]
   input_state_hash varchar(128) [not null]
   result_hash varchar(128)
   finalized_at timestamptz
@@ -1795,7 +1831,7 @@ Table trading.order_intent_batches {
 
   Note: '한 Bot Event에서 정확히 한 파티션의 Flow 의도만 수집하는 거래 격리 경계. 충돌 처리·상계·통합과 자원 잠금은 (bot_id, partition_id) 안에서만 수행한다. 복합 멱등 키가 같은 이벤트의 파티션별 at-least-once 재전달을 안전하게 흡수한다.'
 
-  Records (id, bot_id, partition_id, source_event_id, status, conflict_policy_hash, allocation_rules_version, input_state_hash, result_hash, finalized_at) {
+  Records (id, bot_id, partition_id, source_event_id, status, conflict_policy_hash, composition_rules_version, input_state_hash, result_hash, finalized_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'FINALIZED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '2026-07-28T09:00:00+09:00'
   }
 }
@@ -1918,7 +1954,7 @@ Table trading.orders {
     `(replaces_order_id IS NULL) = (replacement_reason_code IS NULL)` [name: 'order_replacement_reason_consistent']
   }
 
-  Note: '파티션 내부 상계 후 제출되는 불변 파티션 전용 가상 주문 계약. 요청 수량은 접수 뒤 변경하지 않는다. CANCELLED는 사용자·봇 중지·운영자 조작으로 만들 수 없고, 이미 OPEN인 주문에 자동 replacement 정책을 적용할 때 원본을 철회하는 시스템 전이로만 사용한다. 더 작은 소수점 수량이 필요하면 원본 예약을 전액 해제하고 같은 파티션의 새 reservation·allocation을 가진 replacement Order를 만든다. 현재 상태는 추가 전용 order_events와 projection에서만 얻는다.'
+  Note: '파티션 내부 상계 후 제출되는 불변 파티션 전용 가상 주문 계약. 요청 수량은 접수 뒤 변경하지 않는다. CANCELLED는 사용자·봇 중지·운영자 조작으로 만들 수 없고, 이미 OPEN인 주문에 자동 replacement 정책을 적용할 때 원본을 철회하는 시스템 전이로만 사용한다. 더 작은 소수점 수량이 필요하면 원본 예약을 전액 해제하고 같은 파티션의 새 order component·reservation을 가진 replacement Order를 만든다. 현재 상태는 추가 전용 order_events와 projection에서만 얻는다.'
 
   Records (id, bot_id, partition_id, instrument_id, replaces_order_id, replacement_reason_code, order_key, side, order_type, time_in_force, requested_quantity, broker_rules_version, precision_rules_version, slippage_rate_bps, fee_policy_id, accepted_event_id, accepted_at, contract_hash) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, null, 'P1:AAPL:BUY:ORDER:1', 'BUY', 'MARKET', 'DAY', 3.12110526, '1.0.0', '1.0.0', 5, '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '2026-07-28T09:00:00+09:00', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
@@ -1992,33 +2028,33 @@ Table trading.order_group_events {
   Note: '그룹의 활성화·상호 취소·완료·실패를 추가 전용으로 보존한다. order_groups.status는 이 이벤트의 현재 Projection이다.'
 }
 
-Table trading.order_intent_allocations {
+Table trading.order_components {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
   partition_id uuid [not null]
   order_id uuid [not null]
   intent_id uuid [not null]
-  allocated_quantity numeric(28,8) [not null]
-  allocated_notional numeric(24,8)
-  allocation_rank int [not null]
-  allocation_rules_version varchar(40) [not null]
+  component_quantity numeric(28,8) [not null]
+  component_notional numeric(24,8)
+  component_sequence int [not null]
+  composition_rules_version varchar(40) [not null]
 
   indexes {
     (bot_id, partition_id, id) [unique]
     (order_id, intent_id) [unique]
-    (order_id, allocation_rank) [unique]
+    (order_id, component_sequence) [unique]
     (intent_id)
   }
 
   checks {
-    `allocated_quantity > 0` [name: 'order_intent_allocation_quantity_positive']
-    `allocated_notional IS NULL OR allocated_notional > 0` [name: 'order_intent_allocation_notional_positive']
-    `allocation_rank > 0` [name: 'order_intent_allocation_rank_positive']
+    `component_quantity > 0` [name: 'order_component_quantity_positive']
+    `component_notional IS NULL OR component_notional > 0` [name: 'order_component_notional_positive']
+    `component_sequence > 0` [name: 'order_component_sequence_positive']
   }
 
-  Note: '하나의 파티션 전용 Order가 같은 파티션 내부의 각 Flow Intent를 몇 주씩 담당하는지 고정한 불변 관계. 이름을 order_flow_allocations로 바꾸지 않는 이유는 Flow뿐 아니라 정확한 Intent 결정·position_effect·규칙 버전까지 가리키기 때문이다. 합계 불변식은 PostgreSQL 지연 제약 트리거로 강제한다.'
+  Note: '하나의 파티션 전용 Order를 구성하는 Flow별 주문 의도 내역. 각 행은 어떤 Intent가 최종 Order 수량 중 얼마를 구성하는지 고정하며, Order의 component_quantity 합계는 requested_quantity와 같아야 한다. 정확한 Intent·position_effect·구성 규칙 버전을 보존하고 합계 불변식은 PostgreSQL 지연 제약 트리거로 강제한다.'
 
-  Records (id, bot_id, partition_id, order_id, intent_id, allocated_quantity, allocation_rank, allocation_rules_version) {
+  Records (id, bot_id, partition_id, order_id, intent_id, component_quantity, component_sequence, composition_rules_version) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 3.12110526, 1, '1.0.0'
   }
 }
@@ -2093,7 +2129,7 @@ Table trading.resource_reservations {
   }
 }
 
-Table trading.reservation_lot_allocations {
+Table trading.position_lot_reservations {
   bot_id uuid [not null]
   partition_id uuid [not null]
   flow_id uuid [not null]
@@ -2107,33 +2143,33 @@ Table trading.reservation_lot_allocations {
   }
 
   checks {
-    `reserved_quantity > 0` [name: 'reservation_lot_quantity_positive']
+    `reserved_quantity > 0` [name: 'position_lot_reservation_quantity_positive']
   }
 
   Note: 'POSITION_QUANTITY 예약이 같은 Bot·Partition·Flow의 FIFO lot 중 어떤 잔량을 잠갔는지 고정한다. 복합 FK가 다른 파티션 또는 다른 Flow의 lot 매도를 차단하고, 활성 예약 합계는 지연 트리거가 현재 잔량 이하로 제한한다.'
 }
 
-Table trading.order_reservation_allocations {
+Table trading.order_component_reservations {
   bot_id uuid [not null]
   partition_id uuid [not null]
   reservation_id uuid [pk, not null]
-  order_intent_allocation_id uuid [not null]
-  allocated_amount numeric(24,8)
-  allocated_quantity numeric(28,8)
+  order_component_id uuid [not null]
+  reserved_amount numeric(24,8)
+  reserved_quantity numeric(28,8)
 
   indexes {
-    (order_intent_allocation_id)
+    (order_component_id)
   }
 
   checks {
-    `(allocated_amount IS NOT NULL) <> (allocated_quantity IS NOT NULL)` [name: 'order_reservation_exactly_one_measure']
-    `allocated_amount IS NULL OR allocated_amount > 0` [name: 'order_reservation_amount_positive']
-    `allocated_quantity IS NULL OR allocated_quantity > 0` [name: 'order_reservation_quantity_positive']
+    `(reserved_amount IS NOT NULL) <> (reserved_quantity IS NOT NULL)` [name: 'order_component_reservation_exactly_one_measure']
+    `reserved_amount IS NULL OR reserved_amount > 0` [name: 'order_component_reservation_amount_positive']
+    `reserved_quantity IS NULL OR reserved_quantity > 0` [name: 'order_component_reservation_quantity_positive']
   }
 
-  Note: '최종 파티션 전용 Order에 사용할 예약을 정확한 주문-의도 배분에 연결한다. 부분 체결과 예약 재사용을 지원하지 않으므로 한 reservation은 한 allocation에만 연결되며 replacement Order는 새 예약을 만든다.'
+  Note: '최종 Order의 각 구성 내역을 실제 현금·Position 수량 예약과 연결한다. 부분 체결과 예약 재사용을 지원하지 않으므로 하나의 resource reservation은 하나의 order component만 뒷받침하며 replacement Order는 새 예약을 만든다.'
 
-  Records (bot_id, partition_id, reservation_id, order_intent_allocation_id, allocated_amount) {
+  Records (bot_id, partition_id, reservation_id, order_component_id, reserved_amount) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 312.92240353
   }
 }
@@ -2394,7 +2430,7 @@ Table trading.ledger_entries {
   partition_id uuid
   transaction_id uuid [not null]
   ledger_account_id uuid [not null]
-  order_intent_allocation_id uuid
+  order_component_id uuid
   entry_sequence int [not null]
   direction trading.ledger_direction [not null]
   amount numeric(24,8) [not null]
@@ -2404,17 +2440,17 @@ Table trading.ledger_entries {
   indexes {
     (transaction_id, entry_sequence) [unique]
     (bot_id, partition_id, ledger_account_id, transaction_id)
-    (order_intent_allocation_id, transaction_id)
+    (order_component_id, transaction_id)
   }
 
   checks {
     `entry_sequence > 0` [name: 'ledger_entry_sequence_positive']
     `amount > 0` [name: 'ledger_entry_amount_positive']
     `quantity IS NULL OR quantity <> 0` [name: 'ledger_entry_quantity_nonzero']
-    `order_intent_allocation_id IS NULL OR partition_id IS NOT NULL` [name: 'allocated_ledger_entry_requires_partition']
+    `order_component_id IS NULL OR partition_id IS NOT NULL` [name: 'order_component_ledger_entry_requires_partition']
   }
 
-  Note: '추가 전용 차변·대변 분개. Fill 거래의 Flow별 귀속은 order_intent_allocation_id로 직접 이어지고 Flow 자체는 allocation의 Intent에서 유도한다. 지연 트리거가 Fill 없는 체결 분개, 파티션 불일치, 배분 금액·수수료 합계 불일치와 불균형 분개를 커밋 시 차단한다.'
+  Note: '추가 전용 차변·대변 분개. Fill 거래의 Flow별 귀속은 order_component_id로 직접 이어지고 Flow 자체는 component의 Intent에서 유도한다. 지연 트리거가 Fill 없는 체결 분개, 파티션 불일치, 구성별 금액·수수료 합계 불일치와 불균형 분개를 커밋 시 차단한다.'
 }
 
 Table trading.position_lots {
@@ -2423,7 +2459,7 @@ Table trading.position_lots {
   partition_id uuid [not null]
   flow_id uuid [not null]
   instrument_id uuid [not null]
-  opening_order_intent_allocation_id uuid [not null, unique]
+  opening_order_component_id uuid [not null, unique]
   lot_side trading.lot_side [not null]
   opened_quantity numeric(28,8) [not null]
   unit_cost numeric(24,8) [not null]
@@ -2443,7 +2479,7 @@ Table trading.position_lots {
     `opened_cost_basis_amount >= 0` [name: 'position_lot_opened_basis_nonnegative']
   }
 
-  Note: '전량 Fill 뒤 각 주문-의도 배분으로 생성되는 불변 Flow별 FIFO 원가 묶음. fill_allocations 없이 opening_order_intent_allocation_id에서 Order와 유일 정상 Fill을 추적한다. 지연 트리거가 해당 Fill 존재·동일 Partition·OPEN position_effect를 강제한다.'
+  Note: '전량 Fill 뒤 각 Order 구성 내역으로 생성되는 불변 Flow별 FIFO 원가 묶음. 별도 Fill 배분 테이블 없이 opening_order_component_id에서 Order와 유일 정상 Fill을 추적한다. 지연 트리거가 해당 Fill 존재·동일 Partition·OPEN position_effect를 강제한다.'
 }
 
 Table trading.lot_movements {
@@ -2452,7 +2488,7 @@ Table trading.lot_movements {
   partition_id uuid [not null]
   position_lot_id uuid [not null]
   bot_event_id uuid [not null]
-  source_order_intent_allocation_id uuid
+  source_order_component_id uuid
   source_fill_adjustment_id uuid
   corporate_action_id uuid
   reverses_movement_id uuid
@@ -2467,7 +2503,7 @@ Table trading.lot_movements {
     (bot_id, partition_id, id) [unique]
     (position_lot_id, id) [unique]
     (position_lot_id, bot_event_id) [unique]
-    (source_order_intent_allocation_id, position_lot_id)
+    (source_order_component_id, position_lot_id)
     (source_fill_adjustment_id, position_lot_id)
   }
 
@@ -2475,13 +2511,13 @@ Table trading.lot_movements {
     `quantity_delta <> 0` [name: 'lot_movement_quantity_nonzero']
     `remaining_after >= 0` [name: 'lot_movement_remaining_nonnegative']
     `cost_basis_after >= 0` [name: 'lot_movement_basis_nonnegative']
-    `(CASE WHEN source_order_intent_allocation_id IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN source_fill_adjustment_id IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN corporate_action_id IS NOT NULL THEN 1 ELSE 0 END) <= 1` [name: 'lot_movement_source_not_ambiguous']
-    `movement_type NOT IN ('OPEN', 'CLOSE') OR source_order_intent_allocation_id IS NOT NULL` [name: 'fill_movement_source_required']
+    `(CASE WHEN source_order_component_id IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN source_fill_adjustment_id IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN corporate_action_id IS NOT NULL THEN 1 ELSE 0 END) <= 1` [name: 'lot_movement_source_not_ambiguous']
+    `movement_type NOT IN ('OPEN', 'CLOSE') OR source_order_component_id IS NOT NULL` [name: 'fill_movement_source_required']
     `movement_type <> 'CORPORATE_ACTION_ADJUSTMENT' OR corporate_action_id IS NOT NULL` [name: 'corporate_movement_source_required']
     `movement_type <> 'REVERSAL' OR (reverses_movement_id IS NOT NULL AND source_fill_adjustment_id IS NOT NULL)` [name: 'reversal_movement_source_required']
   }
 
-  Note: '개별 로트의 OPEN·FIFO CLOSE·기업행사·정정·반전을 추가 전용으로 보존한다. 정상 거래 이동은 정확한 order_intent_allocation을 가리키며 그 Order의 유일 Fill을 통해 체결을 증명한다. 다른 Partition·Flow lot 소비와 Fill 없는 이동은 복합 FK와 지연 트리거가 차단한다.'
+  Note: '개별 로트의 OPEN·FIFO CLOSE·기업행사·정정·반전을 추가 전용으로 보존한다. 정상 거래 이동은 정확한 order component를 가리키며 그 Order의 유일 Fill을 통해 체결을 증명한다. 다른 Partition·Flow lot 소비와 Fill 없는 이동은 복합 FK와 지연 트리거가 차단한다.'
 }
 
 Table trading.position_lot_projections {
@@ -2710,12 +2746,12 @@ Table trading.partition_budget_projections {
 }
 
 // -----------------------------------------------------------------------------
-// backtest: one official whole-bot run, independent from live runtime.
+// backtest: repeatable whole-bot runs, independent from live runtime.
 // -----------------------------------------------------------------------------
 
 Table backtest.runs {
   id uuid [pk, default: `gen_random_uuid()`]
-  bot_id uuid [not null, unique]
+  bot_id uuid [not null]
   owner_account_id uuid [not null]
   configuration_hash varchar(128) [not null]
   status backtest.run_status [not null]
@@ -2736,14 +2772,18 @@ Table backtest.runs {
   result_hash varchar(128)
 
   indexes {
+    (bot_id, queued_at)
     (status, queued_at)
     (owner_account_id, queued_at)
   }
 
-  Note: '검증된 불변 봇 집합체와 원자적으로 생성. 백테스트 지연·실패는 라이브 봇 생명주기와 원장을 절대 바꾸지 않는다.'
+  Note: '봇 생성 트랜잭션에서 최초 자동 백테스트 한 건을 원자적으로 생성하고, 이후 같은 봇에 사용자가 선택한 기간 또는 공식 BACKTEST 대회의 잠긴 기간마다 실행을 추가할 수 있다. 대회 실행 소유권은 backtest.runs에 nullable competition 컬럼을 섞지 않고 competition.backtest_period_runs가 관리한다. 각 실행은 configuration_hash, 평가 기간, 초기 자금과 정책 버전을 독립적으로 고정하며 idempotency_key는 동일 요청의 중복 생성만 막는다. 백테스트 지연·실패는 라이브 봇 생명주기와 원장을 절대 바꾸지 않는다.'
 
   Records (id, bot_id, owner_account_id, configuration_hash, status, evaluation_start, evaluation_end, initial_cash_amount, market_rules_version, accounting_rules_version, precision_rules_version, fee_policy_id, slippage_rate_bps, buying_power_buffer_policy_id, idempotency_key, queued_at, started_at, completed_at, failure_code, result_hash) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'RUNNING', '2026-07-27', '2026-07-27', 100000.00000000, '1.0.0', '1.0.0', '1.0.0', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'COMPLETED', '2024-01-01', '2024-12-31', 100000.00000000, '1.0.0', '1.0.0', '1.0.0', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', 'BOT_CREATE:00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:01+09:00', '2026-07-27T09:05:00+09:00', null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'RUNNING', '2023-01-01', '2023-12-31', 100000.00000000, '1.0.0', '1.0.0', '1.0.0', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', 'USER_BACKTEST:00000000-0000-4000-8000-000000000002', '2026-07-28T09:00:00+09:00', '2026-07-28T09:00:01+09:00', null, null, null
+    '00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'COMPLETED', '2020-02-01', '2020-04-30', 100000.00000000, '1.0.0', '1.0.0', '1.0.0', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', 'COMPETITION_PERIOD:00000000-0000-4000-8000-000000000003', '2026-07-28T10:00:01+09:00', '2026-07-28T10:00:02+09:00', '2026-07-28T10:04:59+09:00', null, 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+    '00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'COMPLETED', '2022-01-01', '2022-06-30', 100000.00000000, '1.0.0', '1.0.0', '1.0.0', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', 'COMPETITION_PERIOD:00000000-0000-4000-8000-000000000004', '2026-07-28T10:00:01+09:00', '2026-07-28T10:00:02+09:00', '2026-07-28T10:09:59+09:00', null, 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
   }
 }
 
@@ -2764,7 +2804,7 @@ Table backtest.run_attempts {
   Note: '백테스트 실행 시도 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, run_id, attempt_number, worker_execution_key, status, started_at, completed_at, failure_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'SUCCEEDED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'BACKTEST_RUN_1_ATTEMPT_1', 'SUCCEEDED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:05:00+09:00', null
   }
 }
 
@@ -2781,7 +2821,7 @@ Table backtest.input_datasets {
   Note: '백테스트 입력 데이터셋 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (input_bundle_id, dataset_manifest_id, purpose_code, locked_dataset_hash) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'MARKET_INPUT', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   }
 }
 
@@ -2835,7 +2875,7 @@ Table backtest.monthly_judgment_summaries {
   Note: '월별 판정 요약 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, run_id, et_year_month, evaluation_count, active_branch_count, trade_event_count, data_gap_count, triggered_count, rejected_count, summary_document, summary_hash) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'review-example', 1, 1, 1, 1, 1, 1, '{"etYearMonth":"2024-03","evaluations":8190,"orderIntents":112,"skippedTriggers":3}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '2024-03', 8190, 412, 112, 3, 112, 37, '{"orderIntents":112,"skippedTriggers":3}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   }
 }
 
@@ -2853,7 +2893,7 @@ Table backtest.failure_condition_counts {
   Note: '실패 조건 집계 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, monthly_summary_id, flow_or_branch_key, first_failure_condition_key, occurrence_count) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 1
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'FLOW_MOMENTUM_ENTRY', 'PRICE_BELOW_THRESHOLD', 37
   }
 }
 
@@ -2898,7 +2938,7 @@ Table backtest.detail_manifests {
   Note: '백테스트 상세 Parquet 오브젝트는 명시적 UNCOMPRESSED이며 ET 월요일 주 경계를 넘지 않는다.'
 
   Records (id, run_id, object_id, record_type, week_start_date, period_start, period_end, part_number, row_count, schema_version, source_set_hash, supersedes_manifest_id, detail_hash, created_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 1, 1, '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ORDER_DECISIONS', '2026-07-27', '2026-07-27T09:30:00-04:00', '2026-07-31T16:00:00-04:00', 1, 18420, '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-31T16:05:00-04:00'
   }
 }
 
@@ -2908,6 +2948,10 @@ Table backtest.detail_manifests {
 
 Table performance.bot_current_projections {
   bot_id uuid [pk]
+  equity_amount numeric(24,8) [not null]
+  total_return_pct numeric(18,8) [not null]
+  max_drawdown_pct numeric(18,8) [not null]
+  sharpe_ratio numeric(18,8)
   metrics_document jsonb [not null]
   ledger_state_hash varchar(128) [not null]
   position_state_hash varchar(128) [not null]
@@ -2916,19 +2960,33 @@ Table performance.bot_current_projections {
   projection_hash varchar(128) [not null]
   updated_at timestamptz [not null]
 
-  Note: '봇 현재 성과 Projection 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  indexes {
+    (total_return_pct, bot_id)
+    (max_drawdown_pct, bot_id)
+    (sharpe_ratio, bot_id)
+  }
 
-  Records (bot_id, metrics_document, ledger_state_hash, position_state_hash, calculation_rules_version, last_event_sequence, projection_hash, updated_at) {
-    '00000000-0000-4000-8000-000000000001', '{"totalReturnPct":4.18,"maxDrawdownPct":-1.87,"sharpe":1.12,"realizedPnl":"418.32"}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  checks {
+    `last_event_sequence >= 0` [name: 'performance_current_event_sequence_nonnegative']
+  }
+
+  Note: '봇별 최신 성과를 저장하는 mutable Projection. equity_amount, total_return_pct, max_drawdown_pct, sharpe_ratio는 정렬·필터용 핵심 지표이고 metrics_document는 중복되지 않는 확장 지표만 담는다. 갱신은 PostgreSQL 조건부 UPSERT 또는 전용 함수로 기존 last_event_sequence보다 큰 사건만 허용하여 늦게 끝난 과거 계산이 최신 상태를 덮지 못하게 한다. 직접 UPDATE 권한은 애플리케이션 역할에서 제거한다. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+
+  Records (bot_id, equity_amount, total_return_pct, max_drawdown_pct, sharpe_ratio, metrics_document, ledger_state_hash, position_state_hash, calculation_rules_version, last_event_sequence, projection_hash, updated_at) {
+    '00000000-0000-4000-8000-000000000001', 104180.00000000, 4.18000000, -1.87000000, 1.12000000, '{"realizedPnl":"418.32"}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
   }
 }
 
 Table performance.bot_snapshots {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
-  snapshot_type varchar(40) [not null, note: '값은 ET_DAILY_CLOSE, ROOM_START, ROOM_END, BOT_STOP, LEADERBOARD_CUTOFF.']
+  snapshot_type performance.snapshot_type [not null]
   source_event_sequence bigint [not null]
   evaluated_at timestamptz [not null]
+  equity_amount numeric(24,8) [not null]
+  total_return_pct numeric(18,8) [not null]
+  max_drawdown_pct numeric(18,8) [not null]
+  sharpe_ratio numeric(18,8)
   metrics_document jsonb [not null]
   input_hash varchar(128) [not null]
   calculation_rules_version varchar(80) [not null]
@@ -2940,10 +2998,14 @@ Table performance.bot_snapshots {
     (bot_id, evaluated_at)
   }
 
-  Note: '불변 공식 경계 스냅샷. NoSQL 리더보드·대시보드 문서는 절대 채점 증거가 아니다.'
+  checks {
+    `source_event_sequence >= 0` [name: 'performance_snapshot_event_sequence_nonnegative']
+  }
 
-  Records (id, bot_id, snapshot_type, source_event_sequence, evaluated_at, metrics_document, input_hash, calculation_rules_version, snapshot_hash, created_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 1, '2026-07-27T09:00:00+09:00', '{"equity":"104128.70","totalReturnPct":4.13,"maxDrawdownPct":-2.05,"sharpe":1.08}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  Note: '불변 공식 경계 스냅샷. 핵심 지표는 타입 컬럼에 고정하고 metrics_document에는 중복되지 않는 확장 지표만 둔다. 생성 후 UPDATE·DELETE를 금지하고 정정은 새로운 스냅샷으로 남긴다. NoSQL 리더보드·대시보드 문서는 절대 채점 증거가 아니다.'
+
+  Records (id, bot_id, snapshot_type, source_event_sequence, evaluated_at, equity_amount, total_return_pct, max_drawdown_pct, sharpe_ratio, metrics_document, input_hash, calculation_rules_version, snapshot_hash, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ET_DAILY_CLOSE', 1, '2026-07-27T16:00:00-04:00', 104128.70000000, 4.13000000, -2.05000000, 1.08000000, '{"realizedPnl":"4128.70"}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T16:00:01-04:00'
   }
 }
 
@@ -2956,17 +3018,35 @@ Table performance.series_manifests {
   period_start timestamptz [not null]
   period_end timestamptz [not null]
   part_number int [not null]
+  revision_number int [not null, default: 1]
+  row_count bigint [not null]
+  schema_version varchar(40) [not null]
   calculation_rules_version varchar(80) [not null]
+  supersedes_manifest_id uuid
   series_hash varchar(128) [not null]
+  created_at timestamptz [not null, default: `now()`]
+  available_at timestamptz [not null]
 
   indexes {
-    (bot_id, series_type, week_start_date, part_number) [unique]
+    (bot_id, series_type, week_start_date, part_number, revision_number) [unique]
+    (bot_id, series_type, week_start_date, part_number)
+    (object_id) [unique]
+    (supersedes_manifest_id) [unique]
   }
 
-  Note: '성과 시계열 매니페스트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  checks {
+    `period_end > period_start` [name: 'performance_series_period_order']
+    `part_number >= 1` [name: 'performance_series_part_number_positive']
+    `revision_number >= 1` [name: 'performance_series_revision_number_positive']
+    `row_count >= 0` [name: 'performance_series_row_count_nonnegative']
+    `extract(isodow from week_start_date) = 1` [name: 'performance_series_week_starts_monday']
+    `available_at >= created_at` [name: 'performance_series_availability_order']
+  }
 
-  Records (id, bot_id, object_id, series_type, week_start_date, period_start, period_end, part_number, calculation_rules_version, series_hash) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', 1, '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  Note: '주 단위 성과 시계열 Parquet 객체의 PostgreSQL 매니페스트. 실제 시계열은 S3 storage.objects가 소유하고 이 행은 기간, 행 수, 스키마·계산 버전, 해시와 교체 계보를 검증한다. 객체 업로드와 해시 검증이 모두 끝난 뒤 available_at을 포함한 완성 행을 한 번만 삽입한다. ET 월요일 주 경계를 넘지 않는지는 PostgreSQL migration trigger로 검증한다. 기존 행을 덮어쓰지 않고 수정 파일은 같은 논리 파트의 revision_number를 증가시킨 새 행으로 추가하며 supersedes_manifest_id로 직전 행을 가리킨다. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+
+  Records (id, bot_id, object_id, series_type, week_start_date, period_start, period_end, part_number, revision_number, row_count, schema_version, calculation_rules_version, supersedes_manifest_id, series_hash, created_at, available_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'EQUITY_CURVE', '2026-07-27', '2026-07-27T09:30:00-04:00', '2026-07-31T16:00:00-04:00', 1, 1, 1950, '1.0.0', '1.0.0', null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-31T16:05:00-04:00', '2026-07-31T16:05:10-04:00'
   }
 }
 
@@ -2990,13 +3070,16 @@ Table competition.scoring_template_versions {
   Note: '채점 템플릿 버전 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, template_code, version, rules_document, rules_hash, published_at, retired_at) {
-    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1.0.0', '{"metric":"COMPOSITE","weights":{"return":0.4,"sharpe":0.3,"maxDrawdown":0.3}}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
+    '00000000-0000-4000-8000-000000000001', 'OFFICIAL_BACKTEST_COMPOSITE', '1.0.0', '{"formula":"0.4*weightedReturn+0.2*weightedSharpe-0.2*abs(weightedMaxDrawdown)-0.2*abs(worstPeriodMaxDrawdown)","calculationRulesVersion":"1.0.0"}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', null
   }
 }
 
 Table competition.rooms {
   id uuid [pk, default: `gen_random_uuid()`]
-  creator_account_id uuid [not null]
+  competition_type competition.competition_type [not null]
+  organizer_type competition.organizer_type [not null]
+  creator_account_id uuid
+  created_by_operator_id uuid
   name varchar(120) [not null]
   access_type competition.room_access_type [not null]
   status competition.room_status [not null]
@@ -3006,13 +3089,20 @@ Table competition.rooms {
   invalidation_reason_code varchar(80)
 
   indexes {
-    (status, created_at)
+    (competition_type, organizer_type, status, created_at)
+    (creator_account_id, created_at)
   }
 
-  Note: '대회 방 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  checks {
+    `(organizer_type = 'USER' AND creator_account_id IS NOT NULL AND created_by_operator_id IS NULL) OR (organizer_type = 'PLATFORM' AND creator_account_id IS NULL AND created_by_operator_id IS NOT NULL)` [name: 'competition_room_organizer_actor']
+    `competition_type <> 'BACKTEST' OR organizer_type = 'PLATFORM'` [name: 'competition_backtest_platform_only']
+  }
 
-  Records (id, creator_account_id, name, access_type, status, created_at, ended_at, invalidated_at, invalidation_reason_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'Review Example', 'PUBLIC', 'RECRUITING', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE'
+  Note: '라이브와 백테스트 대회의 공통 루트. BACKTEST는 플랫폼 공식 대회만 허용한다. 플랫폼 대회는 고객 계정을 소유자로 가장하지 않고 실제 개설 운영자를 감사 FK로 남긴다. status는 append-only room_events에서 재구축 가능한 현재 Projection이다.'
+
+  Records (id, competition_type, organizer_type, creator_account_id, created_by_operator_id, name, access_type, status, created_at, ended_at, invalidated_at, invalidation_reason_code) {
+    '00000000-0000-4000-8000-000000000001', 'BACKTEST', 'PLATFORM', null, '00000000-0000-4000-8000-000000000001', 'Official Multi-period Backtest', 'PUBLIC', 'EVALUATING', '2026-07-27T09:00:00+09:00', null, null, null
+    '00000000-0000-4000-8000-000000000002', 'LIVE_PAPER', 'USER', '00000000-0000-4000-8000-000000000001', null, 'User Live Paper Room', 'PUBLIC', 'RECRUITING', '2026-07-27T09:00:00+09:00', null, null, null
   }
 }
 
@@ -3021,12 +3111,8 @@ Table competition.room_rules {
   scoring_template_version_id uuid [not null]
   initial_cash_amount numeric(24,8) [not null]
   currency_code char(3) [not null, default: 'USD']
-  participant_limit int [not null]
+  bot_participation_limit int [not null]
   per_account_bot_limit int [not null]
-  stopped_bot_slot_policy varchar(30) [not null]
-  minimum_operation_seconds bigint [not null]
-  minimum_fill_count int [not null]
-  late_submission_policy varchar(40) [not null]
   eligibility_document jsonb [not null]
   market_scope_document jsonb [not null]
   scoring_parameters jsonb [not null]
@@ -3037,10 +3123,36 @@ Table competition.room_rules {
   rules_hash varchar(128) [not null]
   locked_at timestamptz [not null]
 
-  Note: '핵심 자격·정원 필드는 제약과 입장 잠금을 위해 관계형으로 유지하고, 확장 기준은 버전 관리 JSONB에 유지.'
+  checks {
+    `initial_cash_amount > 0` [name: 'competition_initial_cash_positive']
+    `bot_participation_limit > 0` [name: 'competition_bot_participation_limit_positive']
+    `per_account_bot_limit > 0 AND per_account_bot_limit <= bot_participation_limit` [name: 'competition_account_bot_limit_valid']
+    `slippage_rate_bps = 5` [name: 'competition_fixed_slippage_five_bps']
+  }
 
-  Records (room_id, scoring_template_version_id, initial_cash_amount, currency_code, participant_limit, per_account_bot_limit, stopped_bot_slot_policy, minimum_operation_seconds, minimum_fill_count, late_submission_policy, eligibility_document, market_scope_document, scoring_parameters, fee_policy_id, slippage_rate_bps, buying_power_buffer_policy_id, precision_rules_version, rules_hash, locked_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', 1, 1, 'REVIEW_EXAMPLE', 1, 1, 'REVIEW_EXAMPLE', '{"minAccountAgeDays":7,"requireVerifiedEmail":true}', '{"assetTypes":["STOCK","ETF"],"exchanges":["XNAS","XNYS"]}', '{"weights":{"return":0.4,"sharpe":0.3,"maxDrawdown":0.3}}', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+  Note: '모든 대회가 공유하는 잠긴 공개 규칙. 초기 자금, 수수료·고정 슬리피지 정책 버전, 채점 공식과 계산 규칙은 모집·평가·종료 상태와 관계없이 공개한다. 진행 중 참가 허용은 late_submission 문자열이 아니라 Room 유형과 잠긴 일정으로 결정한다.'
+
+  Records (room_id, scoring_template_version_id, initial_cash_amount, currency_code, bot_participation_limit, per_account_bot_limit, eligibility_document, market_scope_document, scoring_parameters, fee_policy_id, slippage_rate_bps, buying_power_buffer_policy_id, precision_rules_version, rules_hash, locked_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', 100, 3, '{"minAccountAgeDays":7,"requireVerifiedEmail":true}', '{"assetTypes":["STOCK","ETF"],"exchanges":["XNAS","XNYS"]}', '{"metrics":{"weightedReturn":0.4,"weightedSharpe":0.2,"weightedMaxDrawdown":0.2,"worstPeriodMaxDrawdown":0.2}}', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', 100000.00000000, 'USD', 20, 2, '{"minAccountAgeDays":7,"requireVerifiedEmail":true}', '{"assetTypes":["STOCK","ETF"],"exchanges":["XNAS","XNYS"]}', '{"metric":"TOTAL_RETURN"}', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', '1.0.0', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table competition.live_room_rules {
+  room_id uuid [pk]
+  stopped_bot_slot_policy varchar(30) [not null]
+  minimum_operation_seconds bigint [not null]
+  minimum_fill_count int [not null]
+
+  checks {
+    `minimum_operation_seconds >= 0` [name: 'competition_live_minimum_operation_nonnegative']
+    `minimum_fill_count >= 0` [name: 'competition_live_minimum_fill_nonnegative']
+  }
+
+  Note: 'LIVE_PAPER 대회에만 존재하는 운영·채점 자격 규칙. room_id가 LIVE_PAPER인지 PostgreSQL deferred constraint trigger가 검증한다.'
+
+  Records (room_id, stopped_bot_slot_policy, minimum_operation_seconds, minimum_fill_count) {
+    '00000000-0000-4000-8000-000000000002', 'COUNT_UNTIL_END', 3600, 1
   }
 }
 
@@ -3061,7 +3173,7 @@ Table competition.room_events {
   Note: '추가 전용 생명주기 증적. rooms.status는 가드된 현재 Projection일 뿐이다.'
 
   Records (id, room_id, event_sequence, event_type, resulting_status, reason_code, occurred_at, payload_document) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'RECRUITING', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"trigger":"RECRUITMENT_OPENED","participantCount":0}'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'EVALUATION_STARTED', 'EVALUATING', null, '2026-07-27T09:00:00+09:00', '{"competitionType":"BACKTEST","participationStillOpen":true}'
   }
 }
 
@@ -3069,7 +3181,7 @@ Table competition.room_invitations {
   id uuid [pk, default: `gen_random_uuid()`]
   room_id uuid [not null]
   issued_by_account_id uuid [not null]
-  credential_type varchar(20) [not null, note: '값은 LINK 또는 CODE.']
+  credential_type competition.invitation_credential_type [not null]
   credential_digest varchar(128) [not null, unique]
   issued_at timestamptz [not null]
   expires_at timestamptz [not null]
@@ -3080,26 +3192,36 @@ Table competition.room_invitations {
     (room_id, revoked_at, expires_at)
   }
 
-  Note: '평문 초대 비밀값은 저장하지 않는다. 활성 초대는 제출 마감 또는 더 이른 방 종료 시점에 만료.'
+  Note: '평문 초대 비밀값은 저장하지 않는다. 활성 초대는 participation_closes_at 또는 더 이른 방 종료 시점에 만료. PLATFORM 공식 대회에서 초대를 사용할 수 있는지는 Room access policy가 결정한다.'
 
   Records (id, room_id, issued_by_account_id, credential_type, credential_digest, issued_at, expires_at, revoked_at, revocation_reason_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, 'REVIEW_EXAMPLE'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'CODE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-01T09:00:00+09:00', '2026-08-31T18:00:00+09:00', null, null
   }
 }
 
 Table competition.room_schedules {
   room_id uuid [pk]
   recruitment_opens_at timestamptz [not null]
-  submission_opens_at timestamptz [not null]
-  submission_closes_at timestamptz [not null]
+  participation_opens_at timestamptz [not null]
   evaluation_starts_at timestamptz [not null]
+  participation_closes_at timestamptz [not null]
   evaluation_ends_at timestamptz [not null]
+  finalization_deadline_at timestamptz [not null]
   timezone_name varchar(80) [not null]
 
-  Note: '마이그레이션 CHECK가 시간 순서를 강제. 모집 시작 시점부터 일정은 불변.'
+  checks {
+    `recruitment_opens_at <= participation_opens_at` [name: 'competition_recruitment_before_participation']
+    `participation_opens_at <= participation_closes_at` [name: 'competition_participation_window_order']
+    `evaluation_starts_at <= evaluation_ends_at` [name: 'competition_evaluation_window_order']
+    `participation_closes_at <= evaluation_ends_at` [name: 'competition_participation_before_evaluation_end']
+    `evaluation_ends_at <= finalization_deadline_at` [name: 'competition_finalization_after_evaluation']
+  }
 
-  Records (room_id, recruitment_opens_at, submission_opens_at, submission_closes_at, evaluation_starts_at, evaluation_ends_at, timezone_name) {
-    '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'America/New_York'
+  Note: '잠긴 공통 일정. participation_closes_at 미입력의 논리적 기본값은 evaluation_ends_at이며 PostgreSQL DEFAULT가 형제 컬럼을 참조할 수 없으므로 생성 함수가 복사한다. LIVE_PAPER는 participation_closes_at <= evaluation_starts_at, 공식 BACKTEST는 participation_closes_at <= evaluation_ends_at을 유형별 deferred trigger가 강제한다. 마감 전에 승인된 BACKTEST Participation은 evaluation_ends_at 뒤에도 finalization_deadline_at까지 완료한다.'
+
+  Records (room_id, recruitment_opens_at, participation_opens_at, evaluation_starts_at, participation_closes_at, evaluation_ends_at, finalization_deadline_at, timezone_name) {
+    '00000000-0000-4000-8000-000000000001', '2026-07-01T09:00:00+09:00', '2026-07-01T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-08-31T18:00:00+09:00', '2026-08-31T18:00:00+09:00', '2026-09-01T18:00:00+09:00', 'Asia/Seoul'
+    '00000000-0000-4000-8000-000000000002', '2026-07-01T09:00:00+09:00', '2026-07-01T09:00:00+09:00', '2026-08-01T09:30:00-04:00', '2026-08-01T09:30:00-04:00', '2026-08-31T16:00:00-04:00', '2026-09-01T16:00:00-04:00', 'America/New_York'
   }
 }
 
@@ -3111,25 +3233,35 @@ Table competition.participations {
   anonymous_alias varchar(80) [not null]
   status competition.participation_status [not null]
   joined_at timestamptz [not null]
+  evaluation_started_at timestamptz
+  evaluation_finished_at timestamptz
+  evaluation_failure_code varchar(80)
   withdrawn_at timestamptz
   withdrawal_reason_code varchar(80)
   expelled_at timestamptz
   expulsion_reason_code varchar(80)
-  completed_at timestamptz
-  post_room_action varchar(30) [note: '값은 CONTINUE_PRIVATE 또는 STOP. null이면 결정 마감 시 STOP 처리.']
+  post_room_action competition.post_room_action [note: 'null이면 결정 마감 시 STOP 처리.']
   action_recorded_at timestamptz
   action_locked_at timestamptz
 
   indexes {
-    (room_id, owner_account_id) [unique]
+    (room_id, owner_account_id, status)
     (room_id, anonymous_alias) [unique]
     (room_id, status)
   }
 
-  Note: '방 참가 봇은 빈 런타임 상태로 시작. 이미 실행 중인 개인 봇은 절대 연결하지 않는다.'
+  checks {
+    `evaluation_finished_at IS NULL OR evaluation_started_at IS NOT NULL` [name: 'competition_participation_evaluation_order']
+    `status <> 'EVALUATION_FAILED' OR (evaluation_finished_at IS NOT NULL AND evaluation_failure_code IS NOT NULL)` [name: 'competition_failed_participation_has_reason']
+    `status <> 'COMPLETED' OR (evaluation_finished_at IS NOT NULL AND evaluation_failure_code IS NULL)` [name: 'competition_completed_participation_has_result']
+    `status <> 'WITHDRAWN' OR withdrawn_at IS NOT NULL` [name: 'competition_withdrawn_has_time']
+    `status <> 'EXPELLED' OR expelled_at IS NOT NULL` [name: 'competition_expelled_has_time']
+  }
 
-  Records (id, room_id, bot_id, owner_account_id, anonymous_alias, status, joined_at, withdrawn_at, withdrawal_reason_code, expelled_at, expulsion_reason_code, completed_at, post_room_action, action_recorded_at, action_locked_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'review-example', 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', 'review-example', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  Note: '사용자가 기존 Bot을 제출하는 행이 아니다. Strategy 선택 요청이 성공하면 출처 관계 없는 독립 새 Bot, Bot 스냅샷 계층, Participation, 최초 사건과 Outbox를 한 트랜잭션으로 생성한다. 같은 계정은 per_account_bot_limit까지 여러 행을 가질 수 있다. LIVE_PAPER는 Room 평가 시작 뒤 신규 참가 금지. 공식 BACKTEST는 participation_closes_at 전까지 진행 중 참가 가능하지만 EVALUATING 중 승인된 행은 사용자 취소·교체 불가하고 성공·실패와 관계없이 슬롯을 계속 점유한다.'
+
+  Records (id, room_id, bot_id, owner_account_id, anonymous_alias, status, joined_at, evaluation_started_at, evaluation_finished_at, evaluation_failure_code, withdrawn_at, withdrawal_reason_code, expelled_at, expulsion_reason_code, post_room_action, action_recorded_at, action_locked_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'bot-orchid-07', 'COMPLETED', '2026-07-28T10:00:00+09:00', '2026-07-28T10:00:01+09:00', '2026-07-28T10:10:01+09:00', null, null, null, null, null, null, null, null
   }
 }
 
@@ -3149,11 +3281,156 @@ Table competition.participation_events {
   Note: '참가 이벤트 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
   Records (id, participation_id, event_sequence, event_type, reason_code, occurred_at, payload_document) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"alias":"참가자-07","joinedVia":"CODE"}'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 'PARTICIPATION_ACCEPTED', null, '2026-07-28T10:00:00+09:00', '{"alias":"bot-orchid-07","slotConsumed":true,"cancellationAllowed":false}'
   }
 }
 
-Table competition.evaluation_segments {
+Table competition.backtest_evaluation_plans {
+  room_id uuid [pk]
+  plan_version varchar(40) [not null]
+  period_count int [not null]
+  plan_hash varchar(128) [not null, unique]
+  commitment_hash varchar(128) [not null, unique]
+  commitment_nonce_ciphertext text [not null]
+  nonce_key_version smallint [not null]
+  locked_at timestamptz [not null]
+  disclosed_at timestamptz
+
+  checks {
+    `period_count >= 2` [name: 'competition_backtest_period_count_minimum']
+    `nonce_key_version > 0` [name: 'competition_backtest_nonce_key_version_positive']
+    `disclosed_at IS NULL OR disclosed_at >= locked_at` [name: 'competition_backtest_plan_disclosure_order']
+  }
+
+  Note: '플랫폼 공식 BACKTEST Room의 1:1 불변 비공개 평가 계획. 초기 자금·수수료·슬리피지·채점 공식은 room_rules로 항상 공개하고, 실제 기간·가중치·Dataset Manifest는 ENDED 전까지 권한 분리한다. 잠금 시 비밀 nonce를 포함한 commitment_hash만 공개하고 ENDED 뒤 계획과 nonce를 공개해 중간 변경이 없었음을 검증한다. nonce 평문은 저장하지 않는다.'
+
+  Records (room_id, plan_version, period_count, plan_hash, commitment_hash, commitment_nonce_ciphertext, nonce_key_version, locked_at, disclosed_at) {
+    '00000000-0000-4000-8000-000000000001', '1.0.0', 2, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'kms:v1:encrypted-review-nonce', 1, '2026-07-01T09:00:00+09:00', null
+  }
+}
+
+Table competition.backtest_evaluation_periods {
+  id uuid [pk, default: `gen_random_uuid()`]
+  evaluation_plan_room_id uuid [not null]
+  period_sequence int [not null]
+  evaluation_start date [not null]
+  evaluation_end date [not null]
+  importance_weight numeric(18,12) [not null]
+  input_set_hash varchar(128) [not null]
+
+  indexes {
+    (evaluation_plan_room_id, period_sequence) [unique]
+    (evaluation_plan_room_id, evaluation_start, evaluation_end) [unique]
+  }
+
+  checks {
+    `period_sequence >= 1` [name: 'competition_backtest_period_sequence_positive']
+    `evaluation_end >= evaluation_start` [name: 'competition_backtest_period_order']
+    `importance_weight > 0 AND importance_weight <= 1` [name: 'competition_backtest_period_weight_range']
+  }
+
+  Note: '서로 독립 초기 상태로 실행하는 숨은 기간. 같은 계획의 기간 범위 비중복, 행 수 = period_count, importance_weight 합계 = 1은 잠금 시 PostgreSQL deferred trigger와 daterange exclusion constraint로 강제한다. 기간 길이로 자동 가중하지 않고 플랫폼이 시장 중요도를 직접 설정한다.'
+
+  Records (id, evaluation_plan_room_id, period_sequence, evaluation_start, evaluation_end, importance_weight, input_set_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, '2020-02-01', '2020-04-30', 0.600000000000, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', 2, '2022-01-01', '2022-06-30', 0.400000000000, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  }
+}
+
+Table competition.backtest_period_datasets {
+  evaluation_period_id uuid [not null]
+  dataset_manifest_id uuid [not null]
+  purpose_code varchar(80) [not null]
+  locked_dataset_hash varchar(128) [not null]
+
+  indexes {
+    (evaluation_period_id, dataset_manifest_id, purpose_code) [pk]
+  }
+
+  Note: '모든 참가 Bot의 동일 기간 Run이 재사용하는 잠긴 시장 데이터 입력. 원본 S3 객체는 공개하지 않고 ENDED 뒤 Manifest 식별자·버전·해시만 공개한다.'
+
+  Records (evaluation_period_id, dataset_manifest_id, purpose_code, locked_dataset_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'MARKET_INPUT', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  }
+}
+
+Table competition.backtest_period_feature_materializations {
+  evaluation_period_id uuid [not null]
+  feature_materialization_id uuid [not null]
+  locked_result_hash varchar(128) [not null]
+
+  indexes {
+    (evaluation_period_id, feature_materialization_id) [pk]
+  }
+
+  Note: '공통 서버 계산 결과를 참가 Bot마다 다시 계산하지 않도록 평가 기간이 잠근 공유 Feature Materialization 입력.'
+
+  Records (evaluation_period_id, feature_materialization_id, locked_result_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  }
+}
+
+Table competition.backtest_period_runs {
+  participation_id uuid [not null]
+  evaluation_period_id uuid [not null]
+  run_id uuid [not null]
+  verified_at timestamptz
+  verification_failure_code varchar(80)
+  locked_result_hash varchar(128)
+
+  indexes {
+    (participation_id, evaluation_period_id) [pk]
+    (run_id) [unique]
+  }
+
+  checks {
+    `verified_at IS NULL OR (verification_failure_code IS NULL AND locked_result_hash IS NOT NULL)` [name: 'competition_backtest_verified_run_has_hash']
+    `verification_failure_code IS NULL OR verified_at IS NULL` [name: 'competition_backtest_failed_verification_not_verified']
+  }
+
+  Note: '참가 Bot·숨은 기간 하나와 기존 backtest.runs 하나를 정확히 연결한다. 각 Run은 동일 Bot 구성에서 동일 초기 자금, 빈 포지션·주문·예약·원장 변동·Flow 상태로 독립 시작한다. 실패 기간만 같은 Run의 run_attempts로 재시도하고 성공 기간은 다시 계산하지 않는다.'
+
+  Records (participation_id, evaluation_period_id, run_id, verified_at, verification_failure_code, locked_result_hash) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000003', '2026-07-28T10:05:00+09:00', null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000004', '2026-07-28T10:10:00+09:00', null, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  }
+}
+
+Table competition.backtest_aggregate_results {
+  id uuid [pk, default: `gen_random_uuid()`]
+  participation_id uuid [not null, unique]
+  evaluation_plan_room_id uuid [not null]
+  scoring_template_version_id uuid [not null]
+  weighted_return_pct numeric(18,8) [not null]
+  weighted_sharpe_ratio numeric(18,8)
+  weighted_max_drawdown_pct numeric(18,8) [not null]
+  worst_period_max_drawdown_pct numeric(18,8) [not null]
+  final_score numeric(24,10) [not null]
+  metrics_document jsonb [not null]
+  period_result_set_hash varchar(128) [not null]
+  calculation_rules_version varchar(80) [not null]
+  aggregate_hash varchar(128) [not null, unique]
+  calculated_at timestamptz [not null]
+  verified_at timestamptz [not null]
+  published_at timestamptz [not null]
+
+  indexes {
+    (evaluation_plan_room_id, published_at)
+  }
+
+  checks {
+    `verified_at >= calculated_at` [name: 'competition_backtest_aggregate_verification_order']
+    `published_at >= verified_at` [name: 'competition_backtest_aggregate_publication_order']
+  }
+
+  Note: '모든 필수 기간 Run이 성공·검증된 Participation에만 생성되는 불변 최종 집계. 기간별 0~100 점수는 만들지 않고 원래 지표에 importance_weight를 적용하며 weighted와 worst-period 위험을 함께 보존한다. published_at부터 최종 점수와 현재 순위를 즉시 공개하지만 기간별 결과는 ENDED 전까지 숨긴다. 한 기간이라도 최종 실패하면 이 행을 만들지 않고 Participation을 EVALUATION_FAILED로 종료한다.'
+
+  Records (id, participation_id, evaluation_plan_room_id, scoring_template_version_id, weighted_return_pct, weighted_sharpe_ratio, weighted_max_drawdown_pct, worst_period_max_drawdown_pct, final_score, metrics_document, period_result_set_hash, calculation_rules_version, aggregate_hash, calculated_at, verified_at, published_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 8.42000000, 1.18000000, -6.70000000, -12.40000000, -0.2160000000, '{"weightedWinRatePct":57.2}', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '1.0.0', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '2026-07-28T10:10:00+09:00', '2026-07-28T10:10:01+09:00', '2026-07-28T10:10:02+09:00'
+  }
+}
+
+Table competition.live_evaluation_segments {
   id uuid [pk, default: `gen_random_uuid()`]
   participation_id uuid [not null]
   segment_type varchar(40) [not null]
@@ -3171,11 +3448,7 @@ Table competition.evaluation_segments {
     (participation_id, starts_at) [unique]
   }
 
-  Note: '가상 청산은 채점 전용 증거이며 라이브 체결·예약·원장 분개를 생성하지 않는다.'
-
-  Records (id, participation_id, segment_type, starts_at, ends_at, start_event_sequence, end_event_sequence, initial_state_hash, final_state_hash, source_set_hash, virtual_liquidation_document, finalized_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"liquidatedAt":"2026-09-30T16:00:00-04:00","cashEquivalent":"10412.87"}', '2026-07-27T09:00:00+09:00'
-  }
+  Note: 'LIVE_PAPER Participation에만 존재하는 공식 평가 구간. 가상 청산은 채점 전용 증거이며 라이브 체결·예약·원장 분개를 생성하지 않는다. Participation의 Room 유형은 deferred trigger가 검증한다.'
 }
 
 Table competition.leaderboard_snapshots {
@@ -3183,7 +3456,7 @@ Table competition.leaderboard_snapshots {
   room_id uuid [not null]
   scoring_template_version_id uuid [not null]
   cutoff_at timestamptz [not null]
-  status varchar(30) [not null]
+  status competition.leaderboard_status [not null]
   result_hash varchar(128) [not null]
   created_at timestamptz [not null]
 
@@ -3191,17 +3464,18 @@ Table competition.leaderboard_snapshots {
     (room_id, cutoff_at) [unique]
   }
 
-  Note: '리더보드 스냅샷 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  Note: '불변 공개 리더보드 스냅샷. 공식 BACKTEST는 새 aggregate result가 published_at에 공개될 때마다 현재 완료 Bot만 포함한 PUBLISHED 스냅샷을 만들고 별도 임시 표시는 하지 않는다. 모든 Participation terminal 뒤 FINAL 스냅샷을 만든다.'
 
   Records (id, room_id, scoring_template_version_id, cutoff_at, status, result_hash, created_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', 'ACTIVE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00'
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '2026-07-28T10:10:02+09:00', 'PUBLISHED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-28T10:10:03+09:00'
   }
 }
 
 Table competition.leaderboard_entries {
   snapshot_id uuid [not null]
   participation_id uuid [not null]
-  performance_snapshot_id uuid [not null]
+  performance_snapshot_id uuid
+  backtest_aggregate_result_id uuid
   rank int [not null]
   is_joint_rank boolean [not null, default: false]
   eligibility_status varchar(30) [not null]
@@ -3215,10 +3489,15 @@ Table competition.leaderboard_entries {
     (snapshot_id, rank)
   }
 
-  Note: '리더보드 엔트리 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
+  checks {
+    `(performance_snapshot_id IS NOT NULL AND backtest_aggregate_result_id IS NULL) OR (performance_snapshot_id IS NULL AND backtest_aggregate_result_id IS NOT NULL)` [name: 'competition_leaderboard_exactly_one_result_source']
+    `rank > 0` [name: 'competition_leaderboard_rank_positive']
+  }
 
-  Records (snapshot_id, participation_id, performance_snapshot_id, rank, is_joint_rank, eligibility_status, eligibility_reason_code, score, tie_break_document, calculation_document) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, true, 'ACTIVE', 'REVIEW_EXAMPLE', 0.05000000, '{"rule":"EARLIER_JOIN","joinedAt":"2026-08-03T10:12:00-04:00"}', '{"metric":"COMPOSITE","weights":{"return":0.4,"sharpe":0.3,"maxDrawdown":0.3},"score":0.7231}'
+  Note: 'LIVE_PAPER는 불변 performance_snapshot_id, BACKTEST는 검증된 backtest_aggregate_result_id 중 정확히 하나를 공식 점수 근거로 사용한다. Snapshot Room 유형, Participation Room과 결과 소유권 일치는 deferred trigger가 검증한다.'
+
+  Records (snapshot_id, participation_id, performance_snapshot_id, backtest_aggregate_result_id, rank, is_joint_rank, eligibility_status, eligibility_reason_code, score, tie_break_document, calculation_document) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, '00000000-0000-4000-8000-000000000001', 1, false, 'ELIGIBLE', null, -0.2160000000, '{"rule":"EARLIER_JOIN","joinedAt":"2026-07-28T10:00:00+09:00"}', '{"formulaVersion":"1.0.0","aggregateHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
   }
 }
 
@@ -3618,8 +3897,8 @@ Ref: trading.order_group_members.(bot_id, partition_id, order_group_id) > tradin
 Ref: trading.order_group_members.(bot_id, partition_id, order_id) > trading.orders.(bot_id, partition_id, id)
 Ref: trading.order_group_events.(bot_id, partition_id, order_group_id) > trading.order_groups.(bot_id, partition_id, id)
 Ref: trading.order_group_events.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
-Ref: trading.order_intent_allocations.(bot_id, partition_id, order_id) > trading.orders.(bot_id, partition_id, id)
-Ref: trading.order_intent_allocations.(bot_id, partition_id, intent_id) > trading.order_intents.(bot_id, partition_id, id)
+Ref: trading.order_components.(bot_id, partition_id, order_id) > trading.orders.(bot_id, partition_id, id)
+Ref: trading.order_components.(bot_id, partition_id, intent_id) > trading.order_intents.(bot_id, partition_id, id)
 Ref: trading.resource_reservations.bot_id > bot.bots.id
 Ref: trading.resource_reservations.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
 Ref: trading.resource_reservations.(partition_id, flow_id) > bot.flows.(partition_id, id)
@@ -3629,10 +3908,10 @@ Ref: trading.resource_reservations.buffer_policy_id > trading.buying_power_buffe
 Ref: trading.resource_reservations.fee_policy_id > trading.fee_policy_versions.id
 Ref: trading.resource_reservations.short_risk_policy_id > trading.short_risk_policy_versions.id
 Ref: trading.resource_reservations.(bot_id, created_event_id) > bot.bot_events.(bot_id, id)
-Ref: trading.reservation_lot_allocations.(bot_id, partition_id, flow_id, reservation_id) > trading.resource_reservations.(bot_id, partition_id, flow_id, id)
-Ref: trading.reservation_lot_allocations.(bot_id, partition_id, flow_id, position_lot_id) > trading.position_lots.(bot_id, partition_id, flow_id, id)
-Ref: trading.order_reservation_allocations.(bot_id, partition_id, reservation_id) > trading.resource_reservations.(bot_id, partition_id, id)
-Ref: trading.order_reservation_allocations.(bot_id, partition_id, order_intent_allocation_id) > trading.order_intent_allocations.(bot_id, partition_id, id)
+Ref: trading.position_lot_reservations.(bot_id, partition_id, flow_id, reservation_id) > trading.resource_reservations.(bot_id, partition_id, flow_id, id)
+Ref: trading.position_lot_reservations.(bot_id, partition_id, flow_id, position_lot_id) > trading.position_lots.(bot_id, partition_id, flow_id, id)
+Ref: trading.order_component_reservations.(bot_id, partition_id, reservation_id) > trading.resource_reservations.(bot_id, partition_id, id)
+Ref: trading.order_component_reservations.(bot_id, partition_id, order_component_id) > trading.order_components.(bot_id, partition_id, id)
 Ref: trading.reservation_events.(bot_id, partition_id, reservation_id) > trading.resource_reservations.(bot_id, partition_id, id)
 Ref: trading.reservation_events.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
 Ref: trading.reservation_events.(bot_id, partition_id, source_fill_id) > trading.fills.(bot_id, partition_id, id)
@@ -3657,15 +3936,15 @@ Ref: trading.ledger_transactions.(bot_id, bot_event_id) > bot.bot_events.(bot_id
 Ref: trading.ledger_transactions.(bot_id, reversal_of_transaction_id) > trading.ledger_transactions.(bot_id, id)
 Ref: trading.ledger_entries.(bot_id, partition_id, transaction_id) > trading.ledger_transactions.(bot_id, partition_id, id)
 Ref: trading.ledger_entries.(bot_id, partition_id, ledger_account_id) > trading.ledger_accounts.(bot_id, partition_id, id)
-Ref: trading.ledger_entries.(bot_id, partition_id, order_intent_allocation_id) > trading.order_intent_allocations.(bot_id, partition_id, id)
+Ref: trading.ledger_entries.(bot_id, partition_id, order_component_id) > trading.order_components.(bot_id, partition_id, id)
 Ref: trading.position_lots.bot_id > bot.bots.id
 Ref: trading.position_lots.(bot_id, partition_id) > bot.bot_partitions.(bot_id, id)
 Ref: trading.position_lots.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.position_lots.instrument_id > market_data.instruments.id
-Ref: trading.position_lots.(bot_id, partition_id, opening_order_intent_allocation_id) > trading.order_intent_allocations.(bot_id, partition_id, id)
+Ref: trading.position_lots.(bot_id, partition_id, opening_order_component_id) > trading.order_components.(bot_id, partition_id, id)
 Ref: trading.lot_movements.(bot_id, partition_id, position_lot_id) > trading.position_lots.(bot_id, partition_id, id)
 Ref: trading.lot_movements.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
-Ref: trading.lot_movements.(bot_id, partition_id, source_order_intent_allocation_id) > trading.order_intent_allocations.(bot_id, partition_id, id)
+Ref: trading.lot_movements.(bot_id, partition_id, source_order_component_id) > trading.order_components.(bot_id, partition_id, id)
 Ref: trading.lot_movements.(bot_id, partition_id, source_fill_adjustment_id) > trading.fill_adjustments.(bot_id, partition_id, id)
 Ref: trading.lot_movements.corporate_action_id > market_data.corporate_actions.id
 Ref: trading.lot_movements.(position_lot_id, reverses_movement_id) > trading.lot_movements.(position_lot_id, id)
@@ -3713,12 +3992,15 @@ Ref: performance.bot_current_projections.bot_id > bot.bots.id
 Ref: performance.bot_snapshots.bot_id > bot.bots.id
 Ref: performance.series_manifests.bot_id > bot.bots.id
 Ref: performance.series_manifests.object_id > storage.objects.id
+Ref: performance.series_manifests.supersedes_manifest_id > performance.series_manifests.id
 
 Ref: competition.rooms.creator_account_id > identity.accounts.id
+Ref: competition.rooms.created_by_operator_id > operations.operator_accounts.id
 Ref: competition.room_rules.room_id > competition.rooms.id
 Ref: competition.room_rules.scoring_template_version_id > competition.scoring_template_versions.id
 Ref: competition.room_rules.buying_power_buffer_policy_id > trading.buying_power_buffer_policy_versions.id
 Ref: competition.room_rules.fee_policy_id > trading.fee_policy_versions.id
+Ref: competition.live_room_rules.room_id > competition.rooms.id
 Ref: competition.room_events.room_id > competition.rooms.id
 Ref: competition.room_invitations.room_id > competition.rooms.id
 Ref: competition.room_invitations.issued_by_account_id > identity.accounts.id
@@ -3727,12 +4009,25 @@ Ref: competition.participations.room_id > competition.rooms.id
 Ref: competition.participations.bot_id > bot.bots.id
 Ref: competition.participations.owner_account_id > identity.accounts.id
 Ref: competition.participation_events.participation_id > competition.participations.id
-Ref: competition.evaluation_segments.participation_id > competition.participations.id
+Ref: competition.backtest_evaluation_plans.room_id > competition.rooms.id
+Ref: competition.backtest_evaluation_periods.evaluation_plan_room_id > competition.backtest_evaluation_plans.room_id
+Ref: competition.backtest_period_datasets.evaluation_period_id > competition.backtest_evaluation_periods.id
+Ref: competition.backtest_period_datasets.dataset_manifest_id > market_data.dataset_manifests.id
+Ref: competition.backtest_period_feature_materializations.evaluation_period_id > competition.backtest_evaluation_periods.id
+Ref: competition.backtest_period_feature_materializations.feature_materialization_id > market_data.feature_materializations.id
+Ref: competition.backtest_period_runs.participation_id > competition.participations.id
+Ref: competition.backtest_period_runs.evaluation_period_id > competition.backtest_evaluation_periods.id
+Ref: competition.backtest_period_runs.run_id > backtest.runs.id
+Ref: competition.backtest_aggregate_results.participation_id > competition.participations.id
+Ref: competition.backtest_aggregate_results.evaluation_plan_room_id > competition.backtest_evaluation_plans.room_id
+Ref: competition.backtest_aggregate_results.scoring_template_version_id > competition.scoring_template_versions.id
+Ref: competition.live_evaluation_segments.participation_id > competition.participations.id
 Ref: competition.leaderboard_snapshots.room_id > competition.rooms.id
 Ref: competition.leaderboard_snapshots.scoring_template_version_id > competition.scoring_template_versions.id
 Ref: competition.leaderboard_entries.snapshot_id > competition.leaderboard_snapshots.id
 Ref: competition.leaderboard_entries.participation_id > competition.participations.id
 Ref: competition.leaderboard_entries.performance_snapshot_id > performance.bot_snapshots.id
+Ref: competition.leaderboard_entries.backtest_aggregate_result_id > competition.backtest_aggregate_results.id
 
 Ref: operations.role_permissions.role_id > operations.roles.id
 Ref: operations.role_permissions.permission_id > operations.permissions.id
