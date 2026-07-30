@@ -1,5 +1,6 @@
 schema_version: 1
 project_id: idea2strategy.platform
+root_remote: https://github.com/Idea2Strategy/Idea2Strategy.git
 workspaces:
     - id: workspace.root
       kind: root
@@ -8,6 +9,10 @@ workspaces:
         - orchestration
       dependencies:
         - workspace.ui
+        - workspace.backend
+        - workspace.trading-engine
+        - workspace.backtest-engine
+        - workspace.data-pipeline
       commands_path: .harness/commands.yaml
     - id: workspace.ui
       kind: submodule
@@ -17,3 +22,44 @@ workspaces:
       responsibilities:
         - ui-baseline
       dependencies: []
+    - id: workspace.backend
+      kind: submodule
+      path: backend
+      repository: https://github.com/Idea2Strategy/Idea2Strategy-backend.git
+      remote: https://github.com/Idea2Strategy/Idea2Strategy-backend.git
+      responsibilities:
+        - core-api
+        - operations
+        - admin-mcp
+      dependencies: []
+      commands_path: .harness/commands.yaml
+    - id: workspace.trading-engine
+      kind: submodule
+      path: trading-engine
+      repository: https://github.com/Idea2Strategy/Idea2Strategy-trading-engine.git
+      remote: https://github.com/Idea2Strategy/Idea2Strategy-trading-engine.git
+      responsibilities:
+        - market-gateway
+        - trading-runtime
+      dependencies: []
+      commands_path: .harness/commands.yaml
+    - id: workspace.backtest-engine
+      kind: submodule
+      path: backtest-engine
+      repository: https://github.com/Idea2Strategy/Idea2Strategy-backtest-engine.git
+      remote: https://github.com/Idea2Strategy/Idea2Strategy-backtest-engine.git
+      responsibilities:
+        - backtest-api
+        - backtest-worker
+      dependencies: []
+      commands_path: .harness/commands.yaml
+    - id: workspace.data-pipeline
+      kind: submodule
+      path: data-pipeline
+      repository: https://github.com/Idea2Strategy/Idea2Strategy-data-pipeline.git
+      remote: https://github.com/Idea2Strategy/Idea2Strategy-data-pipeline.git
+      responsibilities:
+        - market-data-pipeline
+        - corporate-action-research
+      dependencies: []
+      commands_path: .harness/commands.yaml

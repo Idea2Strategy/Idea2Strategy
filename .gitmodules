@@ -1,3 +1,19 @@
 [submodule "ui"]
 	path = ui
 	url = https://github.com/Idea2Strategy/Idea2Strategy-ui.git
+[submodule "backend"]
+	path = backend
+	url = https://github.com/Idea2Strategy/Idea2Strategy-backend.git
+	branch = develop
+[submodule "trading-engine"]
+	path = trading-engine
+	url = https://github.com/Idea2Strategy/Idea2Strategy-trading-engine.git
+	branch = develop
+[submodule "backtest-engine"]
+	path = backtest-engine
+	url = https://github.com/Idea2Strategy/Idea2Strategy-backtest-engine.git
+	branch = develop
+[submodule "data-pipeline"]
+	path = data-pipeline
+	url = https://github.com/Idea2Strategy/Idea2Strategy-data-pipeline.git
+	branch = develop
