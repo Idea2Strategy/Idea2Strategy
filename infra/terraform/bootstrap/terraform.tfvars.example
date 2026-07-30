@@ -1,0 +1,5 @@
+aws_region  = "ap-northeast-2"
+aws_profile = "idea2strategy-terraform"
+
+# Leave empty to use idea2strategy-dev-<account-id>-tfstate.
+state_bucket_name = ""

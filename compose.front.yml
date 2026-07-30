@@ -1,0 +1,34 @@
+name: ${COMPOSE_PROJECT_NAME:-idea2strategy-local}
+
+services:
+  frontend:
+    container_name: idea2strategy-frontend
+    build:
+      context: .
+      dockerfile: infra/docker/frontend/Dockerfile
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:18080}
+      VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-ws://localhost:18080}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-15173}:5173"
+    volumes:
+      - ./ui:/workspace/ui
+      - frontend-node-modules:/workspace/ui/node_modules
+    networks:
+      - development
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5173"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+networks:
+  development:
+    name: idea2strategy-development
+
+volumes:
+  frontend-node-modules:
+    name: idea2strategy-frontend-node-modules
