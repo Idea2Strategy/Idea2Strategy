@@ -87,6 +87,31 @@ Enum identity.sanction_status {
   EXPIRED
 }
 
+Enum identity.delegated_authorization_status {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+Enum identity.delegated_expiry_mode {
+  SESSION_END
+  AT_TIME
+  UNTIL_REVOKED
+}
+
+Enum identity.delegated_credential_type {
+  ACCESS_TOKEN
+  REFRESH_TOKEN
+}
+
+Enum identity.delegated_scope {
+  ACCOUNT_RESOURCE_READ
+  STRATEGY_CREATE
+  STRATEGY_COPY
+  STRATEGY_EDIT
+  STRATEGY_VALIDATE
+}
+
 Enum strategy.strategy_mode {
   BASIC
   PRO
@@ -705,6 +730,111 @@ Table identity.account_consents {
   }
 }
 
+Table identity.delegated_authorizations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  client_label varchar(120) [not null]
+  external_provider_code varchar(80)
+  status identity.delegated_authorization_status [not null]
+  expiry_mode identity.delegated_expiry_mode [not null]
+  auth_epoch_at_grant bigint [not null]
+  disclosure_policy_document_id uuid [not null]
+  scope_set_hash varchar(128) [not null]
+  authorized_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz
+  revoked_at timestamptz
+  revoke_reason_code varchar(80)
+
+  indexes {
+    (account_id, status, authorized_at)
+    (status, expires_at)
+  }
+
+  checks {
+    `auth_epoch_at_grant > 0` [name: 'delegated_authorization_auth_epoch_positive']
+    `(expiry_mode = 'AT_TIME' AND expires_at IS NOT NULL) OR (expiry_mode <> 'AT_TIME' AND expires_at IS NULL)` [name: 'delegated_authorization_expiry_mode_valid']
+    `(status = 'REVOKED' AND revoked_at IS NOT NULL) OR (status <> 'REVOKED' AND revoked_at IS NULL)` [name: 'delegated_authorization_revocation_state_valid']
+  }
+
+  Note: 'User-approved external AI/tool delegation. The delegate is never the account owner or final approver. A mismatched account auth epoch, sanction, expiry, or revocation blocks every new call without affecting committed server work or running bots.'
+
+  Records (id, account_id, client_label, external_provider_code, status, expiry_mode, auth_epoch_at_grant, disclosure_policy_document_id, scope_set_hash, authorized_at, expires_at, revoked_at, revoke_reason_code) {
+    '00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000001', 'Review AI Tool', 'REVIEW_EXAMPLE', 'ACTIVE', 'AT_TIME', 1, '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', null, null
+  }
+}
+
+Table identity.delegated_authorization_scopes {
+  authorization_id uuid [not null]
+  scope_code identity.delegated_scope [not null]
+  granted_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (authorization_id, scope_code) [pk]
+  }
+
+  Note: 'Immutable after authorization activation. Release, bot lifecycle, room final actions, continuation renewal, and order mutation scopes intentionally do not exist; changing permissions requires a new explicit user grant.'
+
+  Records (authorization_id, scope_code, granted_at) {
+    '00000000-0000-4000-8000-000000000011', 'STRATEGY_EDIT', '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table identity.delegated_credentials {
+  id uuid [pk, default: `gen_random_uuid()`]
+  authorization_id uuid [not null]
+  credential_type identity.delegated_credential_type [not null]
+  token_digest varchar(128) [not null, unique]
+  digest_key_version smallint [not null]
+  issued_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz [not null]
+  last_seen_at timestamptz
+  revoked_at timestamptz
+  revoke_reason_code varchar(80)
+  superseded_by_credential_id uuid
+
+  indexes {
+    (authorization_id, credential_type, expires_at)
+    (expires_at, revoked_at)
+  }
+
+  checks {
+    `digest_key_version > 0` [name: 'delegated_credential_digest_key_version_positive']
+    `expires_at > issued_at` [name: 'delegated_credential_expiry_after_issue']
+  }
+
+  Note: 'Opaque CLI/MCP credential metadata. Only a keyed digest is stored. A credential can exercise only the current scopes of its active authorization and can never elevate itself.'
+
+  Records (id, authorization_id, credential_type, token_digest, digest_key_version, issued_at, expires_at, last_seen_at, revoked_at, revoke_reason_code, superseded_by_credential_id) {
+    '00000000-0000-4000-8000-000000000012', '00000000-0000-4000-8000-000000000011', 'ACCESS_TOKEN', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null, null
+  }
+}
+
+Table identity.delegated_authorization_events {
+  id uuid [pk, default: `gen_random_uuid()`]
+  authorization_id uuid [not null]
+  event_sequence bigint [not null]
+  event_type varchar(50) [not null, note: 'AUTHORIZED, CREDENTIAL_ISSUED, CREDENTIAL_REVOKED, EXPIRED, or REVOKED.']
+  actor_type varchar(30) [not null, note: 'ACCOUNT or SYSTEM.']
+  actor_id uuid
+  reason_code varchar(80)
+  correlation_id uuid [not null]
+  idempotency_key varchar(160) [not null]
+  occurred_at timestamptz [not null, default: `now()`]
+  payload_document jsonb [not null]
+
+  indexes {
+    (authorization_id, event_sequence) [unique]
+    (authorization_id, idempotency_key) [unique]
+    (correlation_id)
+  }
+
+  Note: 'Append-only delegation lifecycle evidence. Payloads may identify policy and scopes but never contain tokens, private strategy source, holdings, or result data.'
+
+  Records (id, authorization_id, event_sequence, event_type, actor_type, actor_id, reason_code, correlation_id, idempotency_key, occurred_at, payload_document) {
+    '00000000-0000-4000-8000-000000000013', '00000000-0000-4000-8000-000000000011', 1, 'AUTHORIZED', 'ACCOUNT', '00000000-0000-4000-8000-000000000001', null, '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00', '{"scopes":["STRATEGY_EDIT"]}'
+  }
+}
+
 Table identity.account_sanctions {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
@@ -801,6 +931,66 @@ Table strategy.strategy_documents {
 
   Records (strategy_id, semantic_document, presentation_document, semantic_schema_version, presentation_schema_version, semantic_hash, presentation_hash, edit_sequence, created_at, updated_at) {
     '00000000-0000-4000-8000-000000000001', '{"partitions":[{"key":"partition-1","budgetCapBps":5000,"flows":[{"key":"flow-1","elements":[],"edges":[],"instrumentIds":[]}]}]}', '{"partitions":{"partition-1":{"x":100,"y":100}},"flows":{"flow-1":{"x":300,"y":100}},"elements":{},"edgeRoutes":{},"viewport":{"x":0,"y":0,"zoom":1.0}}', '1.0.0', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table strategy.strategy_edit_leases {
+  strategy_id uuid [pk]
+  session_id uuid
+  delegated_credential_id uuid
+  lease_token_digest varchar(128) [not null, unique]
+  digest_key_version smallint [not null]
+  acquired_at timestamptz [not null]
+  heartbeat_at timestamptz [not null]
+  expires_at timestamptz [not null]
+
+  indexes {
+    (expires_at)
+  }
+
+  checks {
+    `(session_id IS NOT NULL AND delegated_credential_id IS NULL) OR (session_id IS NULL AND delegated_credential_id IS NOT NULL)` [name: 'strategy_edit_lease_exactly_one_editor']
+    `digest_key_version > 0` [name: 'strategy_edit_lease_digest_key_version_positive']
+    `heartbeat_at >= acquired_at AND expires_at > heartbeat_at` [name: 'strategy_edit_lease_time_order_valid']
+  }
+
+  Note: 'Allows exactly one active editor across the web, direct user CLI, and delegated external AI. Revoked or expired credentials invalidate the lease, and a stale edit_sequence or lease token rejects late saves.'
+
+  Records (strategy_id, session_id, delegated_credential_id, lease_token_digest, digest_key_version, acquired_at, heartbeat_at, expires_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:05:00+09:00'
+  }
+}
+
+Table strategy.validation_runs {
+  id uuid [pk, default: `gen_random_uuid()`]
+  strategy_id uuid [not null]
+  requested_by_account_id uuid [not null]
+  delegated_authorization_id uuid
+  requested_edit_sequence bigint [not null]
+  semantic_hash varchar(128) [not null]
+  element_catalog_version_id uuid [not null]
+  status varchar(30) [not null, note: 'RUNNING, VALID, INVALID, or FAILED.']
+  issue_count int [not null, default: 0]
+  result_document jsonb [not null]
+  requested_at timestamptz [not null, default: `now()`]
+  completed_at timestamptz
+
+  indexes {
+    (strategy_id, requested_at)
+    (strategy_id, requested_edit_sequence, semantic_hash, status)
+    (delegated_authorization_id, requested_at)
+  }
+
+  checks {
+    `requested_edit_sequence >= 0` [name: 'strategy_validation_edit_sequence_nonnegative']
+    `issue_count >= 0` [name: 'strategy_validation_issue_count_nonnegative']
+    `(status = 'RUNNING' AND completed_at IS NULL) OR (status <> 'RUNNING' AND completed_at IS NOT NULL)` [name: 'strategy_validation_completion_state_valid']
+  }
+
+  Note: 'Deterministic validation of one exact mutable Strategy document state. delegated_authorization_id identifies an external AI request; null means the account acted directly. Validation never releases a Strategy, launches a Bot, or starts a backtest.'
+
+  Records (id, strategy_id, requested_by_account_id, delegated_authorization_id, requested_edit_sequence, semantic_hash, element_catalog_version_id, status, issue_count, result_document, requested_at, completed_at) {
+    '00000000-0000-4000-8000-000000000014', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', 'VALID', 0, '{"issues":[]}', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:01+09:00'
   }
 }
 
@@ -3641,6 +3831,7 @@ Table operations.audit_events {
   id uuid [pk, default: `gen_random_uuid()`]
   actor_type varchar(30) [not null]
   actor_id uuid [not null]
+  delegated_authorization_id uuid
   action_type varchar(100) [not null]
   target_domain varchar(40) [not null]
   target_id uuid [not null]
@@ -3656,13 +3847,18 @@ Table operations.audit_events {
   indexes {
     (target_domain, target_id, occurred_at)
     (actor_type, actor_id, occurred_at)
+    (delegated_authorization_id, occurred_at)
     (correlation_id)
   }
 
-  Note: '추가 전용 보안 증적. 페이로드·오브젝트 증거에 자격증명, 비공개 전략 소스, 불필요한 보유 정보를 중복 저장하지 않는다.'
+  checks {
+    `(actor_type = 'DELEGATED_AUTHORIZATION' AND delegated_authorization_id IS NOT NULL AND actor_id = delegated_authorization_id) OR (actor_type <> 'DELEGATED_AUTHORIZATION' AND delegated_authorization_id IS NULL)` [name: 'audit_delegated_actor_reference_valid']
+  }
 
-  Records (id, actor_type, actor_id, action_type, target_domain, target_id, reason_code, correlation_id, idempotency_key, before_hash, after_hash, evidence_object_id, occurred_at, recorded_at) {
-    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'review-example', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  Note: '추가 전용 보안 증적. 외부 AI 호출은 actor_type DELEGATED_AUTHORIZATION과 delegated_authorization_id로 위임 승인을 명시한다. 페이로드·오브젝트 증거에 자격증명, 비공개 전략 소스, 불필요한 보유 정보를 중복 저장하지 않는다.'
+
+  Records (id, actor_type, actor_id, delegated_authorization_id, action_type, target_domain, target_id, reason_code, correlation_id, idempotency_key, before_hash, after_hash, evidence_object_id, occurred_at, recorded_at) {
+    '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', null, 'REVIEW_EXAMPLE', 'review-example', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -3793,6 +3989,12 @@ Ref: identity.sessions.(account_id, authenticated_by_login_identity_id) > identi
 Ref: identity.account_consents.account_id > identity.accounts.id
 Ref: identity.account_consents.policy_document_id > identity.policy_documents.id
 Ref: identity.account_consents.supersedes_consent_id > identity.account_consents.id
+Ref: identity.delegated_authorizations.account_id > identity.accounts.id
+Ref: identity.delegated_authorizations.disclosure_policy_document_id > identity.policy_documents.id
+Ref: identity.delegated_authorization_scopes.authorization_id > identity.delegated_authorizations.id
+Ref: identity.delegated_credentials.authorization_id > identity.delegated_authorizations.id
+Ref: identity.delegated_credentials.superseded_by_credential_id > identity.delegated_credentials.id
+Ref: identity.delegated_authorization_events.authorization_id > identity.delegated_authorizations.id
 Ref: identity.password_reset_requests.(account_id, login_identity_id) > identity.login_identities.(account_id, id)
 Ref: identity.authentication_events.account_id > identity.accounts.id
 Ref: identity.authentication_events.subject_login_identity_id > identity.login_identities.id
@@ -3809,6 +4011,13 @@ Ref: identity.account_sanction_events.evidence_object_id > storage.objects.id
 
 Ref: strategy.strategies.owner_account_id > identity.accounts.id
 Ref: strategy.strategy_documents.strategy_id > strategy.strategies.id
+Ref: strategy.strategy_edit_leases.strategy_id > strategy.strategies.id
+Ref: strategy.strategy_edit_leases.session_id > identity.sessions.id
+Ref: strategy.strategy_edit_leases.delegated_credential_id > identity.delegated_credentials.id
+Ref: strategy.validation_runs.strategy_id > strategy.strategies.id
+Ref: strategy.validation_runs.requested_by_account_id > identity.accounts.id
+Ref: strategy.validation_runs.delegated_authorization_id > identity.delegated_authorizations.id
+Ref: strategy.validation_runs.element_catalog_version_id > strategy.element_catalog_versions.id
 Ref: strategy.element_definitions.element_catalog_version_id > strategy.element_catalog_versions.id
 Ref: strategy.package_versions.package_id > strategy.packages.id
 Ref: strategy.package_versions.element_catalog_version_id > strategy.element_catalog_versions.id
@@ -4036,6 +4245,7 @@ Ref: operations.operator_role_assignments.role_id > operations.roles.id
 Ref: operations.operator_role_assignments.granted_by_operator_id > operations.operator_accounts.id
 Ref: operations.operator_role_assignments.revoked_by_operator_id > operations.operator_accounts.id
 Ref: operations.audit_events.evidence_object_id > storage.objects.id
+Ref: operations.audit_events.delegated_authorization_id > identity.delegated_authorizations.id
 Ref: operations.notification_preferences.account_id > identity.accounts.id
 Ref: operations.notification_preferences.bot_id > bot.bots.id
 Ref: operations.notifications.account_id > identity.accounts.id

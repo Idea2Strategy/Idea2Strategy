@@ -3,10 +3,10 @@ schema_version: 1
 id: technology.need.ui-baseline
 kind: architecture
 status: proposed
-revision: 1
+revision: 2
 refs: []
 ---
 
 # technology.need.ui-baseline
 
-An editable UI workspace and user-approved baseline are required before frontend implementation; the existing submodule remains reference-only.
+The `ui` submodule is the editable product frontend workspace. Approved UI baselines, implementation, issues, and subsequent frontend work continue in that repository; no separate `frontend` submodule is used.

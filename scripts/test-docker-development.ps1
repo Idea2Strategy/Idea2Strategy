@@ -13,6 +13,7 @@ $requiredFiles = @(
     "infra/docker/frontend/Dockerfile",
     "infra/docker/backend/Dockerfile.spring",
     "infra/docker/README.md",
+    "backend/db-migration/src/main/resources/db/migration/V1__initial_schema.sql",
     "scripts/dev.ps1",
     "scripts/dev-menu.ps1",
     "scripts/dev.cmd"
@@ -31,7 +32,7 @@ $composeArguments = @(
     "-f", (Join-Path $root "compose.back.yml"),
     "-f", (Join-Path $root "compose.front.yml"),
     "-p", "idea2strategy-local",
-    "--profile", "backend-apps",
+    "--profile", "apps",
     "config",
     "--format", "json"
 )
@@ -47,11 +48,17 @@ $requiredServices = @(
     "redis",
     "minio",
     "minio-init",
+    "localstack",
     "frontend",
     "flyway",
-    "backend",
-    "batch",
-    "backtest"
+    "backend-api",
+    "backend-batch",
+    "backend-worker",
+    "admin-mcp",
+    "market-gateway",
+    "trading-worker",
+    "backtest-api",
+    "backtest-worker"
 )
 
 foreach ($serviceName in $requiredServices) {
@@ -60,7 +67,7 @@ foreach ($serviceName in $requiredServices) {
     }
 }
 
-foreach ($serviceName in @("postgres", "redis", "minio", "frontend", "backend", "batch", "backtest")) {
+foreach ($serviceName in @("postgres", "redis", "minio", "localstack", "frontend", "backend-api", "admin-mcp", "backtest-api")) {
     $service = $config.services.$serviceName
     foreach ($port in @($service.ports)) {
         if ($port.host_ip -ne "127.0.0.1") {
@@ -69,11 +76,29 @@ foreach ($serviceName in @("postgres", "redis", "minio", "frontend", "backend", 
     }
 }
 
-foreach ($serviceName in @("flyway", "backend", "batch", "backtest")) {
+foreach ($serviceName in @("flyway", "backend-api", "backend-batch", "backend-worker", "admin-mcp", "market-gateway", "trading-worker", "backtest-api", "backtest-worker")) {
     $profiles = @($config.services.$serviceName.profiles)
-    if (-not $profiles.Contains("backend-apps")) {
-        throw "$serviceName must be opt-in through the backend-apps profile."
+    if (-not $profiles.Contains("apps")) {
+        throw "$serviceName must be opt-in through the apps profile."
     }
+}
+
+foreach ($serviceName in @("backend-batch", "backend-worker", "market-gateway", "trading-worker", "backtest-worker")) {
+    $publishedPorts = $config.services.$serviceName.ports
+    if ($null -ne $publishedPorts -and @($publishedPorts).Count -ne 0) {
+        throw "$serviceName must not publish a host port."
+    }
+}
+
+$initialMigrationPath = Join-Path $root "backend/db-migration/src/main/resources/db/migration/V1__initial_schema.sql"
+$initialMigration = Get-Content -LiteralPath $initialMigrationPath -Raw
+$createTableCount = ([regex]::Matches($initialMigration, "(?im)^CREATE TABLE ")).Count
+if ($createTableCount -ne 137) {
+    throw "The initial Flyway migration must create the 137 canonical DBML tables; found $createTableCount."
+}
+
+if ($initialMigration -match "(?im)^INSERT INTO ") {
+    throw "The initial Flyway migration must not include DBML review-only Records data."
 }
 
 Write-Output "Docker development configuration checks passed."

@@ -9,6 +9,7 @@
 !.env.example
 !.env.*.example
 *.local
+CLAUDE.local.md
 
 # Terraform local state and generated plans
 **/.terraform/
