@@ -54,6 +54,16 @@ output "batch_instance_id" {
   value       = aws_instance.batch.id
 }
 
+output "batch_instance_type" {
+  description = "Applied batch EC2 instance type."
+  value       = aws_instance.batch.instance_type
+}
+
+output "batch_root_volume_gib" {
+  description = "Applied batch EC2 root volume size in GiB."
+  value       = aws_instance.batch.root_block_device[0].volume_size
+}
+
 output "rds_endpoint" {
   description = "Private RDS endpoint, reachable only from the two EC2 security groups."
   value       = aws_db_instance.this.address

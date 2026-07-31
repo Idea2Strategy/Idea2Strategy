@@ -13,7 +13,13 @@ variable "aws_profile" {
 variable "development_iam_user_names" {
   description = "IAM users who receive MFA-protected Development application access. Login profiles and passwords remain outside Terraform."
   type        = set(string)
-  default     = ["pjy"]
+  default = [
+    "SeoDongWi",
+    "hjcud",
+    "hoyow",
+    "kcrmin",
+    "pjy"
+  ]
 }
 
 variable "project_name" {
@@ -81,13 +87,40 @@ variable "service_instance_type" {
 variable "batch_instance_type" {
   description = "Initial batch and backtest EC2 measurement size."
   type        = string
-  default     = "t3.small"
+  default     = "m7i-flex.large"
 }
 
-variable "ec2_root_volume_gib" {
-  description = "Encrypted gp3 root volume size for each EC2."
+variable "service_root_volume_gib" {
+  description = "Encrypted gp3 root volume size for the service EC2."
   type        = number
   default     = 30
+
+  validation {
+    condition     = var.service_root_volume_gib >= 8
+    error_message = "service_root_volume_gib must be at least 8 GiB."
+  }
+}
+
+variable "batch_root_volume_gib" {
+  description = "Encrypted gp3 root volume size for batch staging and temporary Parquet files."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.batch_root_volume_gib >= 30
+    error_message = "batch_root_volume_gib must be at least 30 GiB."
+  }
+}
+
+variable "batch_swap_gib" {
+  description = "Swap file size that keeps host management agents responsive during batch memory pressure."
+  type        = number
+  default     = 4
+
+  validation {
+    condition     = var.batch_swap_gib >= 2 && var.batch_swap_gib <= 16
+    error_message = "batch_swap_gib must be between 2 and 16 GiB."
+  }
 }
 
 variable "service_target_port" {

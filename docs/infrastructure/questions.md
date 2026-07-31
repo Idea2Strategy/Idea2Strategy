@@ -8,13 +8,13 @@
 
 | ID | 주제 | 질문 | 현재 상태 |
 |---|---|---|---|
-| INFRA-Q-001 | 공개 진입점 | ALB, API Gateway 또는 다른 Reverse Proxy 중 무엇을 사용할 것인가? | 미정 |
-| INFRA-Q-002 | Queue | SQS, Redis Streams 또는 다른 Broker 중 무엇을 사용할 것인가? | 미정 |
+| INFRA-Q-001 | 공개 진입점 | ALB, API Gateway 또는 다른 Reverse Proxy 중 무엇을 사용할 것인가? | ALB 결정 |
+| INFRA-Q-002 | Queue | SQS, Redis Streams 또는 다른 Broker 중 무엇을 사용할 것인가? | Redis Streams 결정 |
 | INFRA-Q-003 | 전달 계약 | 재시도, DLQ, 순서, 중복, 멱등성과 전달 보장을 어떻게 정의할 것인가? | 미정 |
-| INFRA-Q-004 | Redis | EC2 컨테이너, ElastiCache 또는 다른 Redis 호환 서비스 중 무엇을 사용할 것인가? | 미정 |
+| INFRA-Q-004 | Redis | EC2 컨테이너, ElastiCache 또는 다른 Redis 호환 서비스 중 무엇을 사용할 것인가? | Redis 사용 확정, 운영 제품 후속 |
 | INFRA-Q-005 | DB 권한 | 리포·App별 PostgreSQL Role과 테이블별 읽기·쓰기 권한을 어떻게 만들 것인가? | 미정 |
 | INFRA-Q-006 | Flyway 통합 | 여러 리포의 Migration 번호 충돌을 어떻게 막고 어떤 순서로 적용할 것인가? | 미정 |
-| INFRA-Q-007 | 네트워크 | 단일 AZ의 Core·Trading·Compute EC2, RDS, Redis와 진입점을 어느 Subnet에 둘 것인가? | 미정 |
+| INFRA-Q-007 | 네트워크 | Core·Trading·Compute EC2, RDS, Redis와 ALB를 어느 Subnet에 둘 것인가? | ALB는 2-AZ Public Subnet, EC2는 AZ A Public Application Subnet, RDS·Redis는 Private Data Subnet |
 | INFRA-Q-008 | 보안 그룹 | 공개 진입, 내부 API, DB, Redis·Queue의 허용 주체와 포트를 어떻게 제한할 것인가? | 미정 |
 | INFRA-Q-009 | 백업·복구 | RDS와 S3의 RPO·RTO, Backup 보존과 복원 시험 주기를 어떻게 정할 것인가? | 미정 |
 
