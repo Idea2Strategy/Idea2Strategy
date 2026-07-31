@@ -19,21 +19,21 @@ commands:
     timeout_seconds: 30
   - id: command.foundation-repository-build
     kind: test
-    argv: [powershell.exe, -NoProfile, -ExecutionPolicy, Bypass, -File, scripts/verify-foundation-ci.ps1]
+    argv: [node, scripts/verify-foundation-evidence.mjs, ci]
     timeout_seconds: 120
   - id: command.foundation-service-smoke-test
     kind: test
-    argv: [powershell.exe, -NoProfile, -ExecutionPolicy, Bypass, -File, scripts/verify-foundation-ci.ps1]
+    argv: [node, scripts/verify-foundation-evidence.mjs, ci]
     timeout_seconds: 120
   - id: command.compose-static-validation
     kind: test
-    argv: [powershell.exe, -NoProfile, -ExecutionPolicy, Bypass, -File, scripts/test-docker-development.ps1]
+    argv: [node, scripts/verify-foundation-evidence.mjs, compose]
     timeout_seconds: 120
   - id: command.collaboration-policy-check
     kind: security
-    argv: [powershell.exe, -NoProfile, -ExecutionPolicy, Bypass, -File, scripts/verify-collaboration-policy.ps1]
+    argv: [node, scripts/verify-foundation-evidence.mjs, policy]
     timeout_seconds: 120
   - id: command.flyway-migration
     kind: migration
-    argv: [powershell.exe, -NoProfile, -ExecutionPolicy, Bypass, -File, scripts/test-flyway-migration.ps1]
+    argv: [node, scripts/verify-foundation-evidence.mjs, migration]
     timeout_seconds: 300
