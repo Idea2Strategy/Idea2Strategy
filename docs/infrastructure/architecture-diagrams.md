@@ -77,7 +77,7 @@ Development Terraform State와 잠금 객체만 저장하며 애플리케이션 
 
 Redis는 Private Data Subnet의 공유 서비스로 배치한다. 실시간 시장 사건과 최신값 Cache에 사용하지만 공식 정본은 아니며 PostgreSQL, S3와 공급자 데이터로부터 재구축할 수 있어야 한다.
 
-별도 Queue 제품은 추가하지 않고 Redis Streams를 사용한다. 봇 제어 명령, 백테스트 작업과 도메인 사건을 Consumer Group으로 전달한다. 재시도, Pending Entry 회수, 실패 보관과 멱등 처리 기준은 구현 전에 별도 계약으로 확정한다.
+Queue는 봇 제어 명령, 백테스트 작업과 도메인 사건을 전달한다. Queue 제품과 배치 방식은 아직 확정하지 않았으므로 특정 AWS 서비스 아이콘을 사용하지 않고 `Queue — technology and placement TBD`로 표시한다. Redis Streams는 실시간 시장 사건에만 사용한다.
 
 ## Subnet 배치
 
@@ -87,4 +87,4 @@ RDS와 Redis는 Private Data Subnet에 둔다. RDS Subnet Group은 향후 장애
 
 ## 한 문장 설명
 
-Idea2Strategy는 ALB로 외부 요청을 받아 사용자 API와 운영 배치를 Core EC2, 실시간 전략 평가와 가상 체결을 Trading EC2, 백테스트와 대용량 데이터 처리를 Compute EC2로 분리하고, 공식 상태는 PostgreSQL, 대용량 불변 데이터는 S3, 재구축 가능한 실시간 전달·작업 Queue·최신값은 Redis에 두는 구조다.
+Idea2Strategy는 ALB로 외부 요청을 받아 사용자 API와 운영 배치를 Core EC2, 실시간 전략 평가와 가상 체결을 Trading EC2, 백테스트와 대용량 데이터 처리를 Compute EC2로 분리한다. 공식 상태는 PostgreSQL, 대용량 불변 데이터는 S3, 명령·작업은 별도 Queue, 재구축 가능한 실시간 사건과 최신값은 Redis에 둔다.

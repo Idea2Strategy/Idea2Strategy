@@ -54,7 +54,7 @@
 ### 사용자 요청
 
 ```text
-Web UI → Route 53 → ALB(HTTPS·ACM) → backend-api → PostgreSQL 또는 Redis Streams
+Web UI → Route 53 → ALB(HTTPS·ACM) → backend-api → PostgreSQL 또는 Queue
 ```
 
 공개 진입점은 Application Load Balancer로 결정한다. Route 53이 서비스 도메인을 ALB로 연결하고 ACM 인증서를 ALB HTTPS Listener에 연결한다. ALB는 서로 다른 두 Availability Zone의 Public Subnet을 사용하고 Core EC2로만 외부 요청을 전달한다.
@@ -71,7 +71,7 @@ Market Gateway는 처음 한 개로 시작한다. 이후 부하와 장애 요구
 ### 백테스트
 
 ```text
-backend-api → Redis Streams → backtest-worker
+backend-api → Queue → backtest-worker
   → PostgreSQL 실행 상태·요약 + S3 상세 Parquet
 ```
 
@@ -113,11 +113,11 @@ S3에는 과거·실시간 시장 데이터 Parquet, RAW·ADJUSTED·파생 데�
 
 Redis는 실시간 시장 사건 전달과 종목별 최신값 Cache에 사용한다. 공식 장기 정본으로 사용하지 않으며 PostgreSQL, S3와 공급자 데이터로부터 재구축할 수 있어야 한다.
 
-Redis 사용을 확정한다. Redis는 Private Data Subnet의 공유 서비스로 두고 실시간 시장 사건, 최신값 Cache와 비동기 작업 전달을 담당한다.
+Redis 사용을 확정한다. Redis는 Private Data Subnet의 공유 서비스로 두고 실시간 시장 사건과 최신값 Cache를 담당한다.
 
 ### Queue
 
-별도 Queue 제품을 추가하지 않고 Redis Streams를 사용한다. Backend의 봇 제어 명령, 백테스트 작업과 일반 도메인 사건을 Consumer Group으로 전달한다. 재시도, Pending Entry 회수, 실패 보관과 멱등 계약은 후속 설계에서 확정한다.
+Backend의 봇 제어 명령, 백테스트 작업과 일반 도메인 사건은 Redis와 분리된 Queue로 전달한다. Queue 제품과 배치 방식은 아직 확정하지 않았으며, 다이어그램에서는 `Queue — technology and placement TBD`로 표시한다. Redis Streams는 실시간 시장 사건에만 사용하고 durable command/job queue로 사용하지 않는다.
 
 ## 5. 배포와 운영
 
@@ -145,8 +145,9 @@ GitHub → GitHub Actions → 테스트·Docker 이미지 빌드 → Amazon ECR
 
 ## 7. 아직 확정하지 않은 항목
 
-- EC2 인스턴스 타입과 CPU·메모리
-- Redis Streams의 재시도·Pending Entry 회수·실패 보관·멱등 계약
+- Core·Trading EC2 인스턴스 타입과 CPU·메모리
+- Queue 제품·배치 방식과 재시도·DLQ·순서·멱등 계약
+- Redis 운영 제품
 - Trading EC2 시작·종료 시간
 - 백테스트·Pipeline 동시 실행 수와 자원 한도
 - Lambda와 Compute Worker 사이의 작업 크기 기준

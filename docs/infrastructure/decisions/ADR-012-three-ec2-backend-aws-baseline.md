@@ -20,7 +20,7 @@
 - Redis: 실시간 사건·최신값
 - Public Ingress: 두 Availability Zone의 Public Subnet을 사용하는 ALB
 - EC2 Subnet: 초기에는 Availability Zone A의 Public Application Subnet
-- 작업 전달: 별도 Queue 제품 대신 Redis Streams
+- Queue: Redis와 분리한다. 제품과 배치 방식은 후속 결정으로 남긴다.
 - Flyway: 유일한 DB Migration 도구
 
 ## 미확정 항목
@@ -28,7 +28,8 @@
 이 제안은 다음 세부 구현을 확정하지 않는다.
 
 - ElastiCache, EC2 컨테이너 또는 다른 Redis 호환 운영 방식
-- Redis Streams의 재시도, Pending Entry 회수, 실패 보관과 멱등 계약
+- Queue 제품·배치 방식과 재시도·DLQ·순서·멱등 계약
+- Redis Stream Key, 보존 시간, Consumer Group과 장애 복구 방식
 - EC2 사양과 Compute 동시 실행 수
 - 애플리케이션 EC2의 Multi-AZ 확장 시점
 
@@ -44,8 +45,8 @@ ADR-001·002의 데이터 보호와 Flyway, ADR-007·008의 Projection과 SIP �
 - 실시간 거래, Core API와 Compute 자원 고갈의 영향 범위가 분리된다.
 - Git 리포, Docker 이미지, IAM Role, DB Role과 배포 대상이 증가한다.
 - ALB가 공개 HTTPS 진입점이 되고 Core에만 요청을 전달한다.
-- Redis가 실시간 Cache와 Redis Streams 작업 전달을 함께 담당한다.
-- Redis 운영 제품과 Streams 전달 보장 세부 계약은 별도로 결정해야 한다.
+- Queue와 Redis를 분리하여 명령·작업과 실시간 사건·Cache의 운영 계약을 독립적으로 관리한다.
+- Redis 운영 제품과 Queue 전달 보장 세부 계약은 별도로 결정해야 한다.
 - 현재 Terraform Market Data Bootstrap은 유지하고 새 목표 구조는 후속 단계에서 구현한다.
 
 ## 검증 조건

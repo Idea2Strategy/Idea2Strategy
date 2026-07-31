@@ -1,0 +1,210 @@
+<mxfile host="Electron" agent="draw.io Desktop">
+  <diagram id="idea2strategy-service-flow-v3" name="Service Flow v3">
+    <mxGraphModel dx="978" dy="552" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1050" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="e18" edge="1" parent="1" source="queue" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;dashed=1;strokeColor=#F59E0B;fontColor=#B45309" target="pipeline" value="Queue or schedule">
+          <mxGeometry relative="1" x="-0.0186" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1442.5" y="320" />
+              <mxPoint x="1250" y="320" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=28;fontStyle=1;fontColor=#172033" value="Idea2Strategy Service Flow" vertex="1">
+          <mxGeometry height="42" width="600" x="30" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="meta" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=12;fontColor=#5B6475" value="Logical service flow | Reference: 2026-07-31 | AWS icons: official 2026 Q2 (Icon-package_04302026)" vertex="1">
+          <mxGeometry height="28" width="1200" x="32" y="62" as="geometry" />
+        </mxCell>
+        <mxCell id="externalBand" parent="1" style="swimlane;html=1;rounded=1;startSize=34;fillColor=#F8FAFC;strokeColor=#94A3B8;fontSize=15;fontStyle=1;spacingLeft=12" value="External actors and providers" vertex="1">
+          <mxGeometry height="650" width="220" x="25" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="entryBand" parent="1" style="swimlane;html=1;rounded=1;startSize=34;fillColor=#FFF7ED;strokeColor=#F59E0B;fontSize=15;fontStyle=1;spacingLeft=12" value="DNS and entry" vertex="1">
+          <mxGeometry height="650" width="210" x="270" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="coreBand" parent="1" style="swimlane;html=1;rounded=1;startSize=34;fillColor=#EFF6FF;strokeColor=#3B82F6;fontSize=15;fontStyle=1;spacingLeft=12" value="Core EC2" vertex="1">
+          <mxGeometry height="650" width="245" x="505" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="tradingBand" parent="1" style="swimlane;html=1;rounded=1;startSize=34;fillColor=#FFF7ED;strokeColor=#F97316;fontSize=15;fontStyle=1;spacingLeft=12" value="Trading EC2" vertex="1">
+          <mxGeometry height="650" width="245" x="775" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="computeBand" parent="1" style="swimlane;html=1;rounded=1;startSize=34;fillColor=#F5F3FF;strokeColor=#8B5CF6;fontSize=15;fontStyle=1;spacingLeft=12" value="Compute EC2" vertex="1">
+          <mxGeometry height="650" width="245" x="1045" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="dataBand" parent="1" style="swimlane;html=1;rounded=1;startSize=34;fillColor=#F8FAFC;strokeColor=#64748B;fontSize=15;fontStyle=1;spacingLeft=12" value="Queue, Redis, and storage" vertex="1">
+          <mxGeometry height="650" width="255" x="1315" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="user" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;fontSize=14;align=center" value="User" vertex="1">
+          <mxGeometry height="58" width="160" x="55" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="operator" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;fontSize=14;align=center" value="Operator" vertex="1">
+          <mxGeometry height="58" width="160" x="55" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="provider" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;fontSize=13;align=center" value="real-time market data provider" vertex="1">
+          <mxGeometry height="70" width="180" x="45" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="route53" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#F59E0B;fontSize=13;align=center" value="Route 53" vertex="1">
+          <mxGeometry height="62" width="160" x="295" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="alb" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#F59E0B;fontSize=13;align=center" value="ALB" vertex="1">
+          <mxGeometry height="70" width="160" x="295" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="acm" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#F59E0B;fontSize=13;align=center" value="ACM" vertex="1">
+          <mxGeometry height="62" width="160" x="295" y="585" as="geometry" />
+        </mxCell>
+        <mxCell id="api" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#3B82F6;strokeWidth=2;fontSize=14;align=center" value="backend-api" vertex="1">
+          <mxGeometry height="62" width="185" x="535" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="batch" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#3B82F6;fontSize=14;align=center" value="backend-batch" vertex="1">
+          <mxGeometry height="62" width="185" x="535" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="worker" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#3B82F6;fontSize=14;align=center" value="backend-worker" vertex="1">
+          <mxGeometry height="62" width="185" x="535" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="mcp" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#3B82F6;fontSize=14;align=center" value="admin-mcp" vertex="1">
+          <mxGeometry height="62" width="185" x="535" y="590" as="geometry" />
+        </mxCell>
+        <mxCell id="gateway" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#F97316;fontSize=14;align=center" value="market-gateway" vertex="1">
+          <mxGeometry height="62" width="185" x="805" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="trader" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#F97316;strokeWidth=2;fontSize=14;align=center" value="trading-worker" vertex="1">
+          <mxGeometry height="62" width="185" x="805" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="btapi" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8B5CF6;fontSize=14;align=center" value="backtest-api" vertex="1">
+          <mxGeometry height="62" width="185" x="1075" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="btworker" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8B5CF6;fontSize=14;align=center" value="backtest-worker" vertex="1">
+          <mxGeometry height="62" width="185" x="1075" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="pipeline" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8B5CF6;fontSize=14;align=center" value="pipeline-worker" vertex="1">
+          <mxGeometry height="62" width="185" x="1075" y="580" as="geometry" />
+        </mxCell>
+        <mxCell id="queue" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFBEB;strokeColor=#F59E0B;strokeWidth=2;fontSize=13;align=center" value="Queue" vertex="1">
+          <mxGeometry height="72" width="195" x="1345" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="redis" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#FEF2F2;strokeColor=#EF4444;strokeWidth=2;fontSize=13;align=center" value="Redis" vertex="1">
+          <mxGeometry height="82" width="195" x="1345" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="postgres" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#2563EB;fontSize=13;align=center" value="PostgreSQL" vertex="1">
+          <mxGeometry height="82" width="195" x="1345" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="marketS3" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#F0FDF4;strokeColor=#16A34A;fontSize=12;align=center" value="Market Data S3" vertex="1">
+          <mxGeometry height="72" width="215" x="1335" y="610" as="geometry" />
+        </mxCell>
+        <mxCell id="resultsS3" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#F0FDF4;strokeColor=#16A34A;fontSize=12;align=center" value="Results S3" vertex="1">
+          <mxGeometry height="72" width="215" x="1335" y="700" as="geometry" />
+        </mxCell>
+        <mxCell id="opsBand" parent="1" style="swimlane;html=1;rounded=1;startSize=34;fillColor=#F8FAFC;strokeColor=#94A3B8;fontSize=15;fontStyle=1;spacingLeft=12" value="Deployment and operations control plane" vertex="1">
+          <mxGeometry height="170" width="1545" x="25" y="820" as="geometry" />
+        </mxCell>
+        <mxCell id="github" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;fontSize=13;align=center" value="GitHub&lt;br&gt;&lt;font color=&#39;#64748B&#39;&gt;External&lt;/font&gt;" vertex="1">
+          <mxGeometry height="58" width="170" x="65" y="875" as="geometry" />
+        </mxCell>
+        <mxCell id="actions" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;fontSize=13;align=center" value="GitHub Actions" vertex="1">
+          <mxGeometry height="58" width="170" x="280" y="875" as="geometry" />
+        </mxCell>
+        <mxCell id="ecr" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#F59E0B;fontSize=13;align=center" value="ECR" vertex="1">
+          <mxGeometry height="58" width="170" x="495" y="875" as="geometry" />
+        </mxCell>
+        <mxCell id="ssm" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#F59E0B;fontSize=13;align=center" value="Systems Manager" vertex="1">
+          <mxGeometry height="58" width="170" x="710" y="875" as="geometry" />
+        </mxCell>
+        <mxCell id="compose" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#3B82F6;fontSize=13;align=center" value="EC2 Docker Compose" vertex="1">
+          <mxGeometry height="58" width="190" x="925" y="875" as="geometry" />
+        </mxCell>
+        <mxCell id="cw" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#64748B;fontSize=13;align=center" value="CloudWatch" vertex="1">
+          <mxGeometry height="58" width="190" x="1160" y="875" as="geometry" />
+        </mxCell>
+        <mxCell id="legend" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=12;fontColor=#475569" value="solid dark = sync/API/DB | dashed orange = Queue async | solid red = Redis state | solid green = S3 object | dotted gray = deployment/operations" vertex="1">
+          <mxGeometry height="30" width="1500" x="30" y="1005" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="user" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#334155;fontColor=#334155" target="route53" value="DNS alias resolution">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="operator" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#334155;fontColor=#334155" target="route53" value="DNS alias resolution">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="route53" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#334155;fontColor=#334155" target="alb" value="DNS alias resolution">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="alb" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#334155;fontColor=#334155" target="api" value="HTTPS/application traffic">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="alb" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#334155;fontColor=#334155" target="mcp" value="HTTPS/application traffic">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="acm" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;dashed=1;strokeColor=#64748B;fontColor=#64748B" target="alb" value="certificate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="provider" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#334155;fontColor=#334155" target="gateway" value="market data">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="gateway" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#EF4444;fontColor=#B91C1C" target="redis" value="real-time state">
+          <mxGeometry relative="1" x="-0.0892" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1140" y="331" />
+              <mxPoint x="1140" y="391" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="redis" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#EF4444;fontColor=#B91C1C" target="trader" value="real-time state">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="queue" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;dashed=1;strokeColor=#F59E0B;fontColor=#B45309" target="trader" value="async work">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="trader" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#334155;fontColor=#334155" target="postgres" value="orders, fills, ledger">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="api" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#334155;fontColor=#334155" target="btapi" value="internal API">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="api" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;dashed=1;strokeColor=#F59E0B;fontColor=#B45309" target="queue" value="async job">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" edge="1" parent="1" source="queue" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;dashed=1;strokeColor=#F59E0B;fontColor=#B45309" target="btworker" value="async job">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1420" y="290" />
+              <mxPoint x="1190" y="290" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e15" edge="1" parent="1" source="btworker" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#334155;fontColor=#334155" target="postgres" value="status and summary">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" edge="1" parent="1" source="btworker" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#16A34A;fontColor=#15803D" target="marketS3" value="Market Data Parquet">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" edge="1" parent="1" source="btworker" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#16A34A;fontColor=#15803D" target="resultsS3" value="detailed results">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e19" edge="1" parent="1" source="pipeline" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#16A34A;fontColor=#15803D" target="marketS3" value="Parquet objects">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e20" edge="1" parent="1" source="pipeline" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;strokeColor=#334155;fontColor=#334155" target="postgres" value="Manifest">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e21" edge="1" parent="1" source="github" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;dotted=1;strokeColor=#64748B;fontColor=#64748B" target="actions" value="build and test">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e22" edge="1" parent="1" source="actions" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;dotted=1;strokeColor=#64748B;fontColor=#64748B" target="ecr" value="image digest">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e23" edge="1" parent="1" source="ecr" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;dotted=1;strokeColor=#64748B;fontColor=#64748B" target="ssm" value="image digest">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e24" edge="1" parent="1" source="ssm" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;dotted=1;strokeColor=#64748B;fontColor=#64748B" target="compose" value="Docker Compose update">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e25" edge="1" parent="1" source="compose" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;dotted=1;strokeColor=#64748B;fontColor=#64748B" target="cw" value="logs and metrics">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
