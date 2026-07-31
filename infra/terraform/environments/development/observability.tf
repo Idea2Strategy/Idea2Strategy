@@ -46,6 +46,24 @@ resource "aws_cloudwatch_metric_alarm" "batch_cpu_high" {
   }
 }
 
+resource "aws_cloudwatch_metric_alarm" "batch_memory_high" {
+  alarm_name          = "${local.name_prefix}-batch-memory-high"
+  alarm_description   = "Batch EC2 memory has exceeded 80 percent for 5 minutes."
+  namespace           = "Idea2Strategy/Development"
+  metric_name         = "mem_used_percent"
+  statistic           = "Average"
+  period              = 60
+  evaluation_periods  = 5
+  datapoints_to_alarm = 5
+  threshold           = 80
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "missing"
+
+  dimensions = {
+    InstanceId = aws_instance.batch.id
+  }
+}
+
 resource "aws_cloudwatch_metric_alarm" "service_status_check_failed" {
   count = local.enable_service_stack ? 1 : 0
 

@@ -1,0 +1,296 @@
+<mxfile host="Electron" agent="draw.io CLI">
+  <diagram id="idea2strategy-server-flow-v3" name="Server Flow v3">
+    <mxGraphModel dx="1334" dy="1046" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1250" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=28;fontStyle=1;fontColor=#172033;" value="Idea2Strategy Server Flow v3" vertex="1">
+          <mxGeometry height="45" width="520" x="35" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="coreGroup" parent="1" style="swimlane;html=1;rounded=1;startSize=42;horizontal=1;fillColor=#E8F3FF;strokeColor=#4A90E2;fontColor=#173A63;fontSize=16;fontStyle=1;swimlaneFillColor=#D5E9FF;arcSize=0;spacingLeft=42;connectable=0;" value="EC2 #1 · Core" vertex="1">
+          <mxGeometry height="890" width="360" x="500" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="adminMcp" parent="coreGroup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#72A9E6;fontSize=14;arcSize=12;" value="&lt;b&gt;admin-mcp&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;Administrative Operations&lt;/font&gt;" vertex="1">
+          <mxGeometry height="82" width="270" x="45" y="114" as="geometry" />
+        </mxCell>
+        <mxCell id="backendApi" parent="coreGroup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2F80ED;strokeWidth=2;fontSize=14;arcSize=12;" value="&lt;b&gt;backend-api&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;User API&lt;/font&gt;" vertex="1">
+          <mxGeometry height="92" width="270" x="45" y="657" as="geometry" />
+        </mxCell>
+        <mxCell id="backendWorker" parent="coreGroup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#72A9E6;fontSize=14;arcSize=12;" value="&lt;b&gt;backend-worker&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;Notifications &amp;amp; Async Processing&lt;/font&gt;" vertex="1">
+          <mxGeometry height="82" width="270" x="45" y="476" as="geometry" />
+        </mxCell>
+        <mxCell id="backendBatch" parent="coreGroup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#72A9E6;fontSize=14;arcSize=12;" value="&lt;b&gt;backend-batch&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;Scheduled Operations&lt;/font&gt;" vertex="1">
+          <mxGeometry height="82" width="270" x="45" y="295" as="geometry" />
+        </mxCell>
+        <mxCell id="tZE_vTUoA-qPkpKtVlls-1" edge="1" parent="coreGroup" source="backendBatch" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="adminMcp" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tradingGroup" parent="1" style="swimlane;html=1;rounded=1;startSize=42;horizontal=1;fillColor=#FFF2E3;strokeColor=#F2994A;fontColor=#6B3A13;fontSize=16;fontStyle=1;swimlaneFillColor=#FFE5C5;arcSize=0;spacingLeft=42;connectable=0;" value="EC2 #2 · Trading" vertex="1">
+          <mxGeometry height="310" width="380" x="950" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="tradingWorker" parent="tradingGroup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#F2994A;strokeWidth=2;fontSize=14;arcSize=12;" value="&lt;b&gt;trading-worker&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;Strategy Evaluation &amp;amp; Paper Execution&lt;/font&gt;" vertex="1">
+          <mxGeometry height="78" width="270" x="55" y="175" as="geometry" />
+        </mxCell>
+        <mxCell id="computeGroup" parent="1" style="swimlane;html=1;rounded=1;startSize=42;horizontal=1;fillColor=#F1ECFF;strokeColor=#8E6BD8;fontColor=#412B73;fontSize=16;fontStyle=1;swimlaneFillColor=#E4DAFF;arcSize=0;spacingLeft=42;connectable=0;align=center;" value="EC2 #3 · Compute" vertex="1">
+          <mxGeometry height="480" width="380" x="950" y="555" as="geometry" />
+        </mxCell>
+        <mxCell id="messagingGroup" parent="1" style="swimlane;html=1;rounded=1;startSize=42;horizontal=1;fillColor=#FFFBE8;strokeColor=#D6A700;fontColor=#6F5900;fontSize=16;fontStyle=1;swimlaneFillColor=#FFF2B8;arcSize=10;spacingLeft=12;connectable=0;" value="Messaging &amp; Realtime" vertex="1">
+          <mxGeometry height="430" width="280" x="1410" y="409" as="geometry" />
+        </mxCell>
+        <mxCell id="redis" parent="messagingGroup" style="shape=label;rounded=1;whiteSpace=wrap;html=1;image=data:image/svg+xml,%3Csvg%20fill%3D%22%23FF4438%22%20role%3D%22img%22%20viewBox%3D%220%200%2024%2024%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Ctitle%3ERedis%3C%2Ftitle%3E%3Cpath%20d%3D%22M22.71%2013.145c-1.66%202.092-3.452%204.483-7.038%204.483-3.203%200-4.397-2.825-4.48-5.12.701%201.484%202.073%202.685%204.214%202.63%204.117-.133%206.94-3.852%206.94-7.239%200-4.05-3.022-6.972-8.268-6.972-3.752%200-8.4%201.428-11.455%203.685C2.59%206.937%203.885%209.958%204.35%209.626c2.648-1.904%204.748-3.13%206.784-3.744C8.12%209.244.886%2017.05%200%2018.425c.1%201.261%201.66%204.648%202.424%204.648.232%200%20.431-.133.664-.365a100.49%20100.49%200%200%200%205.54-6.765c.222%203.104%201.748%206.898%206.014%206.898%203.819%200%207.604-2.756%209.33-8.965.2-.764-.73-1.361-1.261-.73zm-4.349-5.013c0%201.959-1.926%202.922-3.685%202.922-.941%200-1.664-.247-2.235-.568%201.051-1.592%202.092-3.225%203.21-4.973%201.972.334%202.71%201.43%202.71%202.619z%22%2F%3E%3C%2Fsvg%3E;imageWidth=38;imageHeight=38;imageAlign=left;imageVerticalAlign=middle;spacingLeft=45;align=center;verticalAlign=middle;fillColor=#FFE7E7;strokeColor=#D95D5D;fontSize=14;arcSize=14;" value="&lt;b&gt;Redis&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;Real-Time Quotes &amp;amp; Cache&lt;/font&gt;" vertex="1">
+          <mxGeometry height="105" width="200" x="22" y="296.5" as="geometry" />
+        </mxCell>
+        <mxCell id="queue" parent="messagingGroup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#D6A700;strokeWidth=2;fontSize=14;arcSize=18;" value="&lt;b&gt;Queue&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;Asynchronous Job Delivery&lt;/font&gt;" vertex="1">
+          <mxGeometry height="86" width="200" x="22" y="53" as="geometry" />
+        </mxCell>
+        <mxCell id="dataGroup" parent="1" style="swimlane;html=1;rounded=1;startSize=42;horizontal=1;fillColor=#F7F8FA;strokeColor=#8C95A6;fontColor=#394150;fontSize=16;fontStyle=1;swimlaneFillColor=#E9ECF1;arcSize=10;spacingLeft=12;connectable=0;" value="System of Record &amp; Object Storage" vertex="1">
+          <mxGeometry height="511.5" width="360" x="1750" y="198.5" as="geometry" />
+        </mxCell>
+        <mxCell id="postgres" parent="dataGroup" style="shape=label;rounded=1;whiteSpace=wrap;html=1;image=data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3Csvg%20width%3D%2240px%22%20height%3D%2240px%22%20viewBox%3D%220%200%2040%2040%22%20version%3D%221.1%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20xmlns%3Axlink%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink%22%3E%0A%20%20%20%20%3Ctitle%3EIcon-Architecture%2F32%2FArch_Amazon-RDS_32%3C%2Ftitle%3E%0A%20%20%20%20%3Cg%20id%3D%22Icon-Architecture%2F32%2FArch_Amazon-RDS_32%22%20stroke%3D%22none%22%20stroke-width%3D%221%22%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%0A%20%20%20%20%20%20%20%20%3Cg%20id%3D%22Icon-Architecture-BG%2F32%2FDatabase%22%20fill%3D%22%23C925D1%22%3E%0A%20%20%20%20%20%20%20%20%20%20%20%20%3Crect%20id%3D%22Rectangle%22%20x%3D%220%22%20y%3D%220%22%20width%3D%2240%22%20height%3D%2240%22%3E%3C%2Frect%3E%0A%20%20%20%20%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%20%20%20%20%3Cpath%20d%3D%22M11.854%2C28.854%20L7.708%2C33%20L10.5%2C33%20L10.5%2C34%20L6.5%2C34%20C6.224%2C34%206%2C33.777%206%2C33.5%20L6%2C29.5%20L7%2C29.5%20L7%2C32.293%20L11.147%2C28.147%20L11.854%2C28.854%20Z%20M33%2C29.5%20L34%2C29.5%20L34%2C33.5%20C34%2C33.777%2033.777%2C34%2033.5%2C34%20L29.5%2C34%20L29.5%2C33%20L32.293%2C33%20L28.147%2C28.854%20L28.854%2C28.147%20L33%2C32.293%20L33%2C29.5%20Z%20M34%2C6.5%20L34%2C10.5%20L33%2C10.5%20L33%2C7.708%20L28.854%2C11.854%20L28.147%2C11.147%20L32.293%2C7%20L29.5%2C7%20L29.5%2C6%20L33.5%2C6%20C33.777%2C6%2034%2C6.224%2034%2C6.5%20L34%2C6.5%20Z%20M7%2C10.5%20L6%2C10.5%20L6%2C6.5%20C6%2C6.224%206.224%2C6%206.5%2C6%20L10.5%2C6%20L10.5%2C7%20L7.527%2C7%20L11.846%2C11.14%20L11.155%2C11.861%20L7%2C7.88%20L7%2C10.5%20Z%20M32.726%2C19.4%20C32.726%2C17.842%2030.92%2C16.3%2027.896%2C15.277%20L28.216%2C14.33%20C31.718%2C15.515%2033.726%2C17.363%2033.726%2C19.4%20C33.726%2C21.437%2031.718%2C23.286%2028.216%2C24.471%20L27.896%2C23.523%20C30.92%2C22.5%2032.726%2C20.958%2032.726%2C19.4%20L32.726%2C19.4%20Z%20M7.737%2C19.4%20C7.737%2C20.892%209.427%2C22.393%2012.258%2C23.414%20L11.918%2C24.354%20C8.625%2C23.167%206.737%2C21.361%206.737%2C19.4%20C6.737%2C17.439%208.625%2C15.633%2011.918%2C14.445%20L12.258%2C15.386%20C9.427%2C16.407%207.737%2C17.908%207.737%2C19.4%20L7.737%2C19.4%20Z%20M20.023%2C15.719%20C16.887%2C15.719%2015.132%2C14.92%2015.106%2C14.594%20C15.132%2C14.268%2016.887%2C13.469%2020.023%2C13.469%20C23.156%2C13.469%2024.913%2C14.267%2024.94%2C14.594%20C24.913%2C14.92%2023.156%2C15.719%2020.023%2C15.719%20L20.023%2C15.719%20Z%20M20.023%2C19.274%20C16.841%2C19.274%2015.106%2C18.348%2015.106%2C17.872%20L15.106%2C15.842%20C16.241%2C16.437%2018.175%2C16.719%2020.023%2C16.719%20C21.871%2C16.719%2023.805%2C16.437%2024.94%2C15.842%20L24.94%2C17.872%20C24.94%2C18.348%2023.205%2C19.274%2020.023%2C19.274%20L20.023%2C19.274%20Z%20M20.023%2C23.011%20C16.841%2C23.011%2015.106%2C22.084%2015.106%2C21.608%20L15.106%2C19.265%20C16.225%2C19.93%2018.129%2C20.274%2020.023%2C20.274%20C21.917%2C20.274%2023.821%2C19.93%2024.94%2C19.265%20L24.94%2C21.608%20C24.94%2C22.084%2023.205%2C23.011%2020.023%2C23.011%20L20.023%2C23.011%20Z%20M20.023%2C26.29%20C16.841%2C26.29%2015.106%2C25.375%2015.106%2C24.905%20L15.106%2C23.001%20C16.225%2C23.667%2018.129%2C24.011%2020.023%2C24.011%20C21.917%2C24.011%2023.821%2C23.667%2024.94%2C23.001%20L24.94%2C24.905%20C24.94%2C25.375%2023.205%2C26.29%2020.023%2C26.29%20L20.023%2C26.29%20Z%20M20.023%2C12.469%20C17.173%2C12.469%2014.106%2C13.134%2014.106%2C14.594%20L14.106%2C24.905%20C14.106%2C26.471%2017.083%2C27.29%2020.023%2C27.29%20C22.963%2C27.29%2025.94%2C26.471%2025.94%2C24.905%20L25.94%2C14.594%20C25.94%2C13.134%2022.873%2C12.469%2020.023%2C12.469%20L20.023%2C12.469%20Z%22%20id%3D%22Amazon-RDS_Icon_32_Squid%22%20fill%3D%22%23FFFFFF%22%3E%3C%2Fpath%3E%0A%20%20%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E;imageWidth=44;imageHeight=44;imageAlign=left;imageVerticalAlign=middle;spacingLeft=52;align=center;verticalAlign=middle;fillColor=#E9F2FF;strokeColor=#527FBC;fontSize=13;arcSize=14;" value="&lt;b&gt;Amazon RDS for PostgreSQL&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;State | Summary | Ledger | Manifest&lt;/font&gt;" vertex="1">
+          <mxGeometry height="125" width="270" x="49" y="111.5" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" parent="dataGroup" style="shape=label;rounded=1;whiteSpace=wrap;html=1;image=data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3Csvg%20width%3D%2280px%22%20height%3D%2280px%22%20viewBox%3D%220%200%2080%2080%22%20version%3D%221.1%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20xmlns%3Axlink%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink%22%3E%0A%20%20%20%20%3Ctitle%3EIcon-Architecture%2F64%2FArch_Amazon-Simple-Storage-Service_64%3C%2Ftitle%3E%0A%20%20%20%20%3Cg%20id%3D%22Icon-Architecture%2F64%2FArch_Amazon-Simple-Storage-Service_64%22%20stroke%3D%22none%22%20stroke-width%3D%221%22%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%0A%20%20%20%20%20%20%20%20%3Cg%20id%3D%22Icon-Architecture-BG%2F64%2FStorage%22%20fill%3D%22%237AA116%22%3E%0A%20%20%20%20%20%20%20%20%20%20%20%20%3Crect%20id%3D%22Rectangle%22%20x%3D%220%22%20y%3D%220%22%20width%3D%2280%22%20height%3D%2280%22%3E%3C%2Frect%3E%0A%20%20%20%20%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%20%20%20%20%3Cg%20id%3D%22Icon-Service%2F64%2FAmazon-Simple-Storage-Service_64%22%20transform%3D%22translate(12.999900%2C%2011.999600)%22%20fill%3D%22%23FFFFFF%22%3E%0A%20%20%20%20%20%20%20%20%20%20%20%20%3Cpath%20d%3D%22M47.836%2C30.893%20L48.22%2C28.189%20C51.761%2C30.31%2051.807%2C31.186%2051.8060132%2C31.21%20C51.8%2C31.215%2051.196%2C31.719%2047.836%2C30.893%20L47.836%2C30.893%20Z%20M45.893%2C30.353%20C39.773%2C28.501%2031.25%2C24.591%2027.801%2C22.961%20C27.801%2C22.947%2027.805%2C22.934%2027.805%2C22.92%20C27.805%2C21.595%2026.727%2C20.517%2025.401%2C20.517%20C24.077%2C20.517%2022.999%2C21.595%2022.999%2C22.92%20C22.999%2C24.245%2024.077%2C25.323%2025.401%2C25.323%20C25.983%2C25.323%2026.511%2C25.106%2026.928%2C24.761%20C30.986%2C26.682%2039.443%2C30.535%2045.608%2C32.355%20L43.17%2C49.561%20C43.163%2C49.608%2043.16%2C49.655%2043.16%2C49.702%20C43.16%2C51.217%2036.453%2C54%2025.494%2C54%20C14.419%2C54%207.641%2C51.217%207.641%2C49.702%20C7.641%2C49.656%207.638%2C49.611%207.632%2C49.566%20L2.538%2C12.359%20C6.947%2C15.394%2016.43%2C17%2025.5%2C17%20C34.556%2C17%2044.023%2C15.4%2048.441%2C12.374%20L45.893%2C30.353%20Z%20M2%2C8.478%20C2.072%2C7.162%209.634%2C2%2025.5%2C2%20C41.364%2C2%2048.927%2C7.161%2049%2C8.478%20L49%2C8.927%20C48.13%2C11.878%2038.33%2C15%2025.5%2C15%20C12.648%2C15%202.843%2C11.868%202%2C8.913%20L2%2C8.478%20Z%20M51%2C8.5%20C51%2C5.035%2041.066%2C0%2025.5%2C0%20C9.934%2C0%200%2C5.035%200%2C8.5%20L0.094%2C9.254%20L5.642%2C49.778%20C5.775%2C54.31%2017.861%2C56%2025.494%2C56%20C34.966%2C56%2045.029%2C53.822%2045.159%2C49.781%20L47.555%2C32.884%20C48.888%2C33.203%2049.985%2C33.366%2050.866%2C33.366%20C52.049%2C33.366%2052.849%2C33.077%2053.334%2C32.499%20C53.732%2C32.025%2053.884%2C31.451%2053.77%2C30.84%20C53.511%2C29.456%2051.868%2C27.964%2048.522%2C26.055%20L50.898%2C9.293%20L51%2C8.5%20Z%22%20id%3D%22Amazon-Simple-Storage-Service-Icon_64_Squid%22%3E%3C%2Fpath%3E%0A%20%20%20%20%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E;imageWidth=44;imageHeight=44;imageAlign=left;imageVerticalAlign=middle;spacingLeft=52;align=center;verticalAlign=middle;fillColor=#E8F7EF;strokeColor=#4E9F72;fontSize=14;arcSize=14;" value="&lt;b&gt;Amazon S3&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;Parquet | Detailed Results&lt;/font&gt;" vertex="1">
+          <mxGeometry height="125" width="270" x="49" y="301.5" as="geometry" />
+        </mxCell>
+        <mxCell id="operator" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#667085;fontSize=15;fontStyle=1;arcSize=14;" value="Operator" vertex="1">
+          <mxGeometry height="64" width="140" x="35" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="user" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#667085;fontSize=15;fontStyle=1;arcSize=14;" value="User" vertex="1">
+          <mxGeometry height="64" width="140" x="35" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="route53" parent="1" style="shape=label;rounded=1;whiteSpace=wrap;html=1;image=data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3Csvg%20width%3D%2240px%22%20height%3D%2240px%22%20viewBox%3D%220%200%2040%2040%22%20version%3D%221.1%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20xmlns%3Axlink%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink%22%3E%0A%20%20%20%20%3Ctitle%3EIcon-Architecture%2F32%2FArch_Amazon-Route-53_32%3C%2Ftitle%3E%0A%20%20%20%20%3Cg%20id%3D%22Icon-Architecture%2F32%2FArch_Amazon-Route-53_32%22%20stroke%3D%22none%22%20stroke-width%3D%221%22%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%0A%20%20%20%20%20%20%20%20%3Cg%20id%3D%22Icon-Architecture-BG%2F32%2FNetworking-Content-Delivery%22%20fill%3D%22%238C4FFF%22%3E%0A%20%20%20%20%20%20%20%20%20%20%20%20%3Crect%20id%3D%22Rectangle%22%20x%3D%220%22%20y%3D%220%22%20width%3D%2240%22%20height%3D%2240%22%3E%3C%2Frect%3E%0A%20%20%20%20%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%20%20%20%20%3Cpath%20d%3D%22M24.0244033%2C20.3143713%20C24.3665874%2C20.6307385%2024.5381782%2C21.0548902%2024.5381782%2C21.5858283%20C24.5381782%2C22.1656687%2024.3296754%2C22.6277445%2023.9136674%2C22.9740519%20C23.4976594%2C23.3193613%2022.9369964%2C23.492016%2022.2346712%2C23.492016%20C21.6789962%2C23.492016%2021.1303047%2C23.3732535%2020.5866012%2C23.1377246%20L20.5866012%2C22.4281437%20C21.2300668%2C22.6417166%2021.779756%2C22.747505%2022.2346712%2C22.747505%20C22.682603%2C22.747505%2023.0287775%2C22.6467066%2023.2711994%2C22.4461078%20C23.5126237%2C22.245509%2023.6343335%2C21.9580838%2023.6343335%2C21.5858283%20C23.6343335%2C20.8712575%2023.1824112%2C20.5139721%2022.2785665%2C20.5139721%20C21.9952421%2C20.5139721%2021.7149106%2C20.5289421%2021.4365743%2C20.5578842%20L21.4365743%2C19.9730539%20L23.2971376%2C17.9431138%20L20.6753895%2C17.9431138%20L20.6753895%2C17.2165669%20L24.2817896%2C17.2165669%20L24.2817896%2C17.9171657%20L22.456143%2C19.8493014%20C22.4860717%2C19.8433134%2022.5150027%2C19.8403194%2022.5449313%2C19.8403194%20L22.632722%2C19.8403194%20C23.2173279%2C19.8403194%2023.6812217%2C19.999002%2024.0244033%2C20.3143713%20M18.8766787%2C20.1596806%20C19.2358223%2C20.496008%2019.4173893%2C20.9600798%2019.4173893%2C21.5508982%20C19.4173893%2C22.1297405%2019.2068913%2C22.5988024%2018.7878904%2C22.9550898%20C18.3678919%2C23.3133733%2017.8152099%2C23.492016%2017.1308418%2C23.492016%20C16.5282787%2C23.492016%2015.9646228%2C23.3732535%2015.4388765%2C23.1377246%20L15.4388765%2C22.4281437%20C16.0943136%2C22.6417166%2016.6549766%2C22.747505%2017.1218632%2C22.747505%20C17.5697951%2C22.747505%2017.914972%2C22.6457086%2018.154401%2C22.4421158%20C18.3928325%2C22.237525%2018.5135446%2C21.9441118%2018.5135446%2C21.5598802%20C18.5135446%2C21.1407186%2018.4008134%2C20.8353293%2018.1763487%2C20.6467066%20C17.951884%2C20.4580838%2017.585757%2C20.3632735%2017.0769703%2C20.3632735%20C16.7108434%2C20.3632735%2016.2539329%2C20.3932136%2015.7042437%2C20.4520958%20L15.7042437%2C19.8662675%20L15.8728417%2C17.2165669%20L19.1061315%2C17.2165669%20L19.1061315%2C17.9431138%20L16.617067%2C17.9431138%20L16.501343%2C19.742515%20C16.8265674%2C19.6836327%2017.1188704%2C19.6536926%2017.3792495%2C19.6536926%20C18.0167293%2C19.6536926%2018.5165375%2C19.8223553%2018.8766787%2C20.1596806%20M25.5298135%2C26.6217565%20C23.288159%2C27.0249501%2021.3228455%2C27.9351297%2020%2C28.6806387%20C18.6771545%2C27.9351297%2016.711841%2C27.0249501%2014.4691889%2C26.6217565%20C13.8426828%2C26.508982%2010.7151408%2C25.8572854%2010.7151408%2C24.0628743%20C10.7151408%2C23.2265469%2011.0164224%2C22.6706587%2011.5920497%2C21.6776447%20C12.2883892%2C20.4780439%2013.1543243%2C18.9850299%2013.1543243%2C16.8303393%20C13.1543243%2C15.3023952%2012.7552759%2C13.8343313%2011.9671552%2C12.4620758%20L12.2165605%2C12.1556886%20C14.8273348%2C13.4491018%2017.7503645%2C13.2744511%2020%2C11.8522954%20C22.2506331%2C13.2734531%2025.1726652%2C13.4491018%2027.7834395%2C12.1556886%20L28.0328448%2C12.4620758%20C27.2447241%2C13.8343313%2026.8446781%2C15.3023952%2026.8446781%2C16.8303393%20C26.8446781%2C18.9850299%2027.7106132%2C20.4780439%2028.4079503%2C21.6776447%20C28.9835776%2C22.6706587%2029.2838616%2C23.2265469%2029.2838616%2C24.0628743%20C29.2838616%2C25.8572854%2026.1573172%2C26.508982%2025.5298135%2C26.6217565%20M27.8422991%2C16.8303393%20C27.8422991%2C15.3762475%2028.2523214%2C13.9810379%2029.0623897%2C12.6836327%20C29.1751209%2C12.501996%2029.1601565%2C12.2684631%2029.0264753%2C12.1037924%20L28.3002072%2C11.2105788%20C28.1475712%2C11.0219561%2027.8812064%2C10.9690619%2027.6707083%2C11.0878244%20C26.5364132%2C11.7145709%2025.3512394%2C12.0329341%2024.1520988%2C12.0329341%20C22.7035531%2C12.0329341%2021.4375719%2C11.6437126%2020.284322%2C10.8433134%20C20.1127312%2C10.7255489%2019.8872688%2C10.7255489%2019.715678%2C10.8433134%20C18.5614304%2C11.6437126%2017.2964469%2C12.0329341%2015.8479012%2C12.0329341%20C14.6487606%2C12.0329341%2013.4635868%2C11.7145709%2012.3282941%2C11.0878244%20C12.1167984%2C10.9690619%2011.8514312%2C11.0219561%2011.6997928%2C11.2105788%20L10.9735247%2C12.1037924%20C10.8388458%2C12.2684631%2010.8248791%2C12.501996%2010.9376103%2C12.6836327%20C11.746681%2C13.9810379%2012.1567032%2C15.3762475%2012.1567032%2C16.8303393%20C12.1567032%2C18.7165669%2011.3655897%2C20.0808383%2010.7291075%2C21.1766467%20C10.1026015%2C22.257485%209.71751976%2C22.9750499%209.71751976%2C24.0628743%20C9.71751976%2C26.5868263%2013.2201673%2C27.4111776%2014.2926099%2C27.6037924%20C16.5392526%2C28.006986%2018.4995779%2C28.9590818%2019.7485995%2C29.6866267%20C19.8264139%2C29.7325349%2019.913207%2C29.754491%2020%2C29.754491%20C20.086793%2C29.754491%2020.1735861%2C29.7325349%2020.2514005%2C29.6866267%20C21.5004221%2C28.9590818%2023.4607474%2C28.006986%2025.7063924%2C27.6037924%20C26.7798327%2C27.4111776%2030.2814826%2C26.5868263%2030.2814826%2C24.0628743%20C30.2814826%2C22.9750499%2029.8973985%2C22.257485%2029.2708925%2C21.1766467%20C28.6344103%2C20.0808383%2027.8422991%2C18.7165669%2027.8422991%2C16.8303393%20M26.0096693%2C29.2974052%20C23.1883969%2C29.8043912%2020.8200445%2C31.3133733%2020%2C31.8852295%20C19.1799555%2C31.3133733%2016.8116031%2C29.8043912%2013.9893331%2C29.2974052%20C12.5836851%2C29.0449102%207.99762106%2C27.9211577%207.99762106%2C24.0628743%20C7.99762106%2C22.4570858%208.62911519%2C21.3672655%209.24165452%2C20.3133733%20C9.82925332%2C19.3003992%2010.4368045%2C18.253493%2010.4368045%2C16.8303393%20C10.4368045%2C14.6127745%209.17182104%2C13.0389222%208.52436498%2C12.3782435%20C9.19975443%2C11.5568862%2010.8378482%2C9.55988024%2011.6708618%2C8.48802395%20C12.93385%2C9.66866267%2014.3993554%2C10.3123752%2015.8479012%2C10.3123752%20C17.4570639%2C10.3123752%2018.7898857%2C9.66267465%2020%2C8.27644711%20C21.2101143%2C9.66267465%2022.5429361%2C10.3123752%2024.1520988%2C10.3123752%20C25.6006446%2C10.3123752%2027.06615%2C9.66866267%2028.3281406%2C8.48802395%20C29.1611542%2C9.55988024%2030.8002456%2C11.5568862%2031.475635%2C12.3782435%20C30.8271813%2C13.0389222%2029.5631955%2C14.6127745%2029.5631955%2C16.8303393%20C29.5631955%2C18.253493%2030.1707467%2C19.3003992%2030.7583455%2C20.3133733%20C31.3698872%2C21.3672655%2032.0023789%2C22.4570858%2032.0023789%2C24.0628743%20C32.0023789%2C27.9211577%2027.4153173%2C29.0449102%2026.0096693%2C29.2974052%20M31.6212877%2C19.8123752%20C31.0516461%2C18.8313373%2030.5608165%2C17.9840319%2030.5608165%2C16.8303393%20C30.5608165%2C14.4001996%2032.4533037%2C12.8263473%2032.4732561%2C12.8103792%20C32.5750134%2C12.7255489%2032.641854%2C12.6037924%2032.6538255%2C12.4720559%20C32.6667946%2C12.3403194%2032.6278873%2C12.2075848%2032.5430896%2C12.1047904%20C32.5121633%2C12.0678643%2029.4774%2C8.38922156%2028.7840534%2C7.43712575%20C28.6962628%2C7.31736527%2028.5595887%2C7.24151697%2028.4099455%2C7.23353293%20C28.2672857%2C7.2255489%2028.1176425%2C7.28243513%2028.0158852%2C7.39021956%20C26.8556519%2C8.63073852%2025.483923%2C9.31437126%2024.1520988%2C9.31437126%20C22.6806078%2C9.31437126%2021.5223697%2C8.65768463%2020.3960556%2C7.18562874%20C20.2075052%2C6.93812375%2019.7924948%2C6.93812375%2019.6029468%2C7.18562874%20C18.4766326%2C8.65768463%2017.3183946%2C9.31437126%2015.8479012%2C9.31437126%20C14.516077%2C9.31437126%2013.1443481%2C8.63073852%2011.9841148%2C7.39021956%20C11.8823575%2C7.28243513%2011.7337119%2C7.22654691%2011.5890569%2C7.23353293%20C11.4404113%2C7.24151697%2011.3037372%2C7.31736527%2011.2159466%2C7.43712575%20C10.5226%2C8.38922156%207.4878367%2C12.0678643%207.45691044%2C12.1047904%20C7.37211265%2C12.2075848%207.33220781%2C12.3403194%207.34517689%2C12.4730539%20C7.35814596%2C12.6057884%207.42398895%2C12.7265469%207.52774154%2C12.8103792%20C7.54669634%2C12.8263473%209.43918349%2C14.3852295%209.43918349%2C16.8303393%20C9.43918349%2C17.9840319%208.94835393%2C18.8313373%208.37771468%2C19.8123752%20C7.73225386%2C20.9261477%207%2C22.1876248%207%2C24.0628743%20C7%2C27.1886228%209.54592894%2C29.5129741%2013.8127542%2C30.2794411%20C17.0021487%2C30.8532934%2019.6697874%2C32.8762475%2019.6957256%2C32.8962076%20C19.7855115%2C32.9650699%2019.8922569%2C33%2020%2C33%20C20.1067455%2C33%2020.2144885%2C32.9650699%2020.3042744%2C32.8962076%20C20.3302126%2C32.8762475%2022.9978513%2C30.8532934%2026.1872458%2C30.2794411%20C30.4530734%2C29.5129741%2033%2C27.1886228%2033%2C24.0628743%20C33%2C22.1876248%2032.2677461%2C20.9261477%2031.6212877%2C19.8123752%22%20id%3D%22Amazon-Route-53-Icon_32_Squid%22%20fill%3D%22%23FFFFFF%22%3E%3C%2Fpath%3E%0A%20%20%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E;imageWidth=34;imageHeight=34;imageAlign=left;imageVerticalAlign=middle;spacingLeft=40;align=center;verticalAlign=middle;fillColor=#FFF7E6;strokeColor=#D99A2B;fontSize=14;fontStyle=1;arcSize=14;" value="&lt;b&gt;Amazon Route 53&lt;/b&gt;" vertex="1">
+          <mxGeometry height="70" width="145" x="250" y="285" as="geometry" />
+        </mxCell>
+        <mxCell id="alb" parent="1" style="shape=label;rounded=1;whiteSpace=wrap;html=1;image=data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3Csvg%20width%3D%2280px%22%20height%3D%2280px%22%20viewBox%3D%220%200%2080%2080%22%20version%3D%221.1%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20xmlns%3Axlink%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink%22%3E%0A%20%20%20%20%3Ctitle%3EIcon-Architecture%2F64%2FArch_Elastic-Load-Balancing_64%3C%2Ftitle%3E%0A%20%20%20%20%3Cg%20id%3D%22Icon-Architecture%2F64%2FArch_Elastic-Load-Balancing_64%22%20stroke%3D%22none%22%20stroke-width%3D%221%22%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%0A%20%20%20%20%20%20%20%20%3Cg%20id%3D%22Icon-Architecture-BG%2F64%2FNetworking-Content-Delivery%22%20fill%3D%22%238C4FFF%22%3E%0A%20%20%20%20%20%20%20%20%20%20%20%20%3Crect%20id%3D%22Rectangle%22%20x%3D%220%22%20y%3D%220%22%20width%3D%2280%22%20height%3D%2280%22%3E%3C%2Frect%3E%0A%20%20%20%20%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%20%20%20%20%3Cpath%20d%3D%22M30%2C53%20C22.832%2C53%2017%2C47.168%2017%2C40%20C17%2C32.832%2022.832%2C27%2030%2C27%20C37.168%2C27%2043%2C32.832%2043%2C40%20C43%2C47.168%2037.168%2C53%2030%2C53%20M60%2C59%20C60%2C61.206%2058.206%2C63%2056%2C63%20C53.794%2C63%2052%2C61.206%2052%2C59%20C52%2C56.794%2053.794%2C55%2056%2C55%20C58.206%2C55%2060%2C56.794%2060%2C59%20M56%2C17%20C58.206%2C17%2060%2C18.794%2060%2C21%20C60%2C23.206%2058.206%2C25%2056%2C25%20C53.794%2C25%2052%2C23.206%2052%2C21%20C52%2C18.794%2053.794%2C17%2056%2C17%20M59%2C36%20C61.206%2C36%2063%2C37.794%2063%2C40%20C63%2C42.206%2061.206%2C44%2059%2C44%20C56.794%2C44%2055%2C42.206%2055%2C40%20C55%2C37.794%2056.794%2C36%2059%2C36%20M44.949%2C41%20L53.09%2C41%20C53.568%2C43.833%2056.033%2C46%2059%2C46%20C62.309%2C46%2065%2C43.309%2065%2C40%20C65%2C36.691%2062.309%2C34%2059%2C34%20C56.033%2C34%2053.568%2C36.167%2053.09%2C39%20L44.949%2C39%20C44.823%2C37.099%2044.344%2C35.297%2043.572%2C33.654%20L52.446%2C25.823%20C53.442%2C26.559%2054.669%2C27%2056%2C27%20C59.309%2C27%2062%2C24.309%2062%2C21%20C62%2C17.691%2059.309%2C15%2056%2C15%20C52.691%2C15%2050%2C17.691%2050%2C21%20C50%2C22.256%2050.389%2C23.421%2051.051%2C24.386%20L42.581%2C31.859%20C39.904%2C27.738%2035.271%2C25%2030%2C25%20C21.729%2C25%2015%2C31.729%2015%2C40%20C15%2C48.271%2021.729%2C55%2030%2C55%20C35.271%2C55%2039.904%2C52.262%2042.581%2C48.141%20L51.051%2C55.614%20C50.389%2C56.579%2050%2C57.744%2050%2C59%20C50%2C62.309%2052.691%2C65%2056%2C65%20C59.309%2C65%2062%2C62.309%2062%2C59%20C62%2C55.691%2059.309%2C53%2056%2C53%20C54.669%2C53%2053.442%2C53.441%2052.446%2C54.177%20L43.572%2C46.346%20C44.344%2C44.703%2044.823%2C42.901%2044.949%2C41%22%20id%3D%22Elastic-Load-Balancing_Icon_64_Squid%22%20fill%3D%22%23FFFFFF%22%3E%3C%2Fpath%3E%0A%20%20%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E;imageWidth=38;imageHeight=38;imageAlign=left;imageVerticalAlign=middle;spacingLeft=42;align=center;verticalAlign=middle;fillColor=#FFF7E6;strokeColor=#D99A2B;fontSize=13;fontStyle=1;arcSize=14;" value="&lt;b&gt;Application Load Balancer&lt;/b&gt;" vertex="1">
+          <mxGeometry height="90" width="175" x="235" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="marketData" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#667085;fontSize=15;fontStyle=1;arcSize=14;" value="Real-Time Market Data" vertex="1">
+          <mxGeometry height="58" width="180" x="1470" y="193" as="geometry" />
+        </mxCell>
+        <mxCell id="marketGateway" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#F2A65A;fontSize=14;arcSize=12;" value="&lt;b&gt;market-gateway&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;Real-Time Quotes for 550 Symbols&lt;/font&gt;" vertex="1">
+          <mxGeometry height="78" width="270" x="1005" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="backtestApi" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9B7DDB;fontSize=14;arcSize=12;" value="&lt;b&gt;backtest-api&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;FastAPI Job Intake&lt;/font&gt;" vertex="1">
+          <mxGeometry height="78" width="270" x="1005" y="625" as="geometry" />
+        </mxCell>
+        <mxCell id="backtestWorker" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8E6BD8;strokeWidth=2;fontSize=14;arcSize=12;" value="&lt;b&gt;backtest-worker&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;Backtest Computation&lt;/font&gt;" vertex="1">
+          <mxGeometry height="78" width="270" x="1005" y="770" as="geometry" />
+        </mxCell>
+        <mxCell id="pipelineWorker" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9B7DDB;fontSize=14;arcSize=12;" value="&lt;b&gt;pipeline-worker&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5B6475&quot;&gt;Parquet Processing&lt;/font&gt;" vertex="1">
+          <mxGeometry height="78" width="270" x="1005" y="915" as="geometry" />
+        </mxCell>
+        <mxCell id="eOperatorRoute" edge="1" parent="1" source="operator" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#667085;fontColor=#5B6475;entryX=0;entryY=0.75;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryDx=0;entryDy=0;" target="route53" value="Admin Domain">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="150" y="430" as="sourcePoint" />
+            <mxPoint x="225" y="606.4999999999999" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eUserRoute" edge="1" parent="1" source="user" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#667085;fontColor=#5B6475;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" target="route53" value="Service Domain">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eRouteAlb" edge="1" parent="1" source="route53" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#B7791F;fontColor=#8B5E18;" target="alb" value="DNS Alias">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eAlbAdmin" edge="1" parent="1" source="alb" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#2F80ED;fontColor=#2F5FA7;entryX=0;entryY=0.5;" target="adminMcp" value="Admin API">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="460" y="475" />
+              <mxPoint x="460" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eAlbBackend" edge="1" parent="1" source="alb" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#2F80ED;fontColor=#2F5FA7;entryX=0;entryY=0.5;" target="backendApi" value="User API">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="460" y="500" />
+              <mxPoint x="460" y="848" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eAdminPg" edge="1" parent="1" source="adminMcp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6B7280;fontColor=#5B6475;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" target="postgres" value="Admin Data">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="830.1" y="300" />
+              <mxPoint x="830.1" y="60.1" />
+              <mxPoint x="2160" y="60.1" />
+              <mxPoint x="2160" y="341.3" />
+            </Array>
+            <mxPoint x="2160" y="370" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eBatchPg" edge="1" parent="1" source="backendBatch" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6B7280;fontColor=#5B6475;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" target="postgres" value="Operation Results">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="850.1" y="481" />
+              <mxPoint x="850.1" y="80.1" />
+              <mxPoint x="2160" y="80.1" />
+              <mxPoint x="2160" y="341.3" />
+            </Array>
+            <mxPoint x="2010" y="300" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eWorkerPg" edge="1" parent="1" source="backendWorker" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6B7280;fontColor=#5B6475;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" target="postgres" value="Processing Status">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="870.1" y="662" />
+              <mxPoint x="870.1" y="100.1" />
+              <mxPoint x="2160" y="100.1" />
+              <mxPoint x="2160" y="341.3" />
+            </Array>
+            <mxPoint x="2160" y="370" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eBackendPg" edge="1" parent="1" source="backendApi" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6B7280;fontColor=#5B6475;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" target="postgres" value="Service State">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="890.1" y="825" />
+              <mxPoint x="890.1" y="120.1" />
+              <mxPoint x="2160" y="120.1" />
+              <mxPoint x="2160" y="341.3" />
+            </Array>
+            <mxPoint x="850" y="800" as="sourcePoint" />
+            <mxPoint x="1930" y="300" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eBackendBacktestApi" edge="1" parent="1" source="backendApi" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6454C0;fontColor=#5745A5;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="backtestApi" value="Backtest Intake">
+          <mxGeometry relative="1" x="-0.7229" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="980" y="871" />
+              <mxPoint x="980" y="664" />
+            </Array>
+            <mxPoint x="830" y="840.06" as="sourcePoint" />
+            <mxPoint x="930" y="664" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eBackendQueue" edge="1" parent="1" source="backendApi" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;dashPattern=8 6;endArrow=block;endFill=1;strokeColor=#B08700;fontColor=#806500;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.75;entryDx=0;entryDy=0;" target="queue" value="Bot Commands">
+          <mxGeometry relative="1" x="-0.8828" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="920.06" y="847.94" />
+              <mxPoint x="920.06" y="526.53" />
+            </Array>
+            <mxPoint x="840" y="821" as="sourcePoint" />
+            <mxPoint x="1350" y="542" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eBacktestApiQueue" edge="1" parent="1" source="backtestApi" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;dashPattern=8 6;endArrow=block;endFill=1;strokeColor=#B08700;fontColor=#806500;entryX=0.25;entryY=1;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="queue" value="Backtest Jobs">
+          <mxGeometry relative="1" x="-0.6594" as="geometry">
+            <mxPoint x="-1" as="offset" />
+            <Array as="points">
+              <mxPoint x="1482" y="664" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eQueueTradingWorker" edge="1" parent="1" source="queue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;dashPattern=8 6;endArrow=block;endFill=1;strokeColor=#B08700;fontColor=#806500;exitX=0;exitY=0.25;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="tradingWorker" value="Trading Commands">
+          <mxGeometry relative="1" x="-0.1619" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1432" y="490" />
+              <mxPoint x="1140" y="490" />
+            </Array>
+            <mxPoint x="1390" y="560" as="sourcePoint" />
+            <mxPoint x="1120" y="410" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eQueueBacktestWorker" edge="1" parent="1" source="queue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;dashPattern=8 6;endArrow=block;endFill=1;strokeColor=#B08700;fontColor=#806500;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="backtestWorker" value="Compute Jobs">
+          <mxGeometry relative="1" x="-0.7817" as="geometry">
+            <mxPoint y="1" as="offset" />
+            <Array as="points">
+              <mxPoint x="1582" y="690" />
+              <mxPoint x="1380" y="690" />
+              <mxPoint x="1380" y="809" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eMarketGateway" edge="1" parent="1" source="marketData" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#F2994A;fontColor=#9A5B1B;entryX=1;entryY=0.25;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="marketGateway" value="550-Symbol Quotes">
+          <mxGeometry relative="1" x="-0.2471" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1350" y="222" />
+              <mxPoint x="1350" y="239.5" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eGatewayRedis" edge="1" parent="1" source="marketGateway" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#D95D5D;fontColor=#A53E3E;entryX=1;entryY=0.75;entryDx=0;entryDy=0;exitX=1;exitY=0.75;exitDx=0;exitDy=0;" target="redis" value="Latest Quotes">
+          <mxGeometry relative="1" x="-0.5155" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1670.1" y="278.5" />
+              <mxPoint x="1670.1" y="784.3" />
+            </Array>
+            <mxPoint x="1670" y="830" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eRedisTrading" edge="1" parent="1" source="redis" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#D95D5D;fontColor=#A53E3E;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=1;entryY=0.75;entryDx=0;entryDy=0;" target="tradingWorker" value="Quote Lookup">
+          <mxGeometry relative="1" x="0.1909" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1650.1" y="731.8" />
+              <mxPoint x="1650.1" y="378.5" />
+            </Array>
+            <mxPoint x="1280.06" y="378.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eTradingPg" edge="1" parent="1" source="tradingWorker" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6B7280;fontColor=#5B6475;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" target="postgres" value="Orders | Fills | Ledger">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1275" y="341.24" />
+            </Array>
+            <mxPoint x="1280" y="370" as="sourcePoint" />
+            <mxPoint x="1720" y="380" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eBacktestPg" edge="1" parent="1" source="backtestWorker" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6B7280;fontColor=#5B6475;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.75;entryDx=0;entryDy=0;" target="postgres" value="Status | Summary">
+          <mxGeometry relative="1" x="-0.4103" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1207.47" y="870.06" />
+              <mxPoint x="1720.06" y="870.06" />
+              <mxPoint x="1720.06" y="403.71" />
+            </Array>
+            <mxPoint x="1730" y="450" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eBacktestS3" edge="1" parent="1" source="backtestWorker" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#4E9F72;fontColor=#35724E;entryX=0.25;entryY=1;entryDx=0;entryDy=0;" target="s3" value="Detailed Results">
+          <mxGeometry relative="1" x="-0.2532" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1140" y="900" />
+              <mxPoint x="1866.57" y="900" />
+            </Array>
+            <mxPoint x="1880" y="820" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ePipelinePg" edge="1" parent="1" source="pipelineWorker" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6B7280;fontColor=#5B6475;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=1;entryY=0.75;entryDx=0;entryDy=0;" target="postgres" value="Manifest">
+          <mxGeometry relative="1" x="-0.6765" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="2090.1" y="973.5" />
+              <mxPoint x="2090.1" y="403.8" />
+            </Array>
+            <mxPoint x="2150" y="430" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ePipelineS3" edge="1" parent="1" source="pipelineWorker" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#4E9F72;fontColor=#35724E;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="s3" value="Parquet">
+          <mxGeometry relative="1" x="-0.4015" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1934" y="934.57" />
+            </Array>
+            <mxPoint x="1900" y="800" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="coreEc2Icon" parent="1" style="shape=image;html=1;image=data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3Csvg%20width%3D%2240px%22%20height%3D%2240px%22%20viewBox%3D%220%200%2040%2040%22%20version%3D%221.1%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20xmlns%3Axlink%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink%22%3E%0A%20%20%20%20%3Ctitle%3EIcon-Architecture%2F32%2FArch_Amazon-EC2_32%3C%2Ftitle%3E%0A%20%20%20%20%3Cg%20id%3D%22Icon-Architecture%2F32%2FArch_Amazon-EC2_32%22%20stroke%3D%22none%22%20stroke-width%3D%221%22%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%0A%20%20%20%20%20%20%20%20%3Cg%20id%3D%22Icon-Architecture-BG%2F32%2FCompute%22%20fill%3D%22%23ED7100%22%3E%0A%20%20%20%20%20%20%20%20%20%20%20%20%3Crect%20id%3D%22Rectangle%22%20x%3D%220%22%20y%3D%220%22%20width%3D%2240%22%20height%3D%2240%22%3E%3C%2Frect%3E%0A%20%20%20%20%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%20%20%20%20%3Cpath%20d%3D%22M26.052%2C27%20L26%2C13.948%20L13%2C14%20L13%2C27.052%20L26.052%2C27%20Z%20M27%2C14%20L29%2C14%20L29%2C15%20L27%2C15%20L27%2C17%20L29%2C17%20L29%2C18%20L27%2C18%20L27%2C20%20L29%2C20%20L29%2C21%20L27%2C21%20L27%2C23%20L29%2C23%20L29%2C24%20L27%2C24%20L27%2C26%20L29%2C26%20L29%2C27%20L27%2C27%20L27%2C27.052%20C27%2C27.575%2026.574%2C28%2026.052%2C28%20L26%2C28%20L26%2C30%20L25%2C30%20L25%2C28%20L23%2C28%20L23%2C30%20L22%2C30%20L22%2C28%20L20%2C28%20L20%2C30%20L19%2C30%20L19%2C28%20L17%2C28%20L17%2C30%20L16%2C30%20L16%2C28%20L14%2C28%20L14%2C30%20L13%2C30%20L13%2C28%20L12.948%2C28%20C12.426%2C28%2012%2C27.575%2012%2C27.052%20L12%2C27%20L10%2C27%20L10%2C26%20L12%2C26%20L12%2C24%20L10%2C24%20L10%2C23%20L12%2C23%20L12%2C21%20L10%2C21%20L10%2C20%20L12%2C20%20L12%2C18%20L10%2C18%20L10%2C17%20L12%2C17%20L12%2C15%20L10%2C15%20L10%2C14%20L12%2C14%20L12%2C13.948%20C12%2C13.425%2012.426%2C13%2012.948%2C13%20L13%2C13%20L13%2C11%20L14%2C11%20L14%2C13%20L16%2C13%20L16%2C11%20L17%2C11%20L17%2C13%20L19%2C13%20L19%2C11%20L20%2C11%20L20%2C13%20L22%2C13%20L22%2C11%20L23%2C11%20L23%2C13%20L25%2C13%20L25%2C11%20L26%2C11%20L26%2C13%20L26.052%2C13%20C26.574%2C13%2027%2C13.425%2027%2C13.948%20L27%2C14%20Z%20M21%2C33%20L7%2C33%20L7%2C19%20L9%2C19%20L9%2C18%20L7.062%2C18%20C6.477%2C18%206%2C18.477%206%2C19.062%20L6%2C32.938%20C6%2C33.523%206.477%2C34%207.062%2C34%20L20.939%2C34%20C21.524%2C34%2022%2C33.523%2022%2C32.938%20L22%2C31%20L21%2C31%20L21%2C33%20Z%20M34%2C7.062%20L34%2C20.938%20C34%2C21.523%2033.524%2C22%2032.939%2C22%20L30%2C22%20L30%2C21%20L33%2C21%20L33%2C7%20L19%2C7%20L19%2C10%20L18%2C10%20L18%2C7.062%20C18%2C6.477%2018.477%2C6%2019.062%2C6%20L32.939%2C6%20C33.524%2C6%2034%2C6.477%2034%2C7.062%20L34%2C7.062%20Z%22%20id%3D%22Amazon-EC2_Icon_32_Squid%22%20fill%3D%22%23FFFFFF%22%3E%3C%2Fpath%3E%0A%20%20%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E;aspect=fixed;strokeColor=none;fillColor=none;pointerEvents=0;" value="" vertex="1">
+          <mxGeometry height="26" width="26" x="512" y="153" as="geometry" />
+        </mxCell>
+        <mxCell id="tradingEc2Icon" parent="1" style="shape=image;html=1;image=data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3Csvg%20width%3D%2240px%22%20height%3D%2240px%22%20viewBox%3D%220%200%2040%2040%22%20version%3D%221.1%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20xmlns%3Axlink%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink%22%3E%0A%20%20%20%20%3Ctitle%3EIcon-Architecture%2F32%2FArch_Amazon-EC2_32%3C%2Ftitle%3E%0A%20%20%20%20%3Cg%20id%3D%22Icon-Architecture%2F32%2FArch_Amazon-EC2_32%22%20stroke%3D%22none%22%20stroke-width%3D%221%22%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%0A%20%20%20%20%20%20%20%20%3Cg%20id%3D%22Icon-Architecture-BG%2F32%2FCompute%22%20fill%3D%22%23ED7100%22%3E%0A%20%20%20%20%20%20%20%20%20%20%20%20%3Crect%20id%3D%22Rectangle%22%20x%3D%220%22%20y%3D%220%22%20width%3D%2240%22%20height%3D%2240%22%3E%3C%2Frect%3E%0A%20%20%20%20%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%20%20%20%20%3Cpath%20d%3D%22M26.052%2C27%20L26%2C13.948%20L13%2C14%20L13%2C27.052%20L26.052%2C27%20Z%20M27%2C14%20L29%2C14%20L29%2C15%20L27%2C15%20L27%2C17%20L29%2C17%20L29%2C18%20L27%2C18%20L27%2C20%20L29%2C20%20L29%2C21%20L27%2C21%20L27%2C23%20L29%2C23%20L29%2C24%20L27%2C24%20L27%2C26%20L29%2C26%20L29%2C27%20L27%2C27%20L27%2C27.052%20C27%2C27.575%2026.574%2C28%2026.052%2C28%20L26%2C28%20L26%2C30%20L25%2C30%20L25%2C28%20L23%2C28%20L23%2C30%20L22%2C30%20L22%2C28%20L20%2C28%20L20%2C30%20L19%2C30%20L19%2C28%20L17%2C28%20L17%2C30%20L16%2C30%20L16%2C28%20L14%2C28%20L14%2C30%20L13%2C30%20L13%2C28%20L12.948%2C28%20C12.426%2C28%2012%2C27.575%2012%2C27.052%20L12%2C27%20L10%2C27%20L10%2C26%20L12%2C26%20L12%2C24%20L10%2C24%20L10%2C23%20L12%2C23%20L12%2C21%20L10%2C21%20L10%2C20%20L12%2C20%20L12%2C18%20L10%2C18%20L10%2C17%20L12%2C17%20L12%2C15%20L10%2C15%20L10%2C14%20L12%2C14%20L12%2C13.948%20C12%2C13.425%2012.426%2C13%2012.948%2C13%20L13%2C13%20L13%2C11%20L14%2C11%20L14%2C13%20L16%2C13%20L16%2C11%20L17%2C11%20L17%2C13%20L19%2C13%20L19%2C11%20L20%2C11%20L20%2C13%20L22%2C13%20L22%2C11%20L23%2C11%20L23%2C13%20L25%2C13%20L25%2C11%20L26%2C11%20L26%2C13%20L26.052%2C13%20C26.574%2C13%2027%2C13.425%2027%2C13.948%20L27%2C14%20Z%20M21%2C33%20L7%2C33%20L7%2C19%20L9%2C19%20L9%2C18%20L7.062%2C18%20C6.477%2C18%206%2C18.477%206%2C19.062%20L6%2C32.938%20C6%2C33.523%206.477%2C34%207.062%2C34%20L20.939%2C34%20C21.524%2C34%2022%2C33.523%2022%2C32.938%20L22%2C31%20L21%2C31%20L21%2C33%20Z%20M34%2C7.062%20L34%2C20.938%20C34%2C21.523%2033.524%2C22%2032.939%2C22%20L30%2C22%20L30%2C21%20L33%2C21%20L33%2C7%20L19%2C7%20L19%2C10%20L18%2C10%20L18%2C7.062%20C18%2C6.477%2018.477%2C6%2019.062%2C6%20L32.939%2C6%20C33.524%2C6%2034%2C6.477%2034%2C7.062%20L34%2C7.062%20Z%22%20id%3D%22Amazon-EC2_Icon_32_Squid%22%20fill%3D%22%23FFFFFF%22%3E%3C%2Fpath%3E%0A%20%20%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E;aspect=fixed;strokeColor=none;fillColor=none;pointerEvents=0;" value="" vertex="1">
+          <mxGeometry height="26" width="26" x="962" y="154" as="geometry" />
+        </mxCell>
+        <mxCell id="computeEc2Icon" parent="1" style="shape=image;html=1;image=data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3Csvg%20width%3D%2240px%22%20height%3D%2240px%22%20viewBox%3D%220%200%2040%2040%22%20version%3D%221.1%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20xmlns%3Axlink%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink%22%3E%0A%20%20%20%20%3Ctitle%3EIcon-Architecture%2F32%2FArch_Amazon-EC2_32%3C%2Ftitle%3E%0A%20%20%20%20%3Cg%20id%3D%22Icon-Architecture%2F32%2FArch_Amazon-EC2_32%22%20stroke%3D%22none%22%20stroke-width%3D%221%22%20fill%3D%22none%22%20fill-rule%3D%22evenodd%22%3E%0A%20%20%20%20%20%20%20%20%3Cg%20id%3D%22Icon-Architecture-BG%2F32%2FCompute%22%20fill%3D%22%23ED7100%22%3E%0A%20%20%20%20%20%20%20%20%20%20%20%20%3Crect%20id%3D%22Rectangle%22%20x%3D%220%22%20y%3D%220%22%20width%3D%2240%22%20height%3D%2240%22%3E%3C%2Frect%3E%0A%20%20%20%20%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%20%20%20%20%3Cpath%20d%3D%22M26.052%2C27%20L26%2C13.948%20L13%2C14%20L13%2C27.052%20L26.052%2C27%20Z%20M27%2C14%20L29%2C14%20L29%2C15%20L27%2C15%20L27%2C17%20L29%2C17%20L29%2C18%20L27%2C18%20L27%2C20%20L29%2C20%20L29%2C21%20L27%2C21%20L27%2C23%20L29%2C23%20L29%2C24%20L27%2C24%20L27%2C26%20L29%2C26%20L29%2C27%20L27%2C27%20L27%2C27.052%20C27%2C27.575%2026.574%2C28%2026.052%2C28%20L26%2C28%20L26%2C30%20L25%2C30%20L25%2C28%20L23%2C28%20L23%2C30%20L22%2C30%20L22%2C28%20L20%2C28%20L20%2C30%20L19%2C30%20L19%2C28%20L17%2C28%20L17%2C30%20L16%2C30%20L16%2C28%20L14%2C28%20L14%2C30%20L13%2C30%20L13%2C28%20L12.948%2C28%20C12.426%2C28%2012%2C27.575%2012%2C27.052%20L12%2C27%20L10%2C27%20L10%2C26%20L12%2C26%20L12%2C24%20L10%2C24%20L10%2C23%20L12%2C23%20L12%2C21%20L10%2C21%20L10%2C20%20L12%2C20%20L12%2C18%20L10%2C18%20L10%2C17%20L12%2C17%20L12%2C15%20L10%2C15%20L10%2C14%20L12%2C14%20L12%2C13.948%20C12%2C13.425%2012.426%2C13%2012.948%2C13%20L13%2C13%20L13%2C11%20L14%2C11%20L14%2C13%20L16%2C13%20L16%2C11%20L17%2C11%20L17%2C13%20L19%2C13%20L19%2C11%20L20%2C11%20L20%2C13%20L22%2C13%20L22%2C11%20L23%2C11%20L23%2C13%20L25%2C13%20L25%2C11%20L26%2C11%20L26%2C13%20L26.052%2C13%20C26.574%2C13%2027%2C13.425%2027%2C13.948%20L27%2C14%20Z%20M21%2C33%20L7%2C33%20L7%2C19%20L9%2C19%20L9%2C18%20L7.062%2C18%20C6.477%2C18%206%2C18.477%206%2C19.062%20L6%2C32.938%20C6%2C33.523%206.477%2C34%207.062%2C34%20L20.939%2C34%20C21.524%2C34%2022%2C33.523%2022%2C32.938%20L22%2C31%20L21%2C31%20L21%2C33%20Z%20M34%2C7.062%20L34%2C20.938%20C34%2C21.523%2033.524%2C22%2032.939%2C22%20L30%2C22%20L30%2C21%20L33%2C21%20L33%2C7%20L19%2C7%20L19%2C10%20L18%2C10%20L18%2C7.062%20C18%2C6.477%2018.477%2C6%2019.062%2C6%20L32.939%2C6%20C33.524%2C6%2034%2C6.477%2034%2C7.062%20L34%2C7.062%20Z%22%20id%3D%22Amazon-EC2_Icon_32_Squid%22%20fill%3D%22%23FFFFFF%22%3E%3C%2Fpath%3E%0A%20%20%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E;aspect=fixed;strokeColor=none;fillColor=none;pointerEvents=0;" value="" vertex="1">
+          <mxGeometry height="26" width="26" x="962" y="564" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

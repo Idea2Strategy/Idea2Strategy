@@ -1,5 +1,7 @@
 # Idea2Strategy 백엔드·AWS 아키텍처 기준
 
+> **2026-07-31 후속 결정:** 공개 진입점은 두 Availability Zone의 Public Subnet을 사용하는 ALB로 확정한다. 초기 Core·Trading·Compute EC2는 Availability Zone A의 Public Application Subnet에 배치하되 Core만 ALB 요청을 받고 Trading·Compute는 공개 인바운드를 허용하지 않는다. Queue와 Redis는 분리하며, Queue 제품과 배치 방식은 아직 확정하지 않는다. Redis는 실시간 시장 사건과 최신값 Cache를 담당한다. 이 결정은 아래 본문에 남아 있는 관련 미정 표현보다 우선한다.
+
 ## 1. 문서 목적과 상태
 
 이 문서는 Idea2Strategy의 AWS 배치도와 서비스 아키텍처 그림을 작성하기 위한 현재 기준이다.
@@ -24,15 +26,15 @@
 - Python은 필요한 일부 테이블에 SQLAlchemy Core를 사용한다.
 - DB Migration 도구는 Flyway 하나로 통일하고 Alembic은 사용하지 않는다.
 - Redis는 실시간 시장 사건 전달과 최신값 캐시에 사용하되 공식 장기 정본으로 사용하지 않는다.
-- Durable command/job queue는 운영에서 AWS SQS, 로컬에서 LocalStack SQS를 사용한다.
-- SQS Standard를 기본으로 사용하고 순서 보장이 실제 계약인 경로만 FIFO를 사용한다. 모든 consumer는 at-least-once 전달을 전제로 멱등 처리한다.
+- Durable command/job queue는 Redis와 분리한다. Queue 제품과 배치 방식은 후속 결정으로 남긴다.
 - Runtime 기준은 Java 21 LTS, Spring Boot 4.1.0, Gradle 8.14.3, Python 3.12.13, FastAPI 0.139.2, Uvicorn 0.52.0, Node.js 24 LTS, pnpm 11, PostgreSQL 16, Redis 7.4, Flyway 11과 Docker Compose v2다.
 
 ### 아직 확정하지 않은 인프라 세부사항
 
 - EC2 인스턴스 타입과 정확한 CPU·메모리
-- 공개 진입점으로 ALB, API Gateway 또는 다른 Reverse Proxy 중 무엇을 사용할지
 - Redis를 ElastiCache로 운영할지 다른 Redis 호환 서비스로 운영할지
+- Queue 제품·배치 방식과 재시도·DLQ·순서·멱등 계약
+- Redis Stream Key, 보존 시간, Consumer Group과 장애 복구 방식
 - Trading EC2의 정확한 시작·종료 여유 시간
 - 백테스트와 Pipeline 작업의 동시 실행 수와 자원 할당량
 - 어떤 Pipeline 파티션까지 Lambda에서 처리할지에 대한 크기·시간 기준
@@ -107,8 +109,8 @@ flowchart TB
     Alpaca["실시간·과거 시장 데이터 API"]
     AISource["기업행사 공식 정보원"]
 
-    subgraph AWS["AWS · 단일 Availability Zone"]
-        Ingress["공개 진입점\n방식 미결정"]
+    subgraph AWS["AWS · ALB 2-AZ Ingress · Application Single-AZ"]
+        Ingress["Application Load Balancer\nHTTPS·ACM"]
 
         subgraph CoreEC2["EC2 #1 · Core"]
             BackendApi["backend-api\nSpring Boot"]
@@ -133,9 +135,9 @@ flowchart TB
         LambdaControl["Lambda\n배치 트리거·경량 검증"]
 
         Postgres[("RDS PostgreSQL\n공식 상태·원장·요약·Manifest")]
-        Redis[("Redis\nStreams·최신값 Cache")]
+        Redis[("Redis\n실시간 Streams·최신값 Cache")]
         S3[("S3\nParquet·대용량 불변 객체")]
-        WorkQueue[["작업·도메인 사건 Queue\n구현 선택 미정"]]
+        WorkQueue[["Queue · TBD\n명령·작업·도메인 사건"]]
     end
 
     User --> Ingress --> BackendApi
@@ -236,7 +238,7 @@ flowchart LR
     DB[("PostgreSQL")]
     Cache[("Redis")]
     Objects[("S3")]
-    Queue[["Queue"]]
+    Queue[["Queue · TBD"]]
 
     UI --> API
     UI --> MCP
@@ -712,9 +714,9 @@ data-pipeline
 | 운영자 도구 | admin-mcp | 관리자 권한 작업 | 인증된 MCP |
 | Market Gateway | Trading Worker | 가격·호가·봉·거래 상태 | Redis Streams |
 | Market Gateway | Redis Cache | 종목별 최신값 | Redis Hash 또는 동등 구조 |
-| Backend | Trading Worker | 봇 실행·중단·평가 구간 명령 | Queue, 정확한 제품 미결정 |
-| Trading Worker | Backend Worker | 상태·주문·체결·알림 사건 | Transactional Outbox + Queue |
-| Backend | Backtest Worker | 출시 버전 자동 백테스트 작업 | Queue |
+| Backend | Trading Worker | 봇 실행·중단·평가 구간 명령 | Queue — TBD |
+| Trading Worker | Backend Worker | 상태·주문·체결·알림 사건 | Transactional Outbox + Queue — TBD |
+| Backend | Backtest Worker | 출시 버전 자동 백테스트 작업 | Queue — TBD |
 | Backtest Worker | Backend | 완료·실패·불가 상태 | PostgreSQL + 사건 |
 | Pipeline | Backtest Worker | 새 데이터 직접 Push 안 함 | Backtest가 잠긴 Manifest를 조회 |
 | Pipeline | PostgreSQL | Object·Manifest·Lineage | SQLAlchemy Core |
@@ -762,16 +764,18 @@ Compute EC2
 └─ Corporate Action Sources
 
 AWS
-├─ Public Ingress (방식 미결정)
-├─ EC2 Core
-├─ EC2 Trading
-├─ EC2 Compute
+├─ Route 53·ACM
+├─ ALB (2-AZ Public Subnet)
+├─ EC2 Core (AZ A Public Application Subnet)
+├─ EC2 Trading (AZ A Public Application Subnet)
+├─ EC2 Compute (AZ A Public Application Subnet)
 ├─ EventBridge Scheduler
 ├─ Lambda
-├─ RDS PostgreSQL
-├─ Redis
+├─ RDS PostgreSQL (Private Data Subnet)
+├─ Redis Streams·Cache (Private Data Subnet)
+├─ Queue (technology and placement TBD)
 ├─ S3
-└─ Work Queue (제품 미결정)
+└─ Systems Manager·CloudWatch
 ```
 
 ### 서비스 아키텍처 다이어그램
@@ -799,9 +803,9 @@ Data Pipeline
 
 Shared Infrastructure
 ├─ PostgreSQL
-├─ Redis
-├─ S3
-└─ Queue
+├─ Redis Streams·Cache
+├─ Queue · TBD
+└─ S3
 ```
 
 ### 다이어그램에서 반드시 구분할 선
@@ -817,7 +821,7 @@ Shared Infrastructure
 
 ## 16. 구현 전에 남은 기술 결정
 
-- SQS 재시도 횟수, visibility timeout, DLQ redrive와 경로별 FIFO 적용 범위
+- Queue 제품·배치 방식과 재시도·DLQ·순서·멱등 계약
 - Redis Stream Key, 보존 시간, Consumer Group과 장애 복구 방식
 - Trading Worker의 봇 Shard·종목 Routing 방식
 - 시장 데이터 Event Schema와 서버·공급자 시각 처리

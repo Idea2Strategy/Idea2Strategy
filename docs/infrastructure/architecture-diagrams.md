@@ -15,7 +15,7 @@
 
 ### Core EC2
 
-`backend` 리포의 `backend-api`, `backend-batch`, `backend-worker`, `admin-mcp`를 Docker 컨테이너로 실행한다. 외부 UI와 운영자 도구가 직접 접근할 수 있는 서버 실행 경계는 Core뿐이며 공개 진입점 제품은 아직 결정하지 않았다.
+`backend` 리포의 `backend-api`, `backend-batch`, `backend-worker`, `admin-mcp`를 Docker 컨테이너로 실행한다. 외부 요청은 Route 53과 ALB를 거쳐 Core로만 전달한다. Core의 보안 그룹은 ALB 보안 그룹에서 온 애플리케이션 요청만 허용하고 인터넷의 직접 인바운드는 허용하지 않는다.
 
 ### Trading EC2
 
@@ -37,6 +37,12 @@
 4. Systems Manager Run Command가 대상 EC2의 Docker Compose를 갱신한다.
 
 EC2에서 브랜치를 직접 `git pull`하지 않는다. SSH 포트를 공개하지 않으며 운영 접속도 SSM을 사용한다.
+
+## 설정과 모니터링
+
+일반 환경 설정은 Parameter Store, DB 비밀번호와 외부 API Key 같은 민감 정보는 Secrets Manager에 둔다. EC2 IAM Role에는 각 실행 App에 필요한 경로와 Secret만 읽을 수 있는 최소 권한을 부여한다.
+
+ALB, Core·Trading·Compute EC2와 RDS의 로그·지표는 CloudWatch로 모은다. 초기에는 별도 Grafana 서버를 운영하지 않고 CloudWatch Logs, Metrics와 Alarm을 사용하며, 실제 운영 요구가 생기면 Grafana를 후속 추가한다.
 
 ## RDS 저장 방식
 
@@ -67,12 +73,18 @@ Development Terraform State와 잠금 객체만 저장하며 애플리케이션 
 
 모든 버킷은 Public Access를 차단하고 암호화, Versioning과 TLS 강제를 적용한다.
 
-## Redis와 Queue
+## Redis와 작업 전달
 
-Redis는 실시간 시장 사건과 최신값 Cache에 사용하지만 공식 정본은 아니다. Redis 운영 제품은 아직 미정이다.
+Redis는 Private Data Subnet의 공유 서비스로 배치한다. 실시간 시장 사건과 최신값 Cache에 사용하지만 공식 정본은 아니며 PostgreSQL, S3와 공급자 데이터로부터 재구축할 수 있어야 한다.
 
-Queue는 봇 제어 명령, 백테스트 작업과 도메인 사건을 전달한다. 운영은 AWS SQS, 로컬은 LocalStack SQS를 사용한다. Standard Queue가 기본이며 순서 보장이 계약인 경로만 FIFO를 사용하고, consumer는 중복 전달에 멱등하게 동작한다. Redis Streams는 실시간 시장 사건에만 사용한다.
+Queue는 봇 제어 명령, 백테스트 작업과 도메인 사건을 전달한다. Queue 제품과 배치 방식은 아직 확정하지 않았으므로 특정 AWS 서비스 아이콘을 사용하지 않고 `Queue — technology and placement TBD`로 표시한다. Redis Streams는 실시간 시장 사건에만 사용한다.
+
+## Subnet 배치
+
+ALB는 서로 다른 두 Availability Zone의 Public Subnet에 연결한다. 초기 Core·Trading·Compute EC2는 비용과 운영 복잡도를 줄이기 위해 Availability Zone A의 Public Application Subnet에 둔다. 다만 Public Subnet에 있다는 사실이 인터넷 직접 접속을 허용한다는 뜻은 아니다. Core는 ALB에서 온 요청만 받고 Trading·Compute는 공개 인바운드를 받지 않으며, 운영 접속은 SSM을 사용한다.
+
+RDS와 Redis는 Private Data Subnet에 둔다. RDS Subnet Group은 향후 장애 대응을 위해 두 Availability Zone의 Private DB Subnet을 포함하지만 현재 RDS 인스턴스는 Single-AZ로 운영한다.
 
 ## 한 문장 설명
 
-Idea2Strategy는 사용자 API와 운영 배치를 Core EC2, 실시간 전략 평가와 가상 체결을 Trading EC2, 백테스트와 대용량 데이터 처리를 Compute EC2로 분리하고, 공식 상태는 PostgreSQL, 대용량 불변 데이터는 S3, 재구축 가능한 실시간 전달과 최신값은 Redis에 두는 구조다.
+Idea2Strategy는 ALB로 외부 요청을 받아 사용자 API와 운영 배치를 Core EC2, 실시간 전략 평가와 가상 체결을 Trading EC2, 백테스트와 대용량 데이터 처리를 Compute EC2로 분리한다. 공식 상태는 PostgreSQL, 대용량 불변 데이터는 S3, 명령·작업은 별도 Queue, 재구축 가능한 실시간 사건과 최신값은 Redis에 둔다.

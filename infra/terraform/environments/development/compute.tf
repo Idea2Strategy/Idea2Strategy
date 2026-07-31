@@ -26,16 +26,26 @@ resource "aws_instance" "service" {
 
   root_block_device {
     volume_type           = "gp3"
-    volume_size           = var.ec2_root_volume_gib
+    volume_size           = var.service_root_volume_gib
     encrypted             = true
     delete_on_termination = true
   }
 
-  credit_specification {
-    cpu_credits = "standard"
+  dynamic "credit_specification" {
+    for_each = startswith(var.service_instance_type, "t") ? [1] : []
+
+    content {
+      cpu_credits = "standard"
+    }
   }
 
   monitoring = false
+
+  lifecycle {
+    # A stopped instance temporarily loses its auto-assigned public IPv4
+    # association. Do not replace healthy compute solely because of that drift.
+    ignore_changes = [associate_public_ip_address]
+  }
 
   tags = {
     Name = "${local.name_prefix}-service-ec2"
@@ -74,16 +84,26 @@ resource "aws_instance" "batch" {
 
   root_block_device {
     volume_type           = "gp3"
-    volume_size           = var.ec2_root_volume_gib
+    volume_size           = var.batch_root_volume_gib
     encrypted             = true
     delete_on_termination = true
   }
 
-  credit_specification {
-    cpu_credits = "standard"
+  dynamic "credit_specification" {
+    for_each = startswith(var.batch_instance_type, "t") ? [1] : []
+
+    content {
+      cpu_credits = "standard"
+    }
   }
 
   monitoring = false
+
+  lifecycle {
+    # A stopped instance temporarily loses its auto-assigned public IPv4
+    # association. Preserve the instance and its staging volume during resize.
+    ignore_changes = [associate_public_ip_address]
+  }
 
   tags = {
     Name = "${local.name_prefix}-batch-ec2"

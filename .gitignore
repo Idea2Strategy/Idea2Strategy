@@ -134,6 +134,7 @@ $RECYCLE.BIN/
 *~
 *.swp
 *.swo
+.$*.drawio.bkp
 
 # Idea2Strategy local harness: keep only the shared skeleton.
 .harness/local/**

@@ -8,13 +8,13 @@
 
 | ID | 주제 | 질문 | 현재 상태 |
 |---|---|---|---|
-| INFRA-Q-001 | 공개 진입점 | ALB, API Gateway 또는 다른 Reverse Proxy 중 무엇을 사용할 것인가? | 미정 |
-| INFRA-Q-002 | Queue | 운영 AWS SQS, 로컬 LocalStack SQS를 사용한다. Redis Streams는 실시간 시장 사건에만 사용한다. | 확정 |
-| INFRA-Q-003 | 전달 계약 | Standard 기본, 필요한 경로만 FIFO, at-least-once와 consumer 멱등성을 적용한다. 재시도·visibility timeout·DLQ 수치는 검증 후 정한다. | 방향 확정·수치 미정 |
-| INFRA-Q-004 | Redis | EC2 컨테이너, ElastiCache 또는 다른 Redis 호환 서비스 중 무엇을 사용할 것인가? | 미정 |
+| INFRA-Q-001 | 공개 진입점 | ALB, API Gateway 또는 다른 Reverse Proxy 중 무엇을 사용할 것인가? | ALB 결정 |
+| INFRA-Q-002 | Queue | Redis와 분리된 Queue의 운영 제품과 로컬 대체 구현을 무엇으로 할 것인가? | 분리 확정·제품 미정 |
+| INFRA-Q-003 | 전달 계약 | 재시도, DLQ, 순서, 중복, 멱등성과 전달 보장을 어떻게 정의할 것인가? | 미정 |
+| INFRA-Q-004 | Redis | EC2 컨테이너, ElastiCache 또는 다른 Redis 호환 서비스 중 무엇을 사용할 것인가? | Redis 사용 확정, 운영 제품 후속 |
 | INFRA-Q-005 | DB 권한 | 리포·App별 PostgreSQL Role과 테이블별 읽기·쓰기 권한을 어떻게 만들 것인가? | 미정 |
 | INFRA-Q-006 | Flyway 통합 | 도메인 소유자가 migration을 작성하고 나주원(`Juwon-Na`)이 중앙 Flyway 모듈에서 순서·충돌·DBML 일치를 통합한다. | 확정 |
-| INFRA-Q-007 | 네트워크 | 단일 AZ의 Core·Trading·Compute EC2, RDS, Redis와 진입점을 어느 Subnet에 둘 것인가? | 미정 |
+| INFRA-Q-007 | 네트워크 | Core·Trading·Compute EC2, RDS, Redis와 ALB를 어느 Subnet에 둘 것인가? | ALB는 2-AZ Public Subnet, EC2는 AZ A Public Application Subnet, RDS·Redis는 Private Data Subnet |
 | INFRA-Q-008 | 보안 그룹 | 공개 진입, 내부 API, DB, Redis·Queue의 허용 주체와 포트를 어떻게 제한할 것인가? | 미정 |
 | INFRA-Q-009 | 백업·복구 | RDS와 S3의 RPO·RTO, Backup 보존과 복원 시험 주기를 어떻게 정할 것인가? | 미정 |
 

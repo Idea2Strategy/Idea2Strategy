@@ -23,11 +23,11 @@
 - Systems Manager, Parameter Store, Secrets Manager, CloudWatch
 - 위 리소스를 다시 만들 수 있는 Terraform 코드
 
-다음 목표 구조의 Core·Trading·Compute EC2, Lambda, Queue, Redis 서비스와 공개 진입점은 아직 모두 배포된 상태가 아니다.
+다음 목표 구조의 Core·Trading·Compute EC2, Lambda, ALB와 Redis 서비스는 아직 모두 배포된 상태가 아니다.
 
 ## 2. 최신 목표 구조
 
-현재 목표 배치는 단일 Availability Zone과 EC2 세 대를 전제로 한다.
+현재 목표 배치는 ALB가 사용하는 두 Availability Zone과, 초기 애플리케이션을 배치할 단일 Availability Zone의 EC2 세 대를 전제로 한다.
 
 | 실행 경계 | 실행 단위 | 주 책임 |
 |---|---|---|
@@ -54,10 +54,10 @@
 ### 사용자 요청
 
 ```text
-Web UI → 공개 진입점(제품 미정) → backend-api → PostgreSQL 또는 작업 Queue
+Web UI → Route 53 → ALB(HTTPS·ACM) → backend-api → PostgreSQL 또는 Queue
 ```
 
-공개 진입점을 ALB, API Gateway 또는 다른 Reverse Proxy 중 무엇으로 구현할지는 아직 결정하지 않았다.
+공개 진입점은 Application Load Balancer로 결정한다. Route 53이 서비스 도메인을 ALB로 연결하고 ACM 인증서를 ALB HTTPS Listener에 연결한다. ALB는 서로 다른 두 Availability Zone의 Public Subnet을 사용하고 Core EC2로만 외부 요청을 전달한다.
 
 ### 실시간 트레이딩
 
@@ -71,7 +71,7 @@ Market Gateway는 처음 한 개로 시작한다. 이후 부하와 장애 요구
 ### 백테스트
 
 ```text
-backend-api → 작업 Queue → backtest-worker
+backend-api → Queue → backtest-worker
   → PostgreSQL 실행 상태·요약 + S3 상세 Parquet
 ```
 
@@ -113,11 +113,11 @@ S3에는 과거·실시간 시장 데이터 Parquet, RAW·ADJUSTED·파생 데�
 
 Redis는 실시간 시장 사건 전달과 종목별 최신값 Cache에 사용한다. 공식 장기 정본으로 사용하지 않으며 PostgreSQL, S3와 공급자 데이터로부터 재구축할 수 있어야 한다.
 
-Redis를 EC2 컨테이너, ElastiCache 또는 다른 Redis 호환 서비스 중 무엇으로 운영할지는 아직 결정하지 않았다.
+Redis 사용을 확정한다. Redis는 Private Data Subnet의 공유 서비스로 두고 실시간 시장 사건과 최신값 Cache를 담당한다.
 
 ### Queue
 
-Backend의 봇 제어 명령, 백테스트 작업과 일반 도메인 사건은 운영 AWS SQS, 로컬 LocalStack SQS로 전달한다. SQS Standard를 기본으로 사용하고 순서 보장이 실제 계약인 경로만 FIFO를 사용한다. at-least-once 전달을 전제로 consumer 멱등성을 강제하며, 재시도 횟수·visibility timeout·DLQ redrive 값은 부하·장애 시험으로 확정한다. Redis Streams는 실시간 시장 사건에만 사용하고 durable command/job queue로 사용하지 않는다.
+Backend의 봇 제어 명령, 백테스트 작업과 일반 도메인 사건은 Redis와 분리된 Queue로 전달한다. Queue 제품과 배치 방식은 아직 확정하지 않았으며, 다이어그램에서는 `Queue — technology and placement TBD`로 표시한다. Redis Streams는 실시간 시장 사건에만 사용하고 durable command/job queue로 사용하지 않는다.
 
 ## 5. 배포와 운영
 
@@ -145,9 +145,8 @@ GitHub → GitHub Actions → 테스트·Docker 이미지 빌드 → Amazon ECR
 
 ## 7. 아직 확정하지 않은 항목
 
-- EC2 인스턴스 타입과 CPU·메모리
-- 공개 진입점 제품
-- SQS 경로별 재시도·DLQ·FIFO 적용 계약
+- Core·Trading EC2 인스턴스 타입과 CPU·메모리
+- Queue 제품·배치 방식과 재시도·DLQ·순서·멱등 계약
 - Redis 운영 제품
 - Trading EC2 시작·종료 시간
 - 백테스트·Pipeline 동시 실행 수와 자원 한도
