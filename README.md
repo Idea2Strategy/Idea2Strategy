@@ -4,8 +4,12 @@ Idea2Strategy is an early-stage virtual trading bot SaaS project. Product discov
 
 ## Repository structure
 
-- `ui/`: reference UI prototype maintained as the `Idea2Strategy/Idea2Strategy-ui` Git submodule
-- Root repository: product context, contracts, orchestration, and cross-repository coordination
+- `backend/`: Spring Boot API, batch, worker, Admin MCP, and Flyway migration modules
+- `trading-engine/`: Spring Boot market gateway and trading worker modules
+- `backtest-engine/`: Python FastAPI and backtest worker
+- `data-pipeline/`: Python market-data pipeline and corporate-action research jobs
+- `ui/`: React/Vite frontend
+- Root repository: canonical DBML, product context, contracts, Docker orchestration, and cross-repository coordination
 
 The current UI is exploratory. Its UX, copy, visual design, and implementation architecture may be substantially revised or replaced.
 
@@ -14,11 +18,16 @@ The current UI is exploratory. Its UX, copy, visual design, and implementation a
 - Git
 - PowerShell 5.1 or later on Windows
 - Stackcord CLI 1.0.0 available as `stackcord`
+- Claude Code when using the shared AI-assisted workflow
 - Access to the selected GitHub or GitLab repository
 
 Both remotes use `develop` as their default collaboration branch. `main` is reserved for complete releases beginning with `v1.0.0`.
 
-## Clone from GitHub with the UI submodule
+Team members should follow [`docs/development-start-guide.md`](docs/development-start-guide.md) after the shared foundation is merged into `develop`. It covers clone/update, Claude Code onboarding, local startup, assigned-repository branching, tests, pull requests, and root submodule-pointer integration.
+
+Claude Code automatically reads [`CLAUDE.md`](CLAUDE.md). After cloning or pulling, start Claude from the repository root and run `/start-work <A-F> <name> <GitHub-ID>`.
+
+## Clone from GitHub with all submodules
 
 ```bash
 git clone --recurse-submodules https://github.com/Idea2Strategy/Idea2Strategy.git

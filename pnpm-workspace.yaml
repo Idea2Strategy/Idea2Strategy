@@ -1,0 +1,3 @@
+minimumReleaseAgeExclude:
+  - '@dbml/core@9.1.1'
+  - '@dbml/parse@9.1.1'

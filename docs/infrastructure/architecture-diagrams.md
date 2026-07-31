@@ -71,7 +71,7 @@ Development Terraform State와 잠금 객체만 저장하며 애플리케이션 
 
 Redis는 실시간 시장 사건과 최신값 Cache에 사용하지만 공식 정본은 아니다. Redis 운영 제품은 아직 미정이다.
 
-Queue는 봇 제어 명령, 백테스트 작업과 도메인 사건을 전달한다. 제품이 미정이므로 구조도에서는 SQS 같은 특정 제품 아이콘 대신 중립적인 Queue 노드로 표시한다.
+Queue는 봇 제어 명령, 백테스트 작업과 도메인 사건을 전달한다. 운영은 AWS SQS, 로컬은 LocalStack SQS를 사용한다. Standard Queue가 기본이며 순서 보장이 계약인 경로만 FIFO를 사용하고, consumer는 중복 전달에 멱등하게 동작한다. Redis Streams는 실시간 시장 사건에만 사용한다.
 
 ## 한 문장 설명
 

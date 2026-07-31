@@ -106,10 +106,10 @@ while ($true) {
     Write-Host "==================================================" -ForegroundColor Cyan
     Write-Host " 1. Frontend만 실행"
     Write-Host " 2. Backend 개발 인프라만 실행"
-    Write-Host "    - PostgreSQL, Redis, MinIO"
+    Write-Host "    - PostgreSQL, Redis, MinIO, LocalStack SQS"
     Write-Host " 3. Frontend + Backend 개발 인프라 실행 (권장)"
-    Write-Host " 4. Spring 포함 전체 실행"
-    Write-Host "    - Backend 소스가 추가된 뒤 사용"
+    Write-Host " 4. API와 Worker 포함 전체 실행"
+    Write-Host "    - Backend, Trading, Backtest 골격 빌드"
     Write-Host " 5. 기타 관리"
     Write-Host " 0. 종료"
     Write-Host ""

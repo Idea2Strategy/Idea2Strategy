@@ -24,12 +24,14 @@
 - Python은 필요한 일부 테이블에 SQLAlchemy Core를 사용한다.
 - DB Migration 도구는 Flyway 하나로 통일하고 Alembic은 사용하지 않는다.
 - Redis는 실시간 시장 사건 전달과 최신값 캐시에 사용하되 공식 장기 정본으로 사용하지 않는다.
+- Durable command/job queue는 운영에서 AWS SQS, 로컬에서 LocalStack SQS를 사용한다.
+- SQS Standard를 기본으로 사용하고 순서 보장이 실제 계약인 경로만 FIFO를 사용한다. 모든 consumer는 at-least-once 전달을 전제로 멱등 처리한다.
+- Runtime 기준은 Java 21 LTS, Spring Boot 4.1.0, Gradle 8.14.3, Python 3.12.13, FastAPI 0.139.2, Uvicorn 0.52.0, Node.js 24 LTS, pnpm 11, PostgreSQL 16, Redis 7.4, Flyway 11과 Docker Compose v2다.
 
 ### 아직 확정하지 않은 인프라 세부사항
 
 - EC2 인스턴스 타입과 정확한 CPU·메모리
 - 공개 진입점으로 ALB, API Gateway 또는 다른 Reverse Proxy 중 무엇을 사용할지
-- 서비스 제어 명령과 일반 도메인 사건에 SQS, Redis Streams 또는 다른 Broker 중 무엇을 사용할지
 - Redis를 ElastiCache로 운영할지 다른 Redis 호환 서비스로 운영할지
 - Trading EC2의 정확한 시작·종료 여유 시간
 - 백테스트와 Pipeline 작업의 동시 실행 수와 자원 할당량
@@ -815,8 +817,7 @@ Shared Infrastructure
 
 ## 16. 구현 전에 남은 기술 결정
 
-- Java·Spring·Python의 정확한 지원 버전
-- Queue 제품과 전달 보장, 재시도, DLQ, 멱등 계약
+- SQS 재시도 횟수, visibility timeout, DLQ redrive와 경로별 FIFO 적용 범위
 - Redis Stream Key, 보존 시간, Consumer Group과 장애 복구 방식
 - Trading Worker의 봇 Shard·종목 Routing 방식
 - 시장 데이터 Event Schema와 서버·공급자 시각 처리

@@ -50,12 +50,12 @@
 아래 단계는 A~F를 나눈 뒤 각자 구현을 시작하기 전에 한 번만 완료한다. 한 사람이 공통 구현 전체를 떠안지 않고, 각 묶음 담당자가 자신이 생산할 계약과 fixture를 동시에 준비한다.
 
 - [ ] **COM01 — 협업 기준 commit 확정**: 루트의 DBML·문서·계약 후보를 검토해 `develop` 기준 commit을 확정하고, 별도 UI 작업의 submodule pointer를 백엔드 기준선 변경과 섞지 않는다.
-- [ ] **COM02 — runtime·build 기준 확정**: Java·Spring Boot·Gradle·Python·PostgreSQL·Redis의 지원 버전과 재현 가능한 로컬 실행 명령을 고정한다.
-- [ ] **COM03 — 공통 인프라와 전달 경계 확정**: PostgreSQL, Redis, S3 호환 저장소와 durable command/job queue의 제품·로컬 대체물을 선택하고, Redis 실시간 시장 사건과 durable 작업 전달의 책임을 구분한다.
+- [ ] **COM02 — 확정 runtime·build 기준 적용**: Java 21 LTS, Spring Boot 4.1.0, Gradle 8.14.3, Python 3.12.13, FastAPI 0.139.2, Uvicorn 0.52.0, Node.js 24 LTS, pnpm 11, PostgreSQL 16, Redis 7.4, Flyway 11과 Docker Compose v2를 각 저장소의 build·lock·실행 기준에 반영하고 재현 가능한 로컬 명령을 검증한다.
+- [ ] **COM03 — 공통 인프라와 전달 경계 구현**: 운영 durable command/job queue는 AWS SQS, 로컬 대체물은 LocalStack SQS로 구성한다. SQS Standard를 기본으로 사용하고 순서 보장이 실제 계약인 경로만 FIFO를 사용한다. Redis는 실시간 시장 사건과 최신 상태에만 사용하며 durable 작업 Queue로 대체하지 않는다. SQS의 at-least-once 전달을 전제로 consumer 멱등성, 재시도와 DLQ를 검증한다.
 - [ ] **COM04 — backend 공통 골격 병합**: A가 주도하고 B·E가 검토해 네 Spring App과 domain/application/persistence/messaging/common 모듈, 공통 build logic과 빈 앱 기동 테스트를 먼저 `backend/develop`에 병합한다.
 - [ ] **COM05 — 공통 요청·오류·시간·사건 envelope**: 오류 응답, pagination, API version, correlation/idempotency key, UTC 저장·미국 동부 시각 해석과 event envelope를 fixture로 고정한다.
 - [ ] **COM06 — 서비스 경계 계약 fixture**: B는 Basic compiled plan·봇 명령, C는 시장 사건·평가 결과·주문 후보 batch, D는 Dataset Manifest와 백테스트 요청·결과, E는 방 평가 구간·성과 입력, F는 주문·체결·원장 사건 fixture를 각각 제안하고 모든 consumer의 계약 테스트를 통과시킨다.
-- [ ] **COM07 — DB 소유권·Flyway baseline**: 스키마·테이블별 단일 write owner, 서비스별 최소 권한, timestamp 기반 migration 이름, 전용 Flyway 1회 실행, JPA validate·jOOQ code generation과 Python 접근 경계를 검증한다.
+- [ ] **COM07 — DB 소유권·중앙 Flyway baseline**: 스키마·테이블별 단일 write owner가 자신이 소유한 변경의 migration을 작성하고, 나주원(`Juwon-Na`)이 중앙 Flyway 모듈의 통합 담당자로서 순서·충돌·DBML 일치를 검토한다. 전용 Flyway 1회 실행, 서비스별 최소 권한, timestamp 기반 migration 이름, JPA validate·jOOQ code generation과 Python 접근 경계를 검증한다.
 - [ ] **COM08 — 독립 테스트 kit**: fake auth, fake clock, fake queue, 녹화 시장 사건, 소형 Parquet, fake S3와 Testcontainers를 각 저장소에서 외부 구현 없이 사용할 수 있게 한다.
 - [ ] **COM09 — 공통 CI gate**: build, lint, test, migration, DBML, 계약 호환성, dependency·secret scan과 앱 smoke test를 `develop` PR 필수 검사로 구성한다.
 - [ ] **COM10 — 병렬 작업 소유권 확인**: A~F의 경로·스키마·계약 producer를 확정하고 Stackcord로 의미·migration·workspace·root pointer 충돌과 병합 순서를 확인한다.

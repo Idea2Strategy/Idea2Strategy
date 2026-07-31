@@ -1,0 +1,88 @@
+schema_version: 1
+id: work.local-development-foundation
+readiness: ready
+title: Build the shared local development foundation
+outcome: Every service repository has a reproducible empty application skeleton and the root workspace can describe the agreed PostgreSQL, Redis, MinIO, LocalStack SQS, migration, API, and worker boundaries without requiring unfinished domain features.
+acceptance:
+  - id: acceptance.local-infrastructure
+    given: A developer has Docker Compose v2 and a local environment file
+    when: The infrastructure-only profile is started
+    then: PostgreSQL, Redis, MinIO, and LocalStack SQS become healthy with localhost-only published ports
+    failure: An unfinished application image is required or a data service is exposed beyond localhost
+  - id: acceptance.service-skeletons
+    given: Domain features have not been implemented
+    when: Each repository runs its documented build and test command
+    then: Its agreed API and worker applications start or pass an empty smoke test independently
+    failure: A repository requires another team's unfinished business implementation to build or test
+  - id: acceptance.boundaries
+    given: Real-time and durable delivery have different responsibilities
+    when: Local configuration is inspected
+    then: Redis is reserved for real-time market events and latest state while durable jobs use LocalStack SQS
+    failure: Durable jobs depend on Redis or workers publish unnecessary host ports
+refs:
+  - quality.failure-safety
+  - quality.reproducibility
+  - technology.need.server-runtime
+workspaces:
+  - workspace.root
+  - workspace.backend
+  - workspace.trading-engine
+  - workspace.backtest-engine
+  - workspace.data-pipeline
+  - workspace.ui
+scope:
+  repositories:
+    - idea2strategy.platform
+  paths:
+    - compose.back.yml
+    - compose.front.yml
+    - .env.docker.example
+    - infra/docker/**
+    - scripts/dev.ps1
+    - scripts/test-docker-development.ps1
+    - docs/backend-implementation-master-checklist.md
+    - docs/backend-team-allocation.md
+    - docs/backend-and-aws-architecture.md
+    - docs/infrastructure/**
+    - backend/**
+    - trading-engine/**
+    - backtest-engine/**
+    - data-pipeline/**
+    - ui/**
+  policy_ids: []
+  scenario_ids: []
+  contract_ids: []
+  db_entities: []
+  migration_slots:
+    - flyway.foundation
+  ui_flows: []
+  dependency_majors:
+    - spring-boot@4
+    - python@3.12
+    - node@24
+  root_pointers:
+    - workspace.backend
+    - workspace.trading-engine
+    - workspace.backtest-engine
+    - workspace.data-pipeline
+    - workspace.ui
+dependencies: []
+merge_order:
+  - workspace.backend
+  - workspace.trading-engine
+  - workspace.backtest-engine
+  - workspace.data-pipeline
+  - workspace.ui
+  - workspace.root
+first_failing_test: The current Compose model has no LocalStack SQS service, exposes an obsolete Spring backtest app, and the Java and Python engine repositories do not yet contain executable application skeletons.
+evidence:
+  kinds:
+    - repository-build
+    - service-smoke-test
+    - compose-static-validation
+    - collaboration-policy-check
+  integration_required: true
+  user_validation: false
+  migration_required: true
+  rollback_required: false
+fingerprint: sha256:6e172bc50d293a64a663fe3546f54ce0b603e804711f8524242ffb00deb012ea
