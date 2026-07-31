@@ -1,5 +1,33 @@
 name: ${COMPOSE_PROJECT_NAME:-idea2strategy-local}
 
+x-spring-environment: &spring-environment
+  SPRING_PROFILES_ACTIVE: local
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+  SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+  SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+  SPRING_DATA_REDIS_HOST: redis
+  SPRING_DATA_REDIS_PORT: "6379"
+  AWS_ENDPOINT_URL_SQS: http://localstack:4566
+  AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+  AWS_ACCESS_KEY_ID: ${LOCALSTACK_ACCESS_KEY:-test}
+  AWS_SECRET_ACCESS_KEY: ${LOCALSTACK_SECRET_KEY:-test}
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_REGION: ${S3_REGION:-ap-northeast-2}
+  S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
+  S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
+
+x-python-environment: &python-environment
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  REDIS_URL: redis://redis:6379/0
+  AWS_ENDPOINT_URL_SQS: http://localstack:4566
+  AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+  AWS_ACCESS_KEY_ID: ${LOCALSTACK_ACCESS_KEY:-test}
+  AWS_SECRET_ACCESS_KEY: ${LOCALSTACK_SECRET_KEY:-test}
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_REGION: ${S3_REGION:-ap-northeast-2}
+  S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
+  S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
+
 services:
   postgres:
     container_name: idea2strategy-postgres
@@ -8,13 +36,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      TZ: Asia/Seoul
+      TZ: UTC
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-15432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    networks:
-      - development
+    networks: [development]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
@@ -25,12 +52,11 @@ services:
 
   redis:
     container_name: idea2strategy-redis
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     command: ["redis-server", "--appendonly", "no", "--save", ""]
     ports:
       - "127.0.0.1:${REDIS_PORT:-16379}:6379"
-    networks:
-      - development
+    networks: [development]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -50,8 +76,7 @@ services:
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-19001}:9001"
     volumes:
       - minio-data:/data
-    networks:
-      - development
+    networks: [development]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
       interval: 5s
@@ -82,14 +107,34 @@ services:
         mc version enable "local/$${S3_RESULTS_BUCKET}"
         mc anonymous set none "local/$${S3_MARKET_DATA_BUCKET}"
         mc anonymous set none "local/$${S3_RESULTS_BUCKET}"
-    networks:
-      - development
+    networks: [development]
     restart: "no"
+
+  localstack:
+    container_name: idea2strategy-localstack
+    image: localstack/localstack:4.7.0
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: ${AWS_REGION:-ap-northeast-2}
+      DEBUG: ${LOCALSTACK_DEBUG:-0}
+    ports:
+      - "127.0.0.1:${LOCALSTACK_PORT:-14566}:4566"
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./infra/docker/localstack/ready.d:/etc/localstack/init/ready.d:ro
+    networks: [development]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4566/_localstack/health | grep -q '\"sqs\": \"running\"'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
 
   flyway:
     container_name: idea2strategy-flyway
     image: redgate/flyway:11-alpine
-    profiles: ["backend-apps"]
+    profiles: [apps]
     depends_on:
       postgres:
         condition: service_healthy
@@ -100,104 +145,142 @@ services:
       - -password=${POSTGRES_PASSWORD}
       - migrate
     volumes:
-      - ${BACKEND_MIGRATION_DIR:-./infra/docker/backend/flyway/sql}:/flyway/sql:ro
-    networks:
-      - development
+      - ${BACKEND_MIGRATION_DIR:-./backend/db-migration/src/main/resources/db/migration}:/flyway/sql:ro
+    networks: [development]
     restart: "no"
 
-  backend:
-    container_name: idea2strategy-backend
-    profiles: ["backend-apps"]
+  backend-api:
+    container_name: idea2strategy-backend-api
+    profiles: [apps]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.spring
       args:
-        APP_MODULE: backend-app
+        SERVICE_DIR: backend
+        APP_PROJECT: apps:backend-api
+        APP_OUTPUT: apps/backend-api
     environment:
-      SPRING_PROFILES_ACTIVE: local
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-      SPRING_DATA_REDIS_HOST: redis
-      SPRING_DATA_REDIS_PORT: "6379"
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_REGION: ${S3_REGION:-ap-northeast-2}
-      S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
-      S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      <<: *spring-environment
+      SERVER_PORT: "8080"
     ports:
       - "127.0.0.1:${BACKEND_PORT:-18080}:8080"
     depends_on:
-      flyway:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    networks:
-      - development
-    restart: unless-stopped
+      flyway: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+      localstack: {condition: service_healthy}
+    networks: [development]
 
-  batch:
-    container_name: idea2strategy-batch
-    profiles: ["backend-apps"]
+  admin-mcp:
+    container_name: idea2strategy-admin-mcp
+    profiles: [apps]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.spring
       args:
-        APP_MODULE: batch-app
+        SERVICE_DIR: backend
+        APP_PROJECT: apps:admin-mcp
+        APP_OUTPUT: apps/admin-mcp
     environment:
-      SPRING_PROFILES_ACTIVE: local
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_REGION: ${S3_REGION:-ap-northeast-2}
-      S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
-      S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      <<: *spring-environment
+      SERVER_PORT: "8083"
     ports:
-      - "127.0.0.1:${BATCH_PORT:-18081}:8081"
+      - "127.0.0.1:${ADMIN_MCP_PORT:-18083}:8083"
     depends_on:
-      flyway:
-        condition: service_completed_successfully
-      minio-init:
-        condition: service_completed_successfully
-    networks:
-      - development
-    restart: unless-stopped
+      flyway: {condition: service_completed_successfully}
+      localstack: {condition: service_healthy}
+    networks: [development]
 
-  backtest:
-    container_name: idea2strategy-backtest
-    profiles: ["backend-apps"]
+  backend-batch:
+    container_name: idea2strategy-backend-batch
+    profiles: [apps]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.spring
       args:
-        APP_MODULE: backtest-app
-    environment:
-      SPRING_PROFILES_ACTIVE: local
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_REGION: ${S3_REGION:-ap-northeast-2}
-      S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
-      S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+        SERVICE_DIR: backend
+        APP_PROJECT: apps:backend-batch
+        APP_OUTPUT: apps/backend-batch
+    environment: *spring-environment
+    depends_on:
+      flyway: {condition: service_completed_successfully}
+      localstack: {condition: service_healthy}
+    networks: [development]
+
+  backend-worker:
+    container_name: idea2strategy-backend-worker
+    profiles: [apps]
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile.spring
+      args:
+        SERVICE_DIR: backend
+        APP_PROJECT: apps:backend-worker
+        APP_OUTPUT: apps/backend-worker
+    environment: *spring-environment
+    depends_on:
+      flyway: {condition: service_completed_successfully}
+      localstack: {condition: service_healthy}
+    networks: [development]
+
+  market-gateway:
+    container_name: idea2strategy-market-gateway
+    profiles: [apps]
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile.spring
+      args:
+        SERVICE_DIR: trading-engine
+        APP_PROJECT: apps:market-gateway
+        APP_OUTPUT: apps/market-gateway
+    environment: *spring-environment
+    depends_on:
+      redis: {condition: service_healthy}
+    networks: [development]
+
+  trading-worker:
+    container_name: idea2strategy-trading-worker
+    profiles: [apps]
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile.spring
+      args:
+        SERVICE_DIR: trading-engine
+        APP_PROJECT: apps:trading-worker
+        APP_OUTPUT: apps/trading-worker
+    environment: *spring-environment
+    depends_on:
+      flyway: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      localstack: {condition: service_healthy}
+    networks: [development]
+
+  backtest-api:
+    container_name: idea2strategy-backtest-api
+    profiles: [apps]
+    build:
+      context: ./backtest-engine
+    environment: *python-environment
     ports:
       - "127.0.0.1:${BACKTEST_PORT:-18082}:8082"
     depends_on:
-      flyway:
-        condition: service_completed_successfully
-      minio-init:
-        condition: service_completed_successfully
-    networks:
-      - development
-    restart: unless-stopped
+      flyway: {condition: service_completed_successfully}
+      minio-init: {condition: service_completed_successfully}
+      localstack: {condition: service_healthy}
+    networks: [development]
+
+  backtest-worker:
+    container_name: idea2strategy-backtest-worker
+    profiles: [apps]
+    build:
+      context: ./backtest-engine
+    command: ["backtest-worker"]
+    environment: *python-environment
+    depends_on:
+      flyway: {condition: service_completed_successfully}
+      minio-init: {condition: service_completed_successfully}
+      localstack: {condition: service_healthy}
+    networks: [development]
 
 networks:
   development:
@@ -208,3 +291,5 @@ volumes:
     name: idea2strategy-postgres-data
   minio-data:
     name: idea2strategy-minio-data
+  localstack-data:
+    name: idea2strategy-localstack-data

@@ -117,7 +117,7 @@ Redis를 EC2 컨테이너, ElastiCache 또는 다른 Redis 호환 서비스 중 
 
 ### Queue
 
-Backend의 봇 제어 명령, 백테스트 작업과 일반 도메인 사건을 전달할 Queue가 필요하다. SQS, Redis Streams 또는 다른 Broker 중 어떤 제품을 사용할지와 전달 보장, 재시도, DLQ, 멱등 계약은 아직 결정하지 않았다.
+Backend의 봇 제어 명령, 백테스트 작업과 일반 도메인 사건은 운영 AWS SQS, 로컬 LocalStack SQS로 전달한다. SQS Standard를 기본으로 사용하고 순서 보장이 실제 계약인 경로만 FIFO를 사용한다. at-least-once 전달을 전제로 consumer 멱등성을 강제하며, 재시도 횟수·visibility timeout·DLQ redrive 값은 부하·장애 시험으로 확정한다. Redis Streams는 실시간 시장 사건에만 사용하고 durable command/job queue로 사용하지 않는다.
 
 ## 5. 배포와 운영
 
@@ -147,7 +147,7 @@ GitHub → GitHub Actions → 테스트·Docker 이미지 빌드 → Amazon ECR
 
 - EC2 인스턴스 타입과 CPU·메모리
 - 공개 진입점 제품
-- Queue·Broker 제품과 전달 계약
+- SQS 경로별 재시도·DLQ·FIFO 적용 계약
 - Redis 운영 제품
 - Trading EC2 시작·종료 시간
 - 백테스트·Pipeline 동시 실행 수와 자원 한도

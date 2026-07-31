@@ -1,7 +1,7 @@
-FROM node:22-alpine
+FROM node:24-alpine
 
 RUN corepack enable \
-    && corepack prepare pnpm@10.15.0 --activate
+    && corepack prepare pnpm@11.9.0 --activate
 
 WORKDIR /workspace/ui
 

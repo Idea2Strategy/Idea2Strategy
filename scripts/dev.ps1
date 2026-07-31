@@ -132,15 +132,23 @@ function Get-ComposeBaseArguments {
         if ($Scope -eq "front") {
             throw "-WithBackend cannot be used with -Scope front."
         }
-        $gradleWrapper = Join-Path $root "backend\gradlew"
+        $backendGradleSettings = Join-Path $root "backend\settings.gradle.kts"
+        $tradingGradleSettings = Join-Path $root "trading-engine\settings.gradle.kts"
+        $backtestProject = Join-Path $root "backtest-engine\pyproject.toml"
         $migrationDirectory = Join-Path $root "backend\db-migration\src\main\resources\db\migration"
-        if (-not (Test-Path -LiteralPath $gradleWrapper -PathType Leaf)) {
-            throw "Backend source is not ready. Missing: backend/gradlew"
+        foreach ($requiredProjectFile in @(
+            $backendGradleSettings,
+            $tradingGradleSettings,
+            $backtestProject
+        )) {
+            if (-not (Test-Path -LiteralPath $requiredProjectFile -PathType Leaf)) {
+                throw "Service source is not ready. Missing: $requiredProjectFile"
+            }
         }
         if (-not (Test-Path -LiteralPath $migrationDirectory -PathType Container)) {
             throw "Backend Flyway migrations are not ready. Missing: backend/db-migration/src/main/resources/db/migration"
         }
-        $arguments += @("--profile", "backend-apps")
+        $arguments += @("--profile", "apps")
     }
 
     return $arguments
@@ -195,6 +203,7 @@ function Wait-DevelopmentEnvironment {
         $postgresReady = $true
         $redisReady = $true
         $minioReady = $true
+        $localstackReady = $true
         $frontendReady = $true
 
         if ($Scope -in @("all", "back")) {
@@ -203,13 +212,16 @@ function Wait-DevelopmentEnvironment {
             )
             $redisReady = Test-ContainerCommand -Arguments @("redis", "redis-cli", "ping")
             $minioReady = Test-HttpEndpoint -Uri $minioHealthUrl
+            $localstackReady = Test-ContainerCommand -Arguments @(
+                "localstack", "awslocal", "sqs", "list-queues"
+            )
         }
 
         if ($Scope -in @("all", "front")) {
             $frontendReady = Test-HttpEndpoint -Uri $frontendUrl
         }
 
-        if ($postgresReady -and $redisReady -and $minioReady -and $frontendReady) {
+        if ($postgresReady -and $redisReady -and $minioReady -and $localstackReady -and $frontendReady) {
             Write-Host "All default development services are ready." -ForegroundColor Green
             return
         }
@@ -235,8 +247,9 @@ function Open-DevelopmentPages {
 function Show-ConnectionSummary {
     $frontendPort = Get-EnvironmentValue -Name "FRONTEND_PORT" -DefaultValue "15173"
     $backendPort = Get-EnvironmentValue -Name "BACKEND_PORT" -DefaultValue "18080"
-    $batchPort = Get-EnvironmentValue -Name "BATCH_PORT" -DefaultValue "18081"
     $backtestPort = Get-EnvironmentValue -Name "BACKTEST_PORT" -DefaultValue "18082"
+    $adminMcpPort = Get-EnvironmentValue -Name "ADMIN_MCP_PORT" -DefaultValue "18083"
+    $localstackPort = Get-EnvironmentValue -Name "LOCALSTACK_PORT" -DefaultValue "14566"
     $postgresPort = Get-EnvironmentValue -Name "POSTGRES_PORT" -DefaultValue "15432"
     $redisPort = Get-EnvironmentValue -Name "REDIS_PORT" -DefaultValue "16379"
     $minioConsolePort = Get-EnvironmentValue -Name "MINIO_CONSOLE_PORT" -DefaultValue "19001"
@@ -252,16 +265,17 @@ function Show-ConnectionSummary {
         Write-Host "  MinIO Console: http://localhost:$minioConsolePort"
         Write-Host "  PostgreSQL:    localhost:$postgresPort / $postgresDatabase"
         Write-Host "  Redis:         localhost:$redisPort"
+        Write-Host "  LocalStack:    http://localhost:$localstackPort"
     }
     Write-Host "  Local secrets: .env.docker (Git ignored)"
     if ($Scope -in @("all", "back")) {
         if ($WithBackend) {
-            Write-Host "  Backend:       http://localhost:$backendPort"
-            Write-Host "  Batch:         http://localhost:$batchPort"
-            Write-Host "  Backtest:      http://localhost:$backtestPort"
+            Write-Host "  Backend API:   http://localhost:$backendPort"
+            Write-Host "  Backtest API:  http://localhost:$backtestPort"
+            Write-Host "  Admin MCP:     http://localhost:$adminMcpPort"
         }
         else {
-            Write-Host "  Spring apps:   not started; use -WithBackend after backend sources are added"
+            Write-Host "  Service apps:  not started; use -WithBackend to start API and workers"
         }
     }
     Write-Host ""
@@ -293,9 +307,19 @@ try {
                 Invoke-Compose -Arguments @("rm", "-f", "frontend") | Out-Null
             }
             else {
-                $backServices = @("postgres", "redis", "minio", "minio-init")
+                $backServices = @("postgres", "redis", "minio", "minio-init", "localstack")
                 if ($WithBackend) {
-                    $backServices += @("flyway", "backend", "batch", "backtest")
+                    $backServices += @(
+                        "flyway",
+                        "backend-api",
+                        "backend-batch",
+                        "backend-worker",
+                        "admin-mcp",
+                        "market-gateway",
+                        "trading-worker",
+                        "backtest-api",
+                        "backtest-worker"
+                    )
                 }
                 Invoke-Compose -Arguments (@("stop") + $backServices) | Out-Null
                 Invoke-Compose -Arguments (@("rm", "-f") + $backServices) | Out-Null

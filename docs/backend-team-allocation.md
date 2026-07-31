@@ -23,12 +23,23 @@
 
 ## 2. 여섯 명이 먼저 같이 끝낼 공통 작업
 
+### 확정된 공통 기준
+
+- Runtime: Java 21 LTS, Spring Boot 4.1.0, Gradle 8.14.3, Python 3.12.13, FastAPI 0.139.2, Uvicorn 0.52.0, Node.js 24 LTS, pnpm 11
+- Data·migration: PostgreSQL 16, Redis 7.4, Flyway 11, Docker Compose v2
+- Durable Queue: 운영 AWS SQS, 로컬 LocalStack SQS. Standard가 기본이며 실제 순서 보장 계약이 있는 경로만 FIFO를 사용한다.
+- Redis 책임: 실시간 시장 사건 전달과 최신 상태 저장. 봇 명령·백테스트·배치 같은 durable 작업 전달에는 사용하지 않는다.
+- Migration 책임: 각 도메인 소유자가 자신의 migration을 작성하고 나주원(`Juwon-Na`)이 중앙 Flyway 모듈에서 순서·충돌·DBML 일치를 통합 검토한다.
+- 외부 공개 포트: `ui:15173`, `backend-api:18080`, `backtest-api:18082`
+- 내부·관리 포트: `admin-mcp:18083`, PostgreSQL `15432`, Redis `16379`, MinIO `19000/19001`
+- Worker 경계: `backend-batch`, `backend-worker`, `market-gateway`, `trading-worker`, `backtest-worker`, `pipeline-worker`는 호스트 포트를 열지 않고 Docker 내부 네트워크로 통신한다.
+
 아래 항목만 모두 함께 끝낸 뒤 A~F 작업을 시작한다.
 
 - [ ] 루트와 모든 서브모듈의 기준 브랜치를 `develop`으로 맞추고 기준 commit을 확인한다.
-- [ ] Java, Spring Boot, Gradle, Python, PostgreSQL, Redis의 공통 버전을 확정한다.
+- [ ] 위에서 확정한 Runtime·Data 버전을 각 저장소의 build·lock 파일과 로컬 실행 환경에 적용한다.
 - [ ] `backend`, `trading-engine`, `ui`, 두 Python 저장소가 빈 상태에서도 빌드·테스트·실행되게 한다.
-- [ ] DB 스키마와 테이블별 변경 담당자, Flyway 실행 주체와 migration 작성 규칙을 정한다.
+- [ ] DB 스키마와 테이블별 변경 담당자를 확정하고 중앙 Flyway 모듈의 migration 작성·통합 규칙을 적용한다.
 - [ ] API 오류 형식, 시간 저장 방식, pagination, 인증 주체, correlation ID와 idempotency 규칙을 정한다.
 - [ ] 영역 사이에서 주고받을 메시지·파일 형식과 예제 fixture를 만든다.
 - [ ] 외부 서비스가 없어도 개발 가능한 fake auth, fake clock, fake queue, 시장 데이터, Parquet와 S3 대역을 준비한다.
