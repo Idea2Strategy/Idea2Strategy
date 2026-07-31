@@ -17,3 +17,23 @@ commands:
     kind: user
     argv: [git, rev-parse, --verify, HEAD]
     timeout_seconds: 30
+  - id: command.foundation-repository-build
+    kind: repository-build
+    argv: [powershell.exe, -NoProfile, -ExecutionPolicy, Bypass, -File, scripts/verify-foundation-ci.ps1]
+    timeout_seconds: 120
+  - id: command.foundation-service-smoke-test
+    kind: service-smoke-test
+    argv: [powershell.exe, -NoProfile, -ExecutionPolicy, Bypass, -File, scripts/verify-foundation-ci.ps1]
+    timeout_seconds: 120
+  - id: command.compose-static-validation
+    kind: compose-static-validation
+    argv: [powershell.exe, -NoProfile, -ExecutionPolicy, Bypass, -File, scripts/test-docker-development.ps1]
+    timeout_seconds: 120
+  - id: command.collaboration-policy-check
+    kind: collaboration-policy-check
+    argv: [powershell.exe, -NoProfile, -ExecutionPolicy, Bypass, -File, scripts/verify-collaboration-policy.ps1]
+    timeout_seconds: 120
+  - id: command.flyway-migration
+    kind: migration
+    argv: [powershell.exe, -NoProfile, -ExecutionPolicy, Bypass, -File, scripts/test-flyway-migration.ps1]
+    timeout_seconds: 300
