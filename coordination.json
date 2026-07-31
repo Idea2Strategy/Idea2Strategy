@@ -34,6 +34,41 @@
       "root_pointer": true,
       "starts_at": "2026-07-31T12:40:36.2153875Z",
       "expires_at": "2026-08-01T12:40:36.0714383Z"
+    },
+    {
+      "id": "claim.com-e-room-performance-fixtures",
+      "work_id": "work.com-e-room-performance-fixtures",
+      "definition_fingerprint": "sha256:4468de6869e11008f1f59122ee0e5ec632d2f3f68500680325d22259f41f07b4",
+      "status": "in_progress",
+      "owner": "dertz569",
+      "branch": "feature/4-room-performance-contract-fixture",
+      "repository": "idea2strategy.backend",
+      "paths": [
+        "modules/backend-messaging/**/competition/**",
+        "modules/backend-messaging/**/performance/**"
+      ],
+      "policy_ids": [
+        "policy.comparison.bots-only"
+      ],
+      "scenario_ids": [
+        "scenario.room.finish"
+      ],
+      "contract_ids": [],
+      "db_entities": [],
+      "migration_slots": [],
+      "ui_flows": [],
+      "dependency_majors": [],
+      "stable_ids": [
+        "journey.room.compare",
+        "policy.comparison.bots-only",
+        "quality.auditability",
+        "quality.failure-safety",
+        "quality.reproducibility",
+        "scenario.room.finish"
+      ],
+      "root_pointer": false,
+      "starts_at": "2026-07-31T12:41:42.1030628Z",
+      "expires_at": "2026-08-01T12:41:41.9437321Z"
     }
   ]
 }
