@@ -2,51 +2,38 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.local-development-foundation",
-      "work_id": "work.local-development-foundation",
-      "definition_fingerprint": "sha256:6e172bc50d293a64a663fe3546f54ce0b603e804711f8524242ffb00deb012ea",
-      "status": "done",
-      "owner": "common-foundation",
-      "branch": "feature/common-development-foundation",
-      "repository": "idea2strategy.platform",
+      "id": "claim.com-c-market-evaluation-fixtures-pjy008008",
+      "work_id": "work.com-c-market-evaluation-fixtures",
+      "definition_fingerprint": "sha256:ae6b609a82dadcda1acf1cb0db9c9b654fd18a0daa4d90f492e816cad2901577",
+      "status": "in_progress",
+      "owner": "pjy008008",
+      "branch": "feature/2-market-evaluation-fixtures",
+      "repository": "idea2strategy.trading-engine",
       "paths": [
-        ".env.docker.example",
-        "backend/**",
-        "backtest-engine/**",
-        "compose.back.yml",
-        "compose.front.yml",
-        "data-pipeline/**",
-        "docs/backend-and-aws-architecture.md",
-        "docs/backend-implementation-master-checklist.md",
-        "docs/backend-team-allocation.md",
-        "docs/infrastructure/**",
-        "infra/docker/**",
-        "scripts/dev.ps1",
-        "scripts/test-docker-development.ps1",
-        "trading-engine/**",
-        "ui/**"
+        "trading-engine/modules/market-data-adapter/**",
+        "trading-engine/modules/trading-messaging/**"
       ],
-      "policy_ids": [],
-      "scenario_ids": [],
+      "policy_ids": [
+        "policy.market.us-only"
+      ],
+      "scenario_ids": [
+        "scenario.bot.evaluate"
+      ],
       "contract_ids": [],
       "db_entities": [],
-      "migration_slots": [
-        "flyway.foundation"
-      ],
+      "migration_slots": [],
       "ui_flows": [],
-      "dependency_majors": [
-        "node@24",
-        "python@3.12",
-        "spring-boot@4"
-      ],
+      "dependency_majors": [],
       "stable_ids": [
+        "capability.bot.server-execution",
+        "policy.market.us-only",
+        "quality.auditability",
         "quality.failure-safety",
-        "quality.reproducibility",
-        "technology.need.server-runtime"
+        "scenario.bot.evaluate"
       ],
       "root_pointer": true,
-      "starts_at": "2026-07-31T08:06:11.3327251Z",
-      "expires_at": "2026-08-01T08:06:11.192926Z"
+      "starts_at": "2026-07-31T12:40:36.2153875Z",
+      "expires_at": "2026-08-01T12:40:36.0714383Z"
     }
   ]
 }
