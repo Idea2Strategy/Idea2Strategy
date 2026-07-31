@@ -17,7 +17,3 @@
 	path = data-pipeline
 	url = https://github.com/Idea2Strategy/Idea2Strategy-data-pipeline.git
 	branch = develop
-[submodule "frontend"]
-	path = frontend
-	url = https://github.com/Idea2Strategy/Idea2Strategy-frontend.git
-	branch = develop

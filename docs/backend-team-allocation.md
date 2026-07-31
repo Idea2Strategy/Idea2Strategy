@@ -8,7 +8,7 @@
 
 ## 1. 여섯 담당 영역
 
-| 영역 | 담당자 | 담당 범위 | 주 저장소 | 서버 기술·런타임 | 함께 연결할 frontend |
+| 영역 | 담당자 | 담당 범위 | 주 저장소 | 서버 기술·런타임 | 함께 연결할 UI |
 |---|---|---|---|---|---|
 | A — 계정·운영 | 나주원 (`Juwon-Na`) | 가입, 로그인, 세션, 권한, 제재, 알림, 운영자 기능, Admin MCP | `backend` | Java·Spring Boot | 로그인, 계정 설정, 알림, 운영자 화면 |
 | B — 전략·봇 | 손현준 (`hjcud`) | Basic 전략 저장·검증·출시, 봇 생성·실행·중단, 외부 AI용 CLI | `backend` | Java·Spring Boot | 전략 편집기, 출시, 봇 생성·제어 화면 |
@@ -17,9 +17,9 @@
 | E — 방·성과 | 황영우 (`dertz569`) | 방 생성·참여·일정, 평가, 점수 템플릿, 리더보드 | `backend` | Java·Spring Boot | 방 생성·참여·관리, 평가·리더보드 화면 |
 | F — 거래·원장 | 민경철 (`kcrmin`) | 예산·위험 검사, 주문, 가상 체결, 포지션, 원장, 정산 | `trading-engine` | Java·Spring Boot | 주문·체결, 포지션·예산, 원장 화면 |
 
-각 영역은 서버만 담당하지 않는다. 사용자가 이용하는 기능은 해당 서버 처리와 `frontend` 연결을 같은 작업 범위로 본다.
+각 영역은 서버만 담당하지 않는다. 사용자가 이용하는 기능은 해당 서버 처리와 `ui` 연결을 같은 작업 범위로 본다.
 
-`frontend` 하위 Issue는 모든 영역에서 TypeScript·React·Vite를 사용한다. 루트 저장소의 문서·DBML·계약·submodule pointer 작업은 별도 애플리케이션 런타임이 없는 통합 작업으로 표시한다.
+`ui` 하위 Issue는 모든 영역에서 TypeScript·React·Vite를 사용한다. 루트 저장소의 문서·DBML·계약·submodule pointer 작업은 별도 애플리케이션 런타임이 없는 통합 작업으로 표시한다.
 
 ## 2. 여섯 명이 먼저 같이 끝낼 공통 작업
 
@@ -27,13 +27,13 @@
 
 - [ ] 루트와 모든 서브모듈의 기준 브랜치를 `develop`으로 맞추고 기준 commit을 확인한다.
 - [ ] Java, Spring Boot, Gradle, Python, PostgreSQL, Redis의 공통 버전을 확정한다.
-- [ ] `backend`, `trading-engine`, `frontend`, 두 Python 저장소가 빈 상태에서도 빌드·테스트·실행되게 한다.
+- [ ] `backend`, `trading-engine`, `ui`, 두 Python 저장소가 빈 상태에서도 빌드·테스트·실행되게 한다.
 - [ ] DB 스키마와 테이블별 변경 담당자, Flyway 실행 주체와 migration 작성 규칙을 정한다.
 - [ ] API 오류 형식, 시간 저장 방식, pagination, 인증 주체, correlation ID와 idempotency 규칙을 정한다.
 - [ ] 영역 사이에서 주고받을 메시지·파일 형식과 예제 fixture를 만든다.
 - [ ] 외부 서비스가 없어도 개발 가능한 fake auth, fake clock, fake queue, 시장 데이터, Parquet와 S3 대역을 준비한다.
 - [ ] 각 저장소의 build, test, migration, contract test와 smoke test를 CI에서 확인한다.
-- [ ] `frontend`의 router, API client, 인증 상태, loading·empty·error·permission 공통 처리를 준비한다.
+- [ ] `ui`의 router, API client, 인증 상태, loading·empty·error·permission 공통 처리를 준비한다.
 - [ ] 공통 작업을 각 저장소의 `develop`에 먼저 병합하고 여섯 명이 최신 상태를 다시 받는다.
 
 공통 작업은 한 브랜치에서 여섯 명이 동시에 수정하지 않는다. 항목마다 한 명이 변경하고 필요한 사람이 검토한 뒤 바로 `develop`에 병합한다.
@@ -43,7 +43,7 @@
 각 담당자는 다른 영역의 실제 구현을 기다리지 않고 다음 순서로 진행한다.
 
 1. 자신이 소비할 API·이벤트·Parquet 형식의 예제 fixture를 먼저 받는다.
-2. 실제 상대 서비스 대신 fixture와 fake adapter로 서버와 frontend를 함께 개발한다.
+2. 실제 상대 서비스 대신 fixture와 fake adapter로 서버와 UI를 함께 개발한다.
 3. 자신의 저장소와 DB 소유 범위만 수정한다.
 4. 상대 영역이 실제 구현을 끝내면 fixture와 동일한 계약인지 contract test로 확인한다.
 5. 실제 서비스 간 연결은 각자의 독립 기능이 끝난 뒤 별도 통합 작업으로 처리한다.
@@ -65,12 +65,12 @@ E 방 평가 일정·참가 상태 ──→ B, C, F
 
 | 영역 | 첫 번째 확인 가능한 결과 |
 |---|---|
-| A | 가입·로그인 후 인증된 사용자 정보가 frontend에 표시되고 권한 없는 요청이 거절된다. |
+| A | 가입·로그인 후 인증된 사용자 정보가 UI에 표시되고 권한 없는 요청이 거절된다. |
 | B | Basic 전략 문서를 저장하고 다시 열었을 때 블록과 입력값이 그대로 복원된다. |
-| C | 녹화된 Alpaca 시세가 내부 시장 이벤트로 변환되고 실행 상태가 frontend에 표시된다. |
+| C | 녹화된 Alpaca 시세가 내부 시장 이벤트로 변환되고 실행 상태가 UI에 표시된다. |
 | D | Alpaca 예제 응답이 Parquet와 Manifest로 저장되고 동일한 입력을 백테스트가 읽는다. |
-| E | 공개·비밀방을 생성하고 참여 상태를 저장하며 frontend에서 확인한다. |
-| F | 주문 후보가 예산·위험 검사를 거쳐 주문 의도로 변환되고 결과가 frontend에 표시된다. |
+| E | 공개·비밀방을 생성하고 참여 상태를 저장하며 UI에서 확인한다. |
+| F | 주문 후보가 예산·위험 검사를 거쳐 주문 의도로 변환되고 결과가 UI에 표시된다. |
 
 첫 결과가 끝나면 같은 브랜치를 계속 사용하지 않는다. 다음 작업은 최신 `develop`에서 새 브랜치를 만든다.
 
@@ -98,7 +98,7 @@ E 방 평가 일정·참가 상태 ──→ B, C, F
 | 하위 Issue | 저장소 | 기술·런타임 | 담당자 | 선행 Issue | 단독 소유 범위 | 산출물 |
 |---|---|---|---|---|---|---|
 | `backend#…` | `backend` | Java·Spring Boot | 손현준 (`hjcud`) | 공통 계약 Issue | API·Command·Query·DB 변경 | backend PR |
-| `frontend#…` | `frontend` | TypeScript·React | 손현준 (`hjcud`) | API 계약 fixture | 해당 기능 화면 경로 | frontend PR |
+| `ui#…` | `ui` | TypeScript·React | 손현준 (`hjcud`) | API 계약 fixture | 해당 기능 화면 경로 | UI PR |
 | `backtest-engine#…` | `backtest-engine` | Python·FastAPI/worker | 서동위 (`SeoDongWi`) | compiled plan fixture | 백테스트 소비 경로 | engine PR |
 | `root#…` 통합 | 루트 | 문서·계약·E2E | 흐름 담당자 | 위 하위 Issue 전체 | E2E·pointer만 | 루트 PR |
 
@@ -149,11 +149,11 @@ E 방 평가 일정·참가 상태 ──→ B, C, F
 → 다음 Issue를 최신 develop에서 새 브랜치로 시작
 ```
 
-서버와 frontend가 함께 바뀌어도 저장소마다 별도의 하위 Issue와 브랜치를 만든다. Issue 번호는 저장소별 번호이므로 같을 필요가 없으며, 두 Issue를 같은 루트 상위 Issue에 연결한다.
+서버와 UI가 함께 바뀌어도 저장소마다 별도의 하위 Issue와 브랜치를 만든다. Issue 번호는 저장소별 번호이므로 같을 필요가 없으며, 두 Issue를 같은 루트 상위 Issue에 연결한다.
 
 ```text
 backend:  feature/341-strategy-release-api
-frontend: feature/87-strategy-release-ui
+ui:      feature/87-strategy-release-ui
 ```
 
 완료 순서는 다음과 같다.
@@ -174,9 +174,9 @@ frontend: feature/87-strategy-release-ui
 | `backend` | A: identity·operations / B: strategy·bot-control / E: competition·performance |
 | `trading-engine` | C: market·evaluation / F: order·execution·settlement |
 | `data-pipeline`, `backtest-engine` | D |
-| `frontend` | 각 담당자의 기능 경로, 공통 shell은 공통 작업 담당자 |
+| `ui` | 각 담당자의 기능 경로, 공통 shell은 공통 작업 담당자 |
 
-하나의 경로, DB 테이블, migration 또는 계약에는 동시에 한 하위 Issue만 write owner가 된다. 다른 담당자의 소유 범위나 공통 build 파일·frontend shell을 바꿔야 하면 현재 Issue에 섞지 않는다. 별도의 선행 Issue와 작은 PR을 먼저 `develop`에 병합하고, 영향받는 작업은 최신 `develop`에서 새 브랜치를 만든다.
+하나의 경로, DB 테이블, migration 또는 계약에는 동시에 한 하위 Issue만 write owner가 된다. 다른 담당자의 소유 범위나 공통 build 파일·UI shell을 바꿔야 하면 현재 Issue에 섞지 않는다. 별도의 선행 Issue와 작은 PR을 먼저 `develop`에 병합하고, 영향받는 작업은 최신 `develop`에서 새 브랜치를 만든다.
 
 계약 producer 구현이 늦더라도 승인된 fixture가 있으면 consumer는 병렬 개발한다. 다만 실제 producer와의 계약 테스트가 끝나기 전에는 상위 흐름을 완료하지 않는다.
 

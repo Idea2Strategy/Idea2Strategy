@@ -3,7 +3,7 @@
 > 상태: A~F 담당자 확정, GitHub Issue 생성 전 기준안
 > 목적: 공통 선행 단계 완료 후 A~F 중 하나를 맡은 6명의 개발자가 자신의 묶음을 독립적으로 진행하고, 모든 카드가 완료되면 전체 서비스가 실제로 동작하도록 한다.
 
-사용자에게 보이는 카드는 서버 구현만으로 완료되지 않는다. 마스터 카드 하나는 루트 저장소의 상위 사용자 흐름 Issue가 되고, 실제 `frontend`·서버·엔진 작업은 저장소별 하위 Issue로 나눈다. 상위 Issue는 화면·API 연결·loading·empty·error·permission 상태와 기능 E2E까지 검증된 뒤에만 완료한다.
+사용자에게 보이는 카드는 서버 구현만으로 완료되지 않는다. 마스터 카드 하나는 루트 저장소의 상위 사용자 흐름 Issue가 되고, 실제 `ui`·서버·엔진 작업은 저장소별 하위 Issue로 나눈다. 상위 Issue는 화면·API 연결·loading·empty·error·permission 상태와 기능 E2E까지 검증된 뒤에만 완료한다.
 
 ## 0. 현재 구현 범위
 
@@ -43,7 +43,7 @@
 
 각 루트 상위 Issue에는 하위 Issue별 저장소, 담당자, `Blocked by`, 단독 소유 경로·DB·계약과 완료 산출물을 표로 기록한다. 저장소마다 Issue 번호가 독립적이므로 같은 번호를 강제하지 않고 모두 같은 상위 Issue에 연결한다.
 
-각 하위 Issue에는 구현 기술도 명시한다. `backend`와 `trading-engine`은 Java·Spring Boot, `data-pipeline`과 `backtest-engine`은 Python, `frontend`는 TypeScript·React·Vite다. Python API는 FastAPI, 장시간 실행은 worker, 예약·이벤트성 데이터 작업은 배포 결정에 따라 worker 또는 Lambda로 표시한다.
+각 하위 Issue에는 구현 기술도 명시한다. `backend`와 `trading-engine`은 Java·Spring Boot, `data-pipeline`과 `backtest-engine`은 Python, `ui`는 TypeScript·React·Vite다. Python API는 FastAPI, 장시간 실행은 worker, 예약·이벤트성 데이터 작업은 배포 결정에 따라 worker 또는 Lambda로 표시한다.
 
 ## 2. 6명 공통 선행 단계
 
@@ -59,7 +59,7 @@
 - [ ] **COM08 — 독립 테스트 kit**: fake auth, fake clock, fake queue, 녹화 시장 사건, 소형 Parquet, fake S3와 Testcontainers를 각 저장소에서 외부 구현 없이 사용할 수 있게 한다.
 - [ ] **COM09 — 공통 CI gate**: build, lint, test, migration, DBML, 계약 호환성, dependency·secret scan과 앱 smoke test를 `develop` PR 필수 검사로 구성한다.
 - [ ] **COM10 — 병렬 작업 소유권 확인**: A~F의 경로·스키마·계약 producer를 확정하고 Stackcord로 의미·migration·workspace·root pointer 충돌과 병합 순서를 확인한다.
-- [ ] **COM11 — frontend 공통 골격**: 기존 `ui`를 보존한 채 실제 제품용 `frontend` 서브모듈에 app shell, router, 인증 상태, API client, 공통 오류·loading 처리와 테스트 기반을 먼저 병합한다.
+- [ ] **COM11 — UI 공통 골격**: 실제 제품용 `ui` 서브모듈에 app shell, router, 인증 상태, API client, 공통 오류·loading 처리와 테스트 기반을 먼저 병합한다.
 - [ ] **COM12 — Issue·브랜치·PR 흐름 검증**: 확정된 A~F 담당자를 루트 사용자 흐름 Issue와 저장소별 하위 Issue에 배정한다. 이후 하위 Issue 하나를 선택해 해당 저장소 feature 브랜치→`develop` PR→E2E→Issue 종료→최신 `develop`에서 다음 브랜치 생성 흐름을 검증한다.
 
 보호된 `contracts/`나 제품 의미를 변경할 때는 정확한 GitHub commit에 대한 제품 권한자의 fresh 승인이 확인되어야 한다. 확인 전에는 격리된 proposal과 각 리포의 소비자 fixture까지만 준비하고 확정 계약으로 표현하지 않는다.
@@ -80,7 +80,7 @@
 - 로그에 인증정보, 토큰, 비공개 전략 원문과 불필요한 개인정보를 남기지 않는다.
 - 감사 대상 동작에는 행위자, 권한, 대상, 사유, 전후 상태와 서버 시각을 남긴다.
 - 정적 분석, 단위 테스트, DB 통합 테스트, 계약 테스트와 해당 앱 기동 검증을 통과한다.
-- 사용자 기능은 실제 frontend 화면, API 연결, loading·empty·error·permission 상태와 E2E를 통과한다.
+- 사용자 기능은 실제 UI 화면, API 연결, loading·empty·error·permission 상태와 E2E를 통과한다.
 - 임시 stub, 비어 있는 성공 응답, 숨겨진 기본 정책과 해결되지 않은 핵심 TODO를 남기지 않는다.
 - 기능 PR은 `develop`을 대상으로 하고 `main`은 v1.0 이상 정식 릴리스만 받는다.
 
@@ -176,7 +176,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 - [ ] **A20 — 운영 사건 처리**: 운영자가 사건을 조회·배정·처리하고 근거·결과·전후 상태를 감사 기록으로 남긴다.
 - [ ] **A21 — 정기 backend-batch 업무**: 제재·세션·토큰·알림·사건의 기한 전환을 재실행 가능하고 멱등적으로 처리한다.
 - [ ] **A22 — A 묶음 독립 E2E**: fake 전략·봇·방 사건을 사용해 가입부터 알림·운영 처리까지 독립 E2E를 통과시킨다.
-- [ ] **A23 — 계정·운영 frontend 연결**: 로그인·가입·계정 설정·알림·권한별 운영 화면을 실제 API와 연결하고 오류·권한 상태 E2E를 통과시킨다.
+- [ ] **A23 — 계정·운영 UI 연결**: 로그인·가입·계정 설정·알림·권한별 운영 화면을 실제 API와 연결하고 오류·권한 상태 E2E를 통과시킨다.
 
 ## A3. 통합 구간
 
@@ -234,7 +234,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 - [ ] **B25 — 무소속 봇 30일 명시적 연장**: 로그인과 조회로 연장하지 않고, 기한 7일 전부터 버튼을 허용하며 서버 접수 시각부터 정확히 30일 뒤로 다음 기한을 계산한다.
 - [ ] **B26 — 확인 기한 강제 중단 batch**: 기한을 넘긴 무소속 봇에 중복 없이 중단 절차를 시작하고 알림 전달 실패와 무관하게 정책을 적용한다.
 - [ ] **B27 — B 묶음 독립 E2E**: fake 인증·백테스트·trading adapter로 전략 생성→검증→출시→봇 실행·중단을 검증한다.
-- [ ] **B28 — 전략·봇 frontend 연결**: Basic 전략 편집·검증·출시, 봇 생성·실행·중단 화면을 실제 API와 연결하고 E2E를 통과시킨다.
+- [ ] **B28 — 전략·봇 UI 연결**: Basic 전략 편집·검증·출시, 봇 생성·실행·중단 화면을 실제 API와 연결하고 E2E를 통과시킨다.
 
 ## B4. 통합 구간
 
@@ -280,7 +280,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 - [ ] **C17 — 주문 직전 유효성 재검사**: 평가 결과의 시세·포지션·예산·상태가 아직 유효한지 검사하고 무효할 때만 버리고 재평가한다.
 - [ ] **C18 — 판단 로그와 runtime state**: 조건 충족·최초 실패·예산 계산·후보·거절·축소·적용 규칙과 상태 변경을 순서 있게 기록한다.
 - [ ] **C19 — C 묶음 독립 E2E·재기동 복구**: 녹화된 시장 fixture로 연결·warm-up→지표 계산→Basic 평가→주문 후보 batch를 실행하고 process 재기동 후 같은 평가 결과를 보장한다.
-- [ ] **C20 — 실행 상태·판단 frontend 연결**: 봇 실행 상태, 데이터 저하와 판단 로그 조회를 실제 API와 연결하되 실행 중 노드 애니메이션은 제공하지 않는다.
+- [ ] **C20 — 실행 상태·판단 UI 연결**: 봇 실행 상태, 데이터 저하와 판단 로그 조회를 실제 API와 연결하되 실행 중 노드 애니메이션은 제공하지 않는다.
 
 ## C3. 통합 구간
 
@@ -337,7 +337,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 - [ ] **D28 — 실패·재시도·취소·자원 제한**: run attempt, lease, timeout, 메모리·CPU 제한, 재시도와 중복 worker 실행을 안전하게 처리한다.
 - [ ] **D29 — 백테스트 결과 Query**: 목록, 개요, 성과, 월별 판단, 월별 거래 상세, 입력 데이터·모델과 unavailable 이유를 제공한다.
 - [ ] **D30 — D 묶음 독립 재현 E2E**: 고정 Alpaca 응답→Parquet→Manifest→공식 백테스트를 반복해 같은 입력과 결과를 보장하고 pipeline과 backtest의 Compute 자원 제한을 각각 검증한다.
-- [ ] **D31 — 백테스트 frontend 연결**: 자동 실행 상태, 결과 개요, 성과, ET 월별 판단과 거래 상세 화면을 실제 API와 연결하고 unavailable·failed 상태를 검증한다.
+- [ ] **D31 — 백테스트 UI 연결**: 자동 실행 상태, 결과 개요, 성과, ET 월별 판단과 거래 상세 화면을 실제 API와 연결하고 unavailable·failed 상태를 검증한다.
 
 ## D3. 통합 구간
 
@@ -402,7 +402,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 - [ ] **E32 — 최종 리더보드 접근·보존**: 공개방은 전체 공개, 비밀방은 종료 직전 자격 보유자만 조회하게 하고 종료 후 1년이 지나면 방 단위 조회를 종료한다.
 - [ ] **E33 — 제재·철회·무효화 공개 제거**: 대상 봇을 다른 사용자의 순위·비교에서 즉시 제거하되 소유자의 원장·판단·성과 원본과 감사 근거는 보존한다.
 - [ ] **E34 — E 묶음 독립 E2E**: fake bot·trading 사건으로 생성→모집→제출→라이브 평가→순위→계속 운영/중단을 모두 검증한다.
-- [ ] **E35 — 방·성과 frontend 연결**: 방 생성·탐색·참여·일정·익명 봇 리더보드·내 봇 비교와 종료 후 선택 화면을 실제 API와 연결한다.
+- [ ] **E35 — 방·성과 UI 연결**: 방 생성·탐색·참여·일정·익명 봇 리더보드·내 봇 비교와 종료 후 선택 화면을 실제 API와 연결한다.
 
 ## E4. 통합 구간
 
@@ -443,7 +443,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 - [ ] **F14 — 봇 중단·강제 정산**: 평가 중지, 미체결 취소, 현실적인 정산 주문, 실패 재시도와 settlement-failed 상태를 구현한다.
 - [ ] **F15 — 예산·포지션·주문 Query projection**: 봇·파티션·흐름별 예산, 포지션, 주문, 체결과 공식 원장을 jOOQ 조회용 projection으로 제공한다.
 - [ ] **F16 — F 묶음 독립 E2E·재기동 복구**: fake 주문 후보와 녹화 호가로 예산→부분 체결→원장→중단을 실행하고 process 재기동 후 같은 공식 상태를 보장한다.
-- [ ] **F17 — 거래·원장 frontend 연결**: 주문·개별 체결·포지션·전략 예산·거절/축소 이유·중단 정산 결과를 실제 API와 연결하고 사용자 직접 주문 입력은 제공하지 않는다.
+- [ ] **F17 — 거래·원장 UI 연결**: 주문·개별 체결·포지션·전략 예산·거절/축소 이유·중단 정산 결과를 실제 API와 연결하고 사용자 직접 주문 입력은 제공하지 않는다.
 
 ## F2. 통합 구간
 
