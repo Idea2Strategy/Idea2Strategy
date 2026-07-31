@@ -1,0 +1,6 @@
+bucket       = "idea2strategy-dev-REPLACE_WITH_ACCOUNT_ID-tfstate"
+key          = "idea2strategy/development/terraform.tfstate"
+region       = "ap-northeast-2"
+profile      = "idea2strategy-terraform"
+encrypt      = true
+use_lockfile = true

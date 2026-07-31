@@ -1,0 +1,210 @@
+name: ${COMPOSE_PROJECT_NAME:-idea2strategy-local}
+
+services:
+  postgres:
+    container_name: idea2strategy-postgres
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - development
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    container_name: idea2strategy-redis
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-16379}:6379"
+    networks:
+      - development
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  minio:
+    container_name: idea2strategy-minio
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-19000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  minio-init:
+    container_name: idea2strategy-minio-init
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET:?S3_MARKET_DATA_BUCKET is required}
+      S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET:?S3_RESULTS_BUCKET is required}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_MARKET_DATA_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_RESULTS_BUCKET}"
+        mc version enable "local/$${S3_MARKET_DATA_BUCKET}"
+        mc version enable "local/$${S3_RESULTS_BUCKET}"
+        mc anonymous set none "local/$${S3_MARKET_DATA_BUCKET}"
+        mc anonymous set none "local/$${S3_RESULTS_BUCKET}"
+    networks:
+      - development
+    restart: "no"
+
+  flyway:
+    container_name: idea2strategy-flyway
+    image: redgate/flyway:11-alpine
+    profiles: ["backend-apps"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - -connectRetries=60
+      - -url=jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      - -user=${POSTGRES_USER}
+      - -password=${POSTGRES_PASSWORD}
+      - migrate
+    volumes:
+      - ${BACKEND_MIGRATION_DIR:-./infra/docker/backend/flyway/sql}:/flyway/sql:ro
+    networks:
+      - development
+    restart: "no"
+
+  backend:
+    container_name: idea2strategy-backend
+    profiles: ["backend-apps"]
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile.spring
+      args:
+        APP_MODULE: backend-app
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_REGION: ${S3_REGION:-ap-northeast-2}
+      S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
+      S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-18080}:8080"
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks:
+      - development
+    restart: unless-stopped
+
+  batch:
+    container_name: idea2strategy-batch
+    profiles: ["backend-apps"]
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile.spring
+      args:
+        APP_MODULE: batch-app
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_REGION: ${S3_REGION:-ap-northeast-2}
+      S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
+      S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:${BATCH_PORT:-18081}:8081"
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    networks:
+      - development
+    restart: unless-stopped
+
+  backtest:
+    container_name: idea2strategy-backtest
+    profiles: ["backend-apps"]
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile.spring
+      args:
+        APP_MODULE: backtest-app
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_REGION: ${S3_REGION:-ap-northeast-2}
+      S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
+      S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:${BACKTEST_PORT:-18082}:8082"
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    networks:
+      - development
+    restart: unless-stopped
+
+networks:
+  development:
+    name: idea2strategy-development
+
+volumes:
+  postgres-data:
+    name: idea2strategy-postgres-data
+  minio-data:
+    name: idea2strategy-minio-data

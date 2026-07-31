@@ -1,0 +1,58 @@
+locals {
+  name_prefix = "${var.project_name}-${var.environment}"
+
+  enable_service_stack = var.deployment_phase == "full"
+
+  common_tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Owner       = "Infrastructure"
+  }
+
+  public_subnets = {
+    a = {
+      cidr_block = var.public_subnet_cidrs[0]
+      az         = data.aws_availability_zones.available.names[0]
+    }
+    b = {
+      cidr_block = var.public_subnet_cidrs[1]
+      az         = data.aws_availability_zones.available.names[1]
+    }
+  }
+
+  private_db_subnets = {
+    a = {
+      cidr_block = var.private_db_subnet_cidrs[0]
+      az         = data.aws_availability_zones.available.names[0]
+    }
+    b = {
+      cidr_block = var.private_db_subnet_cidrs[1]
+      az         = data.aws_availability_zones.available.names[1]
+    }
+  }
+
+  market_data_bucket_name = "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-market-data"
+  result_bucket_name      = "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-backtest-results"
+
+  ecr_repositories = local.enable_service_stack ? toset([
+    "frontend",
+    "backend",
+    "batch",
+    "backtest",
+    "market-data-worker"
+  ]) : toset([])
+
+  parameter_path = "/${var.project_name}/${var.environment}"
+
+  hosted_zone_id = local.enable_service_stack ? (
+    var.existing_hosted_zone_id != "" ? var.existing_hosted_zone_id : aws_route53_zone.this[0].zone_id
+  ) : null
+}
+
+check "two_availability_zones" {
+  assert {
+    condition     = length(data.aws_availability_zones.available.names) >= 2
+    error_message = "The selected region must expose at least two available Availability Zones."
+  }
+}
