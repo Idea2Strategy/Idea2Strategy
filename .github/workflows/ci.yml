@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: root-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  schema-and-coordination:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          submodules: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install schema tooling
+        run: pnpm install --frozen-lockfile
+      - name: Validate canonical DBML
+        run: pnpm dbml:validate
+      - name: Test dbdiagram export preparation
+        run: pnpm dbml:export:test
+      - name: Validate tracked formatting
+        run: git diff --check HEAD^
+      - name: Verify submodule pointers are tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in backend backtest-engine data-pipeline trading-engine ui; do
+            test "$(git ls-files -s "$path" | awk '{print $1}')" = "160000"
+          done

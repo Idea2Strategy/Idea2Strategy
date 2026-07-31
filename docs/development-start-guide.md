@@ -121,6 +121,25 @@ ui/               TypeScript / React / Vite
 
 개별 담당자는 서브모듈 PR이 끝났다는 이유만으로 루트 포인터를 직접 섞어 올리지 않는다. 루트 통합 Issue의 담당자가 완료된 커밋들을 정해진 순서로 모은다.
 
+### GitHub Actions 확인
+
+루트와 모든 서브모듈은 `develop` 대상 PR과 `develop` push에서 저장소별 CI를 실행한다.
+
+- 루트: canonical DBML, dbdiagram export 도구와 submodule pointer 형식
+- `backend`, `trading-engine`: Java 21·Gradle 전체 테스트
+- `backtest-engine`: Python 3.12·pytest
+- `data-pipeline`: Python 3.12 Linux·unittest 전체
+- `ui`: Node.js 24·pnpm 11의 typecheck, test와 build
+
+현재 GitHub 비공개 무료 플랜에서는 branch protection의 required status check를 강제할 수 없다. 따라서 PR 작성자와 리뷰어는 Actions가 성공하기 전에 병합하지 않는 것을 필수 협업 규칙으로 적용한다. 플랜이 변경되면 `develop`에 위 검사를 required status check로 연결한다.
+
+`data-pipeline`의 전체 Parquet 테스트 기준 환경은 CI와 동일한 Python 3.12 Linux다. Windows의 깊은 임시 경로에서는 파일 경로 제한 때문에 일부 Parquet E2E가 실패할 수 있으므로, 해당 실패를 확인할 때는 다음 Linux 컨테이너 명령으로 재현한다.
+
+```powershell
+docker run --rm -v "${PWD}:/workspace" -w /workspace python:3.12-slim `
+  sh -lc "python -m pip install -q -r requirements.txt && python -m unittest discover -s tests -v"
+```
+
 ## 9. 현재 DB 기준선
 
 - 정본: `db/schema.dbml`
