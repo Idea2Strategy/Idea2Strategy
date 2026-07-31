@@ -5,7 +5,7 @@
       "id": "claim.local-development-foundation",
       "work_id": "work.local-development-foundation",
       "definition_fingerprint": "sha256:6e172bc50d293a64a663fe3546f54ce0b603e804711f8524242ffb00deb012ea",
-      "status": "integrated",
+      "status": "done",
       "owner": "common-foundation",
       "branch": "feature/common-development-foundation",
       "repository": "idea2strategy.platform",
