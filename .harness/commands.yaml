@@ -20,10 +20,12 @@ commands:
   - id: command.foundation-repository-build
     kind: test
     argv: [node, scripts/verify-foundation-evidence.mjs, ci]
+    environment: [APPDATA, LOCALAPPDATA]
     timeout_seconds: 120
   - id: command.foundation-service-smoke-test
     kind: test
     argv: [node, scripts/verify-foundation-evidence.mjs, ci]
+    environment: [APPDATA, LOCALAPPDATA]
     timeout_seconds: 120
   - id: command.compose-static-validation
     kind: test
