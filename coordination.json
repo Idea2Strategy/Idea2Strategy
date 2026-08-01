@@ -39,6 +39,30 @@
       "expires_at": "2026-08-02T12:17:44.7619248Z"
     },
     {
+      "id": "claim.c20-live-chart-rendering-pjy008008",
+      "work_id": "work.c20-live-chart-rendering",
+      "definition_fingerprint": "sha256:91af9883338b0b575a0a703a1d3daa3d521687b7c8a5b3ab8caf7737758321fe",
+      "status": "in_progress",
+      "owner": "pjy008008",
+      "branch": "feature/87-live-bot-operations",
+      "repository": "idea2strategy.ui",
+      "paths": [
+        "ui/src/components/LiveExecutionChart.test.tsx",
+        "ui/src/components/LiveExecutionChart.tsx"
+      ],
+      "policy_ids": [],
+      "scenario_ids": [],
+      "contract_ids": [],
+      "db_entities": [],
+      "migration_slots": [],
+      "ui_flows": [],
+      "dependency_majors": [],
+      "stable_ids": [],
+      "root_pointer": false,
+      "starts_at": "2026-08-01T12:26:27.2222076Z",
+      "expires_at": "2026-08-02T12:26:27.0986494Z"
+    },
+    {
       "id": "claim.c20-owner-bot-operations-query-pjy008008",
       "work_id": "work.c20-owner-bot-operations-query",
       "definition_fingerprint": "sha256:0c7080807f8afe8534176f69fb14cb47ff3b10788f1f18e0de3d0f7a80d34a6a",
