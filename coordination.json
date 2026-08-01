@@ -174,7 +174,7 @@
       "id": "claim.e02-competition-performance-dbml-alignment",
       "work_id": "work.e02-competition-performance-dbml-alignment",
       "definition_fingerprint": "sha256:46aa71b2454c7cd504ac9cec8f9833b8f3e4d44d73a5318c69818d3fec092a2e",
-      "status": "in_progress",
+      "status": "blocked",
       "owner": "dertz569",
       "branch": "feature/42-competition-performance-dbml-alignment",
       "repository": "repository.github.root",
