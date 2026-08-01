@@ -2,12 +2,12 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.c11-startup-warmup-pjy008008",
-      "work_id": "work.c11-startup-warmup",
-      "definition_fingerprint": "sha256:5828c09bee1edabdfeab593a47a0a8202cd55eecee58895e373097b4c5ea59ed",
-      "status": "integrated",
+      "id": "claim.c12-incremental-trigger-features-pjy008008",
+      "work_id": "work.c12-incremental-trigger-features",
+      "definition_fingerprint": "sha256:bfa7c7b9d67613b412c593ab6ae4b1faf04e73fb145051f8d54f3ed6f178d926",
+      "status": "in_progress",
       "owner": "pjy008008",
-      "branch": "feature/27-startup-warmup",
+      "branch": "feature/29-incremental-trigger-features",
       "repository": "idea2strategy.trading-engine",
       "paths": [
         "trading-engine/modules/strategy-runtime/**"
@@ -26,12 +26,12 @@
         "quality.auditability",
         "quality.failure-safety",
         "quality.reproducibility",
-        "scenario.bot.evaluate",
-        "technology.need.object-storage"
+        "question.strategy.catalog",
+        "scenario.bot.evaluate"
       ],
       "root_pointer": true,
-      "starts_at": "2026-08-01T07:18:00.8585536Z",
-      "expires_at": "2026-08-02T07:18:00.7365729Z"
+      "starts_at": "2026-08-01T07:41:41.689851Z",
+      "expires_at": "2026-08-02T07:41:41.5623068Z"
     },
     {
       "id": "claim.com-e-room-performance-fixtures",
