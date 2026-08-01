@@ -5,7 +5,7 @@
       "id": "claim.c12-incremental-trigger-features-pjy008008",
       "work_id": "work.c12-incremental-trigger-features",
       "definition_fingerprint": "sha256:bfa7c7b9d67613b412c593ab6ae4b1faf04e73fb145051f8d54f3ed6f178d926",
-      "status": "in_progress",
+      "status": "review",
       "owner": "pjy008008",
       "branch": "feature/29-incremental-trigger-features",
       "repository": "idea2strategy.trading-engine",
