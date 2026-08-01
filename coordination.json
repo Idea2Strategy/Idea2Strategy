@@ -5,7 +5,7 @@
       "id": "claim.c17-pre-order-revalidation-pjy008008",
       "work_id": "work.c17-pre-order-revalidation",
       "definition_fingerprint": "sha256:79e56501131c3b2299234d9238bea53286a6deaa12721c731fefcc9f1b782e3f",
-      "status": "review",
+      "status": "integrated",
       "owner": "pjy008008",
       "branch": "feature/41-pre-order-revalidation",
       "repository": "idea2strategy.trading-engine",
