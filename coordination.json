@@ -5,7 +5,7 @@
       "id": "claim.com-c-market-evaluation-fixtures-pjy008008",
       "work_id": "work.com-c-market-evaluation-fixtures",
       "definition_fingerprint": "sha256:ae6b609a82dadcda1acf1cb0db9c9b654fd18a0daa4d90f492e816cad2901577",
-      "status": "review",
+      "status": "integrated",
       "owner": "pjy008008",
       "branch": "feature/2-market-evaluation-fixtures",
       "repository": "idea2strategy.trading-engine",
