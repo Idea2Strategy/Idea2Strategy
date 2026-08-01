@@ -2,12 +2,12 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.c16-basic-candidate-convergence-pjy008008",
-      "work_id": "work.c16-basic-candidate-convergence",
-      "definition_fingerprint": "sha256:511338b46500b7ae2c352df01a2809d4548c62584934ca1fba02db731d687701",
-      "status": "integrated",
+      "id": "claim.c17-pre-order-revalidation-pjy008008",
+      "work_id": "work.c17-pre-order-revalidation",
+      "definition_fingerprint": "sha256:79e56501131c3b2299234d9238bea53286a6deaa12721c731fefcc9f1b782e3f",
+      "status": "in_progress",
       "owner": "pjy008008",
-      "branch": "feature/38-basic-candidate-convergence",
+      "branch": "feature/41-pre-order-revalidation",
       "repository": "idea2strategy.trading-engine",
       "paths": [
         "trading-engine/modules/strategy-runtime/**"
@@ -34,8 +34,8 @@
         "scenario.bot.evaluate"
       ],
       "root_pointer": true,
-      "starts_at": "2026-08-01T10:38:22.0700133Z",
-      "expires_at": "2026-08-02T10:38:21.9485466Z"
+      "starts_at": "2026-08-01T10:54:49.5617926Z",
+      "expires_at": "2026-08-02T10:54:49.4346218Z"
     },
     {
       "id": "claim.com-e-room-performance-fixtures",
