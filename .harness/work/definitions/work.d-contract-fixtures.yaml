@@ -1,0 +1,63 @@
+schema_version: 1
+id: work.d-contract-fixtures
+readiness: ready
+title: Prepare D-owned market-data and backtest compatibility fixtures
+outcome: The data pipeline publishes a deterministic AVAILABLE Dataset Manifest fixture and the backtest engine rejects incompatible manifests, requests, and result events before runtime implementation begins.
+acceptance:
+    - id: acceptance.backtest-contract-fixtures
+      given: A released Basic strategy and an AVAILABLE Dataset Manifest fixture
+      when: The backtest request and lifecycle result fixtures are loaded
+      then: The request pins the strategy and dataset hashes and results cover queued, running, complete, failed, and unavailable with stable correlation and idempotency fields
+      failure: A request floats an input version or a terminal result lacks its required completion or failure detail
+    - id: acceptance.consumer-compatibility
+      given: Producer and consumer copies of the compatibility fixtures
+      when: Each repository runs its local test suite
+      then: Both repositories validate the same schema identifiers and reject a deliberately incompatible example
+      failure: Either repository accepts an unknown schema version or a corrupted SHA-256 value
+    - id: acceptance.dataset-manifest-fixture
+      given: A small immutable market-data object set has passed producer validation
+      when: The data pipeline emits the compatibility fixture
+      then: The AVAILABLE manifest identifies its dataset, revision, object keys, row counts, schema versions, and SHA-256 integrity values deterministically
+      failure: An AVAILABLE manifest omits integrity data, contains no objects, or accepts a non-canonical dataset hash
+refs:
+    - capability.backtest.automatic
+    - decision.data.hybrid
+    - quality.failure-safety
+    - quality.reproducibility
+workspaces:
+    - workspace.backtest-engine
+    - workspace.data-pipeline
+scope:
+    repositories:
+        - idea2strategy.platform
+    paths:
+        - backtest-engine/src/backtest_engine/contracts.py
+        - backtest-engine/tests/fixtures/contracts/**
+        - backtest-engine/tests/test_contracts.py
+        - data-pipeline/market_pipeline_lib/compatibility.py
+        - data-pipeline/tests/fixtures/contracts/**
+        - data-pipeline/tests/test_compatibility_contracts.py
+    policy_ids: []
+    scenario_ids: []
+    contract_ids: []
+    db_entities: []
+    migration_slots: []
+    ui_flows: []
+    dependency_majors: []
+    root_pointers:
+        - workspace.data-pipeline
+        - workspace.backtest-engine
+dependencies: []
+merge_order:
+    - workspace.data-pipeline
+    - workspace.backtest-engine
+first_failing_test: The backtest engine has no compatibility validator or fixtures and therefore cannot reject an AVAILABLE Dataset Manifest with a corrupted dataset hash or an unversioned backtest lifecycle event.
+evidence:
+    kinds:
+        - contract-test
+        - test
+    integration_required: true
+    user_validation: false
+    migration_required: false
+    rollback_required: false
+fingerprint: sha256:30b4e8cb5f23ba4d2a8e6995e255c436217991f1d87e8d7f299130491300fbdc
