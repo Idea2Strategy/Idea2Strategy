@@ -105,39 +105,32 @@
       "expires_at": "2026-08-02T11:59:02.1615722Z"
     },
     {
-      "id": "claim.com-e-room-performance-fixtures",
-      "work_id": "work.com-e-room-performance-fixtures",
-      "definition_fingerprint": "sha256:4468de6869e11008f1f59122ee0e5ec632d2f3f68500680325d22259f41f07b4",
+      "id": "claim.com07-29-competition-currency-schema-drift",
+      "work_id": "work.com07-29-competition-currency-schema-drift",
+      "definition_fingerprint": "sha256:e0fa4bc713a86a511ace7b95f64af3ad657f474e97daabdee7d2ff29212dc016",
       "status": "in_progress",
       "owner": "dertz569",
-      "branch": "feature/4-room-performance-contract-fixture",
-      "repository": "idea2strategy.backend",
+      "branch": "fix/29-competition-currency-schema-drift",
+      "repository": "repository.github.backend",
       "paths": [
-        "modules/backend-messaging/**/competition/**",
-        "modules/backend-messaging/**/performance/**"
+        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/competition/CompetitionRoomRulesJpaEntity.java",
+        "backend/modules/backend-persistence/src/test"
       ],
-      "policy_ids": [
-        "policy.comparison.bots-only"
-      ],
-      "scenario_ids": [
-        "scenario.room.finish"
-      ],
+      "policy_ids": [],
+      "scenario_ids": [],
       "contract_ids": [],
-      "db_entities": [],
+      "db_entities": [
+        "competition.room_rules"
+      ],
       "migration_slots": [],
       "ui_flows": [],
       "dependency_majors": [],
       "stable_ids": [
-        "journey.room.compare",
-        "policy.comparison.bots-only",
-        "quality.auditability",
-        "quality.failure-safety",
-        "quality.reproducibility",
-        "scenario.room.finish"
+        "quality.reproducibility"
       ],
       "root_pointer": false,
-      "starts_at": "2026-07-31T12:41:42.1030628Z",
-      "expires_at": "2026-08-01T12:41:41.9437321Z"
+      "starts_at": "2026-08-01T13:03:53.0605406Z",
+      "expires_at": "2026-08-03T13:03:52.8429987Z"
     },
     {
       "id": "claim.e01-competition-performance-foundation",
