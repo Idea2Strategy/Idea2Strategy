@@ -5,7 +5,7 @@
       "id": "claim.c08-us-market-session-pjy008008",
       "work_id": "work.c08-us-market-session",
       "definition_fingerprint": "sha256:d4fa2f4e10e9f1464d0be2fb914189c239ec645b8004178c41ae5f604d1164bc",
-      "status": "review",
+      "status": "integrated",
       "owner": "pjy008008",
       "branch": "feature/20-us-market-session",
       "repository": "idea2strategy.trading-engine",
