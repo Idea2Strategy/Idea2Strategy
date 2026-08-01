@@ -5,7 +5,7 @@
       "id": "claim.c20-live-bot-operations-ui-pjy008008",
       "work_id": "work.c20-live-bot-operations-ui",
       "definition_fingerprint": "sha256:19b9f0f684702f02c3eaaf1320a6ad7968b1803232ad354f57d159780444a97b",
-      "status": "in_progress",
+      "status": "review",
       "owner": "pjy008008",
       "branch": "feature/87-live-bot-operations",
       "repository": "idea2strategy.ui",
