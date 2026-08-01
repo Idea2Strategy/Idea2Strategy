@@ -5,7 +5,7 @@
       "id": "claim.a09-session-management-juwon-na",
       "work_id": "work.a09-session-management",
       "definition_fingerprint": "sha256:ce86dd746ea001f5648288504b4a97373830f931b5102f435a6cfc9392f653e9",
-      "status": "in_progress",
+      "status": "review",
       "owner": "Juwon-Na",
       "branch": "feature/67-session-management",
       "repository": "repository.github.backend",
