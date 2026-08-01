@@ -108,7 +108,7 @@
       "id": "claim.com07-29-competition-currency-schema-drift",
       "work_id": "work.com07-29-competition-currency-schema-drift",
       "definition_fingerprint": "sha256:e0fa4bc713a86a511ace7b95f64af3ad657f474e97daabdee7d2ff29212dc016",
-      "status": "in_progress",
+      "status": "blocked",
       "owner": "dertz569",
       "branch": "fix/29-competition-currency-schema-drift",
       "repository": "repository.github.backend",
