@@ -2,20 +2,17 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.c10-locked-execution-plan-loader-pjy008008",
-      "work_id": "work.c10-locked-execution-plan-loader",
-      "definition_fingerprint": "sha256:cd9b3e4682d9c5f8d7a4c6be663911c08fb446380615401d127bfd75db6bc0cd",
-      "status": "integrated",
+      "id": "claim.c11-startup-warmup-pjy008008",
+      "work_id": "work.c11-startup-warmup",
+      "definition_fingerprint": "sha256:5828c09bee1edabdfeab593a47a0a8202cd55eecee58895e373097b4c5ea59ed",
+      "status": "in_progress",
       "owner": "pjy008008",
-      "branch": "feature/25-locked-execution-plan-loader",
+      "branch": "feature/27-startup-warmup",
       "repository": "idea2strategy.trading-engine",
       "paths": [
         "trading-engine/modules/strategy-runtime/**"
       ],
-      "policy_ids": [
-        "policy.privacy.strategy-private",
-        "policy.strategy.immutable-release"
-      ],
+      "policy_ids": [],
       "scenario_ids": [
         "scenario.bot.evaluate"
       ],
@@ -26,16 +23,15 @@
       "dependency_majors": [],
       "stable_ids": [
         "capability.strategy.basic",
-        "policy.privacy.strategy-private",
-        "policy.strategy.immutable-release",
         "quality.auditability",
         "quality.failure-safety",
         "quality.reproducibility",
-        "scenario.bot.evaluate"
+        "scenario.bot.evaluate",
+        "technology.need.object-storage"
       ],
       "root_pointer": true,
-      "starts_at": "2026-08-01T06:55:04.8842277Z",
-      "expires_at": "2026-08-02T06:55:04.7516309Z"
+      "starts_at": "2026-08-01T07:18:00.8585536Z",
+      "expires_at": "2026-08-02T07:18:00.7365729Z"
     },
     {
       "id": "claim.com-e-room-performance-fixtures",
