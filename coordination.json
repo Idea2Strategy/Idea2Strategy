@@ -5,7 +5,7 @@
       "id": "claim.c07-redis-market-stream-pjy008008",
       "work_id": "work.c07-redis-market-stream",
       "definition_fingerprint": "sha256:a7e36809163630bd5dd610c002730ee92b0e58d0c8f8ed70654459db00eced59",
-      "status": "review",
+      "status": "integrated",
       "owner": "pjy008008",
       "branch": "feature/18-redis-market-stream",
       "repository": "idea2strategy.trading-engine",
