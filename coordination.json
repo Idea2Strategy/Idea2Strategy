@@ -2,42 +2,46 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.c19-basic-runtime-e2e-recovery-pjy008008",
-      "work_id": "work.c19-basic-runtime-e2e-recovery",
-      "definition_fingerprint": "sha256:f1edfd6a2e5053155e84392dfe6f734e05342d8187b25bf7f848a25368864e59",
-      "status": "integrated",
+      "id": "claim.c20-owner-bot-operations-query-pjy008008",
+      "work_id": "work.c20-owner-bot-operations-query",
+      "definition_fingerprint": "sha256:0c7080807f8afe8534176f69fb14cb47ff3b10788f1f18e0de3d0f7a80d34a6a",
+      "status": "in_progress",
       "owner": "pjy008008",
-      "branch": "feature/45-basic-runtime-e2e-recovery",
-      "repository": "idea2strategy.trading-engine",
+      "branch": "feature/44-bot-operations-query-api",
+      "repository": "idea2strategy.backend",
       "paths": [
-        "trading-engine/modules/market-data-adapter/src/test/resources/fixtures/c19/**",
-        "trading-engine/modules/strategy-runtime/**"
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/botoperations/**",
+        "backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/botoperations/**",
+        "backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/botoperations/**",
+        "backend/modules/backend-application/src/test/java/com/idea2strategy/backend/application/botoperations/**",
+        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/botoperations/**",
+        "backend/modules/backend-persistence/src/test/java/com/idea2strategy/backend/persistence/botoperations/**"
       ],
       "policy_ids": [
-        "policy.execution.server-only",
-        "policy.user.no-direct-orders"
+        "policy.execution.server-only"
       ],
       "scenario_ids": [
         "scenario.bot.evaluate"
       ],
       "contract_ids": [],
-      "db_entities": [],
+      "db_entities": [
+        "bot.bot_events",
+        "bot.bots"
+      ],
       "migration_slots": [],
-      "ui_flows": [],
+      "ui_flows": [
+        "ui.bot.operations"
+      ],
       "dependency_majors": [],
       "stable_ids": [
-        "capability.audit.evidence",
-        "capability.strategy.basic",
-        "policy.execution.server-only",
-        "policy.user.no-direct-orders",
-        "quality.auditability",
-        "quality.failure-safety",
-        "quality.reproducibility",
-        "scenario.bot.evaluate"
+        "capability.bot.server-execution",
+        "journey.bot.operate",
+        "scenario.bot.evaluate",
+        "ui.bot.operations"
       ],
       "root_pointer": true,
-      "starts_at": "2026-08-01T11:29:44.3269969Z",
-      "expires_at": "2026-08-02T11:29:44.2034856Z"
+      "starts_at": "2026-08-01T11:59:02.2842064Z",
+      "expires_at": "2026-08-02T11:59:02.1615722Z"
     },
     {
       "id": "claim.com-e-room-performance-fixtures",
