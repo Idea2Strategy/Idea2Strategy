@@ -2,17 +2,20 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.c14-basic-executor-pjy008008",
-      "work_id": "work.c14-basic-executor",
-      "definition_fingerprint": "sha256:0b0a31b51c5ec18a2bc23d2902487fc520eb476035f79d39d329143e3406b7ff",
-      "status": "integrated",
+      "id": "claim.c16-basic-candidate-convergence-pjy008008",
+      "work_id": "work.c16-basic-candidate-convergence",
+      "definition_fingerprint": "sha256:511338b46500b7ae2c352df01a2809d4548c62584934ca1fba02db731d687701",
+      "status": "in_progress",
       "owner": "pjy008008",
-      "branch": "feature/36-basic-executor",
+      "branch": "feature/38-basic-candidate-convergence",
       "repository": "idea2strategy.trading-engine",
       "paths": [
         "trading-engine/modules/strategy-runtime/**"
       ],
-      "policy_ids": [],
+      "policy_ids": [
+        "policy.execution.server-only",
+        "policy.user.no-direct-orders"
+      ],
       "scenario_ids": [
         "scenario.bot.evaluate"
       ],
@@ -23,15 +26,16 @@
       "dependency_majors": [],
       "stable_ids": [
         "capability.strategy.basic",
+        "policy.execution.server-only",
+        "policy.user.no-direct-orders",
         "quality.auditability",
         "quality.failure-safety",
         "quality.reproducibility",
-        "question.strategy.catalog",
         "scenario.bot.evaluate"
       ],
       "root_pointer": true,
-      "starts_at": "2026-08-01T10:22:11.7200564Z",
-      "expires_at": "2026-08-02T10:22:11.601024Z"
+      "starts_at": "2026-08-01T10:38:22.0700133Z",
+      "expires_at": "2026-08-02T10:38:21.9485466Z"
     },
     {
       "id": "claim.com-e-room-performance-fixtures",
