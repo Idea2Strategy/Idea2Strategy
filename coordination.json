@@ -5,7 +5,7 @@
       "id": "claim.c06-market-event-ordering-pjy008008",
       "work_id": "work.c06-market-event-ordering",
       "definition_fingerprint": "sha256:1c13295f38eda08847ac7cd451a22155f174f4c3bf1d2a80ac75709df5163f1c",
-      "status": "in_progress",
+      "status": "review",
       "owner": "pjy008008",
       "branch": "feature/15-market-event-ordering",
       "repository": "idea2strategy.trading-engine",
