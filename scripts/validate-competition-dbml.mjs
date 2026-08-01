@@ -26,8 +26,6 @@ const requiredTables = [
   'backtest_period_runs',
   'backtest_aggregate_results',
   'live_evaluation_segments',
-  'leaderboard_snapshots',
-  'leaderboard_entries',
 ];
 for (const name of requiredTables) {
   if (!tables.has(name)) throw new Error(`required competition table is missing: ${name}`);
@@ -40,6 +38,9 @@ const forbiddenPatterns = [
   /Enum competition\.room_status\s*\{[^}]*\bWAITING\b/s,
   /Enum competition\.room_status\s*\{[^}]*\bSUBMISSION\b/s,
   /\(room_id, owner_account_id\) \[unique\]/,
+  /Enum competition\.leaderboard_status\s*\{/,
+  /Table competition\.leaderboard_snapshots\s*\{/,
+  /Table competition\.leaderboard_entries\s*\{/,
 ];
 for (const pattern of forbiddenPatterns) {
   if (pattern.test(source)) throw new Error(`obsolete competition structure remains: ${pattern}`);
@@ -95,8 +96,6 @@ requireFields('backtest_aggregate_results', [
   'period_result_set_hash',
   'published_at',
 ]);
-requireFields('leaderboard_entries', ['performance_snapshot_id', 'backtest_aggregate_result_id']);
-
 const requiredFragments = [
   "competition_type <> 'BACKTEST' OR organizer_type = 'PLATFORM'",
   'per_account_bot_limit > 0 AND per_account_bot_limit <= bot_participation_limit',
@@ -106,7 +105,6 @@ const requiredFragments = [
   'commitment_hash varchar(128) [not null, unique]',
   'Ref: competition.backtest_period_runs.run_id > backtest.runs.id',
   'Ref: competition.backtest_aggregate_results.participation_id > competition.participations.id',
-  'Ref: competition.leaderboard_entries.backtest_aggregate_result_id > competition.backtest_aggregate_results.id',
   'execution_eligible_from timestamptz [not null]',
 ];
 for (const fragment of requiredFragments) {
@@ -215,19 +213,6 @@ for (const link of rowsFor('backtest_period_runs')) {
   if (run.bot_id !== participation.bot_id) throw new Error(`Records period run crosses Bot ownership: ${link.run_id}`);
   if (run.evaluation_start !== period.evaluation_start || run.evaluation_end !== period.evaluation_end) {
     throw new Error(`Records period run dates do not match evaluation period: ${link.run_id}`);
-  }
-}
-
-const aggregateResults = new Map(rowsFor('backtest_aggregate_results').map((row) => [row.id, row]));
-for (const entryRow of rowsFor('leaderboard_entries')) {
-  if (entryRow.backtest_aggregate_result_id === null) continue;
-  const result = aggregateResults.get(entryRow.backtest_aggregate_result_id);
-  if (!result) throw new Error(`Records leaderboard references missing aggregate: ${entryRow.backtest_aggregate_result_id}`);
-  if (result.participation_id !== entryRow.participation_id) {
-    throw new Error(`Records leaderboard crosses aggregate Participation: ${entryRow.participation_id}`);
-  }
-  if (Math.abs(Number(result.final_score) - Number(entryRow.score)) > 1e-10) {
-    throw new Error(`Records leaderboard score differs from aggregate: ${entryRow.participation_id}`);
   }
 }
 
