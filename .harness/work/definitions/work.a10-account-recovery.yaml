@@ -1,0 +1,85 @@
+schema_version: 1
+id: work.a10-account-recovery
+readiness: ready
+title: Implement password and account recovery
+outcome: Account owners can recover access using verified email, an already linked OIDC identity, or pre-issued one-time recovery codes while secrets remain digest-only and successful recovery atomically invalidates prior credentials and sessions.
+acceptance:
+    - id: acceptance.a10-audit-notification
+      given: Recovery succeeds or is rejected because evidence is expired, revoked, used, or invalid
+      when: The outcome is committed
+      then: A correlated authentication event and security notification are emitted without credential material
+      failure: A security outcome is missing, duplicated, or leaks token, code, or password material
+    - id: acceptance.a10-oidc-proof
+      given: An account with an already linked active OIDC identity
+      when: That identity is used as recovery proof
+      then: Recovery can proceed without linking a new identity or trusting provider email
+      failure: A new identity is silently linked or email matching alone grants recovery
+    - id: acceptance.a10-recovery-codes
+      given: An authenticated account issuing or reissuing recovery codes
+      when: Codes are returned or consumed
+      then: Raw codes are shown once, only digests are stored, reissue revokes the previous set, and each code succeeds at most once under concurrency
+      failure: Raw codes remain recoverable, an earlier set remains active, or one code is consumed more than once
+    - id: acceptance.a10-reset-consumption
+      given: A valid one-time password reset token
+      when: Concurrent requests attempt to consume it
+      then: Exactly one request changes the password, advances credential version and auth epoch, and revokes all prior sessions and unused reset requests atomically
+      failure: More than one request succeeds or any earlier credential or session remains usable
+    - id: acceptance.a10-reset-request
+      given: A password reset request for any email address
+      when: The request is accepted
+      then: The response does not reveal account existence and any issued token has configured expiry with only its digest persisted
+      failure: The response reveals whether the account exists or raw token material is persisted or logged
+refs:
+    - quality.auditability
+    - quality.failure-safety
+    - quality.reproducibility
+workspaces:
+    - workspace.backend
+    - workspace.root
+scope:
+    repositories:
+        - repository.github.backend
+    paths:
+        - backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/identity/**
+        - backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/identity/**
+        - backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/identity/**
+        - backend/modules/backend-application/src/test/java/com/idea2strategy/backend/application/identity/**
+        - backend/modules/backend-domain/src/main/java/com/idea2strategy/backend/domain/identity/**
+        - backend/modules/backend-domain/src/test/java/com/idea2strategy/backend/domain/identity/**
+        - backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/identity/**
+        - backend/modules/backend-persistence/src/test/java/com/idea2strategy/backend/persistence/identity/**
+    policy_ids: []
+    scenario_ids: []
+    contract_ids: []
+    db_entities:
+        - identity.account_security_states
+        - identity.authentication_events
+        - identity.login_identities
+        - identity.password_credentials
+        - identity.password_reset_requests
+        - identity.recovery_code_sets
+        - identity.recovery_codes
+        - identity.sessions
+    migration_slots: []
+    ui_flows: []
+    dependency_majors: []
+    root_pointers:
+        - workspace.backend
+dependencies:
+    - work.a09-session-management
+merge_order:
+    - workspace.backend
+    - workspace.root
+first_failing_test: Concurrent consumption of the same password reset token must allow exactly one password change while rejecting the other request and making the previous password and every existing session immediately unusable.
+evidence:
+    kinds:
+        - api-integration
+        - application-unit
+        - concurrency-integration
+        - identity-postgresql
+        - persistence-integration
+    integration_required: true
+    user_validation: false
+    migration_required: false
+    rollback_required: false
+fingerprint: sha256:b2e8a887e37ee5fa6d8ec7e747b3dffb61f0e8375c74239c4af18b1907e588b0
