@@ -1,0 +1,70 @@
+schema_version: 1
+id: work.com07-flyway-integration
+readiness: ready
+title: Validate central Flyway and database write ownership
+outcome: Every database owner can contribute an immutable migration while one central backend Flyway path rejects naming, ordering, ownership, and runtime schema drift before deployment.
+acceptance:
+    - id: acceptance.database-access-boundary
+      given: backend, batch, backtest, and pipeline database access responsibilities
+      when: ownership verification runs
+      then: each schema has one registered write owner and Python access is limited to the documented backtest, market_data, and storage boundaries
+      failure: a schema has multiple write owners, an unknown owner, or an application role is granted DDL authority
+    - id: acceptance.flyway-once
+      given: A clean PostgreSQL 16 database
+      when: The central Flyway integration test migrates twice
+      then: The first run applies the complete history and the second run has no pending migrations
+      failure: Application startup owns migration execution, migration fails, or a second run changes the schema
+    - id: acceptance.migration-convention
+      given: The central migration directory contains the immutable baseline and owner migrations
+      when: Migration verification runs
+      then: Every post-baseline migration has a unique UTC timestamp version, a registered owner, and deterministic order
+      failure: A duplicate version, unknown owner, legacy numeric post-baseline version, or modified baseline is accepted
+    - id: acceptance.persistence-boundary
+      given: The migrated database and backend persistence mappings
+      when: persistence integration verification runs
+      then: Hibernate validates mappings and jOOQ queries compile against the shared schema without creating DDL
+      failure: ORM schema creation is required or generated queries target absent schema objects
+refs:
+    - quality.auditability
+    - quality.failure-safety
+    - quality.reproducibility
+workspaces:
+    - workspace.backend
+    - workspace.backtest-engine
+    - workspace.data-pipeline
+    - workspace.root
+scope:
+    repositories:
+        - repository.github.backend
+    paths:
+        - backend/db-migration/**
+        - backend/modules/backend-persistence/build.gradle.kts
+        - backend/modules/backend-persistence/src/test/**
+    policy_ids: []
+    scenario_ids: []
+    contract_ids: []
+    db_entities: []
+    migration_slots:
+        - flyway.central-integration
+    ui_flows: []
+    dependency_majors: []
+    root_pointers:
+        - workspace.backend
+dependencies: []
+merge_order:
+    - workspace.backtest-engine
+    - workspace.data-pipeline
+    - workspace.backend
+    - workspace.root
+first_failing_test: The central migration module has no executable verification and accepts an invalid post-baseline migration name or duplicate timestamp without identifying its write owner.
+evidence:
+    kinds:
+        - database-ownership
+        - flyway-postgresql
+        - migration-convention
+        - persistence-integration
+    integration_required: true
+    user_validation: false
+    migration_required: true
+    rollback_required: false
+fingerprint: sha256:9258dc137eeacba2563a6c939cc64d6fa2f8ddf6d045e46898860004d97a5a49
