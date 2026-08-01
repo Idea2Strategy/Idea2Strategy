@@ -2,12 +2,12 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.c07-redis-market-stream-pjy008008",
-      "work_id": "work.c07-redis-market-stream",
-      "definition_fingerprint": "sha256:a7e36809163630bd5dd610c002730ee92b0e58d0c8f8ed70654459db00eced59",
-      "status": "integrated",
+      "id": "claim.c08-us-market-session-pjy008008",
+      "work_id": "work.c08-us-market-session",
+      "definition_fingerprint": "sha256:d4fa2f4e10e9f1464d0be2fb914189c239ec645b8004178c41ae5f604d1164bc",
+      "status": "in_progress",
       "owner": "pjy008008",
-      "branch": "feature/18-redis-market-stream",
+      "branch": "feature/20-us-market-session",
       "repository": "idea2strategy.trading-engine",
       "paths": [
         "trading-engine/modules/market-data-adapter/**"
@@ -31,8 +31,8 @@
         "technology.need.market-data"
       ],
       "root_pointer": true,
-      "starts_at": "2026-08-01T05:52:09.9334224Z",
-      "expires_at": "2026-08-02T05:52:09.815471Z"
+      "starts_at": "2026-08-01T06:18:21.4350363Z",
+      "expires_at": "2026-08-02T06:18:21.3128918Z"
     },
     {
       "id": "claim.com-e-room-performance-fixtures",
