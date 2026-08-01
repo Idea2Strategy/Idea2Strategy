@@ -66,7 +66,7 @@
       "id": "claim.c20-owner-bot-operations-query-pjy008008",
       "work_id": "work.c20-owner-bot-operations-query",
       "definition_fingerprint": "sha256:0c7080807f8afe8534176f69fb14cb47ff3b10788f1f18e0de3d0f7a80d34a6a",
-      "status": "integrated",
+      "status": "done",
       "owner": "pjy008008",
       "branch": "feature/44-bot-operations-query-api",
       "repository": "idea2strategy.backend",
