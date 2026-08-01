@@ -5,7 +5,7 @@
       "id": "claim.c05-alpaca-sip-adapter-rights-gate-pjy008008",
       "work_id": "work.c05-alpaca-sip-adapter-rights-gate",
       "definition_fingerprint": "sha256:8ea0d456c4850d42fc1cdcf21dae5296f883c5c89beb8228a0567896a360a34d",
-      "status": "in_progress",
+      "status": "review",
       "owner": "pjy008008",
       "branch": "feature/4-alpaca-sip-rights-gate",
       "repository": "idea2strategy.trading-engine",
