@@ -72,15 +72,15 @@ Bot 고유 결정적 실패는 Participation을 `EVALUATION_FAILED`, 공통 데�
 
 ## 점수 공개와 리더보드
 
-검증된 aggregate result가 생성되면 같은 트랜잭션의 Outbox로 리더보드 재계산을 요청한다. 새 불변 `PUBLISHED` snapshot은 공개 완료 Bot만 포함하며 별도 임시 표시는 하지 않는다. 이후 결과가 추가되면 새 snapshot으로 순위가 변경될 수 있다. 모든 승인 Participation이 terminal이면 `FINAL` snapshot을 만든다.
+리더보드는 별도 PostgreSQL `leaderboard_snapshots`·`leaderboard_entries`에 점수와 순위를 복제하지 않는다. LIVE_PAPER의 불변 공식 근거는 `performance.bot_snapshots`, BACKTEST의 불변 공식 근거는 `competition.backtest_aggregate_results`가 소유한다. Query 계층은 공개 가능한 terminal Participation과 해당 근거를 조인해 현재 익명 순위를 결정론적으로 계산한다.
 
-`leaderboard_entries` trigger는 Snapshot, Participation과 결과 근거가 같은 Room에 속하는지 확인한다. LIVE_PAPER는 `performance_snapshot_id`, BACKTEST는 `backtest_aggregate_result_id`만 허용한다.
+캐시나 검색 문서가 필요하면 위 원본의 해시와 마지막 반영 위치로 재구축 가능한 projection으로만 운영한다. 캐시의 순위·점수는 채점 증거, Room 종료 조건 또는 감사 원본이 아니다. 모든 승인 Participation이 terminal이 되면 Room 사건과 `ended_at`을 잠그며, 최종 조회는 그 고정된 원본 집합에서 계산한다.
 
 기간별 점수와 매수·매도·판단 상세는 `ENDED` 전 공개하지 않는다. `ENDED` 뒤에도 상세 S3 객체는 Participation 소유 계정만 읽을 수 있고 다른 Bot의 상세는 공개하지 않는다. 운영자 접근은 별도 감사 권한과 audit event가 필요하다.
 
 ## 불변·삭제 정책
 
-Room Event, Participation Event, 평가 계획, 기간, 입력 잠금, 기간 Run 연결, aggregate result와 leaderboard snapshot은 append-only다. 일반 역할의 UPDATE·DELETE를 trigger와 권한으로 차단한다. Room·Participation·Bot 논리 삭제가 Backtest Run, 결과, 리더보드와 감사 증거를 연쇄 삭제하지 않게 FK에 cascade를 사용하지 않는다.
+Room Event, Participation Event, 평가 계획, 기간, 입력 잠금, 기간 Run 연결, aggregate result와 공식 performance snapshot은 append-only다. 일반 역할의 UPDATE·DELETE를 trigger와 권한으로 차단한다. Room·Participation·Bot 논리 삭제가 Backtest Run, 결과와 감사 증거를 연쇄 삭제하지 않게 FK에 cascade를 사용하지 않는다.
 
 ## 안전한 마이그레이션 순서
 
@@ -93,7 +93,7 @@ Room Event, Participation Event, 평가 계획, 기간, 입력 잠금, 기간 Ru
 7. 애플리케이션을 새 컬럼 dual-read로 배포한 뒤 참가 생성 함수·한도 잠금·유형별 실행 라우팅·공개 게이트를 활성화한다.
 8. `(room_id, owner_account_id) UNIQUE`를 제거하고 새 비유일 조회 인덱스를 만든다. 이 순서는 다중 Bot 참가 쓰기 기능을 켜기 직전에 수행한다.
 9. NOT NULL, CHECK, FK와 deferred trigger를 `NOT VALID`로 추가하고 backfill 감사 후 VALIDATE한다.
-10. 공식 BACKTEST 대회 생성·참가·기간 Run·aggregate·리더보드 통합 검증이 통과한 뒤에만 기존 상태값·컬럼 읽기를 제거한다.
+10. 공식 BACKTEST 대회 생성·참가·기간 Run·aggregate·파생 리더보드 Query 통합 검증이 통과한 뒤에만 기존 상태값·컬럼 읽기를 제거한다.
 
 ## Rollback
 

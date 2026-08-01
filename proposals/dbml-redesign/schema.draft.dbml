@@ -335,11 +335,6 @@ Enum competition.participation_status {
   EVALUATION_FAILED
 }
 
-Enum competition.leaderboard_status {
-  PUBLISHED
-  FINAL
-}
-
 Enum competition.invitation_credential_type {
   LINK
   CODE
@@ -3641,55 +3636,8 @@ Table competition.live_evaluation_segments {
   Note: 'LIVE_PAPER Participation에만 존재하는 공식 평가 구간. 가상 청산은 채점 전용 증거이며 라이브 체결·예약·원장 분개를 생성하지 않는다. Participation의 Room 유형은 deferred trigger가 검증한다.'
 }
 
-Table competition.leaderboard_snapshots {
-  id uuid [pk, default: `gen_random_uuid()`]
-  room_id uuid [not null]
-  scoring_template_version_id uuid [not null]
-  cutoff_at timestamptz [not null]
-  status competition.leaderboard_status [not null]
-  result_hash varchar(128) [not null]
-  created_at timestamptz [not null]
-
-  indexes {
-    (room_id, cutoff_at) [unique]
-  }
-
-  Note: '불변 공개 리더보드 스냅샷. 공식 BACKTEST는 새 aggregate result가 published_at에 공개될 때마다 현재 완료 Bot만 포함한 PUBLISHED 스냅샷을 만들고 별도 임시 표시는 하지 않는다. 모든 Participation terminal 뒤 FINAL 스냅샷을 만든다.'
-
-  Records (id, room_id, scoring_template_version_id, cutoff_at, status, result_hash, created_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '2026-07-28T10:10:02+09:00', 'PUBLISHED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '2026-07-28T10:10:03+09:00'
-  }
-}
-
-Table competition.leaderboard_entries {
-  snapshot_id uuid [not null]
-  participation_id uuid [not null]
-  performance_snapshot_id uuid
-  backtest_aggregate_result_id uuid
-  rank int [not null]
-  is_joint_rank boolean [not null, default: false]
-  eligibility_status varchar(30) [not null]
-  eligibility_reason_code varchar(80)
-  score numeric(24,10) [not null]
-  tie_break_document jsonb [not null]
-  calculation_document jsonb [not null]
-
-  indexes {
-    (snapshot_id, participation_id) [pk]
-    (snapshot_id, rank)
-  }
-
-  checks {
-    `(performance_snapshot_id IS NOT NULL AND backtest_aggregate_result_id IS NULL) OR (performance_snapshot_id IS NULL AND backtest_aggregate_result_id IS NOT NULL)` [name: 'competition_leaderboard_exactly_one_result_source']
-    `rank > 0` [name: 'competition_leaderboard_rank_positive']
-  }
-
-  Note: 'LIVE_PAPER는 불변 performance_snapshot_id, BACKTEST는 검증된 backtest_aggregate_result_id 중 정확히 하나를 공식 점수 근거로 사용한다. Snapshot Room 유형, Participation Room과 결과 소유권 일치는 deferred trigger가 검증한다.'
-
-  Records (snapshot_id, participation_id, performance_snapshot_id, backtest_aggregate_result_id, rank, is_joint_rank, eligibility_status, eligibility_reason_code, score, tie_break_document, calculation_document) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, '00000000-0000-4000-8000-000000000001', 1, false, 'ELIGIBLE', null, -0.2160000000, '{"rule":"EARLIER_JOIN","joinedAt":"2026-07-28T10:00:00+09:00"}', '{"formulaVersion":"1.0.0","aggregateHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
-  }
-}
+// The leaderboard is a derived Query projection over immutable official score
+// evidence. It is not duplicated in PostgreSQL snapshot or entry tables.
 
 // -----------------------------------------------------------------------------
 // operations: outbox, rebuild checkpoints, audit, and notification delivery.
@@ -4231,13 +4179,6 @@ Ref: competition.backtest_aggregate_results.participation_id > competition.parti
 Ref: competition.backtest_aggregate_results.evaluation_plan_room_id > competition.backtest_evaluation_plans.room_id
 Ref: competition.backtest_aggregate_results.scoring_template_version_id > competition.scoring_template_versions.id
 Ref: competition.live_evaluation_segments.participation_id > competition.participations.id
-Ref: competition.leaderboard_snapshots.room_id > competition.rooms.id
-Ref: competition.leaderboard_snapshots.scoring_template_version_id > competition.scoring_template_versions.id
-Ref: competition.leaderboard_entries.snapshot_id > competition.leaderboard_snapshots.id
-Ref: competition.leaderboard_entries.participation_id > competition.participations.id
-Ref: competition.leaderboard_entries.performance_snapshot_id > performance.bot_snapshots.id
-Ref: competition.leaderboard_entries.backtest_aggregate_result_id > competition.backtest_aggregate_results.id
-
 Ref: operations.role_permissions.role_id > operations.roles.id
 Ref: operations.role_permissions.permission_id > operations.permissions.id
 Ref: operations.operator_role_assignments.operator_account_id > operations.operator_accounts.id
