@@ -5,7 +5,7 @@
       "id": "claim.c19-basic-runtime-e2e-recovery-pjy008008",
       "work_id": "work.c19-basic-runtime-e2e-recovery",
       "definition_fingerprint": "sha256:f1edfd6a2e5053155e84392dfe6f734e05342d8187b25bf7f848a25368864e59",
-      "status": "review",
+      "status": "integrated",
       "owner": "pjy008008",
       "branch": "feature/45-basic-runtime-e2e-recovery",
       "repository": "idea2strategy.trading-engine",
