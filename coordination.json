@@ -5,7 +5,7 @@
       "id": "claim.c18-judgment-runtime-journal-pjy008008",
       "work_id": "work.c18-judgment-runtime-journal",
       "definition_fingerprint": "sha256:cb9cbe813a99cecb9b28eda91123224d420414bc2fc4f2d0eba31ba3f96a7513",
-      "status": "in_progress",
+      "status": "review",
       "owner": "pjy008008",
       "branch": "feature/43-judgment-runtime-journal",
       "repository": "idea2strategy.trading-engine",
