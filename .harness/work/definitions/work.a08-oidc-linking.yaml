@@ -1,0 +1,78 @@
+schema_version: 1
+id: work.a08-oidc-linking
+readiness: ready
+title: Implement provider-neutral OIDC login linking
+outcome: A verified OIDC identity can authenticate or explicitly replace an existing account login method without trusting provider email, storing raw subject data, or leaving earlier credentials active.
+acceptance:
+    - id: acceptance.a08-audit
+      given: OIDC login and linking outcomes
+      when: Success or rejection occurs
+      then: Correlated authentication events record the outcome without raw subject, token, or provider claims
+      failure: Security-sensitive provider material appears in persistence or logs
+    - id: acceptance.a08-explicit-link
+      given: A currently authenticated account that reauthenticates its active login method
+      when: It confirms a pending OIDC identity link
+      then: The previous active identity is replaced, the OIDC identity becomes active, auth epoch advances, and earlier sessions and reset requests are revoked atomically
+      failure: Two active identities remain or old credentials and sessions continue to authenticate
+    - id: acceptance.a08-no-email-autolink
+      given: An OIDC assertion whose email matches an existing account
+      when: No authenticated account-link confirmation exists
+      then: The subject is not attached to the existing account
+      failure: Matching provider email silently grants access to an existing account
+    - id: acceptance.a08-provider-validation
+      given: A verified issuer and immutable subject from an OIDC adapter
+      when: OIDC authentication is requested
+      then: Only an active catalogued OIDC provider with the exact issuer is accepted and only a versioned subject HMAC is persisted
+      failure: An inactive provider, issuer mismatch, raw subject, or raw token is accepted or persisted
+refs:
+    - quality.auditability
+    - quality.failure-safety
+    - quality.reproducibility
+workspaces:
+    - workspace.backend
+    - workspace.root
+scope:
+    repositories:
+        - repository.github.backend
+    paths:
+        - backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/identity/**
+        - backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/identity/**
+        - backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/identity/**
+        - backend/modules/backend-application/src/test/java/com/idea2strategy/backend/application/identity/**
+        - backend/modules/backend-domain/src/main/java/com/idea2strategy/backend/domain/identity/**
+        - backend/modules/backend-domain/src/test/java/com/idea2strategy/backend/domain/identity/**
+        - backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/identity/**
+        - backend/modules/backend-persistence/src/test/java/com/idea2strategy/backend/persistence/identity/**
+    policy_ids: []
+    scenario_ids: []
+    contract_ids: []
+    db_entities:
+        - identity.account_emails
+        - identity.accounts
+        - identity.auth_providers
+        - identity.authentication_events
+        - identity.login_identities
+        - identity.password_reset_requests
+        - identity.sessions
+    migration_slots: []
+    ui_flows: []
+    dependency_majors: []
+    root_pointers:
+        - workspace.backend
+dependencies:
+    - work.a07-email-auth
+merge_order:
+    - workspace.backend
+    - workspace.root
+first_failing_test: A matching provider email without authenticated link confirmation must not attach the OIDC subject to the existing account.
+evidence:
+    kinds:
+        - api-integration
+        - application-unit
+        - identity-postgresql
+        - persistence-integration
+    integration_required: true
+    user_validation: false
+    migration_required: false
+    rollback_required: false
+fingerprint: sha256:8e2e107671895ee375aea87b1022163d8b107861410ca17bf86aaef005ea212e
