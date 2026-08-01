@@ -2,6 +2,43 @@
   "schema_version": 1,
   "claims": [
     {
+      "id": "claim.c20-live-bot-operations-ui-pjy008008",
+      "work_id": "work.c20-live-bot-operations-ui",
+      "definition_fingerprint": "sha256:19b9f0f684702f02c3eaaf1320a6ad7968b1803232ad354f57d159780444a97b",
+      "status": "in_progress",
+      "owner": "pjy008008",
+      "branch": "feature/87-live-bot-operations",
+      "repository": "idea2strategy.ui",
+      "paths": [
+        "ui/src/ProductScreens.test.tsx",
+        "ui/src/api/botOperations.test.ts",
+        "ui/src/api/botOperations.ts",
+        "ui/src/views/BotsView.tsx"
+      ],
+      "policy_ids": [
+        "policy.execution.server-only"
+      ],
+      "scenario_ids": [
+        "scenario.bot.evaluate"
+      ],
+      "contract_ids": [],
+      "db_entities": [],
+      "migration_slots": [],
+      "ui_flows": [
+        "ui.bot.operations"
+      ],
+      "dependency_majors": [],
+      "stable_ids": [
+        "capability.bot.server-execution",
+        "journey.bot.operate",
+        "scenario.bot.evaluate",
+        "ui.bot.operations"
+      ],
+      "root_pointer": true,
+      "starts_at": "2026-08-01T12:17:44.8823691Z",
+      "expires_at": "2026-08-02T12:17:44.7619248Z"
+    },
+    {
       "id": "claim.c20-owner-bot-operations-query-pjy008008",
       "work_id": "work.c20-owner-bot-operations-query",
       "definition_fingerprint": "sha256:0c7080807f8afe8534176f69fb14cb47ff3b10788f1f18e0de3d0f7a80d34a6a",
