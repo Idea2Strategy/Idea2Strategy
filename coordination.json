@@ -2,12 +2,12 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.c17-pre-order-revalidation-pjy008008",
-      "work_id": "work.c17-pre-order-revalidation",
-      "definition_fingerprint": "sha256:79e56501131c3b2299234d9238bea53286a6deaa12721c731fefcc9f1b782e3f",
-      "status": "integrated",
+      "id": "claim.c18-judgment-runtime-journal-pjy008008",
+      "work_id": "work.c18-judgment-runtime-journal",
+      "definition_fingerprint": "sha256:cb9cbe813a99cecb9b28eda91123224d420414bc2fc4f2d0eba31ba3f96a7513",
+      "status": "in_progress",
       "owner": "pjy008008",
-      "branch": "feature/41-pre-order-revalidation",
+      "branch": "feature/43-judgment-runtime-journal",
       "repository": "idea2strategy.trading-engine",
       "paths": [
         "trading-engine/modules/strategy-runtime/**"
@@ -25,6 +25,7 @@
       "ui_flows": [],
       "dependency_majors": [],
       "stable_ids": [
+        "capability.audit.evidence",
         "capability.strategy.basic",
         "policy.execution.server-only",
         "policy.user.no-direct-orders",
@@ -34,8 +35,8 @@
         "scenario.bot.evaluate"
       ],
       "root_pointer": true,
-      "starts_at": "2026-08-01T10:54:49.5617926Z",
-      "expires_at": "2026-08-02T10:54:49.4346218Z"
+      "starts_at": "2026-08-01T11:11:43.8264625Z",
+      "expires_at": "2026-08-02T11:11:43.6906396Z"
     },
     {
       "id": "claim.com-e-room-performance-fixtures",
