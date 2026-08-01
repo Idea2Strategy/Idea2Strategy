@@ -2,18 +2,19 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.c09-market-data-degradation-pjy008008",
-      "work_id": "work.c09-market-data-degradation",
-      "definition_fingerprint": "sha256:4380f93f88970863d32e319033ea58b5191fa18f3c541ae23fb64ad8b0846483",
-      "status": "integrated",
+      "id": "claim.c10-locked-execution-plan-loader-pjy008008",
+      "work_id": "work.c10-locked-execution-plan-loader",
+      "definition_fingerprint": "sha256:cd9b3e4682d9c5f8d7a4c6be663911c08fb446380615401d127bfd75db6bc0cd",
+      "status": "in_progress",
       "owner": "pjy008008",
-      "branch": "feature/22-market-data-degradation",
+      "branch": "feature/25-locked-execution-plan-loader",
       "repository": "idea2strategy.trading-engine",
       "paths": [
-        "trading-engine/modules/market-data-adapter/**"
+        "trading-engine/modules/strategy-runtime/**"
       ],
       "policy_ids": [
-        "policy.market.us-only"
+        "policy.privacy.strategy-private",
+        "policy.strategy.immutable-release"
       ],
       "scenario_ids": [
         "scenario.bot.evaluate"
@@ -24,15 +25,17 @@
       "ui_flows": [],
       "dependency_majors": [],
       "stable_ids": [
-        "policy.market.us-only",
+        "capability.strategy.basic",
+        "policy.privacy.strategy-private",
+        "policy.strategy.immutable-release",
         "quality.auditability",
         "quality.failure-safety",
-        "scenario.bot.evaluate",
-        "technology.need.market-data"
+        "quality.reproducibility",
+        "scenario.bot.evaluate"
       ],
       "root_pointer": true,
-      "starts_at": "2026-08-01T06:33:00.2625995Z",
-      "expires_at": "2026-08-02T06:33:00.1366196Z"
+      "starts_at": "2026-08-01T06:55:04.8842277Z",
+      "expires_at": "2026-08-02T06:55:04.7516309Z"
     },
     {
       "id": "claim.com-e-room-performance-fixtures",
