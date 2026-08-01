@@ -5,7 +5,7 @@
       "id": "claim.c10-locked-execution-plan-loader-pjy008008",
       "work_id": "work.c10-locked-execution-plan-loader",
       "definition_fingerprint": "sha256:cd9b3e4682d9c5f8d7a4c6be663911c08fb446380615401d127bfd75db6bc0cd",
-      "status": "in_progress",
+      "status": "review",
       "owner": "pjy008008",
       "branch": "feature/25-locked-execution-plan-loader",
       "repository": "idea2strategy.trading-engine",
