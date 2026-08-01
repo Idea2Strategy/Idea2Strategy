@@ -5,7 +5,7 @@
       "id": "claim.c09-market-data-degradation-pjy008008",
       "work_id": "work.c09-market-data-degradation",
       "definition_fingerprint": "sha256:4380f93f88970863d32e319033ea58b5191fa18f3c541ae23fb64ad8b0846483",
-      "status": "in_progress",
+      "status": "review",
       "owner": "pjy008008",
       "branch": "feature/22-market-data-degradation",
       "repository": "idea2strategy.trading-engine",
