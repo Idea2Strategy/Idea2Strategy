@@ -5,7 +5,7 @@
       "id": "claim.c11-startup-warmup-pjy008008",
       "work_id": "work.c11-startup-warmup",
       "definition_fingerprint": "sha256:5828c09bee1edabdfeab593a47a0a8202cd55eecee58895e373097b4c5ea59ed",
-      "status": "in_progress",
+      "status": "review",
       "owner": "pjy008008",
       "branch": "feature/27-startup-warmup",
       "repository": "idea2strategy.trading-engine",
