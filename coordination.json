@@ -5,7 +5,7 @@
       "id": "claim.c16-basic-candidate-convergence-pjy008008",
       "work_id": "work.c16-basic-candidate-convergence",
       "definition_fingerprint": "sha256:511338b46500b7ae2c352df01a2809d4548c62584934ca1fba02db731d687701",
-      "status": "in_progress",
+      "status": "review",
       "owner": "pjy008008",
       "branch": "feature/38-basic-candidate-convergence",
       "repository": "idea2strategy.trading-engine",
