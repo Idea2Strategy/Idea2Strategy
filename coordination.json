@@ -5,7 +5,7 @@
       "id": "claim.c14-basic-executor-pjy008008",
       "work_id": "work.c14-basic-executor",
       "definition_fingerprint": "sha256:0b0a31b51c5ec18a2bc23d2902487fc520eb476035f79d39d329143e3406b7ff",
-      "status": "review",
+      "status": "integrated",
       "owner": "pjy008008",
       "branch": "feature/36-basic-executor",
       "repository": "idea2strategy.trading-engine",
