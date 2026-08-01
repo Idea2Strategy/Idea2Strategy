@@ -5,7 +5,7 @@
       "id": "claim.c13-per-bot-evaluation-queue-pjy008008",
       "work_id": "work.c13-per-bot-evaluation-queue",
       "definition_fingerprint": "sha256:35eacb0e4c0db7ff14d9055ffb858e41dc50bbb3116dc5190d8c4eeab77c3d65",
-      "status": "in_progress",
+      "status": "review",
       "owner": "pjy008008",
       "branch": "feature/33-per-bot-evaluation-queue",
       "repository": "idea2strategy.trading-engine",
