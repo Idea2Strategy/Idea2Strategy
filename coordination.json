@@ -2,107 +2,37 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.c20-live-bot-operations-ui-pjy008008",
-      "work_id": "work.c20-live-bot-operations-ui",
-      "definition_fingerprint": "sha256:19b9f0f684702f02c3eaaf1320a6ad7968b1803232ad354f57d159780444a97b",
-      "status": "done",
-      "owner": "pjy008008",
-      "branch": "feature/87-live-bot-operations",
-      "repository": "idea2strategy.ui",
+      "id": "claim.a09-session-management-juwon-na",
+      "work_id": "work.a09-session-management",
+      "definition_fingerprint": "sha256:ce86dd746ea001f5648288504b4a97373830f931b5102f435a6cfc9392f653e9",
+      "status": "in_progress",
+      "owner": "Juwon-Na",
+      "branch": "feature/67-session-management",
+      "repository": "repository.github.backend",
       "paths": [
-        "ui/src/ProductScreens.test.tsx",
-        "ui/src/api/botOperations.test.ts",
-        "ui/src/api/botOperations.ts",
-        "ui/src/views/BotsView.tsx"
-      ],
-      "policy_ids": [
-        "policy.execution.server-only"
-      ],
-      "scenario_ids": [
-        "scenario.bot.evaluate"
-      ],
-      "contract_ids": [],
-      "db_entities": [],
-      "migration_slots": [],
-      "ui_flows": [
-        "ui.bot.operations"
-      ],
-      "dependency_majors": [],
-      "stable_ids": [
-        "capability.bot.server-execution",
-        "journey.bot.operate",
-        "scenario.bot.evaluate",
-        "ui.bot.operations"
-      ],
-      "root_pointer": true,
-      "starts_at": "2026-08-01T12:17:44.8823691Z",
-      "expires_at": "2026-08-02T12:17:44.7619248Z"
-    },
-    {
-      "id": "claim.c20-live-chart-rendering-pjy008008",
-      "work_id": "work.c20-live-chart-rendering",
-      "definition_fingerprint": "sha256:91af9883338b0b575a0a703a1d3daa3d521687b7c8a5b3ab8caf7737758321fe",
-      "status": "done",
-      "owner": "pjy008008",
-      "branch": "feature/87-live-bot-operations",
-      "repository": "idea2strategy.ui",
-      "paths": [
-        "ui/src/components/LiveExecutionChart.test.tsx",
-        "ui/src/components/LiveExecutionChart.tsx"
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/identity/**",
+        "backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/identity/**",
+        "backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/identity/**",
+        "backend/modules/backend-application/src/test/java/com/idea2strategy/backend/application/identity/**",
+        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/identity/**"
       ],
       "policy_ids": [],
       "scenario_ids": [],
       "contract_ids": [],
-      "db_entities": [],
+      "db_entities": [
+        "identity.account_security_states",
+        "identity.authentication_events",
+        "identity.login_identities",
+        "identity.password_credentials",
+        "identity.sessions"
+      ],
       "migration_slots": [],
       "ui_flows": [],
       "dependency_majors": [],
       "stable_ids": [],
-      "root_pointer": false,
-      "starts_at": "2026-08-01T12:26:27.2222076Z",
-      "expires_at": "2026-08-02T12:26:27.0986494Z"
-    },
-    {
-      "id": "claim.c20-owner-bot-operations-query-pjy008008",
-      "work_id": "work.c20-owner-bot-operations-query",
-      "definition_fingerprint": "sha256:0c7080807f8afe8534176f69fb14cb47ff3b10788f1f18e0de3d0f7a80d34a6a",
-      "status": "done",
-      "owner": "pjy008008",
-      "branch": "feature/44-bot-operations-query-api",
-      "repository": "idea2strategy.backend",
-      "paths": [
-        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/botoperations/**",
-        "backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/botoperations/**",
-        "backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/botoperations/**",
-        "backend/modules/backend-application/src/test/java/com/idea2strategy/backend/application/botoperations/**",
-        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/botoperations/**",
-        "backend/modules/backend-persistence/src/test/java/com/idea2strategy/backend/persistence/botoperations/**"
-      ],
-      "policy_ids": [
-        "policy.execution.server-only"
-      ],
-      "scenario_ids": [
-        "scenario.bot.evaluate"
-      ],
-      "contract_ids": [],
-      "db_entities": [
-        "bot.bot_events",
-        "bot.bots"
-      ],
-      "migration_slots": [],
-      "ui_flows": [
-        "ui.bot.operations"
-      ],
-      "dependency_majors": [],
-      "stable_ids": [
-        "capability.bot.server-execution",
-        "journey.bot.operate",
-        "scenario.bot.evaluate",
-        "ui.bot.operations"
-      ],
       "root_pointer": true,
-      "starts_at": "2026-08-01T11:59:02.2842064Z",
-      "expires_at": "2026-08-02T11:59:02.1615722Z"
+      "starts_at": "2026-08-01T15:57:28.5754761Z",
+      "expires_at": "2026-08-04T15:57:28.3286574Z"
     },
     {
       "id": "claim.com07-29-competition-currency-schema-drift",
