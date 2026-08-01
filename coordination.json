@@ -42,7 +42,7 @@
       "id": "claim.c20-live-chart-rendering-pjy008008",
       "work_id": "work.c20-live-chart-rendering",
       "definition_fingerprint": "sha256:91af9883338b0b575a0a703a1d3daa3d521687b7c8a5b3ab8caf7737758321fe",
-      "status": "review",
+      "status": "integrated",
       "owner": "pjy008008",
       "branch": "feature/87-live-bot-operations",
       "repository": "idea2strategy.ui",
