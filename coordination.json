@@ -136,7 +136,7 @@
       "id": "claim.e01-competition-performance-foundation",
       "work_id": "work.e01-competition-performance-foundation",
       "definition_fingerprint": "sha256:cc0d22b95c728fa420c3f4c1f8b9ac8a9137e65a25a4d038f50c0d3de503b65e",
-      "status": "in_progress",
+      "status": "blocked",
       "owner": "dertz569",
       "branch": "feature/7-competition-performance-cqrs",
       "repository": "idea2strategy.backend",
