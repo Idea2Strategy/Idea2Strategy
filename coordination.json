@@ -110,6 +110,40 @@
       "root_pointer": false,
       "starts_at": "2026-08-01T03:37:07.7553158Z",
       "expires_at": "2026-08-02T03:37:07.5646267Z"
+    },
+    {
+      "id": "claim.e02-competition-performance-dbml-alignment",
+      "work_id": "work.e02-competition-performance-dbml-alignment",
+      "definition_fingerprint": "sha256:46aa71b2454c7cd504ac9cec8f9833b8f3e4d44d73a5318c69818d3fec092a2e",
+      "status": "in_progress",
+      "owner": "dertz569",
+      "branch": "feature/42-competition-performance-dbml-alignment",
+      "repository": "repository.github.root",
+      "paths": [
+        "proposals/dbml-redesign",
+        "scripts/validate-competition-dbml.mjs"
+      ],
+      "policy_ids": [],
+      "scenario_ids": [
+        "scenario.room.finish"
+      ],
+      "contract_ids": [],
+      "db_entities": [
+        "competition.*",
+        "performance.*"
+      ],
+      "migration_slots": [],
+      "ui_flows": [],
+      "dependency_majors": [],
+      "stable_ids": [
+        "capability.room.bot-comparison",
+        "quality.auditability",
+        "quality.reproducibility",
+        "scenario.room.finish"
+      ],
+      "root_pointer": false,
+      "starts_at": "2026-08-01T04:12:04.1183288Z",
+      "expires_at": "2026-08-03T04:12:03.9299304Z"
     }
   ]
 }
