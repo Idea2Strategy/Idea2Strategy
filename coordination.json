@@ -72,6 +72,44 @@
       "root_pointer": false,
       "starts_at": "2026-07-31T12:41:42.1030628Z",
       "expires_at": "2026-08-01T12:41:41.9437321Z"
+    },
+    {
+      "id": "claim.e01-competition-performance-foundation",
+      "work_id": "work.e01-competition-performance-foundation",
+      "definition_fingerprint": "sha256:cc0d22b95c728fa420c3f4c1f8b9ac8a9137e65a25a4d038f50c0d3de503b65e",
+      "status": "in_progress",
+      "owner": "dertz569",
+      "branch": "feature/7-competition-performance-cqrs",
+      "repository": "idea2strategy.backend",
+      "paths": [
+        "apps/backend-api/**/competition/**",
+        "apps/backend-api/**/performance/**",
+        "modules/backend-application/**/competition/**",
+        "modules/backend-application/**/performance/**",
+        "modules/backend-application/**/testing/*Backtest*",
+        "modules/backend-application/**/testing/*Bot*",
+        "modules/backend-application/**/testing/*Trading*",
+        "modules/backend-domain/**/competition/**",
+        "modules/backend-domain/**/performance/**",
+        "modules/backend-persistence/**/competition/**",
+        "modules/backend-persistence/**/performance/**"
+      ],
+      "policy_ids": [],
+      "scenario_ids": [],
+      "contract_ids": [],
+      "db_entities": [
+        "competition.room_rules",
+        "competition.room_schedules",
+        "competition.rooms",
+        "performance.bot_current_projections"
+      ],
+      "migration_slots": [],
+      "ui_flows": [],
+      "dependency_majors": [],
+      "stable_ids": [],
+      "root_pointer": false,
+      "starts_at": "2026-08-01T03:37:07.7553158Z",
+      "expires_at": "2026-08-02T03:37:07.5646267Z"
     }
   ]
 }
