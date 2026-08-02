@@ -5,9 +5,13 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $prepareBundle = Join-Path $PSScriptRoot 'prepare-flyway-bundle.ps1'
 $bundle = Join-Path $root '.harness/local/tmp/flyway-bundle'
+$fillAllocationFixture = Join-Path $root 'trading-engine/db/migration-contributions/fixtures/partial_fill_allocation_contract.sql.fixture'
 
 if (-not (Test-Path -LiteralPath $prepareBundle -PathType Leaf)) {
     throw 'Flyway bundle preparation script is missing.'
+}
+if (-not (Test-Path -LiteralPath $fillAllocationFixture -PathType Leaf)) {
+    throw 'The pinned trading-engine revision is missing the required partial-fill allocation contract fixture.'
 }
 
 & $prepareBundle | Out-Host
@@ -107,8 +111,8 @@ try {
     $tableCount = (docker exec -e "PGPASSWORD=$password" $container `
         psql -U $user -d $database -Atc `
         "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ($schemaList) AND table_type = 'BASE TABLE';").Trim()
-    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '138') {
-        throw "Expected 138 application tables after Flyway; found '$tableCount'."
+    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '139') {
+        throw "Expected 139 application tables after Flyway; found '$tableCount'."
     }
 
     $fillAllocationTable = (docker exec -e "PGPASSWORD=$password" $container `
@@ -118,11 +122,23 @@ try {
         throw 'The central bundle is missing canonical trading.fill_component_allocations.'
     }
 
+    docker cp $fillAllocationFixture "${container}:/tmp/partial_fill_allocation_contract.sql"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to copy the partial-fill allocation contract fixture into PostgreSQL.'
+    }
+    docker exec -e "PGPASSWORD=$password" $container `
+        psql -v ON_ERROR_STOP=1 -U $user -d $database `
+        -f /tmp/partial_fill_allocation_contract.sql | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The partial-fill allocation contract fixture failed.'
+    }
+
     [pscustomobject]@{
         status = 'passed'
         application_tables = [int]$tableCount
         successful_migrations = [int]$historyAfterSecondRun
         second_run_pending = 0
+        partial_fill_allocation_contract = 'passed'
         bundle_sha256 = $secondBundleDigest
         postgres = '16-alpine'
         flyway = '11-alpine'

@@ -1616,6 +1616,26 @@ Table bot.bots {
   }
 }
 
+Table bot.continuation_deadlines {
+  bot_id uuid [pk]
+  due_at timestamptz [not null]
+  last_renewed_at timestamptz
+  renewal_sequence bigint [not null, default: 0]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (due_at)
+  }
+
+  checks {
+    `last_renewed_at IS NULL OR due_at > last_renewed_at` [name: 'bot_continuation_due_after_renewal']
+    `renewal_sequence >= 0` [name: 'bot_continuation_sequence_nonnegative']
+  }
+
+  Note: '무소속 실행 봇의 명시적 계속 실행 확인 기한. 조회와 로그인은 이 행을 변경하지 않는다.'
+}
+
 Table bot.launch_snapshots {
   bot_id uuid [pk]
   snapshot_schema_version varchar(40) [not null]
@@ -4108,6 +4128,7 @@ Ref: market_data.quality_incidents.evidence_object_id > storage.objects.id
 Ref: market_data.stream_watermarks.feed_id > market_data.feeds.id
 
 Ref: bot.bots.owner_account_id > identity.accounts.id
+Ref: bot.continuation_deadlines.bot_id > bot.bots.id
 Ref: bot.launch_snapshots.bot_id > bot.bots.id
 Ref: bot.launch_configurations.bot_id > bot.bots.id
 Ref: bot.launch_configurations.buying_power_buffer_policy_id > trading.buying_power_buffer_policy_versions.id
