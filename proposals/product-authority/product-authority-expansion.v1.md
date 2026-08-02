@@ -12,8 +12,8 @@ refs:
 
 # decision.governance.product-authority-expansion
 
-`user:pjy008008`과 `user:Juwon-Na`를 `user:kcrmin`과 함께 제품 권한자(product authority)로
-추가하는 제안이다.
+`user:pjy008008`, `user:Juwon-Na`, `user:Pearone99`를 `user:kcrmin`과 함께 제품
+권한자(product authority)로 추가하는 제안이다.
 
 2026-08-02 권한자 `user:kcrmin`의 명시적 지시로 2절 변경 집합을 작업 트리에 반영했다.
 `stackcord governance check --json`은 여전히 `unknown`이며 fresh provider 승인 관찰은
@@ -35,9 +35,16 @@ GitHub PR에서 정확한 head 커밋과 보호 fingerprint에 대한 권한자 
 `CLAUDE.md`의 팀 소유권 목록에 이미 있는 구성원 C 박준유 (`pjy008008`)와
 구성원 A 나주원 (`Juwon-Na`)이다.
 
-두 번째 요청에 함께 제시된 `Pearwon99`는 GitHub API에서 404를 반환하는 존재하지 않는
-계정이므로 제품 권한자로 등록하지 않았다. GitLab 계정이나 별명일 가능성이 있으며
-확인이 필요하다.
+두 번째 요청에 함께 제시된 `Pearwon99`는 GitHub API에서 404를 반환했다. 권한자가
+이후 오타를 정정해 실제 식별자가 `Pearone99`임을 확인했고, 이 계정은 GitHub에
+존재하며 계정 이름이 "Juwon Na"로 `Juwon-Na`와 동일인의 다른 계정이다.
+
+따라서 등록 항목은 넷이지만 실질 권한자는 셋이다. `minimum: 1`에서는 한 사람이 두
+계정을 갖는 것이 승인 정족수를 실질적으로 늘리지 않는다.
+
+`Pearone99`의 저장소 접근 권한은 `none`이다. governance 등록은 승인을 인정하는
+조건일 뿐이므로, 협력자로 초대되기 전에는 이 계정으로 PR을 승인할 수 없고
+fresh provider 관찰도 생기지 않는다.
 
 `.harness/governance.yaml`은 보호 정본이며, `AGENTS.md`와
 `docs/collaboration-policy.md` 7절의 canonical-write gate는 fresh provider 관찰이
@@ -54,7 +61,7 @@ must not edit 원칙에 따라 정본을 수정하지 않고 이 제안만 작�
 `.harness/governance.yaml`
 
 ```yaml
-product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na]
+product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:Pearone99]
 ```
 
 ### 2.2 GitLab monolithic 미러 governance
@@ -71,7 +78,7 @@ product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na]
 - `scripts/verify-collaboration-policy.ps1:68`
 - `scripts/verify-foundation-evidence.mjs:132`
 
-두 곳 모두 기대값을 `product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na]`로 바꾼다.
+두 곳 모두 기대값을 `product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:Pearone99]`로 바꾼다.
 정렬 순서 변화에 취약한 완전 문자열 비교 대신 두 권한자를 각각 확인하는 검사로
 바꾸는 편이 안전하다.
 
@@ -100,7 +107,7 @@ product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na]
 
 `verify-collaboration-policy.ps1:85-91`은 위 네 개 규칙 파일에 리터럴
 `user:kcrmin`이 남아 있기를 요구한다. 따라서 `user:kcrmin`을 지우지 않고
-"승인된 권한자 중 하나(`user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`)"로
+"승인된 권한자 중 하나(`user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, `user:Pearone99`)"로
 확장 서술한다. 검증기에도 두 신규 권한자 리터럴 요구를 추가하면 문서와 구성이
 함께 유지된다.
 
@@ -115,7 +122,7 @@ product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na]
 따라서 두 권한자는 각자 단독 자기 승인으로 보호 제품 의미를 확정할 수 있다.
 이중 확인(`minimum: 2`)은 채택하지 않았다.
 
-권한 범위도 축소하지 않는다. `user:pjy008008`과 `user:Juwon-Na`는 `user:kcrmin`과 동등하며
+권한 범위도 축소하지 않는다. `user:pjy008008`·`user:Juwon-Na`·`user:Pearone99`는 `user:kcrmin`과 동등하며
 `protected_kinds` 전체(`product`, `policy`, `business`, `contract`)를 승인할 수 있다.
 현재 Stackcord 구성은 kind별 권한 분리를 표현하지 않으므로 이 결정은
 구성과도 일치한다.
@@ -137,9 +144,13 @@ product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na]
 
 ## 5. 미해결 확인 사항
 
-- 협력자 권한 확인 완료: `pjy008008`은 `admin`, `Juwon-Na`는 `write`다. 둘 다 PR 승인이
-  가능하다. `write`는 branch protection 등 저장소 설정 변경 권한을 포함하지 않는다.
-- `Pearwon99`가 `user:Juwon-Na`의 GitLab 계정인지 확인이 필요하다.
+- 협력자 권한 확인 완료: `pjy008008`은 `admin`, `Juwon-Na`는 `write`, `Pearone99`는
+  `none`이다. 앞의 둘은 PR 승인이 가능하다. `write`는 branch protection 등 저장소 설정
+  변경 권한을 포함하지 않는다.
+- `user:Pearone99`을 협력자로 초대할지, 초대한다면 어느 권한 수준을 부여할지 결정이
+  필요하다. 초대 전에는 등록만 되어 있고 승인에 사용할 수 없다.
+- 나주원이 `user:Juwon-Na`와 `user:Pearone99` 중 어느 계정을 상시 사용할지 정하면
+  나머지 한 항목은 등록에서 제거하는 편이 권한 표면을 줄인다.
 - `scripts/verify-foundation-evidence.mjs`는 이 머신에 Node.js가 없어 로컬에서
   실행하지 못했다. CI에서 처음 검증된다.
 - `worktrees/com07-root`는 별도 브랜치 워크트리이므로 이 변경을 반영하지 않았다.

@@ -55,7 +55,7 @@ try {
   $ownerPath = Join-Path $sandbox '.harness/local/project/policy/owner.yaml'
   Assert-True (Test-Path -LiteralPath $ownerPath -PathType Leaf) 'first bootstrap creates local authority reference'
   $ownerText = Get-Content -Raw -Encoding utf8 $ownerPath
-  Assert-True $ownerText.Contains('product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na]') 'authority reference names provider identities'
+  Assert-True $ownerText.Contains('product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:Pearone99]') 'authority reference names provider identities'
   Assert-True $ownerText.Contains('contact_email_is_authority: false') 'authority reference rejects email authentication'
   Assert-True (-not $ownerText.Contains('@')) 'generated authority reference contains no email address'
 
