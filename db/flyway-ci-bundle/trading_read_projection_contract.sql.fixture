@@ -1,0 +1,1064 @@
+-- PostgreSQL 16 contract probe for the F15 canonical trading read projections.
+-- Run only against an ephemeral migrated database as a PostgreSQL superuser.
+-- Parent rows outside bot and trading are intentionally bypassed while the focused
+-- read aggregate is seeded; all assertions execute with normal triggers.
+--
+-- The PREPARE statements below must stay byte identical to the statements shipped in
+-- com.idea2strategy.trading.persistence.projection.CanonicalTradingReadSql, apart from
+-- the JDBC "?" placeholders becoming PostgreSQL "$n" placeholders.
+-- CanonicalTradingReadContractTest fails the trading engine build when they drift.
+
+SET session_replication_role = replica;
+
+-- Two owners. Only a0000000-...-0001 may ever see bot b0000000-...-0001.
+INSERT INTO bot.bots (
+    id, owner_account_id, mode, name, lifecycle_status, lifecycle_changed_at,
+    created_at, execution_eligible_from, deleted_at
+) VALUES
+('b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001',
+ 'BASIC', 'F15 read contract bot', 'RUNNING', '2026-07-28T09:00:00+00',
+ '2026-07-28T09:00:00+00', '2026-07-28T09:00:00+00', NULL),
+('b0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000002',
+ 'BASIC', 'Another owner bot', 'RUNNING', '2026-07-28T09:00:00+00',
+ '2026-07-28T09:00:00+00', '2026-07-28T09:00:00+00', NULL),
+('b0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000001',
+ 'BASIC', 'Logically deleted bot', 'STOPPED', '2026-07-28T09:00:00+00',
+ '2026-07-28T09:00:00+00', '2026-07-28T09:00:00+00', '2026-07-29T09:00:00+00');
+
+INSERT INTO bot.bot_partitions (
+    id, bot_id, name, budget_cap_bps, position_x, position_y, configuration_hash
+) VALUES
+('c0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'Partition one', 5000, 0, 0, repeat('a', 64)),
+('c0000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'Partition two', 5000, 0, 0, repeat('a', 64)),
+('c0000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000002',
+ 'Other owner partition', 5000, 0, 0, repeat('a', 64)),
+('c0000000-0000-4000-8000-000000000004', 'b0000000-0000-4000-8000-000000000003',
+ 'Deleted bot partition', 5000, 0, 0, repeat('a', 64));
+
+INSERT INTO bot.flows (
+    id, partition_id, name, element_catalog_version_id, compiled_flow_plan_id,
+    position_x, position_y, semantic_document, layout_document, layout_schema_version,
+    semantic_hash, layout_hash, configuration_hash
+) VALUES
+('d0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001',
+ 'Requested flow', 'f0000000-0000-4000-8000-000000000001',
+ 'f0000000-0000-4000-8000-000000000002', 0, 0, '{}', '{}', '1.0.0',
+ repeat('a', 64), repeat('b', 64), repeat('a', 64)),
+('d0000000-0000-4000-8000-000000000002', 'c0000000-0000-4000-8000-000000000001',
+ 'Sibling flow in the same partition', 'f0000000-0000-4000-8000-000000000001',
+ 'f0000000-0000-4000-8000-000000000002', 0, 0, '{}', '{}', '1.0.0',
+ repeat('a', 64), repeat('b', 64), repeat('a', 64)),
+('d0000000-0000-4000-8000-000000000003', 'c0000000-0000-4000-8000-000000000002',
+ 'Flow in the sibling partition', 'f0000000-0000-4000-8000-000000000001',
+ 'f0000000-0000-4000-8000-000000000002', 0, 0, '{}', '{}', '1.0.0',
+ repeat('a', 64), repeat('b', 64), repeat('a', 64)),
+('d0000000-0000-4000-8000-000000000004', 'c0000000-0000-4000-8000-000000000003',
+ 'Other owner flow', 'f0000000-0000-4000-8000-000000000001',
+ 'f0000000-0000-4000-8000-000000000002', 0, 0, '{}', '{}', '1.0.0',
+ repeat('a', 64), repeat('b', 64), repeat('a', 64)),
+('d0000000-0000-4000-8000-000000000005', 'c0000000-0000-4000-8000-000000000004',
+ 'Deleted bot flow', 'f0000000-0000-4000-8000-000000000001',
+ 'f0000000-0000-4000-8000-000000000002', 0, 0, '{}', '{}', '1.0.0',
+ repeat('a', 64), repeat('b', 64), repeat('a', 64));
+
+INSERT INTO trading.bot_budget_projections (
+    bot_id, currency_code, available_cash_amount, active_reservation_amount,
+    invested_amount, segregated_short_proceeds_amount, short_collateral_amount,
+    valuation_at, valuation_status, last_event_sequence, projection_hash, updated_at
+) VALUES
+('b0000000-0000-4000-8000-000000000001', 'USD', 900.00000000, 100.00000000,
+ 100.25000000, 0, 0, '2026-07-28T09:10:00+00', 'VALUED', 12, repeat('a', 64),
+ '2026-07-28T09:10:00+00'),
+('b0000000-0000-4000-8000-000000000002', 'USD', 5000.00000000, 0, 0, 0, 0,
+ '2026-07-28T09:10:00+00', 'VALUED', 3, repeat('a', 64), '2026-07-28T09:10:00+00'),
+('b0000000-0000-4000-8000-000000000003', 'USD', 1.00000000, 0, 0, 0, 0,
+ '2026-07-28T09:10:00+00', 'VALUED', 1, repeat('a', 64), '2026-07-28T09:10:00+00');
+
+INSERT INTO trading.partition_budget_projections (
+    partition_id, bot_id, currency_code, budget_cap_amount, active_reservation_amount,
+    invested_amount, segregated_short_proceeds_amount, short_collateral_amount,
+    valuation_at, valuation_status, last_event_sequence, projection_hash, updated_at
+) VALUES
+('c0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'USD', 500.00000000, 100.00000000, 100.25000000, 0, 0, '2026-07-28T09:10:00+00',
+ 'VALUED', 12, repeat('a', 64), '2026-07-28T09:10:00+00'),
+('c0000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'USD', 500.00000000, 0, 0, 0, 0, '2026-07-28T09:10:00+00', 'VALUED', 4,
+ repeat('a', 64), '2026-07-28T09:10:00+00'),
+('c0000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000002',
+ 'USD', 500.00000000, 0, 0, 0, 0, '2026-07-28T09:10:00+00', 'VALUED', 2,
+ repeat('a', 64), '2026-07-28T09:10:00+00');
+
+INSERT INTO trading.flow_position_projections (
+    flow_id, partition_id, bot_id, instrument_id, long_quantity, short_quantity,
+    cost_basis_amount, last_event_sequence, projection_hash, updated_at
+) VALUES
+('d0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001',
+ 'b0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000001',
+ 10.00000000, 0, 100.05000000, 9, repeat('a', 64), '2026-07-28T09:10:00+00'),
+('d0000000-0000-4000-8000-000000000002', 'c0000000-0000-4000-8000-000000000001',
+ 'b0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000001',
+ 5.00000000, 0, 50.03000000, 7, repeat('a', 64), '2026-07-28T09:10:00+00'),
+('d0000000-0000-4000-8000-000000000003', 'c0000000-0000-4000-8000-000000000002',
+ 'b0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000001',
+ 3.00000000, 0, 30.00000000, 2, repeat('a', 64), '2026-07-28T09:10:00+00');
+
+INSERT INTO trading.partition_position_projections (
+    partition_id, bot_id, instrument_id, net_quantity, average_cost, realized_pnl,
+    last_valuation_price, last_valuation_at, valuation_status, last_bot_event_sequence,
+    updated_at
+) VALUES
+('c0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'e0000000-0000-4000-8000-000000000001', 15.00000000, 10.00500000, 0,
+ 10.10000000, '2026-07-28T09:10:00+00', 'VALUED', 12, '2026-07-28T09:10:00+00'),
+('c0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'e0000000-0000-4000-8000-000000000002', 2.00000000, 20.00000000, 0,
+ 20.50000000, '2026-07-28T09:10:00+00', 'VALUED', 12, '2026-07-28T09:10:00+00'),
+('c0000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'e0000000-0000-4000-8000-000000000001', 3.00000000, 10.00000000, 0,
+ 10.10000000, '2026-07-28T09:10:00+00', 'VALUED', 4, '2026-07-28T09:10:00+00');
+
+INSERT INTO trading.order_intent_batches (
+    id, bot_id, partition_id, source_event_id, status, conflict_policy_hash,
+    composition_rules_version, input_state_hash, result_hash, finalized_at
+) VALUES
+('11000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000001',
+ 'FINALIZED', repeat('a', 64), '1.0.0', repeat('a', 64), repeat('b', 64),
+ '2026-07-28T09:00:00+00'),
+('11000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000002', '90000000-0000-4000-8000-000000000002',
+ 'FINALIZED', repeat('a', 64), '1.0.0', repeat('a', 64), repeat('b', 64),
+ '2026-07-28T09:00:00+00');
+
+INSERT INTO trading.order_intents (
+    id, bot_id, batch_id, source_event_id, origin_type, evaluation_run_id,
+    partition_id, flow_id, instrument_id, intent_key, side, position_effect,
+    order_type, time_in_force, requested_quantity, approved_quantity,
+    post_netting_quantity, final_quantity, decision, decision_reason_code
+) VALUES
+-- Executed intent of the requested flow.
+('12000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ '11000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000001',
+ 'FLOW_EVALUATION', '91000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+ 'e0000000-0000-4000-8000-000000000001', 'P1:FLOW1:BUY:1', 'BUY', 'OPEN_LONG',
+ 'MARKET', 'DAY', 12, 12, 12, 12, 'APPROVED', 'WITHIN_PARTITION_BUDGET'),
+-- Executed intent of the sibling flow in the same partition.
+('12000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ '11000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000001',
+ 'FLOW_EVALUATION', '91000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000002',
+ 'e0000000-0000-4000-8000-000000000001', 'P1:FLOW2:BUY:1', 'BUY', 'OPEN_LONG',
+ 'MARKET', 'DAY', 5, 5, 5, 5, 'APPROVED', 'WITHIN_PARTITION_BUDGET'),
+-- Rejection reason of the requested flow.
+('12000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001',
+ '11000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000001',
+ 'FLOW_EVALUATION', '91000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+ 'e0000000-0000-4000-8000-000000000001', 'P1:FLOW1:BUY:2', 'BUY', 'OPEN_LONG',
+ 'MARKET', 'DAY', 40, 0, 0, NULL, 'REJECTED', 'PARTITION_BUDGET_EXCEEDED'),
+-- Reduction reason of the requested flow.
+('12000000-0000-4000-8000-000000000004', 'b0000000-0000-4000-8000-000000000001',
+ '11000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000001',
+ 'FLOW_EVALUATION', '91000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+ 'e0000000-0000-4000-8000-000000000001', 'P1:FLOW1:BUY:3', 'BUY', 'OPEN_LONG',
+ 'MARKET', 'DAY', 20, 20, 20, 10, 'REDUCED', 'RISK_LIMIT_REDUCED'),
+-- Expired order intent of the sibling flow.
+('12000000-0000-4000-8000-000000000005', 'b0000000-0000-4000-8000-000000000001',
+ '11000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000001',
+ 'FLOW_EVALUATION', '91000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000002',
+ 'e0000000-0000-4000-8000-000000000001', 'P1:FLOW2:BUY:2', 'BUY', 'OPEN_LONG',
+ 'MARKET', 'DAY', 3, 3, 3, 3, 'APPROVED', 'WITHIN_PARTITION_BUDGET'),
+-- Rejection reason of the sibling partition.
+('12000000-0000-4000-8000-000000000006', 'b0000000-0000-4000-8000-000000000001',
+ '11000000-0000-4000-8000-000000000002', '90000000-0000-4000-8000-000000000002',
+ 'FLOW_EVALUATION', '91000000-0000-4000-8000-000000000002',
+ 'c0000000-0000-4000-8000-000000000002', 'd0000000-0000-4000-8000-000000000003',
+ 'e0000000-0000-4000-8000-000000000001', 'P2:FLOW3:BUY:1', 'BUY', 'OPEN_LONG',
+ 'MARKET', 'DAY', 40, 0, 0, NULL, 'REJECTED', 'PARTITION_BUDGET_EXCEEDED');
+
+INSERT INTO trading.orders (
+    id, bot_id, partition_id, instrument_id, order_key, side, order_type,
+    time_in_force, requested_quantity, broker_rules_version, precision_rules_version,
+    slippage_rate_bps, fee_policy_id, accepted_event_id, accepted_at, contract_hash
+) VALUES
+('13000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000001',
+ 'P1:FLOW1:ORDER:1', 'BUY', 'MARKET', 'DAY', 12, '1.0.0', '1.0.0', 5,
+ '92000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000011',
+ '2026-07-28T09:01:00+00', repeat('c', 64)),
+('13000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000001',
+ 'P1:FLOW2:ORDER:1', 'BUY', 'MARKET', 'DAY', 5, '1.0.0', '1.0.0', 5,
+ '92000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000012',
+ '2026-07-28T09:02:00+00', repeat('c', 64)),
+('13000000-0000-4000-8000-000000000004', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000001',
+ 'P1:FLOW2:ORDER:2', 'BUY', 'MARKET', 'DAY', 3, '1.0.0', '1.0.0', 5,
+ '92000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000014',
+ '2026-07-28T09:03:00+00', repeat('c', 64));
+
+INSERT INTO trading.order_components (
+    id, bot_id, partition_id, order_id, intent_id, component_quantity,
+    component_sequence, composition_rules_version
+) VALUES
+('14000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '13000000-0000-4000-8000-000000000001',
+ '12000000-0000-4000-8000-000000000001', 12, 1, '1.0.0'),
+('14000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '13000000-0000-4000-8000-000000000002',
+ '12000000-0000-4000-8000-000000000002', 5, 1, '1.0.0'),
+('14000000-0000-4000-8000-000000000004', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '13000000-0000-4000-8000-000000000004',
+ '12000000-0000-4000-8000-000000000005', 3, 1, '1.0.0');
+
+INSERT INTO trading.order_state_projections (
+    order_id, bot_id, partition_id, status, filled_quantity, remaining_quantity,
+    reserved_cash, reserved_quantity, last_order_event_sequence,
+    last_bot_event_sequence, updated_at
+) VALUES
+-- Partially filled and then withdrawn by an automatic replacement.
+('13000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'CANCELLED', 10, 0, 0, 0, 3, 9,
+ '2026-07-28T09:07:00+00'),
+('13000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'FILLED', 5, 0, 0, 0, 2, 7,
+ '2026-07-28T09:06:00+00'),
+('13000000-0000-4000-8000-000000000004', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'EXPIRED', 0, 0, 0, 0, 2, 8,
+ '2026-07-28T09:08:00+00');
+
+-- Two individual partial fills of the requested flow's order must never collapse.
+INSERT INTO trading.fills (
+    id, order_id, bot_id, partition_id, bot_event_id, provider_fill_key, quantity,
+    reference_price, reference_observed_at, reference_market_hash, slippage_rate_bps,
+    slippage_amount, fill_price, gross_amount, fee_policy_id, fee_rate_bps,
+    precision_rules_version, fee_basis_amount, fee_amount, settlement_cash_delta,
+    occurred_at
+) VALUES
+('15000000-0000-4000-8000-000000000001', '13000000-0000-4000-8000-000000000001',
+ 'b0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001',
+ '93000000-0000-4000-8000-000000000001', 'SIM:FILL:P1:FLOW1:1', 4, 10.00000000,
+ '2026-07-28T09:04:00+00', repeat('d', 64), 5, 0.02000000, 10.00500000, 40.02000000,
+ '92000000-0000-4000-8000-000000000001', 20, '1.0.0', 40.02000000, 0.08000000,
+ -40.10000000, '2026-07-28T09:04:00+00'),
+('15000000-0000-4000-8000-000000000002', '13000000-0000-4000-8000-000000000001',
+ 'b0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001',
+ '93000000-0000-4000-8000-000000000002', 'SIM:FILL:P1:FLOW1:2', 6, 10.00000000,
+ '2026-07-28T09:05:00+00', repeat('d', 64), 5, 0.03000000, 10.00500000, 60.03000000,
+ '92000000-0000-4000-8000-000000000001', 20, '1.0.0', 60.03000000, 0.12000000,
+ -60.15000000, '2026-07-28T09:05:00+00'),
+('15000000-0000-4000-8000-000000000003', '13000000-0000-4000-8000-000000000002',
+ 'b0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001',
+ '93000000-0000-4000-8000-000000000003', 'SIM:FILL:P1:FLOW2:1', 5, 10.00000000,
+ '2026-07-28T09:06:00+00', repeat('d', 64), 5, 0.03000000, 10.00500000, 50.03000000,
+ '92000000-0000-4000-8000-000000000001', 20, '1.0.0', 50.03000000, 0.10000000,
+ -50.13000000, '2026-07-28T09:06:00+00');
+
+INSERT INTO trading.fill_component_allocations (
+    id, bot_id, partition_id, order_id, fill_id, order_component_id,
+    allocation_sequence, allocated_quantity, allocated_gross_amount,
+    allocated_fee_amount, allocated_settlement_cash_delta, allocation_rules_version
+) VALUES
+('16000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '13000000-0000-4000-8000-000000000001',
+ '15000000-0000-4000-8000-000000000001', '14000000-0000-4000-8000-000000000001',
+ 1, 4, 40.02000000, 0.08000000, -40.10000000, '1.0.0'),
+('16000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '13000000-0000-4000-8000-000000000001',
+ '15000000-0000-4000-8000-000000000002', '14000000-0000-4000-8000-000000000001',
+ 1, 6, 60.03000000, 0.12000000, -60.15000000, '1.0.0'),
+('16000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '13000000-0000-4000-8000-000000000002',
+ '15000000-0000-4000-8000-000000000003', '14000000-0000-4000-8000-000000000002',
+ 1, 5, 50.03000000, 0.10000000, -50.13000000, '1.0.0');
+
+INSERT INTO trading.ledger_accounts (
+    id, bot_id, account_key, partition_id, flow_id, account_type, currency_code,
+    instrument_id, created_at
+) VALUES
+('17000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'BOT1:P1:FLOW1:CASH:USD', 'c0000000-0000-4000-8000-000000000001',
+ 'd0000000-0000-4000-8000-000000000001', 'CASH', 'USD', NULL,
+ '2026-07-28T09:00:00+00'),
+('17000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'BOT1:P1:FLOW1:POSITION:INSTR1', 'c0000000-0000-4000-8000-000000000001',
+ 'd0000000-0000-4000-8000-000000000001', 'POSITION', NULL,
+ 'e0000000-0000-4000-8000-000000000001', '2026-07-28T09:00:00+00'),
+('17000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001',
+ 'BOT1:P1:FLOW2:CASH:USD', 'c0000000-0000-4000-8000-000000000001',
+ 'd0000000-0000-4000-8000-000000000002', 'CASH', 'USD', NULL,
+ '2026-07-28T09:00:00+00'),
+('17000000-0000-4000-8000-000000000004', 'b0000000-0000-4000-8000-000000000001',
+ 'BOT1:P1:FLOW2:POSITION:INSTR1', 'c0000000-0000-4000-8000-000000000001',
+ 'd0000000-0000-4000-8000-000000000002', 'POSITION', NULL,
+ 'e0000000-0000-4000-8000-000000000001', '2026-07-28T09:00:00+00');
+
+INSERT INTO trading.ledger_transactions (
+    id, bot_id, partition_id, bot_event_id, transaction_type, transaction_key,
+    source_type, source_id, currency_code, occurred_at, description_code
+) VALUES
+('18000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '94000000-0000-4000-8000-000000000001',
+ 'FILL_SETTLEMENT', 'BOT1:FILL:1', 'FILL', '15000000-0000-4000-8000-000000000001',
+ 'USD', '2026-07-28T09:04:00+00', 'BUY_FILL_SETTLED'),
+('18000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '94000000-0000-4000-8000-000000000002',
+ 'FILL_SETTLEMENT', 'BOT1:FILL:2', 'FILL', '15000000-0000-4000-8000-000000000002',
+ 'USD', '2026-07-28T09:05:00+00', 'BUY_FILL_SETTLED'),
+('18000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '94000000-0000-4000-8000-000000000003',
+ 'FILL_SETTLEMENT', 'BOT1:FILL:3', 'FILL', '15000000-0000-4000-8000-000000000003',
+ 'USD', '2026-07-28T09:06:00+00', 'BUY_FILL_SETTLED');
+
+INSERT INTO trading.ledger_entries (
+    id, bot_id, partition_id, transaction_id, ledger_account_id, order_component_id,
+    entry_sequence, direction, amount, quantity, entry_hash
+) VALUES
+('19000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000001',
+ '17000000-0000-4000-8000-000000000001', '14000000-0000-4000-8000-000000000001',
+ 1, 'CREDIT', 40.10000000, NULL, repeat('e', 64)),
+('19000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000001',
+ '17000000-0000-4000-8000-000000000002', '14000000-0000-4000-8000-000000000001',
+ 2, 'DEBIT', 40.10000000, 4.00000000, repeat('e', 64)),
+('19000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002',
+ '17000000-0000-4000-8000-000000000001', '14000000-0000-4000-8000-000000000001',
+ 1, 'CREDIT', 60.15000000, NULL, repeat('e', 64)),
+('19000000-0000-4000-8000-000000000004', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002',
+ '17000000-0000-4000-8000-000000000002', '14000000-0000-4000-8000-000000000001',
+ 2, 'DEBIT', 60.15000000, 6.00000000, repeat('e', 64)),
+-- Sibling flow ledger lines in the same partition must stay invisible.
+('19000000-0000-4000-8000-000000000005', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000003',
+ '17000000-0000-4000-8000-000000000003', '14000000-0000-4000-8000-000000000002',
+ 1, 'CREDIT', 50.13000000, NULL, repeat('e', 64)),
+('19000000-0000-4000-8000-000000000006', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000003',
+ '17000000-0000-4000-8000-000000000004', '14000000-0000-4000-8000-000000000002',
+ 2, 'DEBIT', 50.13000000, 5.00000000, repeat('e', 64));
+
+INSERT INTO trading.resource_reservations (
+    id, reservation_key, bot_id, partition_id, flow_id, intent_id, resource_type,
+    currency_code, buffer_policy_id, fee_policy_id, precision_rules_version, status,
+    reserved_amount, consumed_amount, released_amount, created_event_id, created_at,
+    last_event_sequence
+) VALUES
+('1c000000-0000-4000-8000-000000000001', 'P1:FLOW1:CASH:1',
+ 'b0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001',
+ 'd0000000-0000-4000-8000-000000000001', '12000000-0000-4000-8000-000000000001',
+ 'CASH_BUYING_POWER', 'USD', '92000000-0000-4000-8000-000000000002',
+ '92000000-0000-4000-8000-000000000001', '1.0.0', 'ACTIVE', 120.00000000,
+ 100.25000000, 0, '90000000-0000-4000-8000-000000000021', '2026-07-28T09:01:00+00', 3),
+('1c000000-0000-4000-8000-000000000002', 'P1:FLOW2:CASH:1',
+ 'b0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001',
+ 'd0000000-0000-4000-8000-000000000002', '12000000-0000-4000-8000-000000000002',
+ 'CASH_BUYING_POWER', 'USD', '92000000-0000-4000-8000-000000000002',
+ '92000000-0000-4000-8000-000000000001', '1.0.0', 'ACTIVE', 60.00000000,
+ 50.13000000, 0, '90000000-0000-4000-8000-000000000022', '2026-07-28T09:02:00+00', 3);
+
+INSERT INTO trading.order_events (
+    id, bot_id, partition_id, order_id, bot_event_id, order_sequence, event_type,
+    previous_status, new_status, reason_code, occurred_at, event_document
+) VALUES
+('1a000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '13000000-0000-4000-8000-000000000001',
+ '95000000-0000-4000-8000-000000000001', 3, 'ORDER_CANCELLED', 'OPEN', 'CANCELLED',
+ 'REPLACED_BY_AUTOMATIC_REPLACEMENT', '2026-07-28T09:07:00+00', '{}'),
+-- Sibling flow terminal reason in the same partition must stay invisible.
+('1a000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', '13000000-0000-4000-8000-000000000004',
+ '95000000-0000-4000-8000-000000000002', 2, 'ORDER_EXPIRED', 'OPEN', 'EXPIRED',
+ 'DAY_SESSION_CLOSE', '2026-07-28T09:08:00+00', '{}');
+
+INSERT INTO trading.system_close_actions (
+    id, bot_id, partition_id, flow_id, instrument_id, source_event_id, reason_type,
+    requested_quantity, generated_intent_id, reason_document, calculation_hash,
+    created_at
+) VALUES
+('1b000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+ 'e0000000-0000-4000-8000-000000000001', '96000000-0000-4000-8000-000000000001',
+ 'BOT_STOP', 10, '12000000-0000-4000-8000-000000000009',
+ '{"trigger":"owner requested stop"}', repeat('a', 64), '2026-07-28T09:09:00+00'),
+-- Sibling partition settlement must stay invisible.
+('1b000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+ 'c0000000-0000-4000-8000-000000000002', 'd0000000-0000-4000-8000-000000000003',
+ 'e0000000-0000-4000-8000-000000000001', '96000000-0000-4000-8000-000000000002',
+ 'RISK_LIMIT_BREACH', 3, '12000000-0000-4000-8000-000000000010',
+ '{"trigger":"risk limit"}', repeat('a', 64), '2026-07-28T09:09:30+00');
+
+SET session_replication_role = origin;
+
+PREPARE projection_bot_budget AS
+with owned_bot as (
+    select b.id as bot_id
+      from bot.bots b
+     where b.owner_account_id = cast($1 as uuid)
+       and b.id = cast($2 as uuid)
+       and b.deleted_at is null
+)
+select p.bot_id,
+       p.currency_code,
+       p.available_cash_amount,
+       p.active_reservation_amount,
+       p.invested_amount,
+       p.segregated_short_proceeds_amount,
+       p.short_collateral_amount,
+       p.valuation_at,
+       p.valuation_status,
+       p.last_event_sequence,
+       p.updated_at
+  from trading.bot_budget_projections p
+  join owned_bot ob on ob.bot_id = p.bot_id
+;
+
+PREPARE projection_flow_fills AS
+with owned_bot as (
+    select b.id as bot_id
+      from bot.bots b
+     where b.owner_account_id = cast($1 as uuid)
+       and b.id = cast($2 as uuid)
+       and b.deleted_at is null
+),
+scope as (
+    select ob.bot_id, p.id as partition_id, f.id as flow_id
+      from owned_bot ob
+      join bot.bot_partitions p
+        on p.bot_id = ob.bot_id
+       and p.id = cast($3 as uuid)
+      join bot.flows f
+        on f.partition_id = p.id
+       and f.id = cast($4 as uuid)
+)
+select f.id as fill_id,
+       f.order_id,
+       f.provider_fill_key,
+       f.quantity,
+       f.reference_price,
+       f.reference_observed_at,
+       f.slippage_rate_bps,
+       f.slippage_amount,
+       f.fill_price,
+       f.gross_amount,
+       f.fee_rate_bps,
+       f.fee_amount,
+       f.settlement_cash_delta,
+       f.occurred_at,
+       a.id as allocation_id,
+       a.allocation_sequence,
+       a.allocated_quantity,
+       a.allocated_gross_amount,
+       a.allocated_fee_amount,
+       a.allocated_settlement_cash_delta
+  from trading.fills f
+  join scope s
+    on s.bot_id = f.bot_id
+   and s.partition_id = f.partition_id
+  join trading.fill_component_allocations a
+    on a.fill_id = f.id
+   and a.bot_id = f.bot_id
+   and a.partition_id = f.partition_id
+  join trading.order_components c
+    on c.id = a.order_component_id
+   and c.bot_id = a.bot_id
+   and c.partition_id = a.partition_id
+  join trading.order_intents i
+    on i.id = c.intent_id
+   and i.flow_id = s.flow_id
+ order by f.occurred_at, f.id, a.allocation_sequence
+ limit $5 offset $6
+;
+
+PREPARE projection_flow_ledger_entries AS
+with owned_bot as (
+    select b.id as bot_id
+      from bot.bots b
+     where b.owner_account_id = cast($1 as uuid)
+       and b.id = cast($2 as uuid)
+       and b.deleted_at is null
+),
+scope as (
+    select ob.bot_id, p.id as partition_id, f.id as flow_id
+      from owned_bot ob
+      join bot.bot_partitions p
+        on p.bot_id = ob.bot_id
+       and p.id = cast($3 as uuid)
+      join bot.flows f
+        on f.partition_id = p.id
+       and f.id = cast($4 as uuid)
+)
+select t.id as transaction_id,
+       t.transaction_type,
+       t.transaction_key,
+       t.source_type,
+       t.source_id,
+       t.currency_code,
+       t.reversal_of_transaction_id,
+       t.occurred_at,
+       t.description_code,
+       e.id as entry_id,
+       e.entry_sequence,
+       e.direction,
+       e.amount,
+       e.quantity,
+       la.account_key,
+       la.account_type
+  from trading.ledger_transactions t
+  join scope s
+    on s.bot_id = t.bot_id
+   and s.partition_id = t.partition_id
+  join trading.ledger_entries e
+    on e.transaction_id = t.id
+   and e.bot_id = t.bot_id
+   and e.partition_id = t.partition_id
+  join trading.ledger_accounts la
+    on la.id = e.ledger_account_id
+   and la.bot_id = e.bot_id
+  join trading.order_components c
+    on c.id = e.order_component_id
+   and c.bot_id = e.bot_id
+   and c.partition_id = e.partition_id
+  join trading.order_intents i
+    on i.id = c.intent_id
+   and i.flow_id = s.flow_id
+ order by t.occurred_at, t.id, e.entry_sequence
+ limit $5 offset $6
+;
+
+PREPARE projection_flow_orders AS
+with owned_bot as (
+    select b.id as bot_id
+      from bot.bots b
+     where b.owner_account_id = cast($1 as uuid)
+       and b.id = cast($2 as uuid)
+       and b.deleted_at is null
+),
+scope as (
+    select ob.bot_id, p.id as partition_id, f.id as flow_id
+      from owned_bot ob
+      join bot.bot_partitions p
+        on p.bot_id = ob.bot_id
+       and p.id = cast($3 as uuid)
+      join bot.flows f
+        on f.partition_id = p.id
+       and f.id = cast($4 as uuid)
+)
+select o.id as order_id,
+       o.instrument_id,
+       o.order_key,
+       o.side,
+       o.order_type,
+       o.time_in_force,
+       o.requested_quantity,
+       o.limit_price,
+       o.stop_price,
+       o.accepted_at,
+       o.expires_at,
+       sp.status,
+       sp.filled_quantity,
+       sp.remaining_quantity,
+       sp.reserved_cash,
+       sp.reserved_quantity,
+       sp.last_order_event_sequence,
+       sp.updated_at
+  from trading.orders o
+  join scope s
+    on s.bot_id = o.bot_id
+   and s.partition_id = o.partition_id
+  join trading.order_state_projections sp
+    on sp.order_id = o.id
+   and sp.bot_id = o.bot_id
+   and sp.partition_id = o.partition_id
+ where exists (
+           select 1
+             from trading.order_components c
+             join trading.order_intents i
+               on i.id = c.intent_id
+            where c.order_id = o.id
+              and c.bot_id = o.bot_id
+              and c.partition_id = o.partition_id
+              and i.flow_id = s.flow_id
+       )
+ order by o.accepted_at, o.id
+ limit $5 offset $6
+;
+
+PREPARE projection_flow_positions AS
+with owned_bot as (
+    select b.id as bot_id
+      from bot.bots b
+     where b.owner_account_id = cast($1 as uuid)
+       and b.id = cast($2 as uuid)
+       and b.deleted_at is null
+),
+scope as (
+    select ob.bot_id, p.id as partition_id, f.id as flow_id
+      from owned_bot ob
+      join bot.bot_partitions p
+        on p.bot_id = ob.bot_id
+       and p.id = cast($3 as uuid)
+      join bot.flows f
+        on f.partition_id = p.id
+       and f.id = cast($4 as uuid)
+)
+select p.instrument_id,
+       p.long_quantity,
+       p.short_quantity,
+       p.cost_basis_amount,
+       p.last_event_sequence,
+       p.projection_hash,
+       p.updated_at
+  from trading.flow_position_projections p
+  join scope s
+    on s.bot_id = p.bot_id
+   and s.partition_id = p.partition_id
+   and s.flow_id = p.flow_id
+ order by p.instrument_id
+ limit $5 offset $6
+;
+
+PREPARE projection_flow_reasons AS
+with owned_bot as (
+    select b.id as bot_id
+      from bot.bots b
+     where b.owner_account_id = cast($1 as uuid)
+       and b.id = cast($2 as uuid)
+       and b.deleted_at is null
+),
+scope as (
+    select ob.bot_id, p.id as partition_id, f.id as flow_id
+      from owned_bot ob
+      join bot.bot_partitions p
+        on p.bot_id = ob.bot_id
+       and p.id = cast($3 as uuid)
+      join bot.flows f
+        on f.partition_id = p.id
+       and f.id = cast($4 as uuid)
+)
+select r.reason_id,
+       r.order_id,
+       r.scope_level,
+       r.reason_type,
+       r.reason_code,
+       r.detail,
+       r.occurred_at
+  from (
+        select i.id as reason_id,
+               null::uuid as order_id,
+               'FLOW' as scope_level,
+               'REJECTION' as reason_type,
+               i.decision_reason_code as reason_code,
+               i.decision::text as detail,
+               ib.finalized_at as occurred_at
+          from trading.order_intents i
+          join scope s
+            on s.bot_id = i.bot_id
+           and s.partition_id = i.partition_id
+           and s.flow_id = i.flow_id
+          join trading.order_intent_batches ib
+            on ib.id = i.batch_id
+           and ib.bot_id = i.bot_id
+           and ib.partition_id = i.partition_id
+         where i.decision in ('REJECTED', 'CONFLICTED')
+
+        union all
+
+        select i.id,
+               null::uuid,
+               'FLOW',
+               'RESIZE',
+               i.decision_reason_code,
+               concat_ws(
+                   '/',
+                   coalesce(i.requested_quantity, i.requested_notional)::text,
+                   i.post_netting_quantity::text,
+                   coalesce(i.final_quantity, i.final_notional, 0)::text),
+               ib.finalized_at
+          from trading.order_intents i
+          join scope s
+            on s.bot_id = i.bot_id
+           and s.partition_id = i.partition_id
+           and s.flow_id = i.flow_id
+          join trading.order_intent_batches ib
+            on ib.id = i.batch_id
+           and ib.bot_id = i.bot_id
+           and ib.partition_id = i.partition_id
+         where i.decision in ('REDUCED', 'NETTED')
+
+        union all
+
+        select oe.id,
+               oe.order_id,
+               'FLOW',
+               case when oe.new_status = 'REJECTED' then 'REJECTION'
+                    else 'SETTLEMENT' end,
+               oe.reason_code,
+               oe.event_type,
+               oe.occurred_at
+          from trading.order_events oe
+          join scope s
+            on s.bot_id = oe.bot_id
+           and s.partition_id = oe.partition_id
+         where oe.reason_code is not null
+           and oe.new_status in ('REJECTED', 'CANCELLED', 'EXPIRED')
+           and exists (
+                   select 1
+                     from trading.order_components c
+                     join trading.order_intents i
+                       on i.id = c.intent_id
+                    where c.order_id = oe.order_id
+                      and c.bot_id = oe.bot_id
+                      and c.partition_id = oe.partition_id
+                      and i.flow_id = s.flow_id
+               )
+
+        union all
+
+        select sca.id,
+               null::uuid,
+               'FLOW',
+               'SETTLEMENT',
+               sca.reason_type::text,
+               sca.reason_document::text,
+               sca.created_at
+          from trading.system_close_actions sca
+          join scope s
+            on s.bot_id = sca.bot_id
+           and s.partition_id = sca.partition_id
+           and s.flow_id = sca.flow_id
+       ) r
+ order by r.occurred_at, r.reason_type, r.reason_id
+ limit $5 offset $6
+;
+
+PREPARE projection_flow_reservations AS
+with owned_bot as (
+    select b.id as bot_id
+      from bot.bots b
+     where b.owner_account_id = cast($1 as uuid)
+       and b.id = cast($2 as uuid)
+       and b.deleted_at is null
+),
+scope as (
+    select ob.bot_id, p.id as partition_id, f.id as flow_id
+      from owned_bot ob
+      join bot.bot_partitions p
+        on p.bot_id = ob.bot_id
+       and p.id = cast($3 as uuid)
+      join bot.flows f
+        on f.partition_id = p.id
+       and f.id = cast($4 as uuid)
+)
+select r.id as reservation_id,
+       r.reservation_key,
+       r.intent_id,
+       r.resource_type,
+       r.status,
+       r.currency_code,
+       r.instrument_id,
+       r.reserved_amount,
+       r.consumed_amount,
+       r.released_amount,
+       r.reserved_quantity,
+       r.consumed_quantity,
+       r.released_quantity,
+       r.created_at,
+       r.last_event_sequence
+  from trading.resource_reservations r
+  join scope s
+    on s.bot_id = r.bot_id
+   and s.partition_id = r.partition_id
+   and s.flow_id = r.flow_id
+ order by r.created_at, r.id
+ limit $5 offset $6
+;
+
+PREPARE projection_partition_budgets AS
+with owned_bot as (
+    select b.id as bot_id
+      from bot.bots b
+     where b.owner_account_id = cast($1 as uuid)
+       and b.id = cast($2 as uuid)
+       and b.deleted_at is null
+)
+select p.bot_id,
+       p.partition_id,
+       p.currency_code,
+       p.budget_cap_amount,
+       p.active_reservation_amount,
+       p.invested_amount,
+       p.segregated_short_proceeds_amount,
+       p.short_collateral_amount,
+       p.valuation_at,
+       p.valuation_status,
+       p.last_event_sequence,
+       p.updated_at
+  from trading.partition_budget_projections p
+  join owned_bot ob on ob.bot_id = p.bot_id
+ order by p.partition_id
+ limit $3 offset $4
+;
+
+PREPARE projection_partition_positions AS
+with owned_bot as (
+    select b.id as bot_id
+      from bot.bots b
+     where b.owner_account_id = cast($1 as uuid)
+       and b.id = cast($2 as uuid)
+       and b.deleted_at is null
+),
+scope as (
+    select ob.bot_id, p.id as partition_id
+      from owned_bot ob
+      join bot.bot_partitions p
+        on p.bot_id = ob.bot_id
+       and p.id = cast($3 as uuid)
+)
+select p.instrument_id,
+       p.net_quantity,
+       p.average_cost,
+       p.realized_pnl,
+       p.last_valuation_price,
+       p.last_valuation_at,
+       p.valuation_status,
+       p.last_bot_event_sequence,
+       p.updated_at
+  from trading.partition_position_projections p
+  join scope s
+    on s.bot_id = p.bot_id
+   and s.partition_id = p.partition_id
+ order by p.instrument_id
+ limit $4 offset $5
+;
+
+-- The owner of bot b0000000-...-0001 reading partition c0000000-...-0001 and
+-- flow d0000000-...-0001.
+CREATE TEMP TABLE owner_bot_budget AS
+EXECUTE projection_bot_budget(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001');
+
+CREATE TEMP TABLE owner_partition_budgets AS
+EXECUTE projection_partition_budgets(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    50, 0);
+
+CREATE TEMP TABLE owner_flow_reservations AS
+EXECUTE projection_flow_reservations(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+    50, 0);
+
+CREATE TEMP TABLE owner_flow_positions AS
+EXECUTE projection_flow_positions(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+    50, 0);
+
+CREATE TEMP TABLE owner_partition_positions AS
+EXECUTE projection_partition_positions(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 50, 0);
+
+CREATE TEMP TABLE owner_flow_orders AS
+EXECUTE projection_flow_orders(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+    50, 0);
+
+CREATE TEMP TABLE owner_flow_fills AS
+EXECUTE projection_flow_fills(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+    50, 0);
+
+CREATE TEMP TABLE owner_flow_ledger_entries AS
+EXECUTE projection_flow_ledger_entries(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+    50, 0);
+
+CREATE TEMP TABLE owner_flow_reasons AS
+EXECUTE projection_flow_reasons(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+    50, 0);
+
+-- The same reads issued by a different account, and by the owner against a
+-- logically deleted bot.
+CREATE TEMP TABLE stranger_bot_budget AS
+EXECUTE projection_bot_budget(
+    'a0000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001');
+
+CREATE TEMP TABLE stranger_flow_fills AS
+EXECUTE projection_flow_fills(
+    'a0000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+    50, 0);
+
+CREATE TEMP TABLE stranger_flow_reasons AS
+EXECUTE projection_flow_reasons(
+    'a0000000-0000-4000-8000-000000000002', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+    50, 0);
+
+CREATE TEMP TABLE deleted_bot_budget AS
+EXECUTE projection_bot_budget(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000003');
+
+-- A flow identifier that belongs to another partition must not widen the read.
+CREATE TEMP TABLE mismatched_flow_positions AS
+EXECUTE projection_flow_positions(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000003',
+    50, 0);
+
+-- Deterministic paging over the two individual fills of the requested flow.
+CREATE TEMP TABLE owner_flow_fills_page_one AS
+EXECUTE projection_flow_fills(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+    1, 0);
+
+CREATE TEMP TABLE owner_flow_fills_page_two AS
+EXECUTE projection_flow_fills(
+    'a0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001', 'd0000000-0000-4000-8000-000000000001',
+    1, 1);
+
+DO $$
+DECLARE
+    actual text;
+BEGIN
+    -- Budgets.
+    IF (SELECT count(*) FROM owner_bot_budget) <> 1
+        OR (SELECT available_cash_amount FROM owner_bot_budget) <> 900.00000000 THEN
+        RAISE EXCEPTION 'bot budget projection did not return the owned bot budget';
+    END IF;
+    IF (SELECT count(*) FROM owner_partition_budgets) <> 2 THEN
+        RAISE EXCEPTION 'partition budgets must list exactly the two owned partitions';
+    END IF;
+    SELECT string_agg(partition_id::text, ',') INTO actual FROM owner_partition_budgets;
+    IF actual <> 'c0000000-0000-4000-8000-000000000001,'
+                 || 'c0000000-0000-4000-8000-000000000002' THEN
+        RAISE EXCEPTION 'partition budgets are not deterministically ordered: %', actual;
+    END IF;
+
+    -- Reservations behind the flow budget.
+    IF (SELECT count(*) FROM owner_flow_reservations) <> 1
+        OR (SELECT reservation_key FROM owner_flow_reservations) <> 'P1:FLOW1:CASH:1' THEN
+        RAISE EXCEPTION 'flow reservations leaked across flows';
+    END IF;
+
+    -- Positions.
+    IF (SELECT count(*) FROM owner_flow_positions) <> 1
+        OR (SELECT long_quantity FROM owner_flow_positions) <> 10.00000000 THEN
+        RAISE EXCEPTION 'flow positions leaked across flows';
+    END IF;
+    IF (SELECT count(*) FROM owner_partition_positions) <> 2 THEN
+        RAISE EXCEPTION 'partition positions leaked across partitions';
+    END IF;
+    SELECT string_agg(instrument_id::text, ',') INTO actual FROM owner_partition_positions;
+    IF actual <> 'e0000000-0000-4000-8000-000000000001,'
+                 || 'e0000000-0000-4000-8000-000000000002' THEN
+        RAISE EXCEPTION 'partition positions are not deterministically ordered: %', actual;
+    END IF;
+
+    -- Orders. Only the order carrying a component of the requested flow.
+    IF (SELECT count(*) FROM owner_flow_orders) <> 1 THEN
+        RAISE EXCEPTION 'flow orders leaked across flows in the same partition';
+    END IF;
+    IF (SELECT order_id FROM owner_flow_orders)
+        <> '13000000-0000-4000-8000-000000000001' THEN
+        RAISE EXCEPTION 'flow orders returned the wrong order';
+    END IF;
+    IF (SELECT status FROM owner_flow_orders)::text <> 'CANCELLED'
+        OR (SELECT filled_quantity FROM owner_flow_orders) <> 10
+        OR (SELECT requested_quantity FROM owner_flow_orders) <> 12 THEN
+        RAISE EXCEPTION 'flow orders lost the rebuildable partial fill state';
+    END IF;
+
+    -- Individual fills stay individual and keep their exact allocation economics.
+    IF (SELECT count(*) FROM owner_flow_fills) <> 2 THEN
+        RAISE EXCEPTION 'individual fills were collapsed or leaked';
+    END IF;
+    SELECT string_agg(quantity::text, ',' ORDER BY occurred_at) INTO actual
+      FROM owner_flow_fills;
+    IF actual <> '4.00000000,6.00000000' THEN
+        RAISE EXCEPTION 'individual fills are not deterministically ordered: %', actual;
+    END IF;
+    IF (SELECT sum(allocated_settlement_cash_delta) FROM owner_flow_fills)
+        <> -100.25000000 THEN
+        RAISE EXCEPTION 'flow attributed fill economics are wrong';
+    END IF;
+
+    -- Official ledger lines of the requested flow only.
+    IF (SELECT count(*) FROM owner_flow_ledger_entries) <> 4 THEN
+        RAISE EXCEPTION 'official ledger entries leaked across flows';
+    END IF;
+    SELECT string_agg(entry_sequence::text, ',' ORDER BY occurred_at, transaction_id,
+                      entry_sequence) INTO actual FROM owner_flow_ledger_entries;
+    IF actual <> '1,2,1,2' THEN
+        RAISE EXCEPTION 'ledger entry order was not preserved: %', actual;
+    END IF;
+    IF (SELECT sum(amount) FROM owner_flow_ledger_entries
+         WHERE direction = 'DEBIT') <> 100.25000000
+        OR (SELECT sum(amount) FROM owner_flow_ledger_entries
+             WHERE direction = 'CREDIT') <> 100.25000000 THEN
+        RAISE EXCEPTION 'the flow ledger view is not balanced';
+    END IF;
+
+    -- Rejection, reduction and settlement reasons.
+    IF (SELECT count(*) FROM owner_flow_reasons) <> 4 THEN
+        RAISE EXCEPTION 'flow reasons leaked or lost rows: %',
+            (SELECT count(*) FROM owner_flow_reasons);
+    END IF;
+    SELECT string_agg(reason_type || ':' || reason_code, ','
+                      ORDER BY occurred_at, reason_type, reason_id) INTO actual
+      FROM owner_flow_reasons;
+    IF actual <> 'REJECTION:PARTITION_BUDGET_EXCEEDED,'
+                 || 'RESIZE:RISK_LIMIT_REDUCED,'
+                 || 'SETTLEMENT:REPLACED_BY_AUTOMATIC_REPLACEMENT,'
+                 || 'SETTLEMENT:BOT_STOP' THEN
+        RAISE EXCEPTION 'flow reasons are wrong or misordered: %', actual;
+    END IF;
+    IF (SELECT detail FROM owner_flow_reasons WHERE reason_type = 'RESIZE')
+        <> '20.00000000/20.00000000/10.00000000' THEN
+        RAISE EXCEPTION 'the reduction reason lost its requested and final quantities';
+    END IF;
+
+    -- Ownership and lifecycle gates.
+    IF (SELECT count(*) FROM stranger_bot_budget) <> 0
+        OR (SELECT count(*) FROM stranger_flow_fills) <> 0
+        OR (SELECT count(*) FROM stranger_flow_reasons) <> 0 THEN
+        RAISE EXCEPTION 'another account could read this bot';
+    END IF;
+    IF (SELECT count(*) FROM deleted_bot_budget) <> 0 THEN
+        RAISE EXCEPTION 'a logically deleted bot was still readable';
+    END IF;
+    IF (SELECT count(*) FROM mismatched_flow_positions) <> 0 THEN
+        RAISE EXCEPTION 'a flow of another partition widened the read';
+    END IF;
+
+    -- Paging is deterministic and does not repeat or skip a fill.
+    IF (SELECT count(*) FROM owner_flow_fills_page_one) <> 1
+        OR (SELECT count(*) FROM owner_flow_fills_page_two) <> 1 THEN
+        RAISE EXCEPTION 'paged fill reads returned the wrong page size';
+    END IF;
+    IF (SELECT fill_id FROM owner_flow_fills_page_one)
+        = (SELECT fill_id FROM owner_flow_fills_page_two) THEN
+        RAISE EXCEPTION 'paged fill reads repeated the same fill';
+    END IF;
+    IF (SELECT quantity FROM owner_flow_fills_page_one) <> 4.00000000
+        OR (SELECT quantity FROM owner_flow_fills_page_two) <> 6.00000000 THEN
+        RAISE EXCEPTION 'paged fill reads are not in the contracted order';
+    END IF;
+END $$;
