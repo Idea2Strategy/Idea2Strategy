@@ -206,8 +206,8 @@ try {
     $tableCount = (docker exec -e "PGPASSWORD=$password" $container `
         psql -U $user -d $database -Atc `
         "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ($schemaList) AND table_type = 'BASE TABLE';").Trim()
-    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '139') {
-        throw "Expected 139 application tables after Flyway; found '$tableCount'."
+    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '145') {
+        throw "Expected 145 application tables after Flyway; found '$tableCount'."
     }
 
     docker cp $fixture "${container}:/tmp/partial_fill_allocation_contract.sql"
