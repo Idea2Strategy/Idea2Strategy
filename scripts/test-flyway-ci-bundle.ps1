@@ -43,6 +43,16 @@ if ($manifestLines.Count -lt 2 -or $manifestLines[0] -cne 'idea2strategy-flyway-
     throw 'Invalid pinned Flyway bundle manifest.'
 }
 
+function Get-Sha256OfText([string]$Text) {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($Text)
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
 function Get-NormalizedTextSha256([string]$Path) {
     $bytes = [System.IO.File]::ReadAllBytes($Path)
     $normalized = New-Object System.IO.MemoryStream
@@ -92,6 +102,26 @@ if ([string]::IsNullOrWhiteSpace($recordedReadContractDigest)) {
 $actualReadContractDigest = Get-NormalizedTextSha256 $readContractFixture
 if ($actualReadContractDigest -cne $recordedReadContractDigest) {
     throw 'The trading read projection contract fixture does not match its recorded digest.'
+}
+
+# The trading engine vendors this bundle as db/canonical-baseline so its own write-path tests can
+# stand up the canonical schema. Root CI checks out without submodules, so that copy is not present
+# here. It does not need to be: the baseline manifest is a deterministic function of these exact
+# migrations, so recomputing it proves whether the pinned copy is still in step with this bundle.
+# The trading engine's CanonicalBaselineContractTest guards the other direction, file by file.
+$recordedBaselineDigest = $metadata.canonical_baseline_sha256
+if ([string]::IsNullOrWhiteSpace($recordedBaselineDigest)) {
+    throw 'Pinned bundle metadata does not record the vendored canonical baseline digest.'
+}
+$baselineManifest = "idea2strategy-canonical-baseline-v1`n"
+foreach ($migration in (Get-ChildItem -LiteralPath $bundle -Filter '*.sql' | Sort-Object -Property Name -CaseSensitive)) {
+    $baselineManifest += "$($migration.Name)`t$(Get-NormalizedTextSha256 $migration.FullName)`n"
+}
+$expectedBaselineDigest = Get-Sha256OfText $baselineManifest
+if ($expectedBaselineDigest -cne $recordedBaselineDigest) {
+    throw ("The vendored canonical baseline is out of step with this bundle: expected " +
+        "$expectedBaselineDigest but the metadata records $recordedBaselineDigest. Refresh " +
+        'db/canonical-baseline in the trading engine and record its new digest in the same change.')
 }
 
 $suffix = [guid]::NewGuid().ToString('N').Substring(0, 12)
