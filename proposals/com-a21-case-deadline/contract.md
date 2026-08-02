@@ -48,4 +48,3 @@ An operator information request may open a bounded response window. Expiry retur
 - one event, one notification envelope, and one durable receipt;
 - backlog catch-up after downtime without early or missing transitions;
 - empty and upgrade migration coverage.
-

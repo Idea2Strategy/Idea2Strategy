@@ -18,4 +18,3 @@ This isolated proposal closes the product gap between A20 operator case handling
 3. A20 migration/application port implementation.
 4. A21 batch adapter wiring.
 5. A22 PostgreSQL race and restart E2E.
-
