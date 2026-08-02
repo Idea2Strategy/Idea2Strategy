@@ -1,7 +1,9 @@
 # 계정 수명주기 계약 v1 (검토안)
 
-상태: 제품 권한자 검토 대상  
-대상 이슈: Idea2Strategy/Idea2Strategy#107  
+상태: 제품 권한자 검토 대상
+
+대상 이슈: Idea2Strategy/Idea2Strategy#107
+
 범위: 이메일 또는 OIDC 인증을 마친 계정의 휴면, 탈퇴 요청·취소, 최종 종료, 보존 및 비식별 처리
 
 정본 근거: `docs/product-discovery.md` 66, 75~79, 1367번 결정과 `docs/backend-implementation-master-checklist.md` A12
