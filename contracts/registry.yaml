@@ -1,4 +1,91 @@
 schema_version: 1
 # product, business, behavior, interface, and data obligations are registered here.
 # The source file is canonical; fingerprint drift marks every declared dependent stale.
-contracts: []
+contracts:
+  - id: contract.identity.delegated-strategy-scope.v1
+    kind: business
+    status: approved
+    revision: 1
+    source: business/delegated-strategy-scope.v1.md
+    compatibility: additive
+    providers: [workspace.root]
+    consumers: [workspace.backend]
+    product_ids:
+      - role.strategy-author
+      - journey.strategy.author
+      - capability.strategy.basic
+      - policy.strategy.no-ai
+      - policy.strategy.immutable-release
+      - policy.user.no-direct-orders
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - role.strategy-author
+      - journey.strategy.author
+      - capability.strategy.basic
+      - policy.strategy.no-ai
+      - policy.strategy.immutable-release
+      - policy.user.no-direct-orders
+    fingerprint: sha256:0ff7acec31cd7b16f5e54e381b608383d211b103ca1c471c86f331d84d899e08
+  - id: contract.operations.operator-rbac.v1
+    kind: business
+    status: approved
+    revision: 1
+    source: business/operator-rbac.v1.md
+    compatibility: additive
+    providers: [workspace.root]
+    consumers: [workspace.backend]
+    product_ids:
+      - role.operator
+      - journey.operator.administer
+      - capability.audit.evidence
+    scenario_ids: [scenario.account.sanction]
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - role.operator
+      - journey.operator.administer
+      - capability.audit.evidence
+      - scenario.account.sanction
+    fingerprint: sha256:ec8b813a105d184ecda937844989695446b6b102d2a3cf23c6b2af35af86d659
+  - id: contract.operations.outbox-delivery.v1
+    kind: data
+    status: approved
+    revision: 1
+    source: data/outbox-delivery.v1.md
+    compatibility: additive
+    providers: [workspace.root]
+    consumers: [workspace.backend]
+    product_ids: [capability.audit.evidence]
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs: [capability.audit.evidence]
+    fingerprint: sha256:6372edf55f4a2de98f02ac2148ce9be167e9a04ea3671b26a6010b5e736cf0cb
+  - id: contract.operations.user-case.v1
+    kind: business
+    status: approved
+    revision: 1
+    source: business/user-case.v1.md
+    compatibility: additive
+    providers: [workspace.root]
+    consumers: [workspace.backend]
+    product_ids: [capability.audit.evidence]
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs: [capability.audit.evidence]
+    fingerprint: sha256:e760d465631f30eaac997f116efbd59be644d8ce546bed3f4b37e93773f7c49f
