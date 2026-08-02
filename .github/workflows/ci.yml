@@ -53,6 +53,7 @@ jobs:
         with:
           fetch-depth: 1
           submodules: recursive
+          token: ${{ secrets.SUBMODULE_READ_TOKEN }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
