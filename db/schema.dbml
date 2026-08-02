@@ -4105,11 +4105,11 @@ Table competition.leaderboard_entries {
   participation_id uuid [not null]
   performance_snapshot_id uuid
   backtest_aggregate_result_id uuid
-  rank int [not null]
+  rank int
   is_joint_rank boolean [not null, default: false]
   eligibility_status varchar(30) [not null]
   eligibility_reason_code varchar(80)
-  score numeric(24,10) [not null]
+  score numeric(24,10)
   tie_break_document jsonb [not null]
   calculation_document jsonb [not null]
 
