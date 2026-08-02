@@ -138,10 +138,12 @@
 
 모든 상태 변경 명령은 `Idempotency-Key`를 요구한다. 키 범위는 `(account_id, command_type, key)`이고 보존기간은 적어도 해당 명령의 재시도 가능 기간보다 길어야 한다.
 
-- 같은 키와 같은 정규화 요청은 최초 응답의 상태 코드와 결과를 반환한다.
+- 성공 또는 상태 변경 없는 성공(no-op)은 완성된 최초 응답을 불변 명령 영수증으로 저장한다. 같은 키와 같은 정규화 요청은 영수증의 동일한 상태 코드, 응답 코드, 응답 본문을 반환한다.
 - 같은 키에 다른 요청은 `409 IDEMPOTENCY_KEY_REUSED`로 거절한다.
+- 영수증은 `(account_id, command_type, key)`, 정규화 요청 hash, 응답 상태·코드·본문, 완료 시각을 고정한다. 상태가 변경된 성공은 같은 계정의 `lifecycle_event_id`를 함께 고정하고, no-op 성공은 사건 없이 `NULL`을 기록할 수 있다.
+- 실패 응답은 영수증에 안전하게 저장된 경우에만 재시도 시 동일하게 재현한다. 트랜잭션 예외로 롤백되어 영수증이 남지 않은 실패까지 재현한다고 보장하지 않는다.
 - 명령은 계정 현재 행을 `FOR UPDATE`로 잠근 뒤 현재 상태, deadline, 정책, 서비스 종료 조건을 다시 평가한다.
-- 현재 행의 `lifecycle_version`을 1 증가시키고 정확히 하나의 사건을 추가하는 작업은 한 DB 트랜잭션이다.
+- 상태 변경 성공은 현재 행의 `lifecycle_version`을 1 증가시키고 정확히 하나의 사건과 완성된 명령 영수증을 같은 DB 트랜잭션에 추가한다. no-op 성공은 현재 상태·버전을 바꾸지 않고 완성된 영수증만 추가한다.
 - 사건의 `(account_id, sequence)`는 유일하고 `sequence`는 1씩 증가한다. 사건에는 `from_state`, `to_state`, `lifecycle_version`, `occurred_at`, `actor_type`, `reason_code`, `correlation_id`, 정책 버전을 기록한다.
 - 상태를 바꾸는 사건의 마지막 `to_state`와 계정 현재 상태·버전은 항상 일치해야 한다. 분기된 sequence나 사건 없는 현재 상태 변경을 허용하지 않는다.
 - 탈퇴 요청과 취소가 동시에 도착하면 DB 잠금 획득 순서로 직렬화한다. 요청이 먼저면 취소는 새 deadline을 보고 판단한다. 취소가 먼저이고 아직 `CLOSING`이 아니면 `409 WITHDRAWAL_NOT_PENDING`이며 이후 요청을 방해하지 않는다.

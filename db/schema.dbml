@@ -507,6 +507,35 @@ Table identity.account_lifecycle_events {
   }
 }
 
+Table identity.account_lifecycle_command_receipts {
+  account_id uuid [not null]
+  command_type varchar(60) [not null]
+  idempotency_key varchar(160) [not null]
+  request_hash varchar(128) [not null]
+  response_status integer [not null]
+  response_code varchar(80)
+  response_document jsonb [not null]
+  lifecycle_event_id uuid
+  completed_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (account_id, command_type, idempotency_key) [pk]
+    (account_id, lifecycle_event_id)
+    (completed_at)
+  }
+
+  checks {
+    `length(btrim(command_type)) > 0 AND length(btrim(idempotency_key)) > 0 AND length(btrim(request_hash)) > 0` [name: 'account_lifecycle_command_receipt_identity_complete']
+    `response_status BETWEEN 200 AND 299` [name: 'account_lifecycle_command_receipt_success_status']
+  }
+
+  Note: '성공 또는 상태 변경 없는 성공(no-op) 수명주기 명령의 최초 완성 응답을 보관하는 불변 영수증. 같은 (account_id, command_type, idempotency_key)와 같은 request_hash 재시도는 저장된 상태 코드·응답 코드·본문을 그대로 반환하고, 다른 hash는 409 IDEMPOTENCY_KEY_REUSED로 거절한다. 상태 변경이 있으면 같은 계정의 lifecycle_event_id를 고정하고 no-op이면 NULL이다. INSERT 후 UPDATE·DELETE 금지는 PostgreSQL migration의 trigger와 서비스 권한으로 강제한다. 예외로 롤백된 실패는 안전하게 저장된 영수증이 아니므로 재현을 보장하지 않는다.'
+
+  Records (account_id, command_type, idempotency_key, request_hash, response_status, response_code, response_document, lifecycle_event_id, completed_at) {
+    '00000000-0000-4000-8000-000000000001', 'WITHDRAWAL_REQUESTED', 'review-example-withdrawal', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 202, null, '{"status":"CLOSING","lifecycleVersion":2}', '00000000-0000-4000-8000-000000000001', '2026-08-02T00:00:00Z'
+  }
+}
+
 Table identity.account_retention_policy_versions {
   version varchar(80) [pk]
   effective_from timestamptz [not null]
@@ -4271,6 +4300,8 @@ Table operations.case_events {
 Ref: identity.account_lifecycle_events.account_id > identity.accounts.id
 Ref: identity.account_lifecycle_events.(account_id, previous_event_id) > identity.account_lifecycle_events.(account_id, id)
 Ref: identity.account_lifecycle_events.retention_policy_version > identity.account_retention_policy_versions.version
+Ref: identity.account_lifecycle_command_receipts.account_id > identity.accounts.id
+Ref: identity.account_lifecycle_command_receipts.(account_id, lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)
 Ref: identity.accounts.(id, last_lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)
 Ref: identity.account_retention_policy_rules.policy_version > identity.account_retention_policy_versions.version
 Ref: identity.account_retention_obligations.account_id > identity.accounts.id
