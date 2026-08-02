@@ -46,6 +46,28 @@ test("pins an append-only single-head lifecycle event chain", () => {
   }
 });
 
+test("persists immutable successful and no-op lifecycle command responses", () => {
+  for (const fragment of [
+    "Table identity.account_lifecycle_command_receipts",
+    "(account_id, command_type, idempotency_key) [pk]",
+    "request_hash varchar(128)",
+    "response_status integer",
+    "response_code varchar(80)",
+    "response_document jsonb",
+    "lifecycle_event_id uuid",
+    "completed_at timestamptz",
+    "response_status BETWEEN 200 AND 299",
+    "INSERT 후 UPDATE·DELETE 금지",
+    "Ref: identity.account_lifecycle_command_receipts.(account_id, lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)",
+  ]) {
+    assert.ok(dbml.includes(fragment), `missing command receipt fragment: ${fragment}`);
+  }
+
+  assert.match(contract, /성공 또는 상태 변경 없는 성공\(no-op\)/);
+  assert.match(contract, /동일한 상태 코드, 응답 코드, 응답 본문/);
+  assert.match(contract, /실패 응답은 영수증에 안전하게 저장된 경우에만/);
+});
+
 test("models versioned retention obligations and legal holds", () => {
   for (const fragment of [
     "Table identity.account_retention_policy_versions",
