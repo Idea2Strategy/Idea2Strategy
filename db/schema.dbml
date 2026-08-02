@@ -53,8 +53,38 @@ Project Idea2Strategy {
 Enum identity.account_lifecycle_status {
   PENDING_VERIFICATION
   ACTIVE
+  DORMANT
   CLOSING
   CLOSED
+}
+
+Enum identity.account_data_category {
+  PROFILE
+  CONTACT_IDENTIFIER
+  AUTH_CREDENTIAL
+  POLICY_CONSENT
+  ACCOUNT_LIFECYCLE_AUDIT
+  TRADING_FINANCIAL_RECORD
+  BOT_STRATEGY_EVALUATION
+  OPERATIONS_DELIVERY_LOG
+}
+
+Enum identity.retention_disposition {
+  DELETE
+  ANONYMIZE
+  RETAIN
+}
+
+Enum identity.retention_obligation_status {
+  PENDING
+  HELD
+  COMPLETED
+  FAILED
+}
+
+Enum identity.legal_hold_status {
+  ACTIVE
+  RELEASED
 }
 
 Enum identity.email_status {
@@ -382,17 +412,36 @@ Enum bot.runtime_value_type {
 Table identity.accounts {
   id uuid [pk, default: `gen_random_uuid()`]
   lifecycle_status identity.account_lifecycle_status [not null]
+  lifecycle_version bigint [not null, default: 1]
+  last_lifecycle_event_id uuid
+  last_successful_auth_at timestamptz
+  dormant_at timestamptz
+  withdrawal_requested_at timestamptz
+  cancellation_deadline_at timestamptz
+  closing_previous_status identity.account_lifecycle_status
+  closed_at timestamptz
+  anonymized_at timestamptz
   status_changed_at timestamptz [not null, default: `now()`]
   created_at timestamptz [not null, default: `now()`]
 
   indexes {
     (lifecycle_status, created_at)
+    (lifecycle_status, last_successful_auth_at)
+    (lifecycle_status, cancellation_deadline_at)
   }
 
-  Note: '최소 계정 루트. 환경설정·이메일·인증·동의·제재는 별도 집합체. 계정 생성은 이메일·환경설정을 같은 트랜잭션으로 삽입하고, 활성화에는 단일 이메일의 VERIFIED가 필요. 제재를 lifecycle_status에 겹쳐 싣지 않는다.'
+  checks {
+    `lifecycle_version > 0` [name: 'account_lifecycle_version_positive']
+    `lifecycle_status <> 'DORMANT' OR dormant_at IS NOT NULL` [name: 'account_dormant_timestamp_required']
+    `lifecycle_status <> 'CLOSING' OR (withdrawal_requested_at IS NOT NULL AND cancellation_deadline_at = withdrawal_requested_at + interval '30 days' AND closing_previous_status IN ('ACTIVE', 'DORMANT'))` [name: 'account_closing_projection_complete']
+    `lifecycle_status <> 'CLOSED' OR closed_at IS NOT NULL` [name: 'account_closed_timestamp_required']
+    `anonymized_at IS NULL OR (closed_at IS NOT NULL AND anonymized_at >= closed_at)` [name: 'account_anonymized_after_close']
+  }
 
-  Records (id, lifecycle_status, status_changed_at, created_at) {
-    '00000000-0000-4000-8000-000000000001', 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  Note: '최소 계정 루트이자 수명주기 현재 projection. lifecycle_version·last_lifecycle_event_id·상태별 기준 시각은 하나의 새 추가 전용 사건과 같은 트랜잭션에서만 갱신한다. 탈퇴 취소 deadline은 요청 instant에서 정확히 30×24시간이며 CLOSED는 종단 상태다. 제재를 lifecycle_status에 겹쳐 싣지 않는다.'
+
+  Records (id, lifecycle_status, lifecycle_version, last_lifecycle_event_id, last_successful_auth_at, dormant_at, withdrawal_requested_at, cancellation_deadline_at, closing_previous_status, closed_at, anonymized_at, status_changed_at, created_at) {
+    '00000000-0000-4000-8000-000000000001', 'ACTIVE', 1, '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', null, null, null, null, null, null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -417,20 +466,153 @@ Table identity.account_lifecycle_events {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
   event_sequence bigint [not null]
+  previous_event_id uuid
+  lifecycle_version bigint [not null]
   previous_status identity.account_lifecycle_status
   new_status identity.account_lifecycle_status [not null]
+  command_type varchar(60) [not null]
+  actor_type varchar(40) [not null]
+  actor_id varchar(160)
+  correlation_id uuid [not null]
+  idempotency_key varchar(160) [not null]
+  request_hash varchar(128) [not null]
+  retention_policy_version varchar(80)
+  cancellation_deadline_at timestamptz
+  dormancy_basis_at timestamptz
   reason_code varchar(80)
   occurred_at timestamptz [not null, default: `now()`]
 
   indexes {
+    (account_id, id) [unique]
     (account_id, event_sequence) [unique]
+    (account_id, command_type, idempotency_key) [unique]
+    (account_id, previous_event_id) [unique]
     (account_id, occurred_at)
   }
 
-  Note: '추가 전용 생명주기 증적. accounts.lifecycle_status는 트랜잭션으로 유지되는 현재 Projection.'
+  checks {
+    `event_sequence > 0` [name: 'account_lifecycle_event_sequence_positive']
+    `lifecycle_version = event_sequence` [name: 'account_lifecycle_event_version_matches_sequence']
+    `(event_sequence = 1 AND previous_event_id IS NULL) OR (event_sequence > 1 AND previous_event_id IS NOT NULL)` [name: 'account_lifecycle_event_previous_link_complete']
+    `(event_sequence = 1 AND previous_status IS NULL) OR (event_sequence > 1 AND previous_status IS NOT NULL AND previous_status <> new_status)` [name: 'account_lifecycle_event_status_chain_complete']
+    `length(btrim(idempotency_key)) > 0 AND length(btrim(request_hash)) > 0` [name: 'account_lifecycle_event_idempotency_complete']
+    `command_type <> 'WITHDRAWAL_REQUESTED' OR cancellation_deadline_at IS NOT NULL` [name: 'account_lifecycle_event_withdrawal_deadline_required']
+    `command_type <> 'ACCOUNT_DORMANT' OR dormancy_basis_at IS NOT NULL` [name: 'account_lifecycle_event_dormancy_basis_required']
+  }
 
-  Records (id, account_id, event_sequence, previous_status, new_status, reason_code, occurred_at) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, null, 'ACTIVE', 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00'
+  Note: '추가 전용 수명주기 증적. 이전 사건과 sequence를 모두 고정하고 accounts 현재 projection과 같은 트랜잭션에서 삽입한다. DBML이 표현하지 못하는 첫 사건의 NULL previous_event_id 단일 head, 현재 projection이 마지막 사건을 가리키는 불변식, UPDATE·DELETE 금지는 PostgreSQL migration의 partial unique index, deferred constraint trigger, append-only trigger로 강제한다.'
+
+  Records (id, account_id, event_sequence, previous_event_id, lifecycle_version, previous_status, new_status, command_type, actor_type, actor_id, correlation_id, idempotency_key, request_hash, retention_policy_version, cancellation_deadline_at, dormancy_basis_at, reason_code, occurred_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, null, 1, null, 'ACTIVE', 'ACCOUNT_ACTIVATED', 'ACCOUNT', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'review-example-activation', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'account-retention-v1', null, null, 'REVIEW_EXAMPLE', '2026-07-27T09:00:00+09:00'
+  }
+}
+
+Table identity.account_retention_policy_versions {
+  version varchar(80) [pk]
+  effective_from timestamptz [not null]
+  approved_at timestamptz [not null]
+  approved_by varchar(120) [not null]
+  basis_reference varchar(160) [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  checks {
+    `approved_at <= effective_from` [name: 'account_retention_policy_approved_before_effective']
+  }
+
+  Note: '계정 수명주기 사건이 고정하는 승인된 보존 정책 버전. 법률 검토 본문은 복제하지 않고 근거 식별자만 저장하며, 버전은 변경·삭제하지 않는다.'
+
+  Records (version, effective_from, approved_at, approved_by, basis_reference, created_at) {
+    'account-retention-v1', '2026-08-02T00:00:00Z', '2026-08-01T00:00:00Z', 'user:review', 'REVIEW_EXAMPLE_POLICY', '2026-08-01T00:00:00Z'
+  }
+}
+
+Table identity.account_retention_policy_rules {
+  policy_version varchar(80) [not null]
+  data_category identity.account_data_category [not null]
+  disposition identity.retention_disposition [not null]
+  retention_days integer
+  legal_basis_code varchar(160) [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (policy_version, data_category) [pk]
+  }
+
+  checks {
+    `retention_days IS NULL OR retention_days >= 0` [name: 'account_retention_policy_rule_days_nonnegative']
+    `disposition = 'RETAIN' OR retention_days IS NOT NULL` [name: 'account_retention_policy_destructive_rule_has_period']
+  }
+
+  Note: '승인된 정책 버전의 데이터 분류별 불변 규칙. 숫자 기간이 승인되지 않은 분류는 retention_days를 NULL로 두고 물리 삭제를 기본 거부한다.'
+
+  Records (policy_version, data_category, disposition, retention_days, legal_basis_code, created_at) {
+    'account-retention-v1', 'ACCOUNT_LIFECYCLE_AUDIT', 'RETAIN', null, 'REVIEW_EXAMPLE_BASIS', '2026-08-01T00:00:00Z'
+  }
+}
+
+Table identity.account_retention_obligations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  lifecycle_event_id uuid [not null]
+  retention_policy_version varchar(80)
+  data_category identity.account_data_category [not null]
+  disposition identity.retention_disposition
+  retention_days integer
+  retain_until timestamptz
+  status identity.retention_obligation_status [not null, default: 'PENDING']
+  failure_code varchar(80)
+  completed_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (lifecycle_event_id, data_category) [unique]
+    (status, retain_until)
+    (account_id, data_category)
+  }
+
+  checks {
+    `retention_days IS NULL OR retention_days >= 0` [name: 'account_retention_days_nonnegative']
+    `(retention_days IS NULL AND retain_until IS NULL) OR (retention_days IS NOT NULL AND retain_until IS NOT NULL)` [name: 'account_retention_period_complete_or_unapproved']
+    `disposition IS NULL OR disposition = 'RETAIN' OR retention_days IS NOT NULL` [name: 'account_retention_destructive_obligation_has_period']
+    `(retention_policy_version IS NOT NULL AND disposition IS NOT NULL AND failure_code IS NULL) OR (retention_policy_version IS NULL AND disposition IS NULL AND retention_days IS NULL AND retain_until IS NULL AND status = 'FAILED' AND failure_code = 'RETENTION_POLICY_MISSING')` [name: 'account_retention_policy_snapshot_or_fail_closed']
+    `status <> 'COMPLETED' OR completed_at IS NOT NULL` [name: 'account_retention_completion_timestamp_required']
+  }
+
+  Note: '사건 발생 시점에 데이터 분류별 정책·처리·기한을 고정한 처리 projection. 정책 스냅샷 열은 변경하지 않고 status·completed_at만 처리 결과에 따라 갱신한다. 정책 버전 자체가 NULL인 RETENTION_POLICY_MISSING 항목은 물리 삭제·비식별화를 기본 거부한다. 승인된 RETAIN 규칙의 retention_days NULL은 무기한 보존을 뜻한다.'
+
+  Records (id, account_id, lifecycle_event_id, retention_policy_version, data_category, disposition, retention_days, retain_until, status, failure_code, completed_at, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'account-retention-v1', 'ACCOUNT_LIFECYCLE_AUDIT', 'RETAIN', null, null, 'PENDING', null, null, '2026-08-02T00:00:00Z'
+  }
+}
+
+Table identity.account_legal_holds {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  data_category identity.account_data_category [not null]
+  status identity.legal_hold_status [not null, default: 'ACTIVE']
+  blocks_identifier_reuse boolean [not null, default: false]
+  basis_reference varchar(160) [not null]
+  applied_by varchar(120) [not null]
+  applied_at timestamptz [not null, default: `now()`]
+  released_by varchar(120)
+  released_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (account_id, data_category, status)
+    (status, applied_at)
+  }
+
+  checks {
+    `status <> 'RELEASED' OR (released_at IS NOT NULL AND released_by IS NOT NULL)` [name: 'account_legal_hold_release_complete']
+    `released_at IS NULL OR released_at >= applied_at` [name: 'account_legal_hold_release_after_apply']
+    `NOT blocks_identifier_reuse OR data_category = 'CONTACT_IDENTIFIER'` [name: 'account_legal_hold_identifier_scope']
+  }
+
+  Note: '보존 의무와 분리된 legal hold. 활성 hold 범위는 retain_until 경과 후에도 삭제·비식별화하지 않는다. 식별자 재사용 차단은 CONTACT_IDENTIFIER에 명시적으로 blocks_identifier_reuse를 설정한 활성 hold만 해당한다. 활성 hold 단일성은 PostgreSQL migration의 partial unique index로 강제한다.'
+
+  Records (id, account_id, data_category, status, blocks_identifier_reuse, basis_reference, applied_by, applied_at, released_by, released_at, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'ACCOUNT_LIFECYCLE_AUDIT', 'ACTIVE', false, 'REVIEW_EXAMPLE_HOLD', 'operator:review', '2026-08-02T00:00:00Z', null, null, '2026-08-02T00:00:00Z'
   }
 }
 
@@ -4054,6 +4236,14 @@ Table operations.case_events {
 // -----------------------------------------------------------------------------
 
 Ref: identity.account_lifecycle_events.account_id > identity.accounts.id
+Ref: identity.account_lifecycle_events.(account_id, previous_event_id) > identity.account_lifecycle_events.(account_id, id)
+Ref: identity.account_lifecycle_events.retention_policy_version > identity.account_retention_policy_versions.version
+Ref: identity.accounts.(id, last_lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)
+Ref: identity.account_retention_policy_rules.policy_version > identity.account_retention_policy_versions.version
+Ref: identity.account_retention_obligations.account_id > identity.accounts.id
+Ref: identity.account_retention_obligations.(account_id, lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)
+Ref: identity.account_retention_obligations.retention_policy_version > identity.account_retention_policy_versions.version
+Ref: identity.account_legal_holds.account_id > identity.accounts.id
 Ref: identity.account_security_states.account_id > identity.accounts.id
 Ref: identity.account_preferences.account_id > identity.accounts.id
 Ref: identity.account_emails.account_id > identity.accounts.id

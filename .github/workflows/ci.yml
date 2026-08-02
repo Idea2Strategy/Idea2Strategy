@@ -33,6 +33,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Validate canonical DBML
         run: pnpm dbml:validate
+      - name: Validate A12 account lifecycle contract
+        run: pnpm dbml:validate:a12
       - name: Test dbdiagram export preparation
         run: pnpm dbml:export:test
       - name: Validate tracked formatting
