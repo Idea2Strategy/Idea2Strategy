@@ -35,6 +35,41 @@
       "expires_at": "2026-08-04T15:57:28.3286574Z"
     },
     {
+      "id": "claim.c90-bot-control-integration-pjy008008",
+      "work_id": "work.c90-bot-control-integration",
+      "definition_fingerprint": "sha256:18c12ce9a5eef485b411ab777ad12fcd7d3d4f9fb7f7bbb5f60b2969472a9e56",
+      "status": "in_progress",
+      "owner": "pjy008008",
+      "branch": "feature/47-bot-control-integration",
+      "repository": "idea2strategy.trading-engine",
+      "paths": [
+        "trading-engine/apps/trading-worker/**",
+        "trading-engine/modules/strategy-runtime/**",
+        "trading-engine/modules/trading-messaging/**"
+      ],
+      "policy_ids": [
+        "policy.execution.server-only"
+      ],
+      "scenario_ids": [
+        "scenario.bot.evaluate"
+      ],
+      "contract_ids": [],
+      "db_entities": [],
+      "migration_slots": [],
+      "ui_flows": [],
+      "dependency_majors": [],
+      "stable_ids": [
+        "capability.bot.server-execution",
+        "quality.auditability",
+        "quality.failure-safety",
+        "quality.reproducibility",
+        "scenario.bot.evaluate"
+      ],
+      "root_pointer": true,
+      "starts_at": "2026-08-02T04:35:52.0621607Z",
+      "expires_at": "2026-08-03T04:35:51.8412729Z"
+    },
+    {
       "id": "claim.com07-29-competition-currency-schema-drift",
       "work_id": "work.com07-29-competition-currency-schema-drift",
       "definition_fingerprint": "sha256:e0fa4bc713a86a511ace7b95f64af3ad657f474e97daabdee7d2ff29212dc016",
