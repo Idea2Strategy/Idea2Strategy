@@ -222,6 +222,7 @@ Enum trading.reservation_resource_type {
 
 Enum trading.reservation_event_type {
   CREATED
+  CONSUMED_BY_FILL
   SETTLED_BY_FILL
   RELEASED_BY_CANCEL
   RELEASED_BY_EXPIRY
@@ -1862,7 +1863,7 @@ Table bot.runtime_state_values {
     (bot_id, last_event_sequence)
   }
 
-  Note: '평가 간 유지가 필요한 공식 봇 전용 Flow 상태만 PostgreSQL이 소유. 주문 Element의 LAST_SUCCESSFUL_FILL_AT 상태는 마지막 정상 전량 Fill 시각을 저장하며, 현재 시각이 이 값과 minReactivationIntervalSeconds를 지난 경우에만 같은 Element가 새 Intent를 만들 수 있다. 거절·만료와 미체결 Order 생성은 이 값을 갱신하지 않는다. 명시적 봇/파티션/Flow 소유가 봇 간 누출을 방지하고, instrument_id는 Flow 전역 상태에서만 null. 공유 가격·캔들·지표·캘린더·피처 값은 여기 금지이며 market_data 공유 계산이나 일회성 캐시 소관. instrument_id의 null-safe 유일성은 마이그레이션에서 강제.'
+  Note: '평가 간 유지가 필요한 공식 봇 전용 Flow 상태만 PostgreSQL이 소유. 주문 Element의 LAST_SUCCESSFUL_FILL_AT 상태는 마지막 정상 개별 Fill 시각을 저장하며, 현재 시각이 이 값과 minReactivationIntervalSeconds를 지난 경우에만 같은 Element가 새 Intent를 만들 수 있다. 거절·만료와 미체결 Order 생성은 이 값을 갱신하지 않는다. 명시적 봇/파티션/Flow 소유가 봇 간 누출을 방지하고, instrument_id는 Flow 전역 상태에서만 null. 공유 가격·캔들·지표·캘린더·피처 값은 여기 금지이며 market_data 공유 계산이나 일회성 캐시 소관. instrument_id의 null-safe 유일성은 마이그레이션에서 강제.'
 
   Records (id, bot_id, partition_id, flow_id, instrument_id, element_instance_key, state_definition_key, value_type, current_value, last_event_sequence, updated_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', 'REVIEW_EXAMPLE', 'DECIMAL', '{"value":28.4}', 1, '2026-07-27T09:00:00+09:00'
@@ -1942,7 +1943,7 @@ Table trading.fee_policy_versions {
     `effective_to IS NULL OR effective_to > effective_from` [name: 'fee_policy_effective_range']
   }
 
-  Note: '모든 롱·숏 매수·매도의 정상 전량 Fill에 동일하게 한 번 적용하는 불변 플랫폼 정책. 사용자가 변경할 수 없고 과거 체결은 당시 policy id를 고정한다.'
+  Note: '모든 롱·숏 매수·매도의 각 정상 개별 Fill에 동일하게 적용하는 불변 플랫폼 정책. 사용자가 변경할 수 없고 과거 체결은 당시 policy id를 고정한다.'
 
   Records (id, policy_code, version, fee_rate_bps, calculation_rules_version, rules_hash, effective_from, effective_to, published_at) {
     '00000000-0000-4000-8000-000000000001', 'OFFICIAL_SIMULATION_FEE', '1.0.0', 20, '1.0.0', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '2026-07-28T09:00:00+09:00', null, '2026-07-28T09:00:00+09:00'
@@ -2231,6 +2232,7 @@ Table trading.order_components {
 
   indexes {
     (bot_id, partition_id, id) [unique]
+    (bot_id, partition_id, order_id, id) [unique]
     (order_id, intent_id) [unique]
     (order_id, component_sequence) [unique]
     (intent_id)
@@ -2301,7 +2303,7 @@ Table trading.resource_reservations {
     `reserved_quantity IS NULL OR consumed_quantity + released_quantity <= reserved_quantity` [name: 'reservation_quantity_not_exceeded']
     `reserved_amount IS NULL OR status = 'ACTIVE' OR consumed_amount + released_amount = reserved_amount` [name: 'reservation_amount_final_conservation']
     `reserved_quantity IS NULL OR status = 'ACTIVE' OR consumed_quantity + released_quantity = reserved_quantity` [name: 'reservation_quantity_final_conservation']
-    `status <> 'ACTIVE' OR (consumed_amount = 0 AND released_amount = 0 AND consumed_quantity = 0 AND released_quantity = 0)` [name: 'active_reservation_unsettled']
+    `status <> 'ACTIVE' OR (released_amount = 0 AND released_quantity = 0)` [name: 'active_reservation_not_released']
     `status <> 'SETTLED' OR ((reserved_amount IS NOT NULL AND consumed_amount > 0) OR (reserved_quantity IS NOT NULL AND consumed_quantity > 0))` [name: 'settled_reservation_has_consumption']
     `status <> 'RELEASED' OR (consumed_amount = 0 AND consumed_quantity = 0)` [name: 'released_reservation_has_no_consumption']
     `resource_type <> 'CASH_BUYING_POWER' OR (currency_code IS NOT NULL AND buffer_policy_id IS NOT NULL AND fee_policy_id IS NOT NULL AND reserved_amount IS NOT NULL)` [name: 'cash_reservation_evidence_required']
@@ -2312,7 +2314,7 @@ Table trading.resource_reservations {
     `resource_type = 'SHORT_COLLATERAL_CASH' OR short_risk_policy_id IS NULL` [name: 'short_policy_only_for_collateral']
   }
 
-  Note: '파티션·Flow 주문 의도별 자원을 나타내는 mutable 현재 Projection. ACTIVE 상태에서는 소비·해제가 모두 0이다. 전량 Fill 시 한 번만 SETTLED로 전환해 실제 사용액을 소비하고 Buying Power 완충액·잔액을 동시에 해제한다. 취소·만료·거절·replacement 시 전액 RELEASED다. 금액·수량 모두 최종 consumed + released = reserved를 행 CHECK와 사건 합계 지연 트리거로 이중 강제한다.'
+  Note: '파티션·Flow 주문 의도별 자원을 나타내는 mutable 현재 Projection. 부분 체결마다 소비량을 누적하는 동안 ACTIVE를 유지할 수 있으며 아직 소비되지 않은 잔여 예약은 후속 체결 또는 취소·만료·거절·replacement에 사용한다. 마지막 체결 또는 일부 소비 뒤 종료는 SETTLED로 전환하면서 실제 사용량을 보존하고 Buying Power 완충액·미사용 잔액을 해제한다. 한 번도 소비되지 않은 예약의 전액 해제만 RELEASED다. 최종 상태에서는 금액·수량 모두 consumed + released = reserved를 행 CHECK와 사건 합계 지연 트리거로 이중 강제한다.'
 
   Records (id, reservation_key, bot_id, partition_id, flow_id, intent_id, resource_type, currency_code, buffer_policy_id, fee_policy_id, precision_rules_version, status, reference_price, reference_observed_at, reference_market_hash, base_notional, fixed_slippage_amount, estimated_fee_amount, buffer_amount, reserved_amount, consumed_amount, released_amount, created_event_id, created_at, last_event_sequence) {
     '00000000-0000-4000-8000-000000000001', 'P1:FLOW_A:AAPL:CASH:1', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'CASH_BUYING_POWER', 'USD', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '1.0.0', 'SETTLED', 100.00000000, '2026-07-28T09:00:00+09:00', 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', 312.11052600, 0.15605526, 0.62453316, 0.03128911, 312.92240353, 312.89111442, 0.03128911, '00000000-0000-4000-8000-000000000001', '2026-07-28T09:00:00+09:00', 2
@@ -2357,7 +2359,7 @@ Table trading.order_component_reservations {
     `reserved_quantity IS NULL OR reserved_quantity > 0` [name: 'order_component_reservation_quantity_positive']
   }
 
-  Note: '최종 Order의 각 구성 내역을 실제 현금·Position 수량 예약과 연결한다. 부분 체결과 예약 재사용을 지원하지 않으므로 하나의 resource reservation은 하나의 order component만 뒷받침하며 replacement Order는 새 예약을 만든다.'
+  Note: '최종 Order의 각 구성 내역을 실제 현금·Position 수량 예약과 연결한다. 하나의 resource reservation은 하나의 order component만 뒷받침하지만 같은 Order의 여러 개별 부분 체결에 걸쳐 순차적으로 소비될 수 있다. replacement Order는 새 예약을 만든다.'
 
   Records (bot_id, partition_id, reservation_id, order_component_id, reserved_amount) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 312.92240353
@@ -2395,13 +2397,14 @@ Table trading.reservation_events {
     `released_amount_delta IS NULL OR released_amount_delta >= 0` [name: 'reservation_event_released_amount_nonnegative']
     `consumed_quantity_delta IS NULL OR consumed_quantity_delta >= 0` [name: 'reservation_event_consumed_quantity_nonnegative']
     `released_quantity_delta IS NULL OR released_quantity_delta >= 0` [name: 'reservation_event_released_quantity_nonnegative']
-    `event_type <> 'SETTLED_BY_FILL' OR source_fill_id IS NOT NULL` [name: 'fill_settlement_source_required']
-    `event_type = 'SETTLED_BY_FILL' OR source_fill_id IS NULL` [name: 'non_fill_reservation_event_has_no_fill']
+    `event_type NOT IN ('CONSUMED_BY_FILL', 'SETTLED_BY_FILL') OR source_fill_id IS NOT NULL` [name: 'fill_consumption_source_required']
+    `event_type IN ('CONSUMED_BY_FILL', 'SETTLED_BY_FILL') OR source_fill_id IS NULL` [name: 'non_fill_reservation_event_has_no_fill']
+    `event_type <> 'CONSUMED_BY_FILL' OR status_after = 'ACTIVE'` [name: 'partial_fill_consumption_stays_active']
     `event_type <> 'SETTLED_BY_FILL' OR status_after = 'SETTLED'` [name: 'fill_settlement_status_valid']
-    `event_type NOT IN ('RELEASED_BY_CANCEL', 'RELEASED_BY_EXPIRY', 'RELEASED_BY_REJECTION', 'RELEASED_BY_REPLACEMENT') OR status_after = 'RELEASED'` [name: 'release_event_status_valid']
+    `event_type NOT IN ('RELEASED_BY_CANCEL', 'RELEASED_BY_EXPIRY', 'RELEASED_BY_REJECTION', 'RELEASED_BY_REPLACEMENT') OR status_after IN ('RELEASED', 'SETTLED')` [name: 'release_event_status_valid']
   }
 
-  Note: '예약 생성과 정확히 한 번의 최종 정산을 추가 전용으로 기록한다. Fill 정산 사건 한 건은 실제 사용액 소비와 완충액·잔액 해제를 함께 기록한다. 취소·만료·거절·replacement는 전액 해제하며 event_key와 sequence가 중복 효과를 차단한다.'
+  Note: '예약 생성, 각 개별 Fill의 부분 소비와 최종 정산을 추가 전용으로 기록한다. CONSUMED_BY_FILL은 예약을 ACTIVE로 유지하며 실제 사용량만 누적하고, SETTLED_BY_FILL은 마지막 체결의 소비와 완충액·잔액 해제를 함께 기록한다. 취소·만료·거절·replacement는 미사용 잔액을 해제하며, 앞서 소비된 양이 있으면 SETTLED, 없으면 RELEASED로 끝난다. event_key와 sequence가 중복 효과를 차단한다.'
 
   Records (id, bot_id, partition_id, reservation_id, bot_event_id, source_fill_id, event_key, reservation_sequence, event_type, consumed_amount_delta, released_amount_delta, status_after, occurred_at, event_hash) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, 'P1:CASH:CREATED:1', 1, 'CREATED', null, null, 'ACTIVE', '2026-07-28T09:00:00+09:00', 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
@@ -2433,10 +2436,10 @@ Table trading.order_events {
     `order_sequence > 0` [name: 'order_event_sequence_positive']
   }
 
-  Note: '주문 상태 전이의 추가 전용 정본. 정상 경로는 PENDING/OPEN에서 FILLED, CANCELLED, EXPIRED 또는 REJECTED 중 하나로만 끝난다. CANCELLED는 사용자·봇 중지·운영자 강제 취소가 아니라 자동 replacement에서 원본 주문을 철회할 때만 허용한다. 부분 체결 상태는 없고 replacement 전 원본은 CANCELLED 사건을 먼저 가져야 한다.'
+  Note: '주문 상태 전이의 추가 전용 정본. 정상 경로는 PENDING/OPEN에서 하나 이상의 부분 체결을 누적한 뒤 FILLED, CANCELLED 또는 EXPIRED로 끝날 수 있고, 체결이 전혀 없는 주문은 REJECTED로 끝날 수 있다. 별도 PARTIALLY_FILLED 상태를 만들지 않고 OPEN 상태와 누적 filled_quantity로 부분 체결을 표현한다. CANCELLED는 사용자·봇 중지·운영자 강제 취소가 아니라 자동 replacement에서 원본 주문을 철회할 때만 허용하며 replacement 전 원본은 CANCELLED 사건을 먼저 가져야 한다.'
 
   Records (id, bot_id, partition_id, order_id, bot_event_id, order_sequence, event_type, previous_status, new_status, reason_code, occurred_at, event_document) {
-    '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 2, 'ORDER_FILLED', 'OPEN', 'FILLED', 'FULL_FILL', '2026-07-28T09:01:00+09:00', '{"requestedQuantity":"3.12110526","fillQuantity":"3.12110526","partialFillsAllowed":false}'
+    '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 2, 'ORDER_FILLED', 'OPEN', 'FILLED', 'FULL_FILL', '2026-07-28T09:01:00+09:00', '{"requestedQuantity":"3.12110526","fillQuantity":"3.12110526","cumulativeFilledQuantity":"3.12110526","remainingQuantity":"0"}'
   }
 }
 
@@ -2468,11 +2471,13 @@ Table trading.order_state_projections {
     `active_stop_price IS NULL OR active_stop_price > 0` [name: 'order_projection_active_stop_positive']
     `trailing_reference_price IS NULL OR trailing_reference_price > 0` [name: 'order_projection_trailing_reference_positive']
     `status <> 'FILLED' OR (filled_quantity > 0 AND remaining_quantity = 0)` [name: 'filled_projection_is_complete']
-    `status NOT IN ('CANCELLED', 'EXPIRED', 'REJECTED') OR (filled_quantity = 0 AND remaining_quantity = 0)` [name: 'nonfilled_terminal_projection_has_no_fill']
-    `status NOT IN ('PENDING', 'OPEN') OR (filled_quantity = 0 AND remaining_quantity > 0)` [name: 'active_projection_has_no_partial_fill']
+    `status <> 'REJECTED' OR (filled_quantity = 0 AND remaining_quantity = 0)` [name: 'rejected_projection_has_no_fill']
+    `status NOT IN ('CANCELLED', 'EXPIRED') OR remaining_quantity = 0` [name: 'closed_projection_has_no_active_remainder']
+    `status <> 'PENDING' OR (filled_quantity = 0 AND remaining_quantity > 0)` [name: 'pending_projection_has_no_fill']
+    `status <> 'OPEN' OR remaining_quantity > 0` [name: 'open_projection_has_remaining_quantity']
   }
 
-  Note: '재구축 가능한 현재 주문 읽기 모델. filled_quantity는 0 또는 Order 전량뿐이며 중간값을 허용하지 않는다. 정본은 order_events와 정상 Fill이다.'
+  Note: '재구축 가능한 현재 주문 읽기 모델. filled_quantity는 정상 Fill과 유효한 반전의 누적 체결 수량이며 0부터 Order 요청 수량까지의 중간값을 허용한다. OPEN 주문은 부분 체결 뒤에도 양수 remaining_quantity를 유지할 수 있고, FILLED는 누적 체결이 요청 수량에 도달해 remaining_quantity가 0인 경우다. CANCELLED·EXPIRED는 누적 체결량을 보존하되 더 이상 활성 잔량이 없으므로 remaining_quantity가 0이다. 정본은 order_events, fills와 fill_adjustments다.'
 
   Records (order_id, bot_id, partition_id, status, filled_quantity, remaining_quantity, reserved_cash, reserved_quantity, last_order_event_sequence, last_bot_event_sequence, updated_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'FILLED', 3.12110526, 0.00000000, 0.00000000, 0.00000000, 2, 2, '2026-07-28T09:01:00+09:00'
@@ -2505,7 +2510,8 @@ Table trading.fills {
 
   indexes {
     (bot_id, partition_id, id) [unique]
-    (order_id) [unique]
+    (bot_id, partition_id, order_id, id) [unique]
+    (order_id, occurred_at, id)
     (bot_id, partition_id, provider_fill_key) [unique]
     (bot_id, partition_id, occurred_at)
     (partition_id, occurred_at)
@@ -2523,10 +2529,50 @@ Table trading.fills {
     `fee_amount >= 0` [name: 'fill_fee_nonnegative']
   }
 
-  Note: 'Order당 최대 한 건인 불변 정상 전량 체결 증적. quantity는 연결 Order.requested_quantity와 정확히 같아야 한다. 최신 유효 참조가격에 고정 5 bps 슬리피지와 공식 20 bps 수수료를 한 번 적용하며 Buying Power 버퍼는 기록하거나 체결가·손익에 반영하지 않는다. 교차 행 수량·상태·계산 일치는 지연 제약 트리거로 검증한다.'
+  Note: 'Order에 발생한 각 정상 개별 체결을 추가 전용으로 기록한다. 하나의 Order는 여러 fills를 가질 수 있고 각 quantity는 양수이며, 유효 Fill 수량의 누계가 Order.requested_quantity를 초과하지 않도록 PostgreSQL 지연 제약 트리거가 검증한다. provider_fill_key는 같은 Bot·Partition에서 동일 체결 전달을 멱등하게 식별한다. 각 체결은 당시 최신 유효 참조가격에 고정 5 bps 슬리피지와 공식 20 bps 수수료를 적용하며 Buying Power 버퍼는 기록하거나 체결가·손익에 반영하지 않는다.'
 
   Records (id, order_id, bot_id, partition_id, bot_event_id, provider_fill_key, quantity, reference_price, reference_observed_at, reference_market_hash, slippage_rate_bps, slippage_amount, fill_price, gross_amount, fee_policy_id, fee_rate_bps, precision_rules_version, fee_basis_amount, fee_amount, settlement_cash_delta, occurred_at, recorded_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'SIM:FILL:P1:ORDER1', 3.12110526, 100.00000000, '2026-07-28T09:01:00+09:00', 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 5, 0.15605526, 100.05000000, 312.26658126, '00000000-0000-4000-8000-000000000001', 20, '1.0.0', 312.26658126, 0.62453316, -312.89111442, '2026-07-28T09:01:00+09:00', '2026-07-28T09:01:00+09:00'
+  }
+}
+
+Table trading.fill_component_allocations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  bot_id uuid [not null]
+  partition_id uuid [not null]
+  order_id uuid [not null]
+  fill_id uuid [not null]
+  order_component_id uuid [not null]
+  allocation_sequence int [not null]
+  allocated_quantity numeric(28,8) [not null]
+  allocated_gross_amount numeric(24,8) [not null]
+  allocated_fee_amount numeric(24,8) [not null]
+  allocated_settlement_cash_delta numeric(24,8) [not null]
+  allocation_rules_version varchar(40) [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (bot_id, partition_id, id) [unique]
+    (bot_id, partition_id, order_id, fill_id, id) [unique]
+    (bot_id, partition_id, order_id, order_component_id, id) [unique]
+    (bot_id, partition_id, order_component_id, id) [unique]
+    (fill_id, order_component_id) [unique]
+    (fill_id, allocation_sequence) [unique]
+    (order_component_id, fill_id)
+  }
+
+  checks {
+    `allocation_sequence > 0` [name: 'fill_allocation_sequence_positive']
+    `allocated_quantity > 0` [name: 'fill_allocation_quantity_positive']
+    `allocated_gross_amount > 0` [name: 'fill_allocation_gross_positive']
+    `allocated_fee_amount >= 0` [name: 'fill_allocation_fee_nonnegative']
+    `allocated_settlement_cash_delta <> 0` [name: 'fill_allocation_cash_delta_nonzero']
+  }
+
+  Note: '하나의 개별 Fill 수량과 경제 효과를 해당 Order를 구성한 Flow별 order component에 결정적으로 귀속하는 추가 전용 정본. 같은 Fill·component 쌍은 한 번만 나타나고 allocation_sequence가 Fill 내부 순서를 고정한다. Fill별 allocated_quantity·allocated_gross_amount·allocated_fee_amount·allocated_settlement_cash_delta 합계는 각각 Fill의 quantity·gross_amount·fee_amount·settlement_cash_delta와 정확히 같아야 하며, component별 누적 배분 수량은 component_quantity를 초과할 수 없다. allocation_rules_version은 투자 판단이 아닌 결정론적 회계 귀속 규칙 버전을 고정한다. 복합 FK와 PostgreSQL 지연 제약 트리거가 Bot·Partition·Order 소유 및 합계 정합성을 강제한다.'
+
+  Records (id, bot_id, partition_id, order_id, fill_id, order_component_id, allocation_sequence, allocated_quantity, allocated_gross_amount, allocated_fee_amount, allocated_settlement_cash_delta, allocation_rules_version, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 3.12110526, 312.26658126, 0.62453316, -312.89111442, '1.0.0', '2026-07-28T09:01:00+09:00'
   }
 }
 
@@ -2557,7 +2603,7 @@ Table trading.fill_adjustments {
     `adjustment_type <> 'CORRECTION' OR quantity_delta = 0` [name: 'fill_correction_does_not_change_quantity']
   }
 
-  Note: '정상 Fill을 복제하지 않고 사후 정정·반전을 명시적으로 남기는 추가 전용 사건. CORRECTION은 가격·금액·수수료만 조정하고, REVERSAL은 migration trigger가 원 Fill의 경제 효과와 정확히 반대인지 검증한다. 정상 Fill의 Order당 1건 불변식에는 포함되지 않는다.'
+  Note: '정상 Fill을 복제하지 않고 사후 정정·반전을 명시적으로 남기는 추가 전용 사건. CORRECTION은 quantity_delta = 0을 유지하면서 가격·금액·수수료만 조정한다. 체결 수량을 바꿔야 하면 기존 Fill의 경제 효과와 수량을 정확히 반전하는 REVERSAL을 기록한 뒤 수정된 수량의 새 Fill과 새 배분을 추가한다. migration trigger가 반전 정합성과 Order별 유효 누적 체결 수량을 검증한다.'
 }
 
 Table trading.ledger_accounts {
@@ -2649,7 +2695,8 @@ Table trading.position_lots {
   partition_id uuid [not null]
   flow_id uuid [not null]
   instrument_id uuid [not null]
-  opening_order_component_id uuid [not null, unique]
+  opening_order_component_id uuid [not null]
+  opening_fill_allocation_id uuid [not null, unique]
   lot_side trading.lot_side [not null]
   opened_quantity numeric(28,8) [not null]
   unit_cost numeric(24,8) [not null]
@@ -2659,6 +2706,8 @@ Table trading.position_lots {
   indexes {
     (bot_id, partition_id, id) [unique]
     (bot_id, partition_id, flow_id, id) [unique]
+    (bot_id, partition_id, opening_order_component_id, opening_fill_allocation_id) [unique]
+    (opening_order_component_id, opened_at, id)
     (partition_id, flow_id, instrument_id, opened_at)
     (bot_id, partition_id, instrument_id, opened_at)
   }
@@ -2669,7 +2718,7 @@ Table trading.position_lots {
     `opened_cost_basis_amount >= 0` [name: 'position_lot_opened_basis_nonnegative']
   }
 
-  Note: '전량 Fill 뒤 각 Order 구성 내역으로 생성되는 불변 Flow별 FIFO 원가 묶음. 별도 Fill 배분 테이블 없이 opening_order_component_id에서 Order와 유일 정상 Fill을 추적한다. 지연 트리거가 해당 Fill 존재·동일 Partition·OPEN position_effect를 강제한다.'
+  Note: '각 부분 또는 전량 Fill의 component 배분마다 생성되는 불변 Flow별 FIFO 원가 묶음. 같은 order component가 여러 개별 체결에 배분되면 여러 lot을 가질 수 있으며 opening_fill_allocation_id가 정확한 Fill·component 배분을 고정한다. 복합 FK와 지연 트리거가 동일 Bot·Partition·Order·Flow·instrument 및 OPEN position_effect를 강제한다.'
 }
 
 Table trading.lot_movements {
@@ -2678,7 +2727,7 @@ Table trading.lot_movements {
   partition_id uuid [not null]
   position_lot_id uuid [not null]
   bot_event_id uuid [not null]
-  source_order_component_id uuid
+  source_fill_allocation_id uuid
   source_fill_adjustment_id uuid
   corporate_action_id uuid
   reverses_movement_id uuid
@@ -2693,7 +2742,7 @@ Table trading.lot_movements {
     (bot_id, partition_id, id) [unique]
     (position_lot_id, id) [unique]
     (position_lot_id, bot_event_id) [unique]
-    (source_order_component_id, position_lot_id)
+    (source_fill_allocation_id, position_lot_id)
     (source_fill_adjustment_id, position_lot_id)
   }
 
@@ -2701,13 +2750,13 @@ Table trading.lot_movements {
     `quantity_delta <> 0` [name: 'lot_movement_quantity_nonzero']
     `remaining_after >= 0` [name: 'lot_movement_remaining_nonnegative']
     `cost_basis_after >= 0` [name: 'lot_movement_basis_nonnegative']
-    `(CASE WHEN source_order_component_id IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN source_fill_adjustment_id IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN corporate_action_id IS NOT NULL THEN 1 ELSE 0 END) <= 1` [name: 'lot_movement_source_not_ambiguous']
-    `movement_type NOT IN ('OPEN', 'CLOSE') OR source_order_component_id IS NOT NULL` [name: 'fill_movement_source_required']
+    `(CASE WHEN source_fill_allocation_id IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN source_fill_adjustment_id IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN corporate_action_id IS NOT NULL THEN 1 ELSE 0 END) <= 1` [name: 'lot_movement_source_not_ambiguous']
+    `movement_type NOT IN ('OPEN', 'CLOSE') OR source_fill_allocation_id IS NOT NULL` [name: 'fill_movement_source_required']
     `movement_type <> 'CORPORATE_ACTION_ADJUSTMENT' OR corporate_action_id IS NOT NULL` [name: 'corporate_movement_source_required']
     `movement_type <> 'REVERSAL' OR (reverses_movement_id IS NOT NULL AND source_fill_adjustment_id IS NOT NULL)` [name: 'reversal_movement_source_required']
   }
 
-  Note: '개별 로트의 OPEN·FIFO CLOSE·기업행사·정정·반전을 추가 전용으로 보존한다. 정상 거래 이동은 정확한 order component를 가리키며 그 Order의 유일 Fill을 통해 체결을 증명한다. 다른 Partition·Flow lot 소비와 Fill 없는 이동은 복합 FK와 지연 트리거가 차단한다.'
+  Note: '개별 로트의 OPEN·FIFO CLOSE·기업행사·정정·반전을 추가 전용으로 보존한다. 정상 거래 이동은 정확한 fill_component_allocation을 가리켜 개별 Fill과 Flow별 order component를 함께 증명한다. 다른 Bot·Partition·Flow lot 소비와 Fill 없는 이동은 복합 FK와 지연 트리거가 차단한다.'
 }
 
 Table trading.position_lot_projections {
@@ -2791,7 +2840,7 @@ Table trading.system_close_actions {
     `requested_quantity > 0` [name: 'system_close_quantity_positive']
   }
 
-  Note: '가상 Position의 위험 한도 위반, Bot 중단, 대회 종료 또는 데이터 무결성 차단에 따라 플랫폼이 생성한 강제 청산 근거. 실제 대여기관 회수 사건은 만들지 않는다. 데이터 무결성 차단은 청산 필요성을 기록하되 유효한 최신 가격 전에는 Fill을 만들지 않는다. 사용자 Flow 판단과 구분하며 생성된 SYSTEM_* 주문 의도부터 파티션 전용 Order·전량 Fill·원장까지 동일 경로로 추적한다.'
+  Note: '가상 Position의 위험 한도 위반, Bot 중단, 대회 종료 또는 데이터 무결성 차단에 따라 플랫폼이 생성한 강제 청산 근거. 실제 대여기관 회수 사건은 만들지 않는다. 데이터 무결성 차단은 청산 필요성을 기록하되 유효한 최신 가격 전에는 Fill을 만들지 않는다. 사용자 Flow 판단과 구분하며 생성된 SYSTEM_* 주문 의도부터 파티션 전용 Order·개별 부분 체결·원장까지 동일 경로로 추적한다.'
 }
 
 Table trading.short_borrow_fee_accruals {
@@ -4131,6 +4180,8 @@ Ref: trading.fills.(bot_id, partition_id, order_id) > trading.orders.(bot_id, pa
 Ref: trading.fills.bot_id > bot.bots.id
 Ref: trading.fills.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
 Ref: trading.fills.fee_policy_id > trading.fee_policy_versions.id
+Ref: trading.fill_component_allocations.(bot_id, partition_id, order_id, fill_id) > trading.fills.(bot_id, partition_id, order_id, id)
+Ref: trading.fill_component_allocations.(bot_id, partition_id, order_id, order_component_id) > trading.order_components.(bot_id, partition_id, order_id, id)
 Ref: trading.fill_adjustments.(bot_id, partition_id, fill_id) > trading.fills.(bot_id, partition_id, id)
 Ref: trading.fill_adjustments.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
 Ref: trading.ledger_accounts.bot_id > bot.bots.id
@@ -4151,9 +4202,10 @@ Ref: trading.position_lots.(bot_id, partition_id) > bot.bot_partitions.(bot_id, 
 Ref: trading.position_lots.(partition_id, flow_id) > bot.flows.(partition_id, id)
 Ref: trading.position_lots.instrument_id > market_data.instruments.id
 Ref: trading.position_lots.(bot_id, partition_id, opening_order_component_id) > trading.order_components.(bot_id, partition_id, id)
+Ref: trading.position_lots.(bot_id, partition_id, opening_order_component_id, opening_fill_allocation_id) > trading.fill_component_allocations.(bot_id, partition_id, order_component_id, id)
 Ref: trading.lot_movements.(bot_id, partition_id, position_lot_id) > trading.position_lots.(bot_id, partition_id, id)
 Ref: trading.lot_movements.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
-Ref: trading.lot_movements.(bot_id, partition_id, source_order_component_id) > trading.order_components.(bot_id, partition_id, id)
+Ref: trading.lot_movements.(bot_id, partition_id, source_fill_allocation_id) > trading.fill_component_allocations.(bot_id, partition_id, id)
 Ref: trading.lot_movements.(bot_id, partition_id, source_fill_adjustment_id) > trading.fill_adjustments.(bot_id, partition_id, id)
 Ref: trading.lot_movements.corporate_action_id > market_data.corporate_actions.id
 Ref: trading.lot_movements.(position_lot_id, reverses_movement_id) > trading.lot_movements.(position_lot_id, id)
