@@ -4,3 +4,7 @@
 *.jpeg binary
 *.gif binary
 *.pdf binary
+
+# Preserve assembler-produced CI migration bytes so manifest hashes are portable.
+db/flyway-ci-bundle/*.sql -text
+db/flyway-ci-bundle/*.fixture -text

@@ -1,0 +1,196 @@
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
+$bundle = Join-Path $root 'db/flyway-ci-bundle'
+$metadataPath = Join-Path $bundle 'source-revisions.json'
+$manifestPath = Join-Path $bundle 'migration-bundle.manifest'
+$digestPath = Join-Path $bundle 'migration-bundle.sha256'
+$fixture = Join-Path $bundle 'partial_fill_allocation_contract.sql.fixture'
+
+foreach ($requiredPath in @($metadataPath, $manifestPath, $digestPath, $fixture)) {
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+        throw "Pinned Flyway CI artifact is missing: $requiredPath"
+    }
+}
+
+$metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+if ($metadata.format -cne 'idea2strategy-flyway-ci-bundle-v1') {
+    throw 'Unsupported pinned Flyway CI bundle metadata format.'
+}
+
+function Get-GitlinkRevision([string]$Path) {
+    $entry = (& git -C $root ls-tree HEAD -- $Path) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or $entry -notmatch '^160000\s+commit\s+([0-9a-f]{40})\s+') {
+        throw "Unable to resolve root gitlink: $Path"
+    }
+    return $Matches[1]
+}
+
+$backendGitlink = Get-GitlinkRevision 'backend'
+$tradingGitlink = Get-GitlinkRevision 'trading-engine'
+if ($metadata.backend_gitlink -cne $backendGitlink) {
+    throw "Pinned bundle backend revision does not match the root gitlink: $($metadata.backend_gitlink) != $backendGitlink"
+}
+if ($metadata.trading_gitlink -cne $tradingGitlink) {
+    throw "Pinned bundle trading revision does not match the root gitlink: $($metadata.trading_gitlink) != $tradingGitlink"
+}
+
+$manifestLines = @(Get-Content -LiteralPath $manifestPath)
+if ($manifestLines.Count -lt 2 -or $manifestLines[0] -cne 'idea2strategy-flyway-bundle-v1') {
+    throw 'Invalid pinned Flyway bundle manifest.'
+}
+
+function Get-NormalizedTextSha256([string]$Path) {
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $normalized = New-Object System.IO.MemoryStream
+    for ($index = 0; $index -lt $bytes.Length; $index++) {
+        if ($bytes[$index] -eq 13 -and $index + 1 -lt $bytes.Length -and $bytes[$index + 1] -eq 10) {
+            $normalized.WriteByte(10)
+            $index++
+        } else {
+            $normalized.WriteByte($bytes[$index])
+        }
+    }
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($normalized.ToArray()))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+        $normalized.Dispose()
+    }
+}
+
+foreach ($line in $manifestLines[1..($manifestLines.Count - 1)]) {
+    if ($line -notmatch '^([^\t]+\.sql)\t([0-9a-f]{64})$') {
+        throw "Invalid pinned Flyway manifest entry: $line"
+    }
+    $migrationPath = Join-Path $bundle $Matches[1]
+    if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) {
+        throw "Pinned Flyway migration is missing: $($Matches[1])"
+    }
+    $actualHash = Get-NormalizedTextSha256 $migrationPath
+    if ($actualHash -cne $Matches[2]) {
+        throw "Pinned Flyway migration hash mismatch: $($Matches[1])"
+    }
+}
+
+$manifestDigest = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$recordedDigest = (Get-Content -LiteralPath $digestPath -Raw).Trim()
+if ($manifestDigest -cne $recordedDigest -or $recordedDigest -cne $metadata.bundle_sha256) {
+    throw 'Pinned Flyway bundle digest does not match its manifest or source metadata.'
+}
+
+$suffix = [guid]::NewGuid().ToString('N').Substring(0, 12)
+$container = "idea2strategy-ci-migration-$suffix"
+$database = 'idea2strategy'
+$user = 'idea2strategy'
+$password = "migration-$suffix"
+
+function Invoke-Flyway([string]$Command, [switch]$Json) {
+    $arguments = @(
+        'run', '--rm',
+        '--network', "container:$container",
+        '-v', "${bundle}:/flyway/sql:ro",
+        'redgate/flyway:11-alpine',
+        "-url=jdbc:postgresql://localhost:5432/$database",
+        "-user=$user",
+        "-password=$password",
+        '-connectRetries=30'
+    )
+    if ($Json) {
+        $arguments += '-outputType=json'
+    }
+    $arguments += $Command
+    $output = & docker @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Flyway $Command failed."
+    }
+    return $output
+}
+
+try {
+    $started = docker run -d `
+        --name $container `
+        --health-cmd "pg_isready -U $user -d $database" `
+        --health-interval 2s `
+        --health-timeout 2s `
+        --health-retries 30 `
+        -e "POSTGRES_DB=$database" `
+        -e "POSTGRES_USER=$user" `
+        -e "POSTGRES_PASSWORD=$password" `
+        postgres:16-alpine
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($started)) {
+        throw 'Failed to start the temporary PostgreSQL container.'
+    }
+
+    $healthy = $false
+    for ($attempt = 0; $attempt -lt 45; $attempt++) {
+        $health = (docker inspect --format '{{.State.Health.Status}}' $container 2>$null).Trim()
+        if ($health -eq 'healthy') {
+            $healthy = $true
+            break
+        }
+        if ($health -eq 'unhealthy') {
+            throw 'Temporary PostgreSQL became unhealthy.'
+        }
+        Start-Sleep -Seconds 2
+    }
+    if (-not $healthy) {
+        throw 'Timed out waiting for temporary PostgreSQL.'
+    }
+
+    Invoke-Flyway 'migrate' | Out-Host
+    Invoke-Flyway 'validate' | Out-Host
+
+    $historyBeforeSecondRun = (docker exec -e "PGPASSWORD=$password" $container `
+        psql -U $user -d $database -Atc `
+        'SELECT count(*) FROM flyway_schema_history WHERE success;').Trim()
+    Invoke-Flyway 'migrate' | Out-Host
+    $historyAfterSecondRun = (docker exec -e "PGPASSWORD=$password" $container `
+        psql -U $user -d $database -Atc `
+        'SELECT count(*) FROM flyway_schema_history WHERE success;').Trim()
+    if ($LASTEXITCODE -ne 0 -or $historyAfterSecondRun -ne $historyBeforeSecondRun) {
+        throw 'The second Flyway migrate applied an unexpected migration.'
+    }
+
+    $infoOutput = (Invoke-Flyway 'info' -Json) -join "`n"
+    if ($infoOutput -match '(?i)"state"\s*:\s*"pending"') {
+        throw 'Flyway reports a pending migration after the second migrate.'
+    }
+
+    $schemaList = "'identity','strategy','bot','storage','market_data','trading','backtest','performance','competition','operations'"
+    $tableCount = (docker exec -e "PGPASSWORD=$password" $container `
+        psql -U $user -d $database -Atc `
+        "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ($schemaList) AND table_type = 'BASE TABLE';").Trim()
+    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '139') {
+        throw "Expected 139 application tables after Flyway; found '$tableCount'."
+    }
+
+    docker cp $fixture "${container}:/tmp/partial_fill_allocation_contract.sql"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to copy the partial-fill allocation contract fixture into PostgreSQL.'
+    }
+    docker exec -e "PGPASSWORD=$password" $container `
+        psql -v ON_ERROR_STOP=1 -U $user -d $database `
+        -f /tmp/partial_fill_allocation_contract.sql | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The partial-fill allocation contract fixture failed.'
+    }
+
+    [pscustomobject]@{
+        status = 'passed'
+        application_tables = [int]$tableCount
+        successful_migrations = [int]$historyAfterSecondRun
+        second_run_pending = 0
+        partial_fill_allocation_contract = 'passed'
+        bundle_sha256 = $recordedDigest
+        backend_revision = $backendGitlink
+        trading_revision = $tradingGitlink
+        postgres = '16-alpine'
+        flyway = '11-alpine'
+    } | ConvertTo-Json -Compress
+} finally {
+    docker rm -f $container *> $null
+}

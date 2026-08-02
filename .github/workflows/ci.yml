@@ -53,40 +53,6 @@ jobs:
         with:
           fetch-depth: 1
           submodules: false
-      - name: Resolve exact service gitlinks
-        id: service-gitlinks
-        shell: bash
-        run: |
-          echo "backend=$(git rev-parse HEAD:backend)" >> "$GITHUB_OUTPUT"
-          echo "trading=$(git rev-parse HEAD:trading-engine)" >> "$GITHUB_OUTPUT"
-      - name: Checkout exact backend gitlink
-        uses: actions/checkout@v4
-        with:
-          repository: Idea2Strategy/Idea2Strategy-backend
-          ref: ${{ steps.service-gitlinks.outputs.backend }}
-          path: backend
-          token: ${{ secrets.SUBMODULE_READ_TOKEN }}
-          persist-credentials: false
-      - name: Checkout exact trading gitlink
-        uses: actions/checkout@v4
-        with:
-          repository: Idea2Strategy/Idea2Strategy-trading-engine
-          ref: ${{ steps.service-gitlinks.outputs.trading }}
-          path: trading-engine
-          token: ${{ secrets.SUBMODULE_READ_TOKEN }}
-          persist-credentials: false
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: gradle
-          cache-dependency-path: |
-            backend/*.gradle.kts
-            backend/gradle.properties
-            backend/gradle/wrapper/gradle-wrapper.properties
-      - name: Verify generated Flyway Compose boundary
+      - name: Verify pinned central Flyway migration lifecycle
         shell: pwsh
-        run: ./scripts/test-docker-development.ps1
-      - name: Verify central Flyway migration lifecycle
-        shell: pwsh
-        run: ./scripts/test-flyway-migration.ps1
+        run: ./scripts/test-flyway-ci-bundle.ps1
