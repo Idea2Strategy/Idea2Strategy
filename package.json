@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dbml:validate": "node scripts/validate-dbml.mjs db/schema.dbml",
+    "dbml:validate:a12": "node --test scripts/validate-account-lifecycle-contract.test.mjs",
     "dbml:export:prepare": "node scripts/prepare-dbdiagram-export.mjs",
     "dbml:export:test": "node --test scripts/prepare-dbdiagram-export.test.mjs",
     "dbml:validate:trading-proposal": "node scripts/validate-trading-dbml.mjs proposals/dbml-redesign/schema.draft.dbml",
