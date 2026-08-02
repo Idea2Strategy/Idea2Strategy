@@ -65,7 +65,7 @@ $requiredGovernanceValues = @(
   'enabled: true',
   'provider: github',
   'repository: Idea2Strategy/Idea2Strategy',
-  'product_authorities: [user:kcrmin]',
+  'product_authorities: [user:kcrmin, user:pjy008008]',
   'protected_kinds: [product, policy, business, contract]',
   'minimum: 1',
   'authority_self_approval: true'
@@ -85,6 +85,7 @@ $authorityRuleFiles = @(
 $requiredAuthorityRules = @(
   'stackcord governance check --json',
   'user:kcrmin',
+  'user:pjy008008',
   'fresh provider',
   'must not edit',
   'Git user.name and user.email never prove authority'
@@ -102,7 +103,7 @@ if (-not (Test-Path -LiteralPath $ownerMetadataPath -PathType Leaf)) {
   throw 'Ignored local product-owner metadata is missing.'
 }
 $ownerMetadata = Get-Content -Raw -Encoding utf8 $ownerMetadataPath
-foreach ($required in @('provider_authority: user:kcrmin', 'contact_email_is_authority: false')) {
+foreach ($required in @('product_authorities: [user:kcrmin, user:pjy008008]', 'contact_email_is_authority: false')) {
   if (-not $ownerMetadata.Contains($required)) {
     throw "Local product-owner metadata requirement is missing: $required"
   }
@@ -161,6 +162,6 @@ if ($trackedInHead) {
   bootstrap_review = [bool]$BootstrapReview
   authorized_policy_change = [bool]$AuthorizedPolicyChange
   governance_enabled = $true
-  product_authority = 'user:kcrmin'
+  product_authorities = @('user:kcrmin', 'user:pjy008008')
   status = 'passed'
 } | ConvertTo-Json -Compress

@@ -83,18 +83,23 @@ function Initialize-TrackedPolicyIntegrity {
 
 function Initialize-ProductAuthorityReference {
   $ownerMetadataPath = Join-Path $localRoot 'project/policy/owner.yaml'
-  if (Test-Path -LiteralPath $ownerMetadataPath -PathType Leaf) {
-    return
-  }
-
   $ownerMetadata = @'
 schema_version: 1
 provider: github
 repository: Idea2Strategy/Idea2Strategy
-provider_authority: user:kcrmin
+product_authorities: [user:kcrmin, user:pjy008008]
 contact_email_is_authority: false
 purpose: non-secret product-authority reference; provider verification is required
 '@
+  if (Test-Path -LiteralPath $ownerMetadataPath -PathType Leaf) {
+    # Migrate only the superseded single-authority default; never overwrite a
+    # locally customized owner reference.
+    $existing = Get-Content -Raw -Encoding utf8 $ownerMetadataPath
+    if (-not $existing.Contains('provider_authority: user:kcrmin')) {
+      return
+    }
+  }
+
   Set-Content -LiteralPath $ownerMetadataPath -Encoding utf8 -Value $ownerMetadata
 }
 

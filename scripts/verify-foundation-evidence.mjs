@@ -129,12 +129,12 @@ function verifyPolicy() {
   const governance = readFileSync(join(root, ".harness/governance.yaml"), "utf8");
   for (const value of [
     "enabled: true", "provider: github", "repository: Idea2Strategy/Idea2Strategy",
-    "product_authorities: [user:kcrmin]", "authority_self_approval: true",
+    "product_authorities: [user:kcrmin, user:pjy008008]", "authority_self_approval: true",
   ]) {
     if (!governance.includes(value)) throw new Error(`Governance requirement is missing: ${value}`);
   }
   const owner = readFileSync(ownerPath, "utf8");
-  for (const value of ["provider_authority: user:kcrmin", "contact_email_is_authority: false"]) {
+  for (const value of ["product_authorities: [user:kcrmin, user:pjy008008]", "contact_email_is_authority: false"]) {
     if (!owner.includes(value)) throw new Error(`Local authority requirement is missing: ${value}`);
   }
   const policy = readFileSync(policyPath, "utf8");
@@ -143,7 +143,7 @@ function verifyPolicy() {
   if (integrity.sha256 !== actual) throw new Error("Collaboration policy differs from the local integrity baseline.");
   const clean = execute("git", ["-C", root, "diff", "--quiet", "HEAD", "--", policyRelative], { allowFailure: true });
   if (clean.status !== 0) throw new Error("Collaboration policy has an uncommitted change.");
-  output({ status: "passed", policy: policyRelative, sha256: actual, product_authority: "user:kcrmin" });
+  output({ status: "passed", policy: policyRelative, sha256: actual, product_authorities: ["user:kcrmin", "user:pjy008008"] });
 }
 
 function sleep(milliseconds) {
