@@ -276,9 +276,10 @@ Backend 소스가 준비되기 전에는 2번 또는 3번 메뉴를 사용한다
 
 ### GitHub Actions의 private 서브모듈 권한
 
-루트 Flyway 통합 job은 서비스 서브모듈을 루트 gitlink의 정확한 커밋으로
-checkout한다. 루트 저장소의 Actions secret `SUBMODULE_READ_TOKEN`에는 필요한
-Idea2Strategy 서브모듈 저장소에만 `Contents: read` 권한이 있는 fine-grained
+루트 Flyway 통합 job은 backend와 trading 서브모듈만 루트 gitlink의 정확한
+커밋으로 checkout한다. 루트 저장소의 Actions secret
+`SUBMODULE_READ_TOKEN`에는 `Idea2Strategy-backend`와
+`Idea2Strategy-trading-engine`에만 `Contents: read` 권한이 있는 fine-grained
 token을 등록한다. 루트의 기본 `GITHUB_TOKEN`은 sibling private 저장소를 읽을
 수 없으며, 이 checkout에 write 권한 토큰을 사용하지 않는다.
 
