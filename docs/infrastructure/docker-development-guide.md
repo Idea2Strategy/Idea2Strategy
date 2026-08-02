@@ -15,6 +15,22 @@
 6. 작업 종료 시 컨테이너만 종료하고 데이터는 유지
 ```
 
+## 중앙 Flyway 번들
+
+로컬 Compose와 CI는 각 애플리케이션 저장소의 migration 디렉터리를 직접 실행하지 않는다. 다음 명령이 backend의 중앙 assembler와 현재 checkout된 정확한 trading-engine contribution 계약을 검증한 뒤 로컬 전용 번들을 만든다.
+
+```powershell
+./scripts/prepare-flyway-bundle.ps1
+```
+
+생성 위치는 `.harness/local/tmp/flyway-bundle` 하나로 고정된다. 스크립트는 이 정확한 경로 밖의 디렉터리를 삭제하거나 다시 만들지 않으며 symlink·reparse point 출력도 거부한다. `compose.back.yml`의 `flyway` 서비스는 생성된 번들만 `/flyway/sql`에 읽기 전용으로 mount한다. backend와 trading runtime은 Flyway를 실행하지 않는다.
+
+PostgreSQL 16에서 최초 migrate, validate, 두 번째 migrate의 pending 0과 현재 application table 수를 확인하려면 다음을 실행한다.
+
+```powershell
+./scripts/test-flyway-migration.ps1
+```
+
 Docker 컨테이너 안에서 코드를 수정하지 않는다. 평소처럼 로컬 프로젝트 파일을 IDE에서 수정하면 된다.
 
 ## 1. 최초 준비
@@ -257,6 +273,15 @@ Docker Desktop이 설치되어 있는지 확인한 뒤 Docker Desktop을 한 번
 - `backend/db-migration/src/main/resources/db/migration`
 
 Backend 소스가 준비되기 전에는 2번 또는 3번 메뉴를 사용한다.
+
+### GitHub Actions의 private 서브모듈 검증
+
+루트 Flyway 통합 job은 private 서브모듈 자격 증명을 저장하지 않는다. 대신
+`db/flyway-ci-bundle`에 검증 완료된 중앙 bundle과 계약 fixture를 고정하고,
+메타데이터의 backend·trading 커밋이 루트 gitlink와 일치하는지 확인한다.
+manifest의 개별 파일 해시와 bundle digest를 검증한 뒤 PostgreSQL 16에서
+실제 migrate·validate·재실행·계약 fixture를 수행한다. 서브모듈 gitlink나
+마이그레이션이 바뀌는 PR은 로컬 중앙 assembler로 이 CI bundle도 함께 갱신해야 한다.
 
 ## 9. 팀 공통 규칙
 

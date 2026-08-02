@@ -144,7 +144,8 @@ docker run --rm -v "${PWD}:/workspace" -w /workspace python:3.12-slim `
 
 - 정본: `db/schema.dbml`
 - PostgreSQL: 10개 논리 스키마
-- 테이블: 137개
+- 현재 전체 Flyway 적용 결과: 139개 테이블
+- 불변 V1 기준선: 137개 테이블
 - 초기 Flyway migration: `backend/db-migration/src/main/resources/db/migration/V1__initial_schema.sql`
 - DBML의 `Records`는 dbdiagram 검토용 샘플이며 migration seed가 아니다.
 

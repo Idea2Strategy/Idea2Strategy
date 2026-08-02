@@ -1,6 +1,5 @@
-# Local Flyway placeholder
+# Legacy Flyway placeholder
 
-루트의 인프라 전용 실행이 앱 소스 없이도 가능하도록 유지하는 빈 fallback 경로다.
-
-실제 `apps` 프로필은 `.env.docker`의 `BACKEND_MIGRATION_DIR`가 가리키는
-Backend 멀티 모듈의 `db-migration/src/main/resources/db/migration`을 사용해야 한다.
+이 경로는 이전 로컬 인프라 구조의 기록으로만 남아 있으며 Compose 입력으로 사용하지 않는다.
+현재 `apps` 프로필은 `scripts/prepare-flyway-bundle.ps1`가 검증·생성한
+`.harness/local/tmp/flyway-bundle`만 읽기 전용으로 mount한다.

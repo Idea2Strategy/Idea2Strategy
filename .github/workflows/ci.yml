@@ -44,3 +44,15 @@ jobs:
           for path in backend backtest-engine data-pipeline trading-engine ui; do
             test "$(git ls-files -s "$path" | awk '{print $1}')" = "160000"
           done
+
+  flyway-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+      - name: Verify pinned central Flyway migration lifecycle
+        shell: pwsh
+        run: ./scripts/test-flyway-ci-bundle.ps1

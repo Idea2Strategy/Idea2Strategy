@@ -3,30 +3,87 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$prepareBundle = Join-Path $PSScriptRoot 'prepare-flyway-bundle.ps1'
-$bundle = Join-Path $root '.harness/local/tmp/flyway-bundle'
-$fillAllocationFixture = Join-Path $root 'trading-engine/db/migration-contributions/fixtures/partial_fill_allocation_contract.sql.fixture'
+$bundle = Join-Path $root 'db/flyway-ci-bundle'
+$metadataPath = Join-Path $bundle 'source-revisions.json'
+$manifestPath = Join-Path $bundle 'migration-bundle.manifest'
+$digestPath = Join-Path $bundle 'migration-bundle.sha256'
+$fixture = Join-Path $bundle 'partial_fill_allocation_contract.sql.fixture'
 
-if (-not (Test-Path -LiteralPath $prepareBundle -PathType Leaf)) {
-    throw 'Flyway bundle preparation script is missing.'
+foreach ($requiredPath in @($metadataPath, $manifestPath, $digestPath, $fixture)) {
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+        throw "Pinned Flyway CI artifact is missing: $requiredPath"
+    }
 }
-if (-not (Test-Path -LiteralPath $fillAllocationFixture -PathType Leaf)) {
-    throw 'The pinned trading-engine revision is missing the required partial-fill allocation contract fixture.'
+
+$metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+if ($metadata.format -cne 'idea2strategy-flyway-ci-bundle-v1') {
+    throw 'Unsupported pinned Flyway CI bundle metadata format.'
 }
 
-& $prepareBundle | Out-Host
-$firstManifestHash = (Get-FileHash -LiteralPath (Join-Path $bundle 'migration-bundle.manifest') -Algorithm SHA256).Hash
-$firstBundleDigest = (Get-Content -LiteralPath (Join-Path $bundle 'migration-bundle.sha256') -Raw).Trim()
+function Get-GitlinkRevision([string]$Path) {
+    $entry = (& git -C $root ls-tree HEAD -- $Path) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or $entry -notmatch '^160000\s+commit\s+([0-9a-f]{40})\s+') {
+        throw "Unable to resolve root gitlink: $Path"
+    }
+    return $Matches[1]
+}
 
-& $prepareBundle | Out-Host
-$secondManifestHash = (Get-FileHash -LiteralPath (Join-Path $bundle 'migration-bundle.manifest') -Algorithm SHA256).Hash
-$secondBundleDigest = (Get-Content -LiteralPath (Join-Path $bundle 'migration-bundle.sha256') -Raw).Trim()
-if ($firstManifestHash -cne $secondManifestHash -or $firstBundleDigest -cne $secondBundleDigest) {
-    throw 'The same exact inputs did not produce a deterministic Flyway bundle.'
+$backendGitlink = Get-GitlinkRevision 'backend'
+$tradingGitlink = Get-GitlinkRevision 'trading-engine'
+if ($metadata.backend_gitlink -cne $backendGitlink) {
+    throw "Pinned bundle backend revision does not match the root gitlink: $($metadata.backend_gitlink) != $backendGitlink"
+}
+if ($metadata.trading_gitlink -cne $tradingGitlink) {
+    throw "Pinned bundle trading revision does not match the root gitlink: $($metadata.trading_gitlink) != $tradingGitlink"
+}
+
+$manifestLines = @(Get-Content -LiteralPath $manifestPath)
+if ($manifestLines.Count -lt 2 -or $manifestLines[0] -cne 'idea2strategy-flyway-bundle-v1') {
+    throw 'Invalid pinned Flyway bundle manifest.'
+}
+
+function Get-NormalizedTextSha256([string]$Path) {
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $normalized = New-Object System.IO.MemoryStream
+    for ($index = 0; $index -lt $bytes.Length; $index++) {
+        if ($bytes[$index] -eq 13 -and $index + 1 -lt $bytes.Length -and $bytes[$index + 1] -eq 10) {
+            $normalized.WriteByte(10)
+            $index++
+        } else {
+            $normalized.WriteByte($bytes[$index])
+        }
+    }
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($normalized.ToArray()))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+        $normalized.Dispose()
+    }
+}
+
+foreach ($line in $manifestLines[1..($manifestLines.Count - 1)]) {
+    if ($line -notmatch '^([^\t]+\.sql)\t([0-9a-f]{64})$') {
+        throw "Invalid pinned Flyway manifest entry: $line"
+    }
+    $migrationPath = Join-Path $bundle $Matches[1]
+    if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) {
+        throw "Pinned Flyway migration is missing: $($Matches[1])"
+    }
+    $actualHash = Get-NormalizedTextSha256 $migrationPath
+    if ($actualHash -cne $Matches[2]) {
+        throw "Pinned Flyway migration hash mismatch: $($Matches[1])"
+    }
+}
+
+$manifestDigest = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$recordedDigest = (Get-Content -LiteralPath $digestPath -Raw).Trim()
+if ($manifestDigest -cne $recordedDigest -or $recordedDigest -cne $metadata.bundle_sha256) {
+    throw 'Pinned Flyway bundle digest does not match its manifest or source metadata.'
 }
 
 $suffix = [guid]::NewGuid().ToString('N').Substring(0, 12)
-$container = "idea2strategy-migration-$suffix"
+$container = "idea2strategy-ci-migration-$suffix"
 $database = 'idea2strategy'
 $user = 'idea2strategy'
 $password = "migration-$suffix"
@@ -90,10 +147,6 @@ try {
     $historyBeforeSecondRun = (docker exec -e "PGPASSWORD=$password" $container `
         psql -U $user -d $database -Atc `
         'SELECT count(*) FROM flyway_schema_history WHERE success;').Trim()
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($historyBeforeSecondRun)) {
-        throw 'Unable to inspect Flyway history after the first migration.'
-    }
-
     Invoke-Flyway 'migrate' | Out-Host
     $historyAfterSecondRun = (docker exec -e "PGPASSWORD=$password" $container `
         psql -U $user -d $database -Atc `
@@ -115,14 +168,7 @@ try {
         throw "Expected 139 application tables after Flyway; found '$tableCount'."
     }
 
-    $fillAllocationTable = (docker exec -e "PGPASSWORD=$password" $container `
-        psql -U $user -d $database -Atc `
-        "SELECT to_regclass('trading.fill_component_allocations') IS NOT NULL;").Trim()
-    if ($LASTEXITCODE -ne 0 -or $fillAllocationTable -ne 't') {
-        throw 'The central bundle is missing canonical trading.fill_component_allocations.'
-    }
-
-    docker cp $fillAllocationFixture "${container}:/tmp/partial_fill_allocation_contract.sql"
+    docker cp $fixture "${container}:/tmp/partial_fill_allocation_contract.sql"
     if ($LASTEXITCODE -ne 0) {
         throw 'Unable to copy the partial-fill allocation contract fixture into PostgreSQL.'
     }
@@ -139,7 +185,9 @@ try {
         successful_migrations = [int]$historyAfterSecondRun
         second_run_pending = 0
         partial_fill_allocation_contract = 'passed'
-        bundle_sha256 = $secondBundleDigest
+        bundle_sha256 = $recordedDigest
+        backend_revision = $backendGitlink
+        trading_revision = $tradingGitlink
         postgres = '16-alpine'
         flyway = '11-alpine'
     } | ConvertTo-Json -Compress

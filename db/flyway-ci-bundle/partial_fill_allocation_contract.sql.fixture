@@ -1,0 +1,216 @@
+-- PostgreSQL 16 contract probe for the canonical partial-fill contribution.
+-- Run only against an ephemeral migrated database as a PostgreSQL superuser.
+-- Parent rows outside trading are intentionally bypassed while the focused
+-- trading aggregate is seeded; all assertions execute with normal triggers.
+
+SET session_replication_role = replica;
+
+INSERT INTO trading.order_intents (
+    id, bot_id, batch_id, source_event_id, origin_type, partition_id, flow_id,
+    instrument_id, intent_key, side, position_effect, order_type, time_in_force,
+    requested_quantity, approved_quantity, post_netting_quantity, final_quantity,
+    decision, decision_reason_code
+) VALUES (
+    '10000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000001',
+    '30000000-0000-4000-8000-000000000001',
+    '40000000-0000-4000-8000-000000000001',
+    'SYSTEM_STOP_LIQUIDATION',
+    '50000000-0000-4000-8000-000000000001',
+    '60000000-0000-4000-8000-000000000001',
+    '70000000-0000-4000-8000-000000000001',
+    'contract-probe-intent', 'BUY', 'OPEN_LONG', 'MARKET', 'DAY',
+    10, 10, 10, 10, 'APPROVED', 'CONTRACT_PROBE'
+);
+
+INSERT INTO trading.orders (
+    id, bot_id, partition_id, instrument_id, order_key, side, order_type,
+    time_in_force, requested_quantity, broker_rules_version,
+    precision_rules_version, slippage_rate_bps, fee_policy_id,
+    accepted_event_id, accepted_at, contract_hash
+) VALUES (
+    '11000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '70000000-0000-4000-8000-000000000001',
+    'contract-probe-order', 'BUY', 'MARKET', 'DAY', 10,
+    '1', '1', 5,
+    '80000000-0000-4000-8000-000000000001',
+    '90000000-0000-4000-8000-000000000001', now(), repeat('a', 64)
+);
+
+INSERT INTO trading.order_components (
+    id, bot_id, partition_id, order_id, intent_id, component_quantity,
+    component_sequence, composition_rules_version
+) VALUES (
+    '12000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '11000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001', 10, 1, '1'
+);
+
+INSERT INTO trading.fills (
+    id, order_id, bot_id, partition_id, bot_event_id, provider_fill_key,
+    quantity, reference_price, reference_observed_at, reference_market_hash,
+    slippage_rate_bps, slippage_amount, fill_price, gross_amount,
+    fee_policy_id, fee_rate_bps, precision_rules_version, fee_basis_amount,
+    fee_amount, settlement_cash_delta, occurred_at
+) VALUES
+(
+    '13000000-0000-4000-8000-000000000001',
+    '11000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '90000000-0000-4000-8000-000000000002', 'contract-probe-fill-1',
+    4, 10, now(), repeat('b', 64), 5, 0.02, 10.005, 40,
+    '80000000-0000-4000-8000-000000000001', 20, '1', 40,
+    0.08, -40.08, now()
+),
+(
+    '13000000-0000-4000-8000-000000000002',
+    '11000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '90000000-0000-4000-8000-000000000003', 'contract-probe-fill-2',
+    6, 10, now(), repeat('c', 64), 5, 0.03, 10.005, 60,
+    '80000000-0000-4000-8000-000000000001', 20, '1', 60,
+    0.12, -60.12, now()
+);
+
+INSERT INTO trading.fill_component_allocations (
+    id, bot_id, partition_id, order_id, fill_id, order_component_id,
+    allocation_sequence, allocated_quantity, allocated_gross_amount,
+    allocated_fee_amount, allocated_settlement_cash_delta, allocation_rules_version
+) VALUES
+(
+    '14000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '11000000-0000-4000-8000-000000000001',
+    '13000000-0000-4000-8000-000000000001',
+    '12000000-0000-4000-8000-000000000001', 1, 4, 40, 0.08, -40.08, '1'
+),
+(
+    '14000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '11000000-0000-4000-8000-000000000001',
+    '13000000-0000-4000-8000-000000000002',
+    '12000000-0000-4000-8000-000000000001', 1, 6, 60, 0.12, -60.12, '1'
+);
+
+INSERT INTO trading.order_state_projections (
+    order_id, bot_id, partition_id, status, filled_quantity,
+    remaining_quantity, reserved_cash, reserved_quantity,
+    last_order_event_sequence, last_bot_event_sequence, updated_at
+) VALUES (
+    '11000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    'FILLED', 10, 0, 0, 0, 3, 3, now()
+);
+
+INSERT INTO trading.resource_reservations (
+    id, reservation_key, bot_id, partition_id, flow_id, intent_id,
+    resource_type, currency_code, buffer_policy_id, fee_policy_id,
+    precision_rules_version, status, reserved_amount, consumed_amount,
+    released_amount, created_event_id, created_at, last_event_sequence
+) VALUES (
+    '15000000-0000-4000-8000-000000000001', 'contract-probe-reservation',
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '60000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'CASH_BUYING_POWER', 'USD',
+    '80000000-0000-4000-8000-000000000002',
+    '80000000-0000-4000-8000-000000000001',
+    '1', 'ACTIVE', 100, 40.08, 0,
+    '90000000-0000-4000-8000-000000000004', now(), 2
+);
+
+INSERT INTO trading.order_component_reservations (
+    bot_id, partition_id, reservation_id, order_component_id, reserved_amount
+) VALUES (
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '15000000-0000-4000-8000-000000000001',
+    '12000000-0000-4000-8000-000000000001', 100
+);
+
+INSERT INTO trading.reservation_events (
+    id, bot_id, partition_id, reservation_id, bot_event_id, source_fill_id,
+    event_key, reservation_sequence, event_type, consumed_amount_delta,
+    status_after, occurred_at, event_hash
+) VALUES
+(
+    '16000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '15000000-0000-4000-8000-000000000001',
+    '90000000-0000-4000-8000-000000000004', NULL,
+    'contract-probe-created', 1, 'CREATED', NULL, 'ACTIVE', now(), repeat('d', 64)
+),
+(
+    '16000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '15000000-0000-4000-8000-000000000001',
+    '90000000-0000-4000-8000-000000000005',
+    '13000000-0000-4000-8000-000000000001',
+    'contract-probe-consumed', 2, 'CONSUMED_BY_FILL', 40.08,
+    'ACTIVE', now(), repeat('e', 64)
+);
+
+SET session_replication_role = origin;
+
+-- Two individual fills for one order, exact allocation economics, cumulative
+-- component capacity and a still-ACTIVE partially consumed reservation pass.
+SELECT trading.assert_fill_allocation_totals('13000000-0000-4000-8000-000000000001');
+SELECT trading.assert_fill_allocation_totals('13000000-0000-4000-8000-000000000002');
+SELECT trading.assert_component_allocation_capacity('12000000-0000-4000-8000-000000000001');
+SELECT trading.assert_order_fill_state('11000000-0000-4000-8000-000000000001');
+SELECT trading.assert_reservation_event_totals('15000000-0000-4000-8000-000000000001');
+SELECT trading.assert_fill_reservation_consumption('16000000-0000-4000-8000-000000000002');
+
+DO $$
+BEGIN
+    BEGIN
+        UPDATE trading.fill_component_allocations
+           SET allocated_fee_amount = 0.07
+         WHERE id = '14000000-0000-4000-8000-000000000001';
+        SET CONSTRAINTS ALL IMMEDIATE;
+        RAISE EXCEPTION 'expected exact fill allocation failure was not raised';
+    EXCEPTION WHEN raise_exception THEN
+        IF SQLERRM LIKE 'expected exact fill allocation failure%' THEN RAISE; END IF;
+    END;
+
+    BEGIN
+        UPDATE trading.order_components
+           SET component_quantity = 9
+         WHERE id = '12000000-0000-4000-8000-000000000001';
+        PERFORM trading.assert_component_allocation_capacity(
+            '12000000-0000-4000-8000-000000000001');
+        RAISE EXCEPTION 'expected cumulative component overfill failure was not raised';
+    EXCEPTION WHEN raise_exception THEN
+        IF SQLERRM LIKE 'expected cumulative component overfill failure%' THEN RAISE; END IF;
+    END;
+
+    BEGIN
+        UPDATE trading.resource_reservations
+           SET consumed_amount = 39
+         WHERE id = '15000000-0000-4000-8000-000000000001';
+        SET CONSTRAINTS ALL IMMEDIATE;
+        RAISE EXCEPTION 'expected reservation projection failure was not raised';
+    EXCEPTION WHEN raise_exception THEN
+        IF SQLERRM LIKE 'expected reservation projection failure%' THEN RAISE; END IF;
+    END;
+
+    BEGIN
+        UPDATE trading.fill_component_allocations
+           SET bot_id = '20000000-0000-4000-8000-000000000099'
+         WHERE id = '14000000-0000-4000-8000-000000000001';
+        RAISE EXCEPTION 'expected cross-scope allocation failure was not raised';
+    EXCEPTION WHEN foreign_key_violation THEN NULL;
+    END;
+END $$;

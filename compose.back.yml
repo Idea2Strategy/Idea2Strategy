@@ -145,7 +145,7 @@ services:
       - -password=${POSTGRES_PASSWORD}
       - migrate
     volumes:
-      - ${BACKEND_MIGRATION_DIR:-./backend/db-migration/src/main/resources/db/migration}:/flyway/sql:ro
+      - ./.harness/local/tmp/flyway-bundle:/flyway/sql:ro
     networks: [development]
     restart: "no"
 
