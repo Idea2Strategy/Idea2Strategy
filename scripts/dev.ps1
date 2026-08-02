@@ -169,6 +169,17 @@ function Invoke-Compose {
     }
 }
 
+function Initialize-FlywayBundle {
+    if (-not $WithBackend) {
+        return
+    }
+    $prepareBundle = Join-Path $PSScriptRoot "prepare-flyway-bundle.ps1"
+    if (-not (Test-Path -LiteralPath $prepareBundle -PathType Leaf)) {
+        throw "Flyway bundle preparation script is missing: $prepareBundle"
+    }
+    & $prepareBundle | Out-Host
+}
+
 function Test-HttpEndpoint {
     param([Parameter(Mandatory = $true)][string]$Uri)
 
@@ -291,6 +302,7 @@ try {
 
     switch ($Action) {
         "up" {
+            Initialize-FlywayBundle
             Invoke-Compose -Arguments @("up", "-d", "--build") | Out-Null
             Wait-DevelopmentEnvironment
             Show-ConnectionSummary
@@ -327,6 +339,7 @@ try {
             Write-Host "Development containers stopped. Volumes were preserved." -ForegroundColor Green
         }
         "restart" {
+            Initialize-FlywayBundle
             Invoke-Compose -Arguments @("up", "-d", "--build") | Out-Null
             Wait-DevelopmentEnvironment
             Show-ConnectionSummary

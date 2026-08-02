@@ -3,10 +3,22 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$migrationPath = Join-Path $root 'backend/db-migration/src/main/resources/db/migration'
+$prepareBundle = Join-Path $PSScriptRoot 'prepare-flyway-bundle.ps1'
+$bundle = Join-Path $root '.harness/local/tmp/flyway-bundle'
 
-if (-not (Test-Path -LiteralPath $migrationPath -PathType Container)) {
-    throw 'Flyway migration directory is missing.'
+if (-not (Test-Path -LiteralPath $prepareBundle -PathType Leaf)) {
+    throw 'Flyway bundle preparation script is missing.'
+}
+
+& $prepareBundle | Out-Host
+$firstManifestHash = (Get-FileHash -LiteralPath (Join-Path $bundle 'migration-bundle.manifest') -Algorithm SHA256).Hash
+$firstBundleDigest = (Get-Content -LiteralPath (Join-Path $bundle 'migration-bundle.sha256') -Raw).Trim()
+
+& $prepareBundle | Out-Host
+$secondManifestHash = (Get-FileHash -LiteralPath (Join-Path $bundle 'migration-bundle.manifest') -Algorithm SHA256).Hash
+$secondBundleDigest = (Get-Content -LiteralPath (Join-Path $bundle 'migration-bundle.sha256') -Raw).Trim()
+if ($firstManifestHash -cne $secondManifestHash -or $firstBundleDigest -cne $secondBundleDigest) {
+    throw 'The same exact inputs did not produce a deterministic Flyway bundle.'
 }
 
 $suffix = [guid]::NewGuid().ToString('N').Substring(0, 12)
@@ -14,6 +26,28 @@ $container = "idea2strategy-migration-$suffix"
 $database = 'idea2strategy'
 $user = 'idea2strategy'
 $password = "migration-$suffix"
+
+function Invoke-Flyway([string]$Command, [switch]$Json) {
+    $arguments = @(
+        'run', '--rm',
+        '--network', "container:$container",
+        '-v', "${bundle}:/flyway/sql:ro",
+        'redgate/flyway:11-alpine',
+        "-url=jdbc:postgresql://localhost:5432/$database",
+        "-user=$user",
+        "-password=$password",
+        '-connectRetries=30'
+    )
+    if ($Json) {
+        $arguments += '-outputType=json'
+    }
+    $arguments += $Command
+    $output = & docker @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Flyway $Command failed."
+    }
+    return $output
+}
 
 try {
     $started = docker run -d `
@@ -46,38 +80,50 @@ try {
         throw 'Timed out waiting for temporary PostgreSQL.'
     }
 
-    docker run --rm `
-        --network "container:$container" `
-        -v "${migrationPath}:/flyway/sql:ro" `
-        redgate/flyway:11-alpine `
-        "-url=jdbc:postgresql://localhost:5432/$database" `
-        "-user=$user" `
-        "-password=$password" `
-        '-connectRetries=30' `
-        migrate
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Flyway migration failed.'
+    Invoke-Flyway 'migrate' | Out-Host
+    Invoke-Flyway 'validate' | Out-Host
+
+    $historyBeforeSecondRun = (docker exec -e "PGPASSWORD=$password" $container `
+        psql -U $user -d $database -Atc `
+        'SELECT count(*) FROM flyway_schema_history WHERE success;').Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($historyBeforeSecondRun)) {
+        throw 'Unable to inspect Flyway history after the first migration.'
+    }
+
+    Invoke-Flyway 'migrate' | Out-Host
+    $historyAfterSecondRun = (docker exec -e "PGPASSWORD=$password" $container `
+        psql -U $user -d $database -Atc `
+        'SELECT count(*) FROM flyway_schema_history WHERE success;').Trim()
+    if ($LASTEXITCODE -ne 0 -or $historyAfterSecondRun -ne $historyBeforeSecondRun) {
+        throw 'The second Flyway migrate applied an unexpected migration.'
+    }
+
+    $infoOutput = (Invoke-Flyway 'info' -Json) -join "`n"
+    if ($infoOutput -match '(?i)"state"\s*:\s*"pending"') {
+        throw 'Flyway reports a pending migration after the second migrate.'
     }
 
     $schemaList = "'identity','strategy','bot','storage','market_data','trading','backtest','performance','competition','operations'"
     $tableCount = (docker exec -e "PGPASSWORD=$password" $container `
         psql -U $user -d $database -Atc `
         "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ($schemaList) AND table_type = 'BASE TABLE';").Trim()
-    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '137') {
-        throw "Expected 137 application tables after Flyway; found '$tableCount'."
+    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '138') {
+        throw "Expected 138 application tables after Flyway; found '$tableCount'."
     }
 
-    $historyCount = (docker exec -e "PGPASSWORD=$password" $container `
+    $fillAllocationTable = (docker exec -e "PGPASSWORD=$password" $container `
         psql -U $user -d $database -Atc `
-        'SELECT count(*) FROM flyway_schema_history WHERE success;').Trim()
-    if ($LASTEXITCODE -ne 0 -or $historyCount -lt 1) {
-        throw 'Flyway schema history does not contain a successful migration.'
+        "SELECT to_regclass('trading.fill_component_allocations') IS NOT NULL;").Trim()
+    if ($LASTEXITCODE -ne 0 -or $fillAllocationTable -ne 't') {
+        throw 'The central bundle is missing canonical trading.fill_component_allocations.'
     }
 
     [pscustomobject]@{
         status = 'passed'
         application_tables = [int]$tableCount
-        successful_migrations = [int]$historyCount
+        successful_migrations = [int]$historyAfterSecondRun
+        second_run_pending = 0
+        bundle_sha256 = $secondBundleDigest
         postgres = '16-alpine'
         flyway = '11-alpine'
     } | ConvertTo-Json -Compress

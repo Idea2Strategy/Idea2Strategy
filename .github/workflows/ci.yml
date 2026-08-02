@@ -44,3 +44,27 @@ jobs:
           for path in backend backtest-engine data-pipeline trading-engine ui; do
             test "$(git ls-files -s "$path" | awk '{print $1}')" = "160000"
           done
+
+  flyway-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            backend/*.gradle.kts
+            backend/gradle.properties
+            backend/gradle/wrapper/gradle-wrapper.properties
+      - name: Verify generated Flyway Compose boundary
+        shell: pwsh
+        run: ./scripts/test-docker-development.ps1
+      - name: Verify central Flyway migration lifecycle
+        shell: pwsh
+        run: ./scripts/test-flyway-migration.ps1

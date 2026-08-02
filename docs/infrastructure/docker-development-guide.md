@@ -15,6 +15,22 @@
 6. 작업 종료 시 컨테이너만 종료하고 데이터는 유지
 ```
 
+## 중앙 Flyway 번들
+
+로컬 Compose와 CI는 각 애플리케이션 저장소의 migration 디렉터리를 직접 실행하지 않는다. 다음 명령이 backend의 중앙 assembler와 현재 checkout된 정확한 trading-engine contribution 계약을 검증한 뒤 로컬 전용 번들을 만든다.
+
+```powershell
+./scripts/prepare-flyway-bundle.ps1
+```
+
+생성 위치는 `.harness/local/tmp/flyway-bundle` 하나로 고정된다. 스크립트는 이 정확한 경로 밖의 디렉터리를 삭제하거나 다시 만들지 않으며 symlink·reparse point 출력도 거부한다. `compose.back.yml`의 `flyway` 서비스는 생성된 번들만 `/flyway/sql`에 읽기 전용으로 mount한다. backend와 trading runtime은 Flyway를 실행하지 않는다.
+
+PostgreSQL 16에서 최초 migrate, validate, 두 번째 migrate의 pending 0과 현재 application table 수를 확인하려면 다음을 실행한다.
+
+```powershell
+./scripts/test-flyway-migration.ps1
+```
+
 Docker 컨테이너 안에서 코드를 수정하지 않는다. 평소처럼 로컬 프로젝트 파일을 IDE에서 수정하면 된다.
 
 ## 1. 최초 준비
