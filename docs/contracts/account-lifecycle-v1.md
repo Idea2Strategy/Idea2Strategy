@@ -132,6 +132,7 @@
 - 동일 OIDC `issuer + subject`도 격리 종료 후 공급자 인증과 현재 필수 동의를 다시 완료한 경우 새 계정에 연결할 수 있다. 과거 권한·데이터·공개 소유권은 자동 이전하지 않는다.
 - legal hold가 `blocks_identifier_reuse=true`로 해당 식별자에 명시 적용된 경우 격리 종료 후에도 재사용을 막는다. 단순히 다른 증적이 hold 대상이라는 이유만으로 재사용을 무기한 차단하지 않는다.
 - 중복 가입 경쟁은 정규화된 이메일 및 `issuer + subject`의 활성/격리 바인딩에 대한 DB 유일성 제약으로 직렬화한다.
+- 격리는 원문 대신 키 버전이 있는 식별자 fingerprint와 `reuse_eligible_at = closed_at + 30일`을 별도 tombstone으로 저장한다. 미해제 fingerprint는 하나만 허용한다. 격리 해제는 활성 `blocks_identifier_reuse` hold가 없음을 확인하고 기존 이메일/OIDC 바인딩의 조회 fingerprint를 제거하는 작업과 같은 트랜잭션에서 수행한다.
 
 ## 9. 멱등성·동시성·DB 불변식
 

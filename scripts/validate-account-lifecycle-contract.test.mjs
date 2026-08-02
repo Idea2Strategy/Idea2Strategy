@@ -70,3 +70,16 @@ test("records the confirmed product values without claiming legal retention peri
   assert.match(contract, /CLOSED 후 30일 격리 기간/);
   assert.match(contract, /승인된 retention policy/);
 });
+
+test("models releasable 30-day identifier quarantine without storing plaintext", () => {
+  for (const fragment of [
+    "Table identity.account_identifier_quarantines",
+    "identifier_fingerprint varchar(128)",
+    "reuse_eligible_at timestamptz",
+    "reuse_eligible_at = quarantined_at + interval '30 days'",
+    "Ref: identity.account_identifier_quarantines.(account_id, lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)",
+  ]) {
+    assert.ok(dbml.includes(fragment), `missing identifier quarantine fragment: ${fragment}`);
+  }
+  assert.match(contract, /별도 tombstone/);
+});

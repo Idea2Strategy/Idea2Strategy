@@ -616,6 +616,39 @@ Table identity.account_legal_holds {
   }
 }
 
+Table identity.account_identifier_quarantines {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  lifecycle_event_id uuid [not null]
+  identifier_kind varchar(20) [not null]
+  provider_code varchar(40) [not null]
+  identifier_fingerprint varchar(128) [not null]
+  fingerprint_key_version smallint [not null]
+  quarantined_at timestamptz [not null]
+  reuse_eligible_at timestamptz [not null]
+  released_at timestamptz
+  release_reason_code varchar(80)
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (identifier_kind, provider_code, identifier_fingerprint)
+    (reuse_eligible_at, released_at)
+    (account_id, identifier_kind)
+  }
+
+  checks {
+    `identifier_kind IN ('EMAIL', 'OIDC_SUBJECT')` [name: 'account_identifier_quarantine_kind_supported']
+    `reuse_eligible_at = quarantined_at + interval '30 days'` [name: 'account_identifier_quarantine_exact_period']
+    `released_at IS NULL OR (released_at >= reuse_eligible_at AND release_reason_code IS NOT NULL)` [name: 'account_identifier_quarantine_release_complete']
+  }
+
+  Note: 'CLOSED 시점에 정규화 이메일 HMAC 또는 OIDC issuer+subject HMAC를 저장하는 재사용 차단 tombstone. provider_code는 EMAIL에는 PASSWORD, OIDC에는 제공자 코드를 사용한다. migration은 released_at IS NULL인 fingerprint에 partial unique index를 두며, 활성 legal hold가 재사용을 차단하지 않는 경우에만 reuse_eligible_at 이후 source binding의 조회 HMAC를 제거하고 같은 트랜잭션에서 released_at을 기록한다. 원문 식별자와 secret은 저장하지 않는다.'
+
+  Records (id, account_id, lifecycle_event_id, identifier_kind, provider_code, identifier_fingerprint, fingerprint_key_version, quarantined_at, reuse_eligible_at, released_at, release_reason_code, created_at) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'EMAIL', 'PASSWORD', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-08-02T00:00:00Z', '2026-09-01T00:00:00Z', null, null, '2026-08-02T00:00:00Z'
+  }
+}
+
 Table identity.account_preferences {
   account_id uuid [pk]
   language_code varchar(12) [not null, note: '현재 지원 값은 ko와 en.']
@@ -4244,6 +4277,8 @@ Ref: identity.account_retention_obligations.account_id > identity.accounts.id
 Ref: identity.account_retention_obligations.(account_id, lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)
 Ref: identity.account_retention_obligations.retention_policy_version > identity.account_retention_policy_versions.version
 Ref: identity.account_legal_holds.account_id > identity.accounts.id
+Ref: identity.account_identifier_quarantines.account_id > identity.accounts.id
+Ref: identity.account_identifier_quarantines.(account_id, lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)
 Ref: identity.account_security_states.account_id > identity.accounts.id
 Ref: identity.account_preferences.account_id > identity.accounts.id
 Ref: identity.account_emails.account_id > identity.accounts.id
