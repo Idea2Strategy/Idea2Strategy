@@ -189,10 +189,10 @@ function verifyMigration() {
       "exec", "-e", `PGPASSWORD=${password}`, container, "psql", "-U", user, "-d", database,
       "-Atc", "SELECT count(*) FROM flyway_schema_history WHERE success;",
     ]).stdout.trim();
-    if (tableCount !== "139" || Number(historyCount) < 1) {
+    if (tableCount !== "138" || Number(historyCount) < 1) {
       throw new Error(`Unexpected migration result: tables=${tableCount}, history=${historyCount}.`);
     }
-    output({ status: "passed", application_tables: 139, successful_migrations: Number(historyCount) });
+    output({ status: "passed", application_tables: 138, successful_migrations: Number(historyCount) });
   } finally {
     execute("docker", ["rm", "-f", container], { allowFailure: true });
   }
