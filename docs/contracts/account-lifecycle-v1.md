@@ -1,6 +1,6 @@
 # 계정 수명주기 계약 v1
 
-상태: 사용자 전달 제품 결정 반영 완료. 정본 병합 전 정확한 HEAD에 대한 GitHub 제품 권한자 `user:kcrmin`의 리뷰가 필요함
+상태: `user:kcrmin`이 승인한 권고를 반영한 정본 제안. 병합 전 이 정확한 commit에 대한 GitHub 제품 권한자 리뷰가 필요함
 
 대상 이슈: Idea2Strategy/Idea2Strategy#107
 
@@ -65,12 +65,13 @@
 
 재활성화는 다음을 모두 만족해야 한다.
 
-1. 기존 기본 인증 수단으로 본인 인증에 성공한다.
-2. 별도의 단계 상승 인증을 통과한다.
-3. 현재 필수 정책 버전의 동의가 없으면 이를 완료한다.
-4. 계정 제재, 보호 잠금 또는 서비스별 접근 금지가 재활성화를 막도록 설정되어 있지 않다. 데이터 보존만을 위한 legal hold는 그 자체로 계정 접근을 제한하지 않는다.
+1. 현재 계정에 연결된 활성 `PASSWORD` 또는 `OIDC` 로그인 수단으로 단계 상승 인증에 성공한다. 복구 코드, 과거 로그인 흔적, 클라이언트가 선언한 인증 수단·시각은 인정하지 않는다.
+2. `PASSWORD`는 서버가 현재 credential을 직접 검증한다. `OIDC`는 서버가 발급한 단일 사용 nonce를 포함한 ID token을 backend가 제공자 JWKS로 직접 검증한다. 정확한 issuer, configured audience와 필요한 `azp`, 만료, nonce, 불변 subject 및 `auth_time` 중 하나라도 불명확하면 기본 거부한다.
+3. OIDC 단계 상승의 경과 시간은 IdP `auth_time`과 backend 검증 시각 중 더 오래된 시각을 기준으로 서버 수신 시각에서 최대 10분이다. nonce는 제공자에 결속하고 원문 대신 키 버전이 있는 HMAC만 저장하며, 만료·재사용·시도 한도 초과를 거절한다. ID token과 원문 nonce는 영속화하거나 로그에 남기지 않는다.
+4. 요청이 제출한 동의 문서 식별자 집합과 이미 저장된 동의를 합쳐 현재 필수 정책 문서의 정확한 집합을 충족해야 한다. 새 동의와 재활성화 사건·현재 head/version·명령 영수증은 하나의 트랜잭션으로 기록한다.
+5. 계정 제재, 보호 잠금 또는 서비스별 접근 금지가 재활성화를 막도록 설정되어 있지 않다. 데이터 보존만을 위한 legal hold는 그 자체로 계정 접근을 제한하지 않는다.
 
-성공 시 `DORMANT -> ACTIVE` 사건과 현재 상태를 원자적으로 기록한 뒤 새 세션을 발급한다. 휴면 전에 발급된 자격은 재사용하지 않는다.
+성공 시 `DORMANT -> ACTIVE` 사건과 현재 상태를 원자적으로 기록하지만 세션은 발급하지 않는다. 사용자는 정상 로그인 절차를 다시 거쳐야 하며 휴면 전에 발급되었거나 폐기된 세션·토큰은 계속 무효다. 같은 멱등 키의 성공 응답 재생도 세션이나 새 nonce를 만들지 않는다.
 
 ## 5. 접근 권한의 즉시 폐기
 
@@ -92,11 +93,11 @@
 | --- | --- | --- | --- |
 | backend/account | 로그인·토큰·환경설정 변경 차단, 취소와 상태 조회만 허용 | deadline 경과, 모든 종료 작업 상태 확인 | 계정 식별 정보 처리 작업 예약 |
 | bot | 신규 생성·시작·재시작 차단, 실행 중 봇 정지 요청 | 모든 봇이 종단/정지 상태이며 미확인 명령 없음 | 전략·실행 증적은 해당 보존 정책에 따름 |
-| trading | 신규 주문·주문 수정 차단, 안전한 취소만 허용 | 미체결 주문 해소, 포지션·잔액의 승인된 정리 또는 외부 계정 분리 완료 | 주문·체결·원장 증적은 불변 보존 대상으로 취급 |
-| competition/evaluation | 신규 참가·제출·평가 시작 차단 | 진행 중 평가를 취소하거나 결과를 확정하고 보상·순위를 정산 | 공개 결과는 계정 표시명 대신 비식별 참가자 키 사용 가능 |
+| trading | 신규 주문·주문 수정 차단 | 미체결 주문, 포지션 또는 잔여 자산이 하나라도 있으면 차단; 승인된 외부 정리 뒤 `settled` 필요 | 주문·체결·원장 증적은 불변 보존 대상으로 취급 |
+| competition/evaluation | 신규 참가·제출·평가 시작 차단; `REGISTERED` 참가를 멱등하게 `WITHDRAWN` 처리 | `EVALUATING` 참가는 평가 완료와 보상·순위 확정까지 차단 | 공개 결과는 계정 표시명 대신 비식별 참가자 키 사용 |
 | notification/integration | 신규 마케팅·일반 알림 중단, 종료 필수 알림만 허용 | webhook·외부 연결 폐기 확인 | 전송 증적은 최소 메타데이터만 정책에 따라 보존 |
 
-각 서비스는 `freeze_requested`, `frozen`, `settlement_required`, `settled`, `blocked` 중 하나의 종료 상태와 이유 코드를 반환한다. 조정자는 모든 필수 서비스가 `frozen` 또는 `settled`이고 `blocked`가 없을 때만 `CLOSED`로 전환한다. 금융·외부 시스템의 정리 방법은 해당 도메인 계약이 결정하며 이 계약은 자동 매도나 강제 청산을 지시하지 않는다.
+필수 readiness 도메인은 `BOT`, `TRADING`, `COMPETITION`, `NOTIFICATION`, `INTEGRATION` 다섯 개다. 각 도메인은 `freeze_requested`, `frozen`, `settlement_required`, `settled`, `blocked` 중 하나와 안정적인 이유 코드를 반환한다. 조정자는 같은 `correlation_id`와 generation에 대해 `TRADING=settled`, 나머지 네 도메인=`frozen`인 증적이 모두 있을 때만 정확히 한 번 `CLOSED`로 전환한다. 누락, 알 수 없음, 오류, timeout, 역순·이전 generation 응답은 성공으로 추정하지 않고 `CLOSING`을 유지하며 새 generation으로 재시도하고 운영 경보를 중복 제거한다. 금융·외부 시스템의 정리 방법은 해당 도메인 계약이 결정하며 자동 주문 취소, 자동 매도 또는 강제 청산은 금지한다.
 
 ## 7. 보존·비식별 행렬
 
@@ -104,25 +105,26 @@
 
 - 수명주기 사건마다 승인된 `retention_policy_version`을 고정하고, 각 데이터 분류의 `retain_until`과 처리 방식(`DELETE`, `ANONYMIZE`, `RETAIN`)을 계산해 기록한다.
 - 정책 버전은 적용 시작 시각, 데이터 분류, 기간, 처리 방식, 근거 식별자와 승인자를 가져야 한다. 근거의 본문이나 민감한 법률 의견은 감사 로그에 복제하지 않는다.
-- 숫자 보존기간은 제품·법무가 승인한 버전형 retention policy 레지스트리에서만 온다. 승인된 정책 버전이나 기간이 없는 분류는 `CLOSED` 전환은 허용하되 물리 삭제를 기본 거부(fail closed)하여 보류하고 `RETENTION_POLICY_MISSING` 운영 경보를 낸다.
+- 보존기간은 `CLOSED` 시각부터 계산한다. 사건 시각에 `effective_from <= closed_at`인 완전한 정책 중 가장 최신 한 개만 선택하며 같은 효력 시각은 허용하지 않는다. 정책이 없거나 모든 데이터 분류를 정확히 한 번 포함하지 않거나 선택 결과가 모호하면 `RETENTION_POLICY_MISSING` 실패 obligation을 남기고 물리 삭제·비식별·식별자 해제를 모두 기본 거부한다.
 - 정책이 나중에 바뀌어도 기존 사건의 버전을 덮어쓰지 않는다. 더 긴 보존이 필요한 경우 새 정책 적용 사건으로 `retain_until`을 연장할 수 있지만 이미 삭제된 데이터를 복구할 수 있다고 가정하지 않는다.
 - legal hold는 `hold_id`, 범위, 시작 시각, 해제 권한자, 근거 식별자를 별도로 기록한다. 활성 hold 범위의 데이터는 `retain_until`이 지나도 삭제·비식별하지 않는다. 해제 후에는 현재 승인 정책으로 새 처리 예정 시각을 계산한다.
+- `BOT_STRATEGY_EVALUATION`은 이전 정책 호환용 결합 분류다. 새 데이터는 이 분류에 배정하지 않고 기존 obligation은 `RETAIN`으로만 fail closed 한다. 새 데이터는 목적에 따라 `BOT_STRATEGY_PRIVATE_DATA` 또는 `COMPETITION_RESULT_EVIDENCE`로 분리한다.
 
 ### 7.2 데이터 분류별 처리
 
 | 데이터 분류 | `CLOSED` 시 기본 처리 | 보존 종료 시 처리 | legal hold | 비고 |
 | --- | --- | --- | --- | --- |
-| 프로필(표시명, 이미지, 환경설정) | 서비스 노출 즉시 중단 | `DELETE` 또는 복원 불가능한 `ANONYMIZE` | 범위에 포함된 필드만 보류 | 공개 결과에는 비식별 참가자 키 사용 |
-| 연락처·로그인 이메일 | 로그인 바인딩 해제, 30일 재사용 격리 | 원문 삭제; 재사용 격리 표식도 만료 후 삭제 | hold가 명시적으로 식별자를 포함할 때만 보류 | 마케팅 목적 사용 즉시 중단 |
-| OIDC issuer/subject, 기기·API 자격 | 모든 자격 즉시 폐기, 30일 재사용 격리 | 원문과 활성 바인딩 삭제 | hold 범위면 증적 저장소에 격리 | secret/token 원문은 어떤 경우에도 보존하지 않음 |
-| 비밀번호·refresh token·secret | 즉시 사용 불가 및 삭제/폐기 | 추가 보존 없음 | hold 대상이 아님 | 해시라도 인증 목적으로 재사용 금지 |
-| 정책 동의 이력 | 원문 계정 식별자 노출 최소화 후 `RETAIN` | 정책 버전의 처리 방식 적용 | 적용 | 동의 문서 버전·시각·증적 식별자는 유지 |
-| 계정 수명주기·보안 감사 | 추가 전용으로 `RETAIN` | 정책에 따라 비식별 또는 삭제 | 적용 | 요청 본문, 토큰, 이메일 원문을 감사 사건에 기록하지 않음 |
-| 주문·체결·원장·정산 | 계정 접근과 분리하여 `RETAIN` | 도메인 보존 정책 적용 | 적용 | 금액·연결 무결성을 깨는 비식별 금지 |
-| 봇·전략·평가 결과 | 비공개 전환 또는 비식별 소유자 키로 연결 | 도메인 정책 적용 | 적용 | 공유·공개 라이선스는 별도 계약을 따름 |
-| 운영 로그·알림 전송 기록 | 최소 필드만 `RETAIN` | 정책에 따라 삭제 | 적용 가능 | 자유 입력과 불필요한 식별자 금지 |
+| `PROFILE` | 서비스 노출 즉시 중단 | 즉시 복원 불가능하게 `ANONYMIZE` | 범위에 포함된 필드만 보류 | 공개 결과에는 비식별 참가자 키 사용 |
+| `CONTACT_IDENTIFIER` | 이메일/OIDC 활성 바인딩 폐기, 재사용 격리 | 30일 뒤 원문·조회 바인딩 삭제 및 격리 해제 | `blocks_identifier_reuse` hold가 있으면 해제도 보류 | fresh ownership verification 필수 |
+| `AUTH_CREDENTIAL` | 비밀번호·refresh token·secret 즉시 사용 불가 | 즉시 `DELETE` | 인증 secret은 hold 대상이 아님 | 해시라도 인증 목적으로 재사용 금지 |
+| `POLICY_CONSENT` | 식별자 노출 최소화 후 보존 | 최소 1,825일 `RETAIN` | 적용 | 동의 문서 버전·시각·증적 식별자 유지 |
+| `ACCOUNT_LIFECYCLE_AUDIT` | 추가 전용 보안·수명주기 증적 보존 | 최소 1,825일 `RETAIN` | 적용 | 토큰·이메일 원문 금지 |
+| `TRADING_FINANCIAL_RECORD` | 계정 접근과 분리해 보존 | 최소 1,825일 `RETAIN` | 적용 | 주문·체결·원장 연결 무결성 유지 |
+| `BOT_STRATEGY_PRIVATE_DATA` | 비공개 전환 | 30일 뒤 `DELETE` | 적용 | 개인 Strategy 원본과 대회 증적이 아닌 Bot·평가 데이터 |
+| `COMPETITION_RESULT_EVIDENCE` | 참가·결과·순위와 재현 증적 보존 | 365일 뒤 계정 연결을 제거해 `ANONYMIZE` | 적용 | 공식 결과에 필요한 독립 Bot·성과·백테스트 증적도 이 분류이며 30일 삭제 대상이 아님 |
+| `OPERATIONS_DELIVERY_LOG` | 최소 필드만 보존 | 365일 뒤 `DELETE` | 적용 가능 | 자유 입력과 불필요한 식별자 금지 |
 
-이 표의 30일은 식별자 재사용 충돌과 계정 탈취를 줄이기 위한 제품 안전 격리 기간이며 법률상 보존기간을 뜻하지 않는다. 그 밖의 숫자 기간은 정책 레지스트리 승인 전까지 이 계약에 고정하지 않는다.
+`RETAIN`의 숫자 기간은 최소 보존기간이며 기간 경과만으로 자동 삭제하지 않는다. `COMPETITION_RESULT_EVIDENCE` 비식별화는 사용자 개설 Room의 `creator_account_id`, `competition.participations.owner_account_id`, 해당 독립 대회 Bot과 공식 backtest run의 `owner_account_id`를 같은 작업에서 제거하고 대응하는 `*_anonymized_at`을 기록한다. `anonymous_alias`, 공식 결과·순위와 재현에 필요한 비식별 증적은 유지한다. 초대 자격처럼 결과 재현에 필요 없는 부수 자료는 이 분류에 포함하지 않는다. private Bot/Strategy 30일 삭제가 이 증적의 FK를 끊어서는 안 된다.
 
 ## 8. 식별자 재사용과 재가입
 
@@ -133,6 +135,7 @@
 - legal hold가 `blocks_identifier_reuse=true`로 해당 식별자에 명시 적용된 경우 격리 종료 후에도 재사용을 막는다. 단순히 다른 증적이 hold 대상이라는 이유만으로 재사용을 무기한 차단하지 않는다.
 - 중복 가입 경쟁은 정규화된 이메일 및 `issuer + subject`의 활성/격리 바인딩에 대한 DB 유일성 제약으로 직렬화한다.
 - 격리는 원문 대신 키 버전이 있는 식별자 fingerprint와 `reuse_eligible_at = closed_at + 30일`을 별도 tombstone으로 저장한다. 미해제 fingerprint는 하나만 허용한다. 격리 해제는 활성 `blocks_identifier_reuse` hold가 없음을 확인하고 기존 이메일/OIDC 바인딩의 조회 fingerprint를 제거하는 작업과 같은 트랜잭션에서 수행한다.
+- HMAC 키 회전 중 재사용 판정은 현재 키와 아직 비교 대상인 모든 이전 키 버전을 확인한다. 어떤 키의 비교 결과라도 불명확하거나 사용할 수 없으면 재사용을 거절한다. 격리 해제 뒤에도 이메일 또는 OIDC 소유권을 새로 검증해야 한다.
 
 ## 9. 멱등성·동시성·DB 불변식
 
@@ -157,7 +160,9 @@
 | --- | --- | --- |
 | `POST /v1/account/withdrawal-requests` | `202`, 상태·요청 시각·deadline | `409 INVALID_LIFECYCLE_TRANSITION`, `403 STEP_UP_REQUIRED` |
 | `POST /v1/account/withdrawal-cancellations` | `200`, 복원 상태 | `409 WITHDRAWAL_NOT_PENDING`, `409 WITHDRAWAL_CANCELLATION_EXPIRED` |
-| `POST /v1/account/reactivations` | `200`, `ACTIVE` 상태와 새 인증 절차 결과 | `403 REACTIVATION_REQUIREMENTS_NOT_MET`, `423 ACCOUNT_RESTRICTED` |
+| `POST /v1/account/oidc-step-up-challenges` | `200`, 제공자 결속 단일 사용 nonce와 만료 시각 | 비활성·미지원 제공자 오류 |
+| `POST /v1/account/reactivations/password` | `200`, `ACTIVE` 상태; 세션 없음, 재로그인 필요 | `403 REACTIVATION_REQUIREMENTS_NOT_MET`, `423 ACCOUNT_RESTRICTED` |
+| `POST /v1/account/reactivations/oidc` | `200`, `ACTIVE` 상태; 세션 없음, 재로그인 필요 | OIDC 검증 오류, `403 REACTIVATION_REQUIREMENTS_NOT_MET`, `423 ACCOUNT_RESTRICTED` |
 | `GET /v1/account/lifecycle` | `200`, 현재 상태·버전·허용된 다음 행동 | 인증/권한 오류 |
 
 - 오류 응답은 안정적인 `code`, 사용자 안전 메시지, `correlation_id`만 제공한다. 내부 hold 근거, 제재 규칙, 타 서비스 상세, 식별자 존재 여부는 노출하지 않는다.
@@ -184,8 +189,8 @@
 
 ## 13. 정본 병합 승인 게이트
 
-이 계약에는 사용자로부터 전달받은 제품 결정인 30 × 24시간의 탈퇴 취소 기간, UTC 달력 기준 12개월의 휴면 판정, CLOSED 후 30일 격리 기간, 최근 10분 이내의 활성 `PASSWORD`/`OIDC` 재인증, 승인된 retention policy 버전과 정책 누락 시 물리 삭제 기본 거부를 반영했다.
+이 제안에는 30 × 24시간의 탈퇴 취소 기간, UTC 달력 기준 12개월의 휴면 판정, backend 직접 OIDC 검증과 단일 사용 nonce, 재활성화 후 세션 미발급, 다섯 도메인 종료 readiness, CLOSED 기준 30일 식별자 격리, 분리된 Bot/Strategy·Competition 보존 분류와 제품 권한자가 승인한 기간 권고를 반영했다.
 
-다만 현재 로컬 권한 검사에서는 정확한 저장소·HEAD·보호 의미 fingerprint에 대한 GitHub 제품 권한자 승인 증거가 확인되지 않았다. 이 변경을 정본으로 병합하려면 해당 정확한 HEAD에 대해 GitHub `user:kcrmin`의 리뷰 승인이 확인되어야 한다. Git 사용자 이름·이메일, 이슈 할당, 일반 댓글 또는 대화에서 전달된 승인만으로 이 게이트를 통과했다고 간주하지 않는다.
+권고안 자체는 `user:kcrmin`이 Idea2Strategy-backend#127에서 승인했지만 현재 로컬 거버넌스 검사는 이 제안의 정확한 commit에 대한 fresh 승인 증거를 확인하지 못했다. 이 변경을 정본으로 병합하려면 해당 정확한 HEAD에 대한 GitHub 제품 권한자 리뷰 승인이 필요하다. 이전 댓글 승인, Git 사용자 이름·이메일, 이슈 할당만으로 이 게이트를 통과했다고 간주하지 않는다.
 
-정본 병합 뒤에도 데이터 분류별 실제 숫자 보존기간과 법적 근거는 승인된 retention policy 버전에서만 정한다. 구현자는 정책이 없는 물리 삭제나 금융 정리 행위를 임의로 코드에 넣지 않는다.
+정확한 commit이 승인·병합되기 전 `account-retention-a12-proposal` 값은 운영 정본이나 seed가 아니다. 구현자는 선택 가능한 완전한 승인 정책이 없는 물리 삭제·비식별·식별자 해제나 금융 정리 행위를 임의로 실행하지 않는다.

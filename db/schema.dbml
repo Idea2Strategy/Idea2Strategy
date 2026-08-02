@@ -65,8 +65,26 @@ Enum identity.account_data_category {
   POLICY_CONSENT
   ACCOUNT_LIFECYCLE_AUDIT
   TRADING_FINANCIAL_RECORD
-  BOT_STRATEGY_EVALUATION
+  BOT_STRATEGY_EVALUATION [note: '이전 정책 호환 전용. 새 정책·데이터는 이 결합 분류에 배정하지 않고 RETAIN으로만 fail closed 한다.']
+  BOT_STRATEGY_PRIVATE_DATA
+  COMPETITION_RESULT_EVIDENCE
   OPERATIONS_DELIVERY_LOG
+}
+
+Enum identity.account_closure_domain {
+  BOT
+  TRADING
+  COMPETITION
+  NOTIFICATION
+  INTEGRATION
+}
+
+Enum identity.account_closure_readiness_status {
+  FREEZE_REQUESTED
+  FROZEN
+  SETTLEMENT_REQUIRED
+  SETTLED
+  BLOCKED
 }
 
 Enum identity.retention_disposition {
@@ -536,6 +554,55 @@ Table identity.account_lifecycle_command_receipts {
   }
 }
 
+Table identity.account_closure_runs {
+  correlation_id uuid [pk]
+  account_id uuid [not null]
+  lifecycle_version bigint [not null]
+  cancellation_deadline_at timestamptz [not null]
+  generation bigint [not null, default: 0]
+  started_at timestamptz [not null]
+  last_checked_at timestamptz [not null]
+  closed_at timestamptz
+
+  indexes {
+    (account_id, lifecycle_version, cancellation_deadline_at) [unique]
+    (correlation_id, account_id) [unique]
+    (account_id, closed_at, last_checked_at)
+  }
+
+  checks {
+    `lifecycle_version > 0` [name: 'account_closure_run_lifecycle_version_positive']
+    `generation >= 0` [name: 'account_closure_run_generation_nonnegative']
+    `last_checked_at >= started_at` [name: 'account_closure_run_check_order']
+    `closed_at IS NULL OR closed_at >= started_at` [name: 'account_closure_run_close_order']
+  }
+
+  Note: '하나의 CLOSING 세대에 대한 멱등 종료 조정 실행. correlation_id와 lifecycle_version을 고정하며 모든 필수 도메인의 같은 generation 증적이 준비되기 전에는 CLOSED를 기록하지 않는다. 오류·timeout·불명확 응답은 성공으로 추정하지 않고 CLOSING을 유지한 채 새 generation으로 재시도한다.'
+}
+
+Table identity.account_closure_readiness {
+  correlation_id uuid [not null]
+  generation bigint [not null]
+  account_id uuid [not null]
+  domain identity.account_closure_domain [not null]
+  status identity.account_closure_readiness_status [not null]
+  reason_code varchar(80) [not null]
+  evidence_document jsonb [not null, default: `'{}'`]
+  observed_at timestamptz [not null]
+
+  indexes {
+    (correlation_id, generation, domain) [pk]
+    (account_id, status, observed_at)
+  }
+
+  checks {
+    `generation > 0` [name: 'account_closure_readiness_generation_positive']
+    `jsonb_typeof(evidence_document) = 'object'` [name: 'account_closure_readiness_evidence_object']
+  }
+
+  Note: 'BOT, TRADING, COMPETITION, NOTIFICATION, INTEGRATION 다섯 필수 도메인의 generation별 fail-closed 증적. CLOSED에는 TRADING=SETTLED와 나머지 도메인=FROZEN이 필요하며 누락·BLOCKED·SETTLEMENT_REQUIRED는 준비 완료가 아니다. 같은 correlation_id·generation·domain의 중복 응답은 하나로 직렬화한다.'
+}
+
 Table identity.account_retention_policy_versions {
   version varchar(80) [pk]
   effective_from timestamptz [not null]
@@ -543,6 +610,10 @@ Table identity.account_retention_policy_versions {
   approved_by varchar(120) [not null]
   basis_reference varchar(160) [not null]
   created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (effective_from) [unique]
+  }
 
   checks {
     `approved_at <= effective_from` [name: 'account_retention_policy_approved_before_effective']
@@ -552,6 +623,7 @@ Table identity.account_retention_policy_versions {
 
   Records (version, effective_from, approved_at, approved_by, basis_reference, created_at) {
     'account-retention-v1', '2026-08-02T00:00:00Z', '2026-08-01T00:00:00Z', 'user:review', 'REVIEW_EXAMPLE_POLICY', '2026-08-01T00:00:00Z'
+    'account-retention-a12-proposal', '2026-08-03T00:00:00Z', '2026-08-02T09:20:30Z', 'user:kcrmin', 'Idea2Strategy-backend#127:issuecomment-5156817219', '2026-08-02T09:20:30Z'
   }
 }
 
@@ -572,10 +644,20 @@ Table identity.account_retention_policy_rules {
     `disposition = 'RETAIN' OR retention_days IS NOT NULL` [name: 'account_retention_policy_destructive_rule_has_period']
   }
 
-  Note: '승인된 정책 버전의 데이터 분류별 불변 규칙. 숫자 기간이 승인되지 않은 분류는 retention_days를 NULL로 두고 물리 삭제를 기본 거부한다.'
+  Note: '승인된 정책 버전의 데이터 분류별 불변 규칙. 숫자 기간이 승인되지 않은 분류는 retention_days를 NULL로 두고 물리 삭제를 기본 거부한다. BOT_STRATEGY_EVALUATION은 과거 호환 전용이며 새 데이터를 배정하지 않고 RETAIN으로만 둔다. Records의 A12 값은 제품 권한자가 승인한 권고를 표현하는 정본 제안이며 운영 seed가 아니다. 이 정확한 DBML commit의 제품 권한자 승인을 거쳐야 정본 정책으로 선택할 수 있다.'
 
   Records (policy_version, data_category, disposition, retention_days, legal_basis_code, created_at) {
     'account-retention-v1', 'ACCOUNT_LIFECYCLE_AUDIT', 'RETAIN', null, 'REVIEW_EXAMPLE_BASIS', '2026-08-01T00:00:00Z'
+    'account-retention-a12-proposal', 'PROFILE', 'ANONYMIZE', 0, 'PRODUCT_AUTHORITY_APPROVAL', '2026-08-02T09:20:30Z'
+    'account-retention-a12-proposal', 'CONTACT_IDENTIFIER', 'DELETE', 30, 'PRODUCT_AUTHORITY_APPROVAL', '2026-08-02T09:20:30Z'
+    'account-retention-a12-proposal', 'AUTH_CREDENTIAL', 'DELETE', 0, 'PRODUCT_AUTHORITY_APPROVAL', '2026-08-02T09:20:30Z'
+    'account-retention-a12-proposal', 'POLICY_CONSENT', 'RETAIN', 1825, 'PRODUCT_AUTHORITY_APPROVAL', '2026-08-02T09:20:30Z'
+    'account-retention-a12-proposal', 'ACCOUNT_LIFECYCLE_AUDIT', 'RETAIN', 1825, 'PRODUCT_AUTHORITY_APPROVAL', '2026-08-02T09:20:30Z'
+    'account-retention-a12-proposal', 'TRADING_FINANCIAL_RECORD', 'RETAIN', 1825, 'PRODUCT_AUTHORITY_APPROVAL', '2026-08-02T09:20:30Z'
+    'account-retention-a12-proposal', 'BOT_STRATEGY_EVALUATION', 'RETAIN', null, 'DEPRECATED_FAIL_CLOSED', '2026-08-02T09:20:30Z'
+    'account-retention-a12-proposal', 'BOT_STRATEGY_PRIVATE_DATA', 'DELETE', 30, 'PRODUCT_AUTHORITY_APPROVAL', '2026-08-02T09:20:30Z'
+    'account-retention-a12-proposal', 'COMPETITION_RESULT_EVIDENCE', 'ANONYMIZE', 365, 'PRODUCT_AUTHORITY_APPROVAL', '2026-08-02T09:20:30Z'
+    'account-retention-a12-proposal', 'OPERATIONS_DELIVERY_LOG', 'DELETE', 365, 'PRODUCT_AUTHORITY_APPROVAL', '2026-08-02T09:20:30Z'
   }
 }
 
@@ -754,6 +836,33 @@ Table identity.auth_providers {
   Records (id, code, display_name, provider_type, issuer, is_active, created_at, updated_at) {
     1, 'PASSWORD', 'Password', 'PASSWORD', null, true, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
+}
+
+Table identity.oidc_step_up_nonces {
+  id uuid [pk]
+  provider_id smallint [not null]
+  nonce_digest varchar(128) [not null, unique]
+  digest_key_version smallint [not null]
+  requested_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  verification_attempt_count int [not null, default: 0]
+  last_verification_attempt_at timestamptz
+  consumed_at timestamptz
+  consumed_by_account_id uuid
+
+  indexes {
+    (expires_at, consumed_at)
+    (provider_id, expires_at, consumed_at)
+  }
+
+  checks {
+    `digest_key_version > 0` [name: 'oidc_step_up_nonce_digest_key_positive']
+    `expires_at > requested_at` [name: 'oidc_step_up_nonce_window_valid']
+    `verification_attempt_count BETWEEN 0 AND 5 AND ((verification_attempt_count = 0 AND last_verification_attempt_at IS NULL) OR (verification_attempt_count > 0 AND last_verification_attempt_at IS NOT NULL))` [name: 'oidc_step_up_nonce_attempts_bounded']
+    `(consumed_at IS NULL AND consumed_by_account_id IS NULL) OR (consumed_at IS NOT NULL AND consumed_by_account_id IS NOT NULL AND consumed_at >= requested_at AND consumed_at <= expires_at)` [name: 'oidc_step_up_nonce_consumption_complete']
+  }
+
+  Note: '서버가 발급하는 OIDC lifecycle 단계 상승 challenge. 원문 nonce와 ID token은 저장하지 않고 키 버전이 있는 nonce HMAC만 저장한다. 정확한 제공자에 결속하고 최대 5번 검증 시도 안에서 한 계정이 만료 전 한 번만 원자적으로 소진한다.'
 }
 
 Table identity.login_identities {
@@ -1822,7 +1931,8 @@ Table market_data.stream_watermarks {
 
 Table bot.bots {
   id uuid [pk, default: `gen_random_uuid()`]
-  owner_account_id uuid [not null]
+  owner_account_id uuid
+  owner_anonymized_at timestamptz
   mode strategy.strategy_mode [not null]
   name varchar(120) [not null]
   lifecycle_status bot.lifecycle_status [not null]
@@ -1849,11 +1959,12 @@ Table bot.bots {
   }
 
   checks {
+    `(owner_account_id IS NOT NULL AND owner_anonymized_at IS NULL) OR (owner_account_id IS NULL AND owner_anonymized_at IS NOT NULL)` [name: 'bot_owner_or_anonymized_evidence']
     `execution_blocked_at IS NOT NULL OR (execution_block_reason_code IS NULL AND execution_block_event_id IS NULL)` [name: 'bot_block_fields_together']
     `started_at IS NULL OR started_at >= execution_eligible_from` [name: 'bot_actual_start_after_eligibility']
   }
 
-  Note: '검증된 Strategy 당시 상태를 복사해 생성한 완전 독립 실행 Bot. 원본 Strategy 식별자·출처·계보·버전 관계를 저장하지 않아 어느 Strategy에서 출시됐는지 조회할 수 없다. 출시된 실행 의미와 mode는 불변이고 Bot 이름, 파티션·Flow 설명과 좌표 및 Flow 내부 layout 같은 presentation만 수정 가능하다. RUNNING이어도 now()가 execution_eligible_from보다 이르면 평가하지 않으며 별도 waiting·scheduled 상태는 만들지 않는다. 개인 Bot은 즉시, 평가 전에 생성된 대회 Bot은 대회 평가 시작부터 실행 가능하고, 이미 진행 중인 공식 BACKTEST 대회 Bot은 입력 잠금 완료 뒤 Competition 백테스트 실행기로만 보낸다. Competition 관계가 BACKTEST인 Bot은 라이브 Trigger Router가 절대 평가하지 않는다. started_at은 실제 첫 실행이 시작될 때만 설정한다. STOPPING은 신규 평가·신규 주문 등록만 막고 기존 미체결 주문을 취소하지 않은 채 결과·예약 해제·정산을 마무리하며 STOPPED는 영구다. 파티션 1개 이상과 각 파티션의 완성 Flow 1개 이상을 검증한 뒤 Bot 스냅샷 계층을 원자적으로 생성한다. archived_at은 STOPPED Bot의 가역 숨김이고 deleted_at은 정산 완료 뒤의 논리 삭제다.'
+  Note: '검증된 Strategy 당시 상태를 복사해 생성한 완전 독립 실행 Bot. owner_account_id 제거는 계정 CLOSED 후 COMPETITION_RESULT_EVIDENCE로 재분류된 공식 대회 Bot에만 허용하며 같은 트랜잭션에서 owner_anonymized_at을 기록한다. PostgreSQL deferred trigger가 해당 Bot의 Participation도 비식별화되었음을 검증한다. 원본 Strategy 식별자·출처·계보·버전 관계를 저장하지 않아 어느 Strategy에서 출시됐는지 조회할 수 없다. 출시된 실행 의미와 mode는 불변이고 Bot 이름, 파티션·Flow 설명과 좌표 및 Flow 내부 layout 같은 presentation만 수정 가능하다. RUNNING이어도 now()가 execution_eligible_from보다 이르면 평가하지 않으며 별도 waiting·scheduled 상태는 만들지 않는다. 개인 Bot은 즉시, 평가 전에 생성된 대회 Bot은 대회 평가 시작부터 실행 가능하고, 이미 진행 중인 공식 BACKTEST 대회 Bot은 입력 잠금 완료 뒤 Competition 백테스트 실행기로만 보낸다. Competition 관계가 BACKTEST인 Bot은 라이브 Trigger Router가 절대 평가하지 않는다. started_at은 실제 첫 실행이 시작될 때만 설정한다. STOPPING은 신규 평가·신규 주문 등록만 막고 기존 미체결 주문을 취소하지 않은 채 결과·예약 해제·정산을 마무리하며 STOPPED는 영구다. 파티션 1개 이상과 각 파티션의 완성 Flow 1개 이상을 검증한 뒤 Bot 스냅샷 계층을 원자적으로 생성한다. archived_at은 STOPPED Bot의 가역 숨김이고 deleted_at은 정산 완료 뒤의 논리 삭제다.'
 
   Records (id, owner_account_id, mode, name, lifecycle_status, lifecycle_changed_at, execution_blocked_at, execution_block_reason_code, execution_block_event_id, created_at, execution_eligible_from, started_at, stop_requested_at, stopped_at, stop_reason_code, archived_at, deleted_at, edit_sequence, updated_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'BASIC', 'Official Backtest Bot', 'RUNNING', '2026-07-28T10:00:00+09:00', null, null, null, '2026-07-28T10:00:00+09:00', '2026-07-28T10:00:00+09:00', '2026-07-28T10:00:01+09:00', null, null, null, null, null, 0, '2026-07-28T10:00:00+09:00'
@@ -3262,7 +3373,8 @@ Table trading.partition_budget_projections {
 Table backtest.runs {
   id uuid [pk, default: `gen_random_uuid()`]
   bot_id uuid [not null]
-  owner_account_id uuid [not null]
+  owner_account_id uuid
+  owner_anonymized_at timestamptz
   configuration_hash varchar(128) [not null]
   status backtest.run_status [not null]
   evaluation_start date [not null]
@@ -3287,7 +3399,11 @@ Table backtest.runs {
     (owner_account_id, queued_at)
   }
 
-  Note: '봇 생성 트랜잭션에서 최초 자동 백테스트 한 건을 원자적으로 생성하고, 이후 같은 봇에 사용자가 선택한 기간 또는 공식 BACKTEST 대회의 잠긴 기간마다 실행을 추가할 수 있다. 대회 실행 소유권은 backtest.runs에 nullable competition 컬럼을 섞지 않고 competition.backtest_period_runs가 관리한다. 각 실행은 configuration_hash, 평가 기간, 초기 자금과 정책 버전을 독립적으로 고정하며 idempotency_key는 동일 요청의 중복 생성만 막는다. 백테스트 지연·실패는 라이브 봇 생명주기와 원장을 절대 바꾸지 않는다.'
+  checks {
+    `(owner_account_id IS NOT NULL AND owner_anonymized_at IS NULL) OR (owner_account_id IS NULL AND owner_anonymized_at IS NOT NULL)` [name: 'backtest_owner_or_anonymized_evidence']
+  }
+
+  Note: '봇 생성 트랜잭션에서 최초 자동 백테스트 한 건을 원자적으로 생성하고, 이후 같은 봇에 사용자가 선택한 기간 또는 공식 BACKTEST 대회의 잠긴 기간마다 실행을 추가할 수 있다. 대회 실행 소유권은 backtest.runs에 nullable competition 컬럼을 섞지 않고 competition.backtest_period_runs가 관리한다. COMPETITION_RESULT_EVIDENCE로 보존하는 공식 대회 실행은 참가자 비식별화와 같은 트랜잭션에서 owner_account_id를 제거하고 owner_anonymized_at을 기록한다. 각 실행은 configuration_hash, 평가 기간, 초기 자금과 정책 버전을 독립적으로 고정하며 idempotency_key는 동일 요청의 중복 생성만 막는다. 백테스트 지연·실패는 라이브 봇 생명주기와 원장을 절대 바꾸지 않는다.'
 
   Records (id, bot_id, owner_account_id, configuration_hash, status, evaluation_start, evaluation_end, initial_cash_amount, market_rules_version, accounting_rules_version, precision_rules_version, fee_policy_id, slippage_rate_bps, buying_power_buffer_policy_id, idempotency_key, queued_at, started_at, completed_at, failure_code, result_hash) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'COMPLETED', '2024-01-01', '2024-12-31', 100000.00000000, '1.0.0', '1.0.0', '1.0.0', '00000000-0000-4000-8000-000000000001', 5, '00000000-0000-4000-8000-000000000001', 'BOT_CREATE:00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:01+09:00', '2026-07-27T09:05:00+09:00', null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -3589,6 +3705,7 @@ Table competition.rooms {
   competition_type competition.competition_type [not null]
   organizer_type competition.organizer_type [not null]
   creator_account_id uuid
+  creator_anonymized_at timestamptz
   created_by_operator_id uuid
   name varchar(120) [not null]
   access_type competition.room_access_type [not null]
@@ -3604,11 +3721,11 @@ Table competition.rooms {
   }
 
   checks {
-    `(organizer_type = 'USER' AND creator_account_id IS NOT NULL AND created_by_operator_id IS NULL) OR (organizer_type = 'PLATFORM' AND creator_account_id IS NULL AND created_by_operator_id IS NOT NULL)` [name: 'competition_room_organizer_actor']
+    `(organizer_type = 'USER' AND created_by_operator_id IS NULL AND ((creator_account_id IS NOT NULL AND creator_anonymized_at IS NULL) OR (creator_account_id IS NULL AND creator_anonymized_at IS NOT NULL))) OR (organizer_type = 'PLATFORM' AND creator_account_id IS NULL AND creator_anonymized_at IS NULL AND created_by_operator_id IS NOT NULL)` [name: 'competition_room_organizer_actor']
     `competition_type <> 'BACKTEST' OR organizer_type = 'PLATFORM'` [name: 'competition_backtest_platform_only']
   }
 
-  Note: '라이브와 백테스트 대회의 공통 루트. BACKTEST는 플랫폼 공식 대회만 허용한다. 플랫폼 대회는 고객 계정을 소유자로 가장하지 않고 실제 개설 운영자를 감사 FK로 남긴다. status는 append-only room_events에서 재구축 가능한 현재 Projection이다.'
+  Note: '라이브와 백테스트 대회의 공통 루트. 사용자 개설 Room을 COMPETITION_RESULT_EVIDENCE로 비식별화할 때 creator_account_id를 제거하고 creator_anonymized_at을 기록한다. BACKTEST는 플랫폼 공식 대회만 허용한다. 플랫폼 대회는 고객 계정을 소유자로 가장하지 않고 실제 개설 운영자를 감사 FK로 남긴다. status는 append-only room_events에서 재구축 가능한 현재 Projection이다.'
 
   Records (id, competition_type, organizer_type, creator_account_id, created_by_operator_id, name, access_type, status, created_at, ended_at, invalidated_at, invalidation_reason_code) {
     '00000000-0000-4000-8000-000000000001', 'BACKTEST', 'PLATFORM', null, '00000000-0000-4000-8000-000000000001', 'Official Multi-period Backtest', 'PUBLIC', 'EVALUATING', '2026-07-27T09:00:00+09:00', null, null, null
@@ -3739,7 +3856,8 @@ Table competition.participations {
   id uuid [pk, default: `gen_random_uuid()`]
   room_id uuid [not null]
   bot_id uuid [not null, unique]
-  owner_account_id uuid [not null]
+  owner_account_id uuid
+  owner_anonymized_at timestamptz
   anonymous_alias varchar(80) [not null]
   status competition.participation_status [not null]
   joined_at timestamptz [not null]
@@ -3761,6 +3879,7 @@ Table competition.participations {
   }
 
   checks {
+    `(owner_account_id IS NOT NULL AND owner_anonymized_at IS NULL) OR (owner_account_id IS NULL AND owner_anonymized_at IS NOT NULL)` [name: 'competition_participant_owner_or_anonymized']
     `evaluation_finished_at IS NULL OR evaluation_started_at IS NOT NULL` [name: 'competition_participation_evaluation_order']
     `status <> 'EVALUATION_FAILED' OR (evaluation_finished_at IS NOT NULL AND evaluation_failure_code IS NOT NULL)` [name: 'competition_failed_participation_has_reason']
     `status <> 'COMPLETED' OR (evaluation_finished_at IS NOT NULL AND evaluation_failure_code IS NULL)` [name: 'competition_completed_participation_has_result']
@@ -3768,7 +3887,7 @@ Table competition.participations {
     `status <> 'EXPELLED' OR expelled_at IS NOT NULL` [name: 'competition_expelled_has_time']
   }
 
-  Note: '사용자가 기존 Bot을 제출하는 행이 아니다. Strategy 선택 요청이 성공하면 출처 관계 없는 독립 새 Bot, Bot 스냅샷 계층, Participation, 최초 사건과 Outbox를 한 트랜잭션으로 생성한다. 같은 계정은 per_account_bot_limit까지 여러 행을 가질 수 있다. LIVE_PAPER는 Room 평가 시작 뒤 신규 참가 금지. 공식 BACKTEST는 participation_closes_at 전까지 진행 중 참가 가능하지만 EVALUATING 중 승인된 행은 사용자 취소·교체 불가하고 성공·실패와 관계없이 슬롯을 계속 점유한다.'
+  Note: '사용자가 기존 Bot을 제출하는 행이 아니다. COMPETITION_RESULT_EVIDENCE의 365일 보존 종료에는 owner_account_id를 NULL로 바꾸고 owner_anonymized_at을 기록하되 anonymous_alias, 공식 결과·순위와 그 재현에 필요한 독립 Bot·성과·백테스트 증적은 유지한다. Strategy 선택 요청이 성공하면 출처 관계 없는 독립 새 Bot, Bot 스냅샷 계층, Participation, 최초 사건과 Outbox를 한 트랜잭션으로 생성한다. 같은 계정은 per_account_bot_limit까지 여러 행을 가질 수 있다. LIVE_PAPER는 Room 평가 시작 뒤 신규 참가 금지. 공식 BACKTEST는 participation_closes_at 전까지 진행 중 참가 가능하지만 EVALUATING 중 승인된 행은 사용자 취소·교체 불가하고 성공·실패와 관계없이 슬롯을 계속 점유한다.'
 
   Records (id, room_id, bot_id, owner_account_id, anonymous_alias, status, joined_at, evaluation_started_at, evaluation_finished_at, evaluation_failure_code, withdrawn_at, withdrawal_reason_code, expelled_at, expulsion_reason_code, post_room_action, action_recorded_at, action_locked_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'bot-orchid-07', 'COMPLETED', '2026-07-28T10:00:00+09:00', '2026-07-28T10:00:01+09:00', '2026-07-28T10:10:01+09:00', null, null, null, null, null, null, null, null
@@ -4202,6 +4321,29 @@ Table operations.notification_preferences {
   }
 }
 
+Table operations.account_integrations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  account_id uuid [not null]
+  integration_code varchar(80) [not null]
+  status varchar(20) [not null, note: '값은 ACTIVE, CLOSING, CLOSED.']
+  freeze_requested_at timestamptz
+  closed_at timestamptz
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (account_id, integration_code) [unique]
+    (account_id, status, updated_at)
+  }
+
+  checks {
+    `status IN ('ACTIVE', 'CLOSING', 'CLOSED')` [name: 'account_integration_status_supported']
+    `status <> 'CLOSING' OR freeze_requested_at IS NOT NULL` [name: 'account_integration_closing_timestamp']
+    `status <> 'CLOSED' OR closed_at IS NOT NULL` [name: 'account_integration_closed_timestamp']
+  }
+
+  Note: '계정 종료 조정의 INTEGRATION readiness를 위한 공유 DB 경계. 행이 없으면 연결 없음이고 원격 성공으로 추정하지 않는다. CLOSING 전환과 freeze 요청 시각, CLOSED 확인을 멱등 기록하며 불명확한 외부 상태는 readiness FROZEN으로 바꾸지 않는다.'
+}
+
 Table operations.notifications {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
@@ -4303,6 +4445,8 @@ Ref: identity.account_lifecycle_events.retention_policy_version > identity.accou
 Ref: identity.account_lifecycle_command_receipts.account_id > identity.accounts.id
 Ref: identity.account_lifecycle_command_receipts.(account_id, lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)
 Ref: identity.accounts.(id, last_lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)
+Ref: identity.account_closure_runs.account_id > identity.accounts.id
+Ref: identity.account_closure_readiness.(correlation_id, account_id) > identity.account_closure_runs.(correlation_id, account_id)
 Ref: identity.account_retention_policy_rules.policy_version > identity.account_retention_policy_versions.version
 Ref: identity.account_retention_obligations.account_id > identity.accounts.id
 Ref: identity.account_retention_obligations.(account_id, lifecycle_event_id) > identity.account_lifecycle_events.(account_id, id)
@@ -4314,6 +4458,8 @@ Ref: identity.account_security_states.account_id > identity.accounts.id
 Ref: identity.account_preferences.account_id > identity.accounts.id
 Ref: identity.account_emails.account_id > identity.accounts.id
 Ref: identity.email_verification_requests.account_id > identity.account_emails.account_id
+Ref: identity.oidc_step_up_nonces.provider_id > identity.auth_providers.id
+Ref: identity.oidc_step_up_nonces.consumed_by_account_id > identity.accounts.id
 Ref: identity.login_identities.provider_id > identity.auth_providers.id
 Ref: identity.login_identities.account_id > identity.accounts.id
 Ref: identity.password_credentials.login_identity_id > identity.login_identities.id
@@ -4584,6 +4730,7 @@ Ref: operations.audit_events.evidence_object_id > storage.objects.id
 Ref: operations.audit_events.delegated_authorization_id > identity.delegated_authorizations.id
 Ref: operations.notification_preferences.account_id > identity.accounts.id
 Ref: operations.notification_preferences.bot_id > bot.bots.id
+Ref: operations.account_integrations.account_id > identity.accounts.id
 Ref: operations.notifications.account_id > identity.accounts.id
 Ref: operations.notifications.bot_id > bot.bots.id
 Ref: operations.delivery_attempts.notification_id > operations.notifications.id
