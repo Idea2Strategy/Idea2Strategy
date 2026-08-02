@@ -8,8 +8,9 @@ $metadataPath = Join-Path $bundle 'source-revisions.json'
 $manifestPath = Join-Path $bundle 'migration-bundle.manifest'
 $digestPath = Join-Path $bundle 'migration-bundle.sha256'
 $fixture = Join-Path $bundle 'partial_fill_allocation_contract.sql.fixture'
+$readContractFixture = Join-Path $bundle 'trading_read_projection_contract.sql.fixture'
 
-foreach ($requiredPath in @($metadataPath, $manifestPath, $digestPath, $fixture)) {
+foreach ($requiredPath in @($metadataPath, $manifestPath, $digestPath, $fixture, $readContractFixture)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Pinned Flyway CI artifact is missing: $requiredPath"
     }
@@ -80,6 +81,17 @@ $manifestDigest = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Ha
 $recordedDigest = (Get-Content -LiteralPath $digestPath -Raw).Trim()
 if ($manifestDigest -cne $recordedDigest -or $recordedDigest -cne $metadata.bundle_sha256) {
     throw 'Pinned Flyway bundle digest does not match its manifest or source metadata.'
+}
+
+# The trading engine owns no canonical DDL, so its read projections can only be proven here.
+# This digest pins the copy taken from the trading contribution at the recorded gitlink.
+$recordedReadContractDigest = $metadata.trading_read_projection_contract_sha256
+if ([string]::IsNullOrWhiteSpace($recordedReadContractDigest)) {
+    throw 'Pinned bundle metadata does not record the trading read projection contract digest.'
+}
+$actualReadContractDigest = Get-NormalizedTextSha256 $readContractFixture
+if ($actualReadContractDigest -cne $recordedReadContractDigest) {
+    throw 'The trading read projection contract fixture does not match its recorded digest.'
 }
 
 $suffix = [guid]::NewGuid().ToString('N').Substring(0, 12)
@@ -179,12 +191,24 @@ try {
         throw 'The partial-fill allocation contract fixture failed.'
     }
 
+    docker cp $readContractFixture "${container}:/tmp/trading_read_projection_contract.sql"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to copy the trading read projection contract fixture into PostgreSQL.'
+    }
+    docker exec -e "PGPASSWORD=$password" $container `
+        psql -v ON_ERROR_STOP=1 -U $user -d $database `
+        -f /tmp/trading_read_projection_contract.sql | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The trading read projection contract fixture failed.'
+    }
+
     [pscustomobject]@{
         status = 'passed'
         application_tables = [int]$tableCount
         successful_migrations = [int]$historyAfterSecondRun
         second_run_pending = 0
         partial_fill_allocation_contract = 'passed'
+        trading_read_projection_contract = 'passed'
         bundle_sha256 = $recordedDigest
         backend_revision = $backendGitlink
         trading_revision = $tradingGitlink
