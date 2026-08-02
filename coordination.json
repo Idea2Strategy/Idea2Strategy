@@ -63,42 +63,43 @@
       "expires_at": "2026-08-03T13:03:52.8429987Z"
     },
     {
-      "id": "claim.e01-competition-performance-foundation",
-      "work_id": "work.e01-competition-performance-foundation",
-      "definition_fingerprint": "sha256:cc0d22b95c728fa420c3f4c1f8b9ac8a9137e65a25a4d038f50c0d3de503b65e",
-      "status": "blocked",
-      "owner": "dertz569",
-      "branch": "feature/7-competition-performance-cqrs",
-      "repository": "idea2strategy.backend",
+      "id": "claim.com07-central-flyway-20260802",
+      "work_id": "work.com07-flyway-integration",
+      "definition_fingerprint": "sha256:dc4cca35790953a85eff20d9c1226ed8bc3b0c6dbf3c1512589e441dca85033f",
+      "status": "in_progress",
+      "owner": "kcrmin",
+      "branch": "feature/com07-central-flyway",
+      "repository": "repository.github.backend,repository.github.root,repository.github.trading-engine",
       "paths": [
-        "apps/backend-api/**/competition/**",
-        "apps/backend-api/**/performance/**",
-        "modules/backend-application/**/competition/**",
-        "modules/backend-application/**/performance/**",
-        "modules/backend-application/**/testing/*Backtest*",
-        "modules/backend-application/**/testing/*Bot*",
-        "modules/backend-application/**/testing/*Trading*",
-        "modules/backend-domain/**/competition/**",
-        "modules/backend-domain/**/performance/**",
-        "modules/backend-persistence/**/competition/**",
-        "modules/backend-persistence/**/performance/**"
+        ".github/workflows/**",
+        "backend/db-migration/**",
+        "backend/modules/backend-persistence/build.gradle.kts",
+        "backend/modules/backend-persistence/src/test/**",
+        "compose.back.yml",
+        "scripts/**",
+        "trading-engine/apps/trading-worker/build.gradle.kts",
+        "trading-engine/apps/trading-worker/src/main/resources/application.yaml",
+        "trading-engine/db/migration-contributions/**",
+        "trading-engine/modules/trading-persistence/build.gradle.kts",
+        "trading-engine/modules/trading-persistence/src/test/**"
       ],
       "policy_ids": [],
       "scenario_ids": [],
       "contract_ids": [],
-      "db_entities": [
-        "competition.room_rules",
-        "competition.room_schedules",
-        "competition.rooms",
-        "performance.bot_current_projections"
+      "db_entities": [],
+      "migration_slots": [
+        "flyway.central-integration"
       ],
-      "migration_slots": [],
       "ui_flows": [],
       "dependency_majors": [],
-      "stable_ids": [],
-      "root_pointer": false,
-      "starts_at": "2026-08-01T03:37:07.7553158Z",
-      "expires_at": "2026-08-02T03:37:07.5646267Z"
+      "stable_ids": [
+        "quality.auditability",
+        "quality.failure-safety",
+        "quality.reproducibility"
+      ],
+      "root_pointer": true,
+      "starts_at": "2026-08-02T04:09:13.8511998Z",
+      "expires_at": "2026-08-03T04:09:13.5855446Z"
     },
     {
       "id": "claim.e02-competition-performance-dbml-alignment",
