@@ -2,28 +2,28 @@ schema_version: 1
 id: work.com07-flyway-integration
 readiness: ready
 title: Validate central Flyway and database write ownership
-outcome: Every database owner can contribute an immutable migration while one central backend Flyway path rejects naming, ordering, ownership, and runtime schema drift before deployment.
+outcome: A deterministic central backend Flyway bundle applies the canonical schema exactly once, owner contributions are verified globally, and application runtimes cannot execute migrations.
 acceptance:
     - id: acceptance.database-access-boundary
-      given: backend, batch, backtest, and pipeline database access responsibilities
+      given: backend, trading, backtest, and pipeline database responsibilities
       when: ownership verification runs
-      then: each schema has one registered write owner and Python access is limited to the documented backtest, market_data, and storage boundaries
-      failure: a schema has multiple write owners, an unknown owner, or an application role is granted DDL authority
+      then: each schema has one registered write owner, owner contributions can only alter owned entities, and application roles have no DDL authority
+      failure: a schema has multiple owners, an unknown owner, a contribution alters another owner's entity, or an application role receives DDL authority
+    - id: acceptance.flyway-bundle-deterministic
+      given: the immutable V1 baseline and exact owner contribution directories from pinned workspace commits
+      when: the central migration bundle is assembled twice
+      then: both manifests, ordered migration lists, and content digests are identical and every migration has a globally unique UTC timestamp version
+      failure: a floating branch, duplicate version, legacy post-baseline name, unknown owner, or nondeterministic bundle is accepted
     - id: acceptance.flyway-once
-      given: A clean PostgreSQL 16 database
-      when: The central Flyway integration test migrates twice
-      then: The first run applies the complete history and the second run has no pending migrations
-      failure: Application startup owns migration execution, migration fails, or a second run changes the schema
-    - id: acceptance.migration-convention
-      given: The central migration directory contains the immutable baseline and owner migrations
-      when: Migration verification runs
-      then: Every post-baseline migration has a unique UTC timestamp version, a registered owner, and deterministic order
-      failure: A duplicate version, unknown owner, legacy numeric post-baseline version, or modified baseline is accepted
-    - id: acceptance.persistence-boundary
-      given: The migrated database and backend persistence mappings
-      when: persistence integration verification runs
-      then: Hibernate validates mappings and jOOQ queries compile against the shared schema without creating DDL
-      failure: ORM schema creation is required or generated queries target absent schema objects
+      given: a clean PostgreSQL 16 database and the assembled central bundle
+      when: Flyway migrates twice and validates
+      then: the first run applies the complete history, the second run executes zero migrations, and validation succeeds
+      failure: an application owns migration execution, migration fails, or the second run changes schema state
+    - id: acceptance.runtime-no-ddl
+      given: a database already migrated by the central bundle
+      when: backend and trading runtimes start
+      then: Flyway auto-execution is disabled, ORM remains validate-only, and jOOQ/persistence mappings fail on schema drift without creating DDL
+      failure: a runtime applies migrations, creates schema objects, or silently targets absent objects
 refs:
     - quality.auditability
     - quality.failure-safety
@@ -33,13 +33,24 @@ workspaces:
     - workspace.backtest-engine
     - workspace.data-pipeline
     - workspace.root
+    - workspace.trading-engine
 scope:
     repositories:
         - repository.github.backend
+        - repository.github.root
+        - repository.github.trading-engine
     paths:
+        - .github/workflows/**
         - backend/db-migration/**
         - backend/modules/backend-persistence/build.gradle.kts
         - backend/modules/backend-persistence/src/test/**
+        - compose.back.yml
+        - scripts/**
+        - trading-engine/apps/trading-worker/build.gradle.kts
+        - trading-engine/apps/trading-worker/src/main/resources/application.yaml
+        - trading-engine/db/migration-contributions/**
+        - trading-engine/modules/trading-persistence/build.gradle.kts
+        - trading-engine/modules/trading-persistence/src/test/**
     policy_ids: []
     scenario_ids: []
     contract_ids: []
@@ -50,21 +61,24 @@ scope:
     dependency_majors: []
     root_pointers:
         - workspace.backend
+        - workspace.trading-engine
 dependencies: []
 merge_order:
     - workspace.backtest-engine
     - workspace.data-pipeline
     - workspace.backend
+    - workspace.trading-engine
     - workspace.root
-first_failing_test: The central migration module has no executable verification and accepts an invalid post-baseline migration name or duplicate timestamp without identifying its write owner.
+first_failing_test: The central migration test only sees backend classpath migrations, accepts no pinned owner contribution bundle, and the trading worker can still auto-run its private Flyway history.
 evidence:
     kinds:
         - database-ownership
+        - deterministic-bundle
         - flyway-postgresql
-        - migration-convention
         - persistence-integration
+        - runtime-no-ddl
     integration_required: true
     user_validation: false
     migration_required: true
     rollback_required: false
-fingerprint: sha256:9258dc137eeacba2563a6c939cc64d6fa2f8ddf6d045e46898860004d97a5a49
+fingerprint: sha256:dc4cca35790953a85eff20d9c1226ed8bc3b0c6dbf3c1512589e441dca85033f
