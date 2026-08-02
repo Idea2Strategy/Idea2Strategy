@@ -96,10 +96,11 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 
 ### 제품 권한과 확정 원본 수정 차단
 
-- Stackcord 제품 권한 검사를 활성화하며 선택 provider는 GitHub, 기준 저장소는 `Idea2Strategy/Idea2Strategy`, 권한자는 `user:kcrmin`과 `user:pjy008008`이다.
+- Stackcord 제품 권한 검사를 활성화하며 선택 provider는 GitHub, 기준 저장소는 `Idea2Strategy/Idea2Strategy`, 권한자는 `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`이다.
 - `.harness/governance.yaml`, `specs/**`, `contracts/**`, 이 문서와 차단 규칙을 집행하는 파일을 수정하기 전에 `stackcord governance check --json`을 실행한다.
-- 정확한 저장소·HEAD 커밋·보호 의미 fingerprint에 대해 구성된 권한자(`user:kcrmin` 또는 `user:pjy008008`)를 승인자로 확인한 fresh provider 관찰만 확정 원본 수정을 허용한다.
-- 두 권한자는 동등하다. 권한 범위는 `protected_kinds` 전체(`product`, `policy`, `business`, `contract`)이며 kind별·영역별 제한을 두지 않는다. `approval.minimum: 1`과 `authority_self_approval: true`이므로 각 권한자는 단독 자기 승인으로 확정 원본 변경을 승인할 수 있다.
+- 정확한 저장소·HEAD 커밋·보호 의미 fingerprint에 대해 구성된 권한자(`user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`)를 승인자로 확인한 fresh provider 관찰만 확정 원본 수정을 허용한다.
+- 세 권한자는 동등하다. 권한 범위는 `protected_kinds` 전체(`product`, `policy`, `business`, `contract`)이며 kind별·영역별 제한을 두지 않는다. `approval.minimum: 1`과 `authority_self_approval: true`이므로 각 권한자는 단독 자기 승인으로 확정 원본 변경을 승인할 수 있다.
+- 저장소 협력자 권한과 제품 권한은 별개다. `user:Juwon-Na`는 GitHub `write` 권한만 보유하므로 PR 승인은 가능하지만 branch protection 등 저장소 설정은 변경할 수 없다.
 - 관찰이 없거나 stale·unknown·unavailable이거나 다른 subject이면 작업자는 must not edit 원칙에 따라 확정 원본을 수정하지 않는다. 별도 격리 제안은 만들 수 있지만 승인·통합·릴리스된 변경으로 표현하지 않는다.
 - Git user.name and user.email never prove authority. 알려진 이메일은 로컬 연락 메타데이터일 뿐 권한 판정에 사용하지 않는다.
 - GitLab monolithic 저장소도 별도의 GitLab 사용자에게 제품 권한을 부여하지 않고 위 GitHub 권한을 동일하게 따른다.
@@ -112,7 +113,7 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 | GitHub | 보호 브랜치, 정책 경로 CODEOWNERS 승인, 필수 상태 검사, 직접 push 제한 | 미적용·사용자 승인 필요 |
 | GitLab | protected branch, CODEOWNERS/approval rule, 필수 pipeline, 직접 push 제한 | 원격 구성·보호 규칙 미적용 |
 | CI/검토 | 정책 변경 전용 검사, 승인 소유자 검증, 제품 변경과 정책 변경 혼합 차단 | 미구현 |
-| 조직 권한 | GitHub/GitLab의 실제 정책 소유자 계정 매핑과 최소 권한 | Stackcord 권한자는 `user:kcrmin`과 `user:pjy008008`로 구성, fresh provider 승인 관찰은 아직 없음 |
+| 조직 권한 | GitHub/GitLab의 실제 정책 소유자 계정 매핑과 최소 권한 | Stackcord 권한자는 `user:kcrmin`·`user:pjy008008`·`user:Juwon-Na`로 구성, fresh provider 승인 관찰은 아직 없음 |
 
 원격 보호를 적용하기 전에는 누구도 정책 문서가 기술적으로 변경 불가능하다고 주장하지 않는다.
 
@@ -156,13 +157,15 @@ Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 St
 
 - 최초 변환 이후 submodule 변경을 GitLab monolithic 구조에 반복 동기화하는 자동화·충돌·rollback 방식
 - GitHub Issues를 Stackcord의 실시간 task provider로 전환하는 시점
-- GitHub `user:kcrmin`·`user:pjy008008`의 fresh provider 승인 관찰과 GitHub/GitLab 원격 보호 설정
+- GitHub `user:kcrmin`·`user:pjy008008`·`user:Juwon-Na`의 fresh provider 승인 관찰과 GitHub/GitLab 원격 보호 설정
+- `Pearwon99`가 `user:Juwon-Na`의 GitLab 계정인지 확인. GitHub에는 존재하지 않는 식별자이므로 제품 권한에는 사용하지 않는다.
 - Jira 프로젝트 키·실제 담당자·일정
 
 ## 14. 변경 이력
 
 | 날짜 | 상태 | 변경 이유 | 승인 근거 |
 | --- | --- | --- | --- |
+| 2026-08-02 | 제품 권한자 추가 | `user:Juwon-Na`(구성원 A, 계정·운영)를 세 번째 동등 권한자로 등록하고 `protected_kinds` 전체 권한을 부여. 사용자가 함께 제시한 `Pearwon99`는 GitHub에 존재하지 않아(404) 사용하지 않았다. 영향: 단독 자기 승인이 가능한 권한자가 셋으로 늘어남 | 권한자 `user:kcrmin`이 현재 세션에서 명시적으로 추가를 지시. `user:Juwon-Na`의 GitHub 협력자 권한은 `write`로 확인되어 PR 승인이 가능하다. 근거 문서: `proposals/product-authority/product-authority-expansion.v1.md` |
 | 2026-08-02 | 제품 권한자 추가 | `user:pjy008008`(구성원 C, 시장·평가)을 `user:kcrmin`과 동등한 제품 권한자로 등록하고 `protected_kinds` 전체에 대한 권한을 부여. 영향: 보호 정본 승인 경로가 둘로 늘어나며 `approval.minimum: 1`·`authority_self_approval: true` 하에서 각 권한자가 단독 자기 승인 가능 | 권한자 `user:kcrmin`이 현재 세션에서 명시적으로 추가를 지시하고 정본 반영을 승인. 근거 문서: `proposals/product-authority/product-authority-expansion.v1.md`. 주의: `stackcord governance check --json`은 여전히 `unknown`이며 fresh provider 승인 관찰은 아직 없음 |
 | 2026-07-22 | 제품 권한 governance 활성화 | GitHub `user:kcrmin`만 확정 제품·정책·비즈니스·계약 변경을 승인할 수 있게 하고, 다른 사용자는 격리 제안만 만들도록 사전 차단 규칙을 추가 | 사용자가 권한 계정과 로컬 연락 이메일을 명시하고 설계 검토 후 진행 승인 |
 | 2026-07-22 | Git Flow 정정 | 양쪽 기본 개발 브랜치를 `develop`으로 통일하고 `main`을 `v1.0.0`부터의 정식 릴리스 전용으로 제한 | 사용자의 명시적 정정 및 진행 승인 |
