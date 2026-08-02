@@ -4130,6 +4130,25 @@ Table competition.leaderboard_entries {
   }
 }
 
+Table competition.room_final_access_grants {
+  room_id uuid [not null]
+  account_id uuid [not null]
+  snapshot_id uuid [not null]
+  eligibility_basis varchar(40) [not null]
+  granted_at timestamptz [not null]
+
+  indexes {
+    (room_id, account_id) [pk]
+    (snapshot_id, account_id) [unique]
+  }
+
+  checks {
+    `eligibility_basis IN ('CREATOR', 'ACTIVE_PARTICIPANT')` [name: 'competition_final_access_basis_valid']
+  }
+
+  Note: 'SECRET 방의 FINAL 리더보드 접근 자격을 종료 시점에 고정하는 불변 grant. 원본 결과 보존과 방 단위 조회 만료는 분리한다.'
+}
+
 // -----------------------------------------------------------------------------
 // operations: outbox, rebuild checkpoints, audit, and notification delivery.
 // -----------------------------------------------------------------------------
@@ -4719,6 +4738,9 @@ Ref: competition.leaderboard_entries.snapshot_id > competition.leaderboard_snaps
 Ref: competition.leaderboard_entries.participation_id > competition.participations.id
 Ref: competition.leaderboard_entries.performance_snapshot_id > performance.bot_snapshots.id
 Ref: competition.leaderboard_entries.backtest_aggregate_result_id > competition.backtest_aggregate_results.id
+Ref: competition.room_final_access_grants.room_id > competition.rooms.id
+Ref: competition.room_final_access_grants.account_id > identity.accounts.id
+Ref: competition.room_final_access_grants.snapshot_id > competition.leaderboard_snapshots.id
 
 Ref: operations.role_permissions.role_id > operations.roles.id
 Ref: operations.role_permissions.permission_id > operations.permissions.id
