@@ -81,6 +81,12 @@ Enum identity.consent_decision {
   WITHDRAWN
 }
 
+Enum identity.theme_preference {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
 Enum identity.sanction_status {
   ACTIVE
   LIFTED
@@ -432,13 +438,14 @@ Table identity.account_preferences {
   account_id uuid [pk]
   language_code varchar(12) [not null, note: '현재 지원 값은 ko와 en.']
   timezone_name varchar(80) [not null, note: '표시 전용 IANA 시간대 이름. 시장 계산은 거래소 캘린더 사용.']
+  theme_preference identity.theme_preference [not null, default: 'SYSTEM', note: '계정 간 동기화되는 표시 전용 선호. 거래·시장 계산이나 접근 권한에 영향을 주지 않음.']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null, default: `now()`]
 
-  Note: '계정과 원자적으로 생성. 알림 수신 설정은 operations.notification_preferences, 마케팅 법적 동의는 account_consents에 유지.'
+  Note: '계정과 원자적으로 생성. 테마 기본값 SYSTEM은 클라이언트의 시스템 설정을 따름. 알림 수신 설정은 operations.notification_preferences, 마케팅 법적 동의는 account_consents에 유지.'
 
-  Records (account_id, language_code, timezone_name, created_at, updated_at) {
-    '00000000-0000-4000-8000-000000000001', 'ko', 'America/New_York', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  Records (account_id, language_code, timezone_name, theme_preference, created_at, updated_at) {
+    '00000000-0000-4000-8000-000000000001', 'ko', 'America/New_York', 'SYSTEM', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
