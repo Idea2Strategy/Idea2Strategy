@@ -4281,16 +4281,21 @@ Table competition.room_final_access_grants {
 Table operations.operator_accounts {
   id uuid [pk, default: `gen_random_uuid()`]
   external_identity_key_hmac varchar(128) [not null, unique]
+  external_identity_key_version smallint [not null]
   status varchar(30) [not null]
   mfa_enrolled_at timestamptz [not null]
   last_mfa_verified_at timestamptz
   created_at timestamptz [not null]
   disabled_at timestamptz
 
+  checks {
+    `external_identity_key_version > 0` [name: 'operator_identity_key_version_positive']
+  }
+
   Note: '운영자 계정 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
-  Records (id, external_identity_key_hmac, status, mfa_enrolled_at, last_mfa_verified_at, created_at, disabled_at) {
-    '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  Records (id, external_identity_key_hmac, external_identity_key_version, status, mfa_enrolled_at, last_mfa_verified_at, created_at, disabled_at) {
+    '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
 }
 
@@ -5202,6 +5207,208 @@ Ref: operations.case_evidence_references.(account_id, case_id) > operations.case
 Ref: operations.case_evidence_references.(case_id, case_event_id) > operations.case_events.(case_id, id)
 Ref: operations.case_evidence_references.storage_object_id > storage.objects.id
 Ref: operations.case_evidence_references.owner_account_id > identity.accounts.id
+
+Table operations.operator_bootstrap_receipts {
+  bootstrap_key varchar(160) [pk]
+  manifest_hash varchar(128) [not null, unique]
+  catalog_version varchar(80) [not null]
+  operator_account_id uuid [not null]
+  operator_role_assignment_id uuid [not null]
+  external_identity_key_version smallint [not null]
+  correlation_id uuid [not null]
+  audit_event_id uuid [not null, unique]
+  applied_at timestamptz [not null]
+
+  indexes {
+    (operator_account_id, operator_role_assignment_id) [unique]
+  }
+
+  checks {
+    `external_identity_key_version > 0` [name: 'operator_bootstrap_key_version_positive']
+  }
+
+  Note: 'Immutable one-shot deployment bootstrap receipt; no HTTP bootstrap path exists.'
+}
+
+Enum operations.batch_job_version_status {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+Enum operations.batch_run_status {
+  RUNNING
+  SUCCEEDED
+  PARTIAL_FAILED
+  FAILED
+  CANCELLED
+}
+
+Enum operations.batch_item_status {
+  PENDING
+  CLAIMED
+  SUCCEEDED
+  QUARANTINED
+  SKIPPED
+}
+
+Enum operations.batch_attempt_outcome {
+  SUCCEEDED
+  RETRY_SCHEDULED
+  QUARANTINED
+  LEASE_EXPIRED
+  SKIPPED
+}
+
+Table operations.batch_job_versions {
+  job_code varchar(80) [not null]
+  job_version varchar(40) [not null]
+  status operations.batch_job_version_status [not null]
+  category_set_document jsonb [not null]
+  content_hash varchar(128) [not null, unique]
+  published_at timestamptz
+  retired_at timestamptz
+
+  indexes {
+    (job_code, job_version) [pk]
+    (job_code, status)
+  }
+
+  checks {
+    `(status = 'DRAFT' AND published_at IS NULL AND retired_at IS NULL) OR (status = 'ACTIVE' AND published_at IS NOT NULL AND retired_at IS NULL) OR (status = 'RETIRED' AND published_at IS NOT NULL AND retired_at IS NOT NULL AND retired_at >= published_at)` [name: 'batch_job_version_lifecycle_consistent']
+  }
+}
+
+Table operations.batch_runs {
+  id uuid [pk, default: `gen_random_uuid()`]
+  job_code varchar(80) [not null]
+  job_version varchar(40) [not null]
+  runtime_policy_version varchar(80) [not null]
+  trigger_id varchar(160) [not null, unique]
+  window_start timestamptz [not null]
+  window_end timestamptz [not null]
+  status operations.batch_run_status [not null]
+  started_at timestamptz [not null]
+  completed_at timestamptz
+  discovered_count bigint [not null, default: 0]
+  succeeded_count bigint [not null, default: 0]
+  quarantined_count bigint [not null, default: 0]
+
+  indexes {
+    (job_code, job_version, started_at)
+    (status, started_at)
+  }
+
+  checks {
+    `window_end > window_start` [name: 'batch_run_window_positive']
+    `discovered_count >= 0 AND succeeded_count >= 0 AND quarantined_count >= 0` [name: 'batch_run_counts_nonnegative']
+    `(status = 'RUNNING' AND completed_at IS NULL) OR (status <> 'RUNNING' AND completed_at IS NOT NULL AND completed_at >= started_at)` [name: 'batch_run_completion_consistent']
+  }
+}
+
+Table operations.batch_items {
+  id uuid [pk, default: `gen_random_uuid()`]
+  discovered_by_run_id uuid [not null]
+  category_code varchar(80) [not null]
+  source_key varchar(200) [not null]
+  source_version varchar(160) [not null]
+  due_at timestamptz [not null]
+  replay_sequence int [not null, default: 0]
+  original_item_id uuid
+  replayed_from_item_id uuid [unique]
+  replay_audit_event_id uuid [unique]
+  status operations.batch_item_status [not null, default: 'PENDING']
+  claim_token uuid [unique]
+  claimed_by varchar(160)
+  claimed_at timestamptz
+  claim_expires_at timestamptz
+  attempt_count int [not null, default: 0]
+  next_attempt_at timestamptz [not null]
+  correlation_id uuid [not null]
+  first_discovered_at timestamptz [not null]
+  completed_at timestamptz
+  domain_result_code varchar(80)
+  terminal_failure_code varchar(80)
+
+  indexes {
+    (category_code, source_key, source_version, due_at, replay_sequence) [unique]
+    (status, next_attempt_at, due_at, id)
+    (original_item_id, replay_sequence) [unique]
+  }
+
+  checks {
+    `replay_sequence >= 0` [name: 'batch_item_replay_sequence_nonnegative']
+    `(replay_sequence = 0 AND original_item_id IS NULL AND replayed_from_item_id IS NULL AND replay_audit_event_id IS NULL) OR (replay_sequence > 0 AND original_item_id IS NOT NULL AND replayed_from_item_id IS NOT NULL AND replay_audit_event_id IS NOT NULL)` [name: 'batch_item_replay_lineage_consistent']
+    `attempt_count >= 0` [name: 'batch_item_attempt_count_nonnegative']
+    `(status = 'CLAIMED' AND claim_token IS NOT NULL AND claimed_by IS NOT NULL AND claimed_at IS NOT NULL AND claim_expires_at > claimed_at) OR (status <> 'CLAIMED' AND claim_token IS NULL AND claimed_by IS NULL AND claimed_at IS NULL AND claim_expires_at IS NULL)` [name: 'batch_item_claim_consistent']
+    `(status IN ('SUCCEEDED', 'QUARANTINED', 'SKIPPED') AND completed_at IS NOT NULL) OR (status IN ('PENDING', 'CLAIMED') AND completed_at IS NULL)` [name: 'batch_item_completion_consistent']
+    `(status = 'QUARANTINED' AND terminal_failure_code IS NOT NULL) OR (status <> 'QUARANTINED' AND terminal_failure_code IS NULL)` [name: 'batch_item_quarantine_consistent']
+  }
+}
+
+Table operations.batch_item_attempts {
+  batch_item_id uuid [not null]
+  attempt_number int [not null]
+  claim_token uuid [not null, unique]
+  worker_id varchar(160) [not null]
+  runtime_policy_version varchar(80) [not null]
+  correlation_id uuid [not null]
+  claimed_at timestamptz [not null]
+  claim_expires_at timestamptz [not null]
+  completed_at timestamptz
+  outcome operations.batch_attempt_outcome
+  domain_result_code varchar(80)
+  failure_code varchar(80)
+  next_attempt_at timestamptz
+
+  indexes {
+    (batch_item_id, attempt_number) [pk]
+    (outcome, completed_at)
+  }
+
+  checks {
+    `attempt_number > 0` [name: 'batch_attempt_number_positive']
+    `claim_expires_at > claimed_at` [name: 'batch_attempt_lease_positive']
+    `(completed_at IS NULL AND outcome IS NULL AND domain_result_code IS NULL AND failure_code IS NULL AND next_attempt_at IS NULL) OR (completed_at IS NOT NULL AND outcome IS NOT NULL)` [name: 'batch_attempt_completion_consistent']
+    `(outcome = 'RETRY_SCHEDULED' AND failure_code IS NOT NULL AND next_attempt_at IS NOT NULL) OR (outcome <> 'RETRY_SCHEDULED' AND next_attempt_at IS NULL) OR outcome IS NULL` [name: 'batch_attempt_retry_consistent']
+    `(outcome IN ('QUARANTINED', 'LEASE_EXPIRED') AND failure_code IS NOT NULL) OR (outcome NOT IN ('QUARANTINED', 'LEASE_EXPIRED')) OR outcome IS NULL` [name: 'batch_attempt_failure_consistent']
+  }
+}
+
+Table operations.batch_run_checkpoints {
+  job_code varchar(80) [not null]
+  job_version varchar(40) [not null]
+  category_code varchar(80) [not null]
+  shard_key varchar(160) [not null]
+  cursor_due_at timestamptz
+  cursor_source_key varchar(200)
+  last_run_id uuid [not null]
+  scanned_count bigint [not null, default: 0]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (job_code, job_version, category_code, shard_key) [pk]
+  }
+
+  checks {
+    `(cursor_due_at IS NULL AND cursor_source_key IS NULL) OR (cursor_due_at IS NOT NULL AND cursor_source_key IS NOT NULL)` [name: 'batch_checkpoint_cursor_pair']
+    `scanned_count >= 0` [name: 'batch_checkpoint_scanned_count_nonnegative']
+  }
+}
+
+Ref: operations.batch_runs.(job_code, job_version) > operations.batch_job_versions.(job_code, job_version)
+Ref: operations.batch_items.discovered_by_run_id > operations.batch_runs.id
+Ref: operations.batch_items.original_item_id > operations.batch_items.id
+Ref: operations.batch_items.replayed_from_item_id > operations.batch_items.id
+Ref: operations.batch_item_attempts.batch_item_id > operations.batch_items.id
+Ref: operations.batch_run_checkpoints.(job_code, job_version) > operations.batch_job_versions.(job_code, job_version)
+Ref: operations.batch_run_checkpoints.last_run_id > operations.batch_runs.id
+
+
+Ref: operations.operator_bootstrap_receipts.catalog_version > operations.rbac_catalog_versions.catalog_version
+Ref: operations.operator_bootstrap_receipts.operator_account_id > operations.operator_accounts.id
+Ref: operations.operator_bootstrap_receipts.operator_role_assignment_id > operations.operator_role_assignments.id
+Ref: operations.operator_bootstrap_receipts.audit_event_id > operations.audit_events.id
 
 DiagramView Default {
   Schemas {
