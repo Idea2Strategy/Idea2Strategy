@@ -108,3 +108,50 @@ contracts:
       - contract.operations.user-case.v1
       - capability.audit.evidence
     fingerprint: sha256:fff9438916108ca94e547928492f93cd72999432a3115d3808cd75f3419d7029
+  - id: contract.operations.durable-batch-execution.v1
+    kind: data
+    status: approved
+    revision: 1
+    source: data/durable-batch-execution.v1.md
+    compatibility: additive
+    providers: [workspace.root]
+    consumers: [workspace.backend]
+    product_ids: [capability.audit.evidence, quality.failure-safety]
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - contract.operations.outbox-delivery.v1
+      - contract.operations.case-response-deadline.v1
+      - capability.audit.evidence
+      - quality.failure-safety
+    fingerprint: sha256:5c6acdc44f719e727cdaec2b9a42297ebad7a0c9537ae03d412952c175921678
+  - id: contract.operations.operator-trust.v1
+    kind: business
+    status: approved
+    revision: 1
+    source: business/operator-trust.v1.md
+    compatibility: additive
+    providers: [workspace.root]
+    consumers: [workspace.backend]
+    product_ids:
+      - role.operator
+      - journey.operator.administer
+      - scenario.account.sanction
+      - capability.audit.evidence
+    scenario_ids: [scenario.account.sanction]
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - contract.operations.operator-rbac.v1
+      - role.operator
+      - journey.operator.administer
+      - scenario.account.sanction
+      - capability.audit.evidence
+    fingerprint: sha256:32b2a4918f823b21e76f9b362f1e186b4c78d5bc5f7ed0527fa208f834c74596
