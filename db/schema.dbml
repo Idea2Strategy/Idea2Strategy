@@ -437,6 +437,7 @@ Enum operations.case_event_type {
   SUBMITTED
   EVIDENCE_ADDED
   INFORMATION_REQUESTED
+  INFORMATION_RESPONSE_DEADLINE_EXPIRED
   REVIEW_STARTED
   RESOLVED
   REJECTED
@@ -4727,6 +4728,8 @@ Table operations.cases {
   case_version bigint [not null, default: 1]
   current_event_sequence int [not null]
   last_case_event_id uuid
+  response_deadline_at timestamptz
+  deadline_policy_version varchar(80)
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null, default: `now()`]
   closed_at timestamptz
@@ -4736,6 +4739,7 @@ Table operations.cases {
     (account_id, status, created_at)
     (account_id, id) [unique]
     (id, last_case_event_id) [unique]
+    (response_deadline_at, id)
   }
 
   checks {
@@ -4744,12 +4748,13 @@ Table operations.cases {
     `last_case_event_id IS NOT NULL` [name: 'case_head_required']
     `(status IN ('RESOLVED', 'REJECTED') AND closed_at IS NOT NULL AND resolution_code IS NOT NULL) OR (status NOT IN ('RESOLVED', 'REJECTED') AND closed_at IS NULL AND resolution_code IS NULL)` [name: 'case_terminal_state_consistent']
     `updated_at >= created_at` [name: 'case_update_time_order']
+    `(response_deadline_at IS NOT NULL AND deadline_policy_version IS NOT NULL) OR (response_deadline_at IS NULL AND deadline_policy_version IS NULL)` [name: 'case_response_deadline_pair']
   }
 
   Note: '사용자 사건의 현재 head projection. 최초 SUBMITTED event와 같은 트랜잭션으로 sequence 1/head/version 1을 생성한다. migration은 case head/event 순환 FK를 DEFERRABLE INITIALLY DEFERRED로 구현해 미리 생성한 event ID를 case head에 넣고 commit 시점에 양쪽 존재를 검증한다. 상태 변경은 case_version과 current_event_sequence를 1씩 증가시키고 정확히 하나의 append-only event를 같은 트랜잭션에 추가해야 한다. RESOLVED와 REJECTED는 terminal이며 별도 CLOSED 상태를 두지 않는다.'
 
-  Records (id, account_id, case_type, status, subject, case_version, current_event_sequence, last_case_event_id, created_at, updated_at, closed_at, resolution_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'INQUIRY', 'OPEN', 'review-example', 1, 1, '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null
+  Records (id, account_id, case_type, status, subject, case_version, current_event_sequence, last_case_event_id, response_deadline_at, deadline_policy_version, created_at, updated_at, closed_at, resolution_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'INQUIRY', 'OPEN', 'review-example', 1, 1, '00000000-0000-4000-8000-000000000001', null, null, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null
   }
 }
 
@@ -4811,6 +4816,28 @@ Table operations.case_command_receipts {
   }
 
   Note: '완료된 사용자 case command의 불변 영수증. 같은 account/command/key와 같은 canonical request hash는 저장된 status/code/document를 그대로 반환하고 다른 hash는 IDEMPOTENCY_KEY_REUSED로 거절한다. 트랜잭션 밖으로 rollback되어 영수증이 없는 실패는 재현된다고 보장하지 않는다.'
+}
+
+Table operations.case_deadline_receipts {
+  case_id uuid [not null]
+  expected_case_version bigint [not null]
+  response_deadline_at timestamptz [not null]
+  decision_status varchar(32) [not null]
+  case_event_id uuid
+  correlation_id uuid [not null]
+  decided_at timestamptz [not null]
+
+  indexes {
+    (case_id, expected_case_version, response_deadline_at) [pk]
+    (case_id, case_event_id) [unique]
+  }
+
+  checks {
+    `decision_status IN ('APPLIED', 'ALREADY_TRANSITIONED')` [name: 'case_deadline_decision_valid']
+    `(decision_status = 'APPLIED' AND case_event_id IS NOT NULL) OR (decision_status = 'ALREADY_TRANSITIONED' AND case_event_id IS NULL)` [name: 'case_deadline_event_consistent']
+  }
+
+  Note: 'A20 사건 응답 기한 처리의 불변 멱등 영수증. 같은 case/version/deadline 재시도는 최초 APPLIED 또는 ALREADY_TRANSITIONED 결과를 재사용하며 새 event나 notification을 만들지 않는다.'
 }
 
 Table operations.case_evidence_references {
@@ -5169,6 +5196,8 @@ Ref: operations.case_events.(case_id, previous_event_id) > operations.case_event
 Ref: operations.cases.(id, last_case_event_id) > operations.case_events.(case_id, id)
 Ref: operations.case_command_receipts.(account_id, case_id) > operations.cases.(account_id, id)
 Ref: operations.case_command_receipts.(case_id, case_event_id) > operations.case_events.(case_id, id)
+Ref: operations.case_deadline_receipts.case_id > operations.cases.id
+Ref: operations.case_deadline_receipts.(case_id, case_event_id) > operations.case_events.(case_id, id)
 Ref: operations.case_evidence_references.(account_id, case_id) > operations.cases.(account_id, id)
 Ref: operations.case_evidence_references.(case_id, case_event_id) > operations.case_events.(case_id, id)
 Ref: operations.case_evidence_references.storage_object_id > storage.objects.id

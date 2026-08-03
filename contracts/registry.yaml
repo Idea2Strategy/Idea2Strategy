@@ -89,3 +89,22 @@ contracts:
     test_ids: []
     refs: [capability.audit.evidence]
     fingerprint: sha256:e760d465631f30eaac997f116efbd59be644d8ce546bed3f4b37e93773f7c49f
+  - id: contract.operations.case-response-deadline.v1
+    kind: business
+    status: approved
+    revision: 1
+    source: business/case-response-deadline.v1.md
+    compatibility: additive
+    providers: [workspace.root]
+    consumers: [workspace.backend]
+    product_ids: [capability.audit.evidence]
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - contract.operations.user-case.v1
+      - capability.audit.evidence
+    fingerprint: sha256:fff9438916108ca94e547928492f93cd72999432a3115d3808cd75f3419d7029

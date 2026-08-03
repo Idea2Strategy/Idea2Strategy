@@ -7,6 +7,7 @@
     "dbml:validate:a13-proposal": "node scripts/validate-operator-rbac-proposal.mjs && node --test scripts/validate-operator-rbac-proposal.test.mjs",
     "dbml:validate:a15-proposal": "node scripts/validate-delegated-strategy-scope-proposal.mjs && node --test scripts/validate-delegated-strategy-scope-proposal.test.mjs",
     "dbml:validate:com-a-canonical": "node scripts/validate-dbml.mjs db/schema.dbml && node --test scripts/validate-com-a-canonical.test.mjs",
+    "dbml:validate:case-deadline-canonical": "node scripts/validate-dbml.mjs db/schema.dbml && node --test scripts/validate-case-response-deadline-canonical.test.mjs",
     "dbml:export:prepare": "node scripts/prepare-dbdiagram-export.mjs",
     "dbml:export:test": "node --test scripts/prepare-dbdiagram-export.test.mjs",
     "dbml:validate:trading-proposal": "node scripts/validate-trading-dbml.mjs proposals/dbml-redesign/schema.draft.dbml",
