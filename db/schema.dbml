@@ -2138,6 +2138,17 @@ Table bot.launch_snapshots {
   }
 }
 
+Table bot.launch_contract_plans {
+  bot_id uuid [pk]
+  contract_version varchar(40) [not null]
+  plan_schema_version varchar(40) [not null]
+  plan_checksum varchar(128) [not null, note: '계약이 발행하는 planChecksum. 소비자는 저장값을 신뢰하지 않고 복호화한 필드에서 다시 계산해 비교한다.']
+  plan_document jsonb [not null, note: '평가 runtime이 봇을 적재하는 strategy-bot.v1 compiled plan 문서. Element 카탈로그의 runtime operation과 warm-up 요구를 소비자 어휘로 번역한 결과이며 launch snapshot의 snapshot_hash를 고정한다.']
+  created_at timestamptz [not null, default: `now()`]
+
+  Note: '출시 시점에 봇 1개에 대해 발행하는 불변 compiled plan 계약. launch_snapshots와 같은 트랜잭션에서 삽입한다. 문서가 고정하는 snapshot_hash는 RUN·STOP 명령이 싣는 해시와 동일해야 하므로 스냅샷과 분리된 시점에 생성할 수 없다. 파생 산출물이므로 자신이 고정하는 스냅샷 행 안에 저장하지 않으며, 이 계약에 생산자가 없던 시점에 출시된 봇은 행이 없고 runtime은 이를 스냅샷 부재로 보고한다.'
+}
+
 Table bot.launch_configurations {
   bot_id uuid [pk]
   initial_cash_amount numeric(24,8) [not null]
@@ -4977,6 +4988,7 @@ Ref: market_data.stream_watermarks.feed_id > market_data.feeds.id
 Ref: bot.bots.owner_account_id > identity.accounts.id
 Ref: bot.continuation_deadlines.bot_id > bot.bots.id
 Ref: bot.launch_snapshots.bot_id > bot.bots.id
+Ref: bot.launch_contract_plans.bot_id > bot.launch_snapshots.bot_id
 Ref: bot.launch_configurations.bot_id > bot.bots.id
 Ref: bot.launch_configurations.buying_power_buffer_policy_id > trading.buying_power_buffer_policy_versions.id
 Ref: bot.launch_configurations.fee_policy_id > trading.fee_policy_versions.id
