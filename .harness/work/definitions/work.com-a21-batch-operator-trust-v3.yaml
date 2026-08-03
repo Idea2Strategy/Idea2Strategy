@@ -1,0 +1,70 @@
+schema_version: 1
+id: work.com-a21-batch-operator-trust-v3
+readiness: ready
+title: Propose durable A21 batch and operator trust contracts
+outcome: Product authority can approve one exact fail-closed contract for durable batch recovery and operator authentication without changing canonical sources before review.
+acceptance:
+    - id: acceptance.com-a-operator-trust
+      given: A request reaches an operator or admin boundary
+      when: Authentication and authorization are evaluated
+      then: A signed short-lived token is verified at the ALB and backend and mapped to an active operator with current MFA and RBAC evidence
+      failure: A client-controlled header, opaque user session, stale MFA row, or edge-only decision grants operator authority
+    - id: acceptance.com-a21-batch-durability
+      given: A due domain item is discovered or retried by multiple workers
+      when: A worker claims, loses, completes, retries, or quarantines the item
+      then: PostgreSQL preserves one current lease owner and append-only attempt evidence while domain idempotency remains authoritative
+      failure: A stale worker can commit ownership or a checkpoint can suppress an unprocessed domain item
+refs:
+    - journey.operator.administer
+    - quality.auditability
+    - quality.failure-safety
+    - role.operator
+workspaces:
+    - workspace.backend
+    - workspace.root
+    - workspace.ui
+scope:
+    repositories:
+        - repository.github.root
+    paths:
+        - proposals/com-a-operator-trust/**
+        - proposals/com-a21-batch-execution/**
+    policy_ids: []
+    scenario_ids:
+        - scenario.account.sanction
+    contract_ids:
+        - contract.operations.case-response-deadline.v1
+        - contract.operations.operator-rbac.v1
+        - contract.operations.outbox-delivery.v1
+    db_entities:
+        - operations.batch_item_attempts
+        - operations.batch_items
+        - operations.batch_job_versions
+        - operations.batch_run_checkpoints
+        - operations.batch_runs
+        - operations.operator_accounts
+        - operations.operator_bootstrap_receipts
+        - operations.operator_role_assignments
+    migration_slots:
+        - postgresql.operations-a21-batch
+        - postgresql.operations-operator-trust
+    ui_flows:
+        - ui.operator.work
+    dependency_majors: []
+    root_pointers: []
+dependencies: []
+merge_order:
+    - workspace.root
+    - workspace.backend
+    - workspace.ui
+first_failing_test: A stale batch lease or client-supplied operator identity must never authorize a state change.
+evidence:
+    kinds:
+        - dbml-validation
+        - proposal-contract
+        - security-boundary-review
+    integration_required: true
+    user_validation: false
+    migration_required: true
+    rollback_required: true
+fingerprint: sha256:1568290e98cc4d9e4bc70e9f9d4fab0959723233cd503d936204b66e135137e9
