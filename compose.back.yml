@@ -217,7 +217,16 @@ services:
         SERVICE_DIR: backend
         APP_PROJECT: apps:backend-worker
         APP_OUTPUT: apps/backend-worker
-    environment: *spring-environment
+    environment:
+      <<: *spring-environment
+      # The relay is an explicit opt-in, and the worker is the process that runs it.
+      # The routing map arrives as JSON rather than as separate variables because a
+      # Spring map key cannot survive an environment variable name: relaxed binding
+      # turns every underscore into a nesting dot, so OFFICIAL_BACKTEST_REQUESTED
+      # would bind as four nested keys instead of one event type.
+      SPRING_APPLICATION_JSON: >-
+        {"idea2strategy":{"outbox-relay":{"enabled":true,"queues":
+        {"OFFICIAL_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/official-backtest-requests"}}}}
     depends_on:
       flyway: {condition: service_completed_successfully}
       localstack: {condition: service_healthy}

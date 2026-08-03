@@ -16,3 +16,9 @@ create_queue "bot-commands"
 create_queue "backtest-jobs"
 create_queue "pipeline-jobs"
 create_queue "domain-events"
+
+# B's official backtest requests get their own queue rather than sharing
+# backtest-jobs. That queue carries D's own job messages, and a single queue
+# holding two contracts would force each consumer to parse the other's — D's
+# release intake says exactly that about its own.
+create_queue "official-backtest-requests"
