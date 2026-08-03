@@ -1,6 +1,6 @@
 # COM-A21 case response deadline proposal
 
-This isolated proposal closes the product gap between A20 operator case handling and A21 batch processing. It does not modify canonical contracts or DBML until product authority `user:kcrmin` reviews the exact proposal.
+This isolated proposal records the reviewed product decision between A20 operator case handling and A21 batch processing. Product authority `user:kcrmin` merged exact proposal commit `f132f575f8d33a78dfe8fd55c5e1db45a8c19d08` in PR #158. Canonical integration is maintained separately so the approved proposal remains immutable review evidence.
 
 ## Recommended decision
 
@@ -13,7 +13,7 @@ This isolated proposal closes the product gap between A20 operator case handling
 
 ## Rollout
 
-1. Product-authority review of this proposal.
+1. Product-authority review of this proposal. (complete)
 2. Canonical contract and DBML integration.
 3. A20 migration/application port implementation.
 4. A21 batch adapter wiring.
