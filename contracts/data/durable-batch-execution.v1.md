@@ -80,4 +80,3 @@ Migration is additive and precedes disabled worker validation. No production dat
 - restart with missing, stale, and advanced checkpoints safely rescans overlap;
 - authorized replay preserves lineage and unauthorized replay creates no row;
 - empty and upgraded PostgreSQL migrations, disabled-startup, and the full backend suite pass.
-

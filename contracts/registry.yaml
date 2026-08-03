@@ -128,7 +128,7 @@ contracts:
       - contract.operations.case-response-deadline.v1
       - capability.audit.evidence
       - quality.failure-safety
-    fingerprint: sha256:ad06eaa04126c860a907c46551f6adef2621aa54e2a521f291e3733ebea9d94b
+    fingerprint: sha256:5c6acdc44f719e727cdaec2b9a42297ebad7a0c9537ae03d412952c175921678
   - id: contract.operations.operator-trust.v1
     kind: business
     status: approved
@@ -154,4 +154,4 @@ contracts:
       - journey.operator.administer
       - scenario.account.sanction
       - capability.audit.evidence
-    fingerprint: sha256:59945b3b22fddc558f42cc73f7e39bccc0d25c768f309d9e9dc01adfd23a7367
+    fingerprint: sha256:32b2a4918f823b21e76f9b362f1e186b4c78d5bc5f7ed0527fa208f834c74596

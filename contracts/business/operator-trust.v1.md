@@ -83,4 +83,3 @@ The schema change is additive. Existing unversioned operator digests are backfil
 - permission self/catalog/assignment reads enforce their distinct guards and redact provider data;
 - browser operator flow and `admin-mcp` use the same trust semantics without sharing customer sessions;
 - ALB, backend, PostgreSQL, UI browser, and audit-correlation E2E pass on the exact integrated commits.
-
