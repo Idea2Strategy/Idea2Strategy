@@ -217,7 +217,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 ## B2. 출시와 외부 AI 도구
 
 - [x] **B15 — Basic 실행 계획 compile**: 검증된 Basic 문서를 결정론적 실행 계획으로 compile하고 카탈로그·템플릿·정책 버전을 고정한다.
-- [x] **B16 — 불변 전략 출시**: 유효한 snapshot을 한 번 출시하고 이후 수정·리비전을 금지하며 변경은 복사 후 새 출시만 허용한다.
+- [x] **B16 — 불변 전략 출시**: 유효한 snapshot을 한 번 출시하고 이후 수정·리비전을 금지하며 변경은 복사 후 새 출시만 허용한다. — 출시 시점 `strategy-bot.v1` compiled plan 발행 보강: backend PR #193(`946832e`, 루트 #190). launch snapshot과 같은 트랜잭션에서 `bot.launch_contract_plans`에 기록하므로 plan이 고정하는 snapshot_hash와 RUN·STOP 명령이 싣는 해시가 항상 같은 release를 지목한다. Element 카탈로그의 `executionContract.runtime`이 element code를 runtime operation으로, feature 카탈로그가 warm-up 요구로 번역되며, 그룹이 하나의 실행 순서로 compile되지 않는 전략은 거부(계약이 plan 전체에 단일 `steps`·단일 side를 싣고 C·D 양쪽이 그렇게 구현하므로)
 - [x] **B17 — 출시·자동 백테스트 계약 발행**: 정확히 한 번의 공식 백테스트 요청 fixture와 Outbox 사건을 제공하고 재시도 중복을 막는다.
 - [x] **B18 — 외부 AI용 Basic 전략 편집 API**: 위임 scope 안에서 공식 Basic 블록 추가·삭제·연결, 값 설정, 미리보기와 검증만 허용하고 코드·외부 데이터·주문 제출을 차단한다.
 - [x] **B18A — 배포 가능한 Idea2Strategy CLI**: 로그인·위임, 전략 목록·생성·복사, Basic 블록 편집, 검증·출시를 안정된 명령·exit code·JSON 출력으로 제공한다.
@@ -239,7 +239,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 ## B4. 통합 구간
 
 - [x] **B90 — 자동 백테스트 실제 연동** `통합`: B17 계약으로 D가 공식 실행 한 건을 생성하고 B Query에 상태가 반영되는지 검증한다.
-- [ ] **B91 — 봇 제어와 trading 실제 연동** `통합`: 실행·중단 명령과 C의 평가 상태·F의 주문 및 정산 상태가 중복·역순 전달에서도 일관된지 검증한다.
+- [x] **B91 — 봇 제어와 trading 실제 연동** `통합`: 실행·중단 명령과 C의 평가 상태·F의 주문 및 정산 상태가 중복·역순 전달에서도 일관된지 검증한다. — trading-engine PR #121(`980d7e1`), 선행 backend PR #193(`946832e`, 루트 #190). 프로덕션 `StrategyBotControlConsumer` bean이 없어 RT5 poller가 배선되지 않았고 명령이 outbox에 방치되던 결함 해소. 실 PostgreSQL에서 `operations.outbox_messages` 행을 실제 poller가 청구하고 실제 codec이 plan checksum을 재계산해 검증하는 8건 E2E: 발행된 run이 다음 시장 사건을 정본 주문으로, 완료된 receipt 재청구 없음, lease 만료 후 재전달이 새로 쓰지 않음, 처리된 sequence 이전 run 무시, stop이 평가 종료·정본 정산 후 시장 사건 무반응, stop보다 먼저 발행됐지만 나중에 도착한 run이 봇을 되살리지 않음, 두 번째 stop 1회만 정산, 다른 release를 지목한 명령 거부·재시도 보존. 미포함: 재등록이 시장 sequence 인식을 초기화하므로 시장 사건 자체의 중복 제거는 trading-engine #107
 - [x] **B92 — 방 참여 봇 실제 연동** `통합`: E의 참가·평가 구간이 별개 봇 초기화, 실행, 종료 후 계속 운영 선택과 일치하는지 검증한다.
 
 ---
