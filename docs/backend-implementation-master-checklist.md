@@ -302,46 +302,46 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 
 ## D0. 독립 시작 구간
 
-- [ ] **D01 — Python 두 저장소 앱·패키지 골격**: data-pipeline worker·Lambda와 FastAPI·backtest worker의 package, lint/type/test와 독립 실행 구성을 완성한다.
-- [ ] **D02 — 객체 저장·Manifest 계약 fixture**: storage object, dataset object, Manifest, lineage, checksum과 publication 상태 예제를 고정한다.
-- [ ] **D03 — 로컬/S3 storage adapter**: 같은 object key·checksum·metadata 계약으로 로컬 파일과 S3를 교체할 수 있게 한다.
+- [x] **D01 — Python 두 저장소 앱·패키지 골격**: data-pipeline worker·Lambda와 FastAPI·backtest worker의 package, lint/type/test와 독립 실행 구성을 완성한다.
+- [x] **D02 — 객체 저장·Manifest 계약 fixture**: storage object, dataset object, Manifest, lineage, checksum과 publication 상태 예제를 고정한다.
+- [x] **D03 — 로컬/S3 storage adapter**: 같은 object key·checksum·metadata 계약으로 로컬 파일과 S3를 교체할 수 있게 한다.
 
 ## D1. 시장 데이터 카탈로그와 적재
 
-- [ ] **D04 — 지원 종목·심볼·세션·provider·feed 카탈로그**: S&P 500과 승인 ETF 등 제공 종목, 심볼 이력, 미국 거래 세션과 데이터 출처를 버전 관리한다.
-- [ ] **D05 — Alpaca 10년 raw 수집**: rate limit·재시도·checkpoint·중단 재개와 checksum을 갖춘 종목·날짜 범위 수집을 구현한다.
-- [ ] **D06 — raw·adjusted 정규화**: 원본 보존, adjusted 값, corporate-action 근거와 schema validation을 분리한다.
-- [ ] **D07 — Parquet partition·파일 크기 정책**: 일별 유입을 작은 파일 폭증 없이 종목군·시간 범위로 partition하고 predicate pushdown이 가능한 schema를 적용한다.
-- [ ] **D08 — 주·월·연 compaction**: 새 객체를 먼저 생성·검증한 뒤 Manifest를 교체하고 기존 객체를 즉시 덮어쓰지 않는다.
-- [ ] **D09 — Manifest 발행·supersede·lineage**: 완전한 dataset snapshot, 포함 객체, 생성 근거와 이전 버전 관계를 원자적으로 발행한다.
-- [ ] **D10 — 데이터 품질 검사·incident**: 누락 bar, 중복, 역순, 비정상 가격·거래량, 세션 불일치와 checksum 실패를 영향 범위와 함께 기록한다.
-- [ ] **D11 — pipeline run·watermark·재처리**: feed별 수집 진도, 실패 재개, backfill과 동일 입력 멱등성을 관리한다.
+- [x] **D04 — 지원 종목·심볼·세션·provider·feed 카탈로그**: S&P 500과 승인 ETF 등 제공 종목, 심볼 이력, 미국 거래 세션과 데이터 출처를 버전 관리한다.
+- [x] **D05 — Alpaca 10년 raw 수집**: rate limit·재시도·checkpoint·중단 재개와 checksum을 갖춘 종목·날짜 범위 수집을 구현한다.
+- [x] **D06 — raw·adjusted 정규화**: 원본 보존, adjusted 값, corporate-action 근거와 schema validation을 분리한다.
+- [x] **D07 — Parquet partition·파일 크기 정책**: 일별 유입을 작은 파일 폭증 없이 종목군·시간 범위로 partition하고 predicate pushdown이 가능한 schema를 적용한다.
+- [x] **D08 — 주·월·연 compaction**: 새 객체를 먼저 생성·검증한 뒤 Manifest를 교체하고 기존 객체를 즉시 덮어쓰지 않는다.
+- [x] **D09 — Manifest 발행·supersede·lineage**: 완전한 dataset snapshot, 포함 객체, 생성 근거와 이전 버전 관계를 원자적으로 발행한다.
+- [x] **D10 — 데이터 품질 검사·incident**: 누락 bar, 중복, 역순, 비정상 가격·거래량, 세션 불일치와 checksum 실패를 영향 범위와 함께 기록한다.
+- [x] **D11 — pipeline run·watermark·재처리**: feed별 수집 진도, 실패 재개, backfill과 동일 입력 멱등성을 관리한다.
 - [ ] **D12 — 실시간 데이터 일별 적재**: C 시장 사건을 buffer하여 검증된 일별 Parquet으로 만들고 이후 compaction 대상으로 발행한다.
 - [ ] **D13 — feature 정의·materialization**: 공식 지표 정의와 입력 Manifest를 고정하고 필요한 feature만 재현 가능하게 물질화한다.
 - [ ] **D14 — 기업행사 AI 조사 후보**: 하루 두 번 공개 근거를 조사해 종목·사건·예정일·근거를 후보로만 저장하고 자동 전략 판단에는 사용하지 않는다.
 - [ ] **D15 — 기업행사 관리자 승인·반영**: A의 admin-mcp 승인 결과만 공식 corporate action과 adjusted dataset 재생성으로 반영한다.
 ## D2. 공식 백테스트
 
-- [ ] **D16 — 백테스트 요청·결과 계약 fixture**: B가 발행할 요청과 D가 발행할 queued/running/complete/failed/unavailable 결과를 버전화한다.
-- [ ] **D17 — 고정 Parquet reader·실행 정책 fixture**: 소형 immutable Manifest와 Parquet, 분기별 기간, 수수료 0.2%, 슬리피지 0.05%, 시간·세션·정밀도와 모델 버전을 고정한다.
-- [ ] **D18 — backtest API·queue·상태 머신**: 출시 자동 작업 접수, 조회와 queued/running/complete/failed/unavailable 상태를 멱등적으로 관리한다.
-- [ ] **D19 — 분기별 공식 기간 선택**: 같은 분기에 생성된 출시본이 동일한 고정 백테스트 기간·정책 버전을 사용하게 한다.
-- [ ] **D20 — 입력 bundle 잠금**: 전략 snapshot, dataset Manifest, feature materialization, 수수료·슬리피지와 모델 버전을 실행 전에 고정한다.
-- [ ] **D21 — Basic runtime 호환 계층**: B의 Basic compiled plan을 C와 의미가 같은 trigger·순차 조건·균등 배분으로 실행한다.
-- [ ] **D22 — 시계·세션·사건 순서 시뮬레이터**: 미국 동부 시각 거래 세션과 데이터 사건을 look-ahead 없이 순서대로 공급한다.
-- [ ] **D23 — 백테스트 주문·체결·회계 모델**: 다음 유효 1분봉부터 주문 유형별 가격 조건을 평가하고 소수점·부분 체결, DAY/GTC/GTD, 수수료 0.2%, 슬리피지 0.05%, 예산·위험과 복식 원장을 재현한다.
-- [ ] **D24 — 데이터 부족·불가 판정**: 필요한 시간 해상도 구간만 체결 불가로 처리하고, 전략 전체 실행 가능성이 사라질 때만 unavailable로 종료하며 근사하지 않는다.
-- [ ] **D25 — 거래·성과 결과 저장**: 주문, 개별 체결, 취소, 거절, 비용, 실현손익, 거래 후 현금·포지션과 성과 summary를 실행 snapshot에 연결한다.
-- [ ] **D26 — 월별 판단 요약**: ET 월별로 거래 상세를 연결하고 비거래 평가는 저장하지 않으며 최초 실패 조건별 횟수만 집계한다.
-- [ ] **D27 — 상세 결과 object Manifest**: 대용량 거래·성과 series를 Parquet object로 저장하고 RDB detail manifest로 정확한 snapshot을 연결한다.
-- [ ] **D28 — 실패·재시도·취소·자원 제한**: run attempt, lease, timeout, 메모리·CPU 제한, 재시도와 중복 worker 실행을 안전하게 처리한다.
-- [ ] **D29 — 백테스트 결과 Query**: 목록, 개요, 성과, 월별 판단, 월별 거래 상세, 입력 데이터·모델과 unavailable 이유를 제공한다.
-- [ ] **D30 — D 묶음 독립 재현 E2E**: 고정 Alpaca 응답→Parquet→Manifest→공식 백테스트를 반복해 같은 입력과 결과를 보장하고 pipeline과 backtest의 Compute 자원 제한을 각각 검증한다.
-- [ ] **D31 — 백테스트 UI 연결**: 자동 실행 상태, 결과 개요, 성과, ET 월별 판단과 거래 상세 화면을 실제 API와 연결하고 unavailable·failed 상태를 검증한다.
+- [x] **D16 — 백테스트 요청·결과 계약 fixture**: B가 발행할 요청과 D가 발행할 queued/running/complete/failed/unavailable 결과를 버전화한다.
+- [x] **D17 — 고정 Parquet reader·실행 정책 fixture**: 소형 immutable Manifest와 Parquet, 분기별 기간, 수수료 0.2%, 슬리피지 0.05%, 시간·세션·정밀도와 모델 버전을 고정한다.
+- [x] **D18 — backtest API·queue·상태 머신**: 출시 자동 작업 접수, 조회와 queued/running/complete/failed/unavailable 상태를 멱등적으로 관리한다.
+- [x] **D19 — 분기별 공식 기간 선택**: 같은 분기에 생성된 출시본이 동일한 고정 백테스트 기간·정책 버전을 사용하게 한다.
+- [x] **D20 — 입력 bundle 잠금**: 전략 snapshot, dataset Manifest, feature materialization, 수수료·슬리피지와 모델 버전을 실행 전에 고정한다.
+- [x] **D21 — Basic runtime 호환 계층**: B의 Basic compiled plan을 C와 의미가 같은 trigger·순차 조건·균등 배분으로 실행한다.
+- [x] **D22 — 시계·세션·사건 순서 시뮬레이터**: 미국 동부 시각 거래 세션과 데이터 사건을 look-ahead 없이 순서대로 공급한다.
+- [x] **D23 — 백테스트 주문·체결·회계 모델**: 다음 유효 1분봉부터 주문 유형별 가격 조건을 평가하고 소수점·부분 체결, DAY/GTC/GTD, 수수료 0.2%, 슬리피지 0.05%, 예산·위험과 복식 원장을 재현한다.
+- [x] **D24 — 데이터 부족·불가 판정**: 필요한 시간 해상도 구간만 체결 불가로 처리하고, 전략 전체 실행 가능성이 사라질 때만 unavailable로 종료하며 근사하지 않는다.
+- [x] **D25 — 거래·성과 결과 저장**: 주문, 개별 체결, 취소, 거절, 비용, 실현손익, 거래 후 현금·포지션과 성과 summary를 실행 snapshot에 연결한다.
+- [x] **D26 — 월별 판단 요약**: ET 월별로 거래 상세를 연결하고 비거래 평가는 저장하지 않으며 최초 실패 조건별 횟수만 집계한다.
+- [x] **D27 — 상세 결과 object Manifest**: 대용량 거래·성과 series를 Parquet object로 저장하고 RDB detail manifest로 정확한 snapshot을 연결한다.
+- [x] **D28 — 실패·재시도·취소·자원 제한**: run attempt, lease, timeout, 메모리·CPU 제한, 재시도와 중복 worker 실행을 안전하게 처리한다.
+- [x] **D29 — 백테스트 결과 Query**: 목록, 개요, 성과, 월별 판단, 월별 거래 상세, 입력 데이터·모델과 unavailable 이유를 제공한다.
+- [x] **D30 — D 묶음 독립 재현 E2E**: 고정 Alpaca 응답→Parquet→Manifest→공식 백테스트를 반복해 같은 입력과 결과를 보장하고 pipeline과 backtest의 Compute 자원 제한을 각각 검증한다.
+- [x] **D31 — 백테스트 UI 연결**: 자동 실행 상태, 결과 개요, 성과, ET 월별 판단과 거래 상세 화면을 실제 API와 연결하고 unavailable·failed 상태를 검증한다.
 
 ## D3. 통합 구간
 
-- [ ] **D90 — C 실시간 적재·warm-up 실제 연동** `통합`: 정규화된 시장 사건을 일별 객체로 만들고 C가 정확한 Manifest·feature를 읽으며 누락 시 실행을 차단하는지 검증한다.
+- [x] **D90 — C 실시간 적재·warm-up 실제 연동** `통합`: 정규화된 시장 사건을 일별 객체로 만들고 C가 정확한 Manifest·feature를 읽으며 누락 시 실행을 차단하는지 검증한다.
 - [ ] **D91 — B 출시 자동 요청 실제 연동** `통합`: 전략 출시마다 공식 실행이 정확히 한 번 생성되고 결과가 B 조회에 반영된다.
 - [ ] **D92 — C runtime 의미 동등성 검증** `통합`: 동일 Basic 전략·동일 사건 fixture에서 실시간 runtime과 백테스트 runtime의 판단이 일치한다.
 - [ ] **D93 — E 방 공식 성과와 결과 격리 검증** `통합`: 백테스트 결과가 E의 라이브 방 순위·우승·공식 성과에 입력되거나 합산되지 않는지 검증한다.
@@ -448,7 +448,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 ## F2. 통합 구간
 
 - [x] **F90 — C 주문 후보 실제 연동** `통합`: C의 평가 결과·후보 batch를 중복·역순 전달에서도 정확히 한 번 처리한다.
-- [ ] **F91 — B 봇 제어 실제 연동** `통합`: B의 실행·중단 명령과 잠긴 봇 정책을 실제 주문·정산 상태로 연결한다.
+- [x] **F91 — B 봇 제어 실제 연동** `통합`: B의 실행·중단 명령과 잠긴 봇 정책을 실제 주문·정산 상태로 연결한다.
 - [ ] **F92 — D 기업행사 실제 연동** `통합`: 승인된 기업행사 버전을 포지션·lot·원장에 정확히 반영한다.
 - [ ] **F93 — E live 성과 실제 연동** `통합`: 원장·포지션·체결 사건이 평가 구간 경계에 맞게 E의 성과 projection으로 전달되는지 검증한다.
 
