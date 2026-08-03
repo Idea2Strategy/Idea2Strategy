@@ -56,10 +56,10 @@
 - [x] **COM05 — 공통 요청·오류·시간·사건 envelope**: 오류 응답, pagination, API version, correlation/idempotency key, UTC 저장·미국 동부 시각 해석과 event envelope를 fixture로 고정한다.
 - [x] **COM06 — 서비스 경계 계약 fixture**: B는 Basic compiled plan·봇 명령, C는 시장 사건·평가 결과·주문 후보 batch, D는 Dataset Manifest와 백테스트 요청·결과, E는 방 평가 구간·성과 입력, F는 주문·체결·원장 사건 fixture를 각각 제안하고 모든 consumer의 계약 테스트를 통과시킨다.
 - [x] **COM07 — DB 소유권·중앙 Flyway baseline**: 스키마·테이블별 단일 write owner가 자신이 소유한 변경의 migration을 작성하고, 나주원(`Juwon-Na`)이 중앙 Flyway 모듈의 통합 담당자로서 순서·충돌·DBML 일치를 검토한다. 전용 Flyway 1회 실행, 서비스별 최소 권한, timestamp 기반 migration 이름, JPA validate·jOOQ code generation과 Python 접근 경계를 검증한다.
-- [ ] **COM08 — 독립 테스트 kit**: fake auth, fake clock, fake queue, 녹화 시장 사건, 소형 Parquet, fake S3와 Testcontainers를 각 저장소에서 외부 구현 없이 사용할 수 있게 한다.
+- [x] **COM08 — 독립 테스트 kit**: fake auth, fake clock, fake queue, 녹화 시장 사건, 소형 Parquet, fake S3와 Testcontainers를 각 저장소에서 외부 구현 없이 사용할 수 있게 한다.
 - [x] **COM09 — 공통 CI gate**: build, lint, test, migration, DBML, 계약 호환성, dependency·secret scan과 앱 smoke test를 `develop` PR 필수 검사로 구성한다.
 - [x] **COM10 — 병렬 작업 소유권 확인**: A~F의 경로·스키마·계약 producer를 확정하고 Stackcord로 의미·migration·workspace·root pointer 충돌과 병합 순서를 확인한다.
-- [ ] **COM11 — UI 공통 골격**: 실제 제품용 `ui` 서브모듈에 app shell, router, 인증 상태, API client, 공통 오류·loading 처리와 테스트 기반을 먼저 병합한다.
+- [x] **COM11 — UI 공통 골격**: 실제 제품용 `ui` 서브모듈에 app shell, router, 인증 상태, API client, 공통 오류·loading 처리와 테스트 기반을 먼저 병합한다.
 - [x] **COM12 — Issue·브랜치·PR 흐름 검증**: 확정된 A~F 담당자를 루트 사용자 흐름 Issue와 저장소별 하위 Issue에 배정한다. 이후 하위 Issue 하나를 선택해 해당 저장소 feature 브랜치→`develop` PR→E2E→Issue 종료→최신 `develop`에서 다음 브랜치 생성 흐름을 검증한다.
 
 보호된 `contracts/`나 제품 의미를 변경할 때는 정확한 GitHub commit에 대한 제품 권한자의 fresh 승인이 확인되어야 한다. 확인 전에는 격리된 proposal과 각 리포의 소비자 fixture까지만 준비하고 확정 계약으로 표현하지 않는다.
