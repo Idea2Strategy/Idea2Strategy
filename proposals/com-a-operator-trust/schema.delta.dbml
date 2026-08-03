@@ -1,0 +1,32 @@
+// Isolated additive proposal. Canonical db/schema.dbml is unchanged.
+
+Table operations.operator_accounts_identity_delta {
+  operator_account_id uuid [pk, note: 'Conceptually operations.operator_accounts.id; shown separately because this is an isolated proposal.']
+  external_identity_key_version smallint [not null]
+
+  checks {
+    `external_identity_key_version > 0` [name: 'operator_identity_key_version_positive']
+  }
+}
+
+Table operations.operator_bootstrap_receipts_proposal {
+  bootstrap_key varchar(160) [pk]
+  manifest_hash varchar(128) [not null, unique]
+  catalog_version varchar(80) [not null]
+  operator_account_id uuid [not null]
+  operator_role_assignment_id uuid [not null]
+  external_identity_key_version smallint [not null]
+  correlation_id uuid [not null]
+  audit_event_id uuid [not null, unique]
+  applied_at timestamptz [not null]
+
+  indexes {
+    (operator_account_id, operator_role_assignment_id) [unique]
+  }
+
+  checks {
+    `external_identity_key_version > 0` [name: 'operator_bootstrap_key_version_positive']
+  }
+
+  Note: 'Immutable one-shot deployment bootstrap receipt. The canonical migration references operations.operator_accounts, operations.operator_role_assignments, operations.rbac_catalog_versions, and operations.audit_events after approval.'
+}
