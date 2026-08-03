@@ -316,7 +316,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 - [x] **D09 — Manifest 발행·supersede·lineage**: 완전한 dataset snapshot, 포함 객체, 생성 근거와 이전 버전 관계를 원자적으로 발행한다.
 - [x] **D10 — 데이터 품질 검사·incident**: 누락 bar, 중복, 역순, 비정상 가격·거래량, 세션 불일치와 checksum 실패를 영향 범위와 함께 기록한다.
 - [x] **D11 — pipeline run·watermark·재처리**: feed별 수집 진도, 실패 재개, backfill과 동일 입력 멱등성을 관리한다.
-- [ ] **D12 — 실시간 데이터 일별 적재**: C 시장 사건을 buffer하여 검증된 일별 Parquet으로 만들고 이후 compaction 대상으로 발행한다.
+- [x] **D12 — 실시간 데이터 일별 적재**: C 시장 사건을 buffer하여 검증된 일별 Parquet으로 만들고 이후 compaction 대상으로 발행한다.
 - [x] **D13 — feature 정의·materialization**: 공식 지표 정의와 입력 Manifest를 고정하고 필요한 feature만 재현 가능하게 물질화한다.
 - [ ] **D14 — 기업행사 AI 조사 후보**: 하루 두 번 공개 근거를 조사해 종목·사건·예정일·근거를 후보로만 저장하고 자동 전략 판단에는 사용하지 않는다.
 - [ ] **D15 — 기업행사 관리자 승인·반영**: A의 admin-mcp 승인 결과만 공식 corporate action과 adjusted dataset 재생성으로 반영한다.
