@@ -48,6 +48,23 @@ jobs:
           for path in backend backtest-engine data-pipeline trading-engine ui; do
             test "$(git ls-files -s "$path" | awk '{print $1}')" = "160000"
           done
+      # The governance verifiers assert the product-authority list as literals in
+      # four scripts and four rule documents. Without these steps a change to
+      # .harness/governance.yaml can silently drift from its enforcement files.
+      # initialize-local-harness.ps1 generates the ignored owner.yaml and the
+      # policy integrity baseline from the checked-out tree, so a fresh runner
+      # has everything the verifiers need.
+      - name: Initialize local harness
+        shell: pwsh
+        run: ./scripts/initialize-local-harness.ps1 -Verify
+      - name: Verify collaboration policy and product authorities
+        shell: pwsh
+        run: ./scripts/verify-collaboration-policy.ps1
+      - name: Verify governance foundation evidence
+        run: node scripts/verify-foundation-evidence.mjs policy
+      - name: Test local harness
+        shell: pwsh
+        run: ./scripts/test-local-harness.ps1
 
   flyway-integration:
     runs-on: ubuntu-latest

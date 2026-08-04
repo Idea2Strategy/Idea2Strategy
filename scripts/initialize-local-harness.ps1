@@ -87,7 +87,7 @@ function Initialize-ProductAuthorityReference {
 schema_version: 1
 provider: github
 repository: Idea2Strategy/Idea2Strategy
-product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:Pearone99, user:hjcud]
+product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]
 contact_email_is_authority: false
 purpose: non-secret product-authority reference; provider verification is required
 '@
@@ -95,7 +95,7 @@ purpose: non-secret product-authority reference; provider verification is requir
     # Migrate any superseded generated default; never overwrite a locally
     # customized owner reference, which omits the generated purpose marker.
     $existing = Get-Content -Raw -Encoding utf8 $ownerMetadataPath
-    if ($existing.Contains('product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:Pearone99, user:hjcud]') -or
+    if ($existing.Contains('product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]') -or
         -not $existing.Contains('purpose: non-secret product-authority reference')) {
       return
     }
