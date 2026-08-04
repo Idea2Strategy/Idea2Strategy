@@ -123,6 +123,10 @@ Assert-Contains $orchestrator '$existing.Reservations | ForEach-Object { $_.Inst
 if ($orchestrator.Contains('@($existing.Reservations.Instances).Count')) {
     throw "Windows PowerShell 5.1 miscounts a property projection over an empty AWS Reservations array."
 }
+Assert-Contains $orchestrator "printf '%s  %s\n'" "Remote checksum verification must emit a real newline escape."
+if ($orchestrator.Contains("printf '%s  %s\\n'")) {
+    throw "A double backslash makes sha256sum treat the newline text as part of the filename."
+}
 
 foreach ($consumer in @("backend", "batch", "backtest", "trading", "pipeline")) {
     Assert-Contains $bootstrap "idea2strategy_${consumer}_runtime" "Bootstrap LOGIN role is missing for $consumer."
