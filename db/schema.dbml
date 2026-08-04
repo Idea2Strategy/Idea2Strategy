@@ -4259,9 +4259,9 @@ Table competition.live_evaluation_segments {
   segment_type varchar(40) [not null]
   starts_at timestamptz [not null]
   ends_at timestamptz [not null]
-  start_event_sequence bigint [not null]
+  start_event_sequence bigint
   end_event_sequence bigint
-  initial_state_hash varchar(128) [not null]
+  initial_state_hash varchar(128)
   final_state_hash varchar(128)
   source_set_hash varchar(128)
   virtual_liquidation_document jsonb
@@ -4271,7 +4271,12 @@ Table competition.live_evaluation_segments {
     (participation_id, starts_at) [unique]
   }
 
-  Note: 'LIVE_PAPER Participation에만 존재하는 공식 평가 구간. 가상 청산은 채점 전용 증거이며 라이브 체결·예약·원장 분개를 생성하지 않는다. Participation의 Room 유형은 deferred trigger가 검증한다.'
+  checks {
+    `(start_event_sequence IS NULL AND initial_state_hash IS NULL) OR (start_event_sequence IS NOT NULL AND initial_state_hash IS NOT NULL)` [name: 'live_evaluation_segment_ledger_evidence_pair']
+    `start_event_sequence IS NULL OR start_event_sequence > 0` [name: 'live_evaluation_segment_start_sequence_positive']
+  }
+
+  Note: 'LIVE_PAPER Participation의 공식 평가 구간. PENDING_LEDGER 동안만 start_event_sequence와 initial_state_hash가 함께 null일 수 있고 Trading OPENED 결과가 두 값을 한 번만 채운 뒤 EVALUATING 전이를 허용한다. Pair 완전성, 양수 sequence, 설정 후 불변성과 Participation 상태 경계는 중앙 Flyway deferred trigger가 강제한다. 가상 청산은 채점 전용 증거이며 라이브 체결·예약·원장 분개를 생성하지 않는다.'
 }
 
 Table competition.leaderboard_snapshots {

@@ -3,7 +3,7 @@ schema_version: 1
 id: contract.trading.virtual-execution.v1
 kind: business
 status: approved
-revision: 2
+revision: 3
 refs:
   - policy.user.no-direct-orders
   - quality.failure-safety
@@ -77,8 +77,9 @@ retryable under the pinned runtime policy; retries never report success.
 
 Success uses `ROOM_EVALUATION_ACCOUNT_OPENED` with schema version
 `room-evaluation-account-opened.v1` and records the request identities,
-`botEventId`, `ledgerTransactionId`, account IDs, amount, currency, policy IDs,
-and `completedAt`. Permanent domain rejection uses
+`botEventId`, its positive Trading-owned `botEventSequence`,
+`ledgerTransactionId`, account IDs, amount, currency, policy IDs, and
+`completedAt`. Permanent domain rejection uses
 `ROOM_EVALUATION_ACCOUNT_OPEN_REJECTED` with schema version
 `room-evaluation-account-open-rejected.v1` and records the same request
 identities, a stable reason code, and `rejectedAt`, without credentials or
@@ -86,9 +87,13 @@ private strategy content. Both facts retain the request payload hash and
 producer idempotency key.
 
 E durably records a matching completion or rejection even when it arrives
-before local request observation. Matching success advances exactly one
-`PENDING_LEDGER` participation to `EVALUATING`; matching rejection advances it
-to a visible failed state. A duplicate fact is a no-op, while mismatched
+before local request observation. While the participation is `PENDING_LEDGER`,
+its live evaluation segment has a null `start_event_sequence` and
+`initial_state_hash` pair. Matching success immutably fills both fields from the
+Trading fact and then advances exactly one `PENDING_LEDGER` participation to
+`EVALUATING`; no other participation state may retain a null pair. Matching
+rejection advances it to a visible failed state. A duplicate fact is a no-op,
+while mismatched
 identity, amount, currency, policy, or hash is a permanent audited conflict.
 Out-of-order facts are retained and replayed after the request becomes visible;
 they are never discarded or converted into success.
