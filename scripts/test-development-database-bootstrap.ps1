@@ -48,6 +48,10 @@ Assert-Contains $outputs 'output "database_bootstrap"' "Terraform must expose a 
 
 foreach ($needle in @(
     '[switch]$Execute',
+    '[string]$PolicySeedSqlPath',
+    '[string]$PolicySeedSha256',
+    'policy-seed.sql',
+    'policy_seed_sha256',
     'PutRolePolicy',
     'DeleteRolePolicy',
     'TerminateInstances',
@@ -81,6 +85,13 @@ foreach ($needle in @(
     'secretsmanager put-secret-value',
     'rolcanlogin',
     'pg_auth_members',
+    'idea2strategy_policy_seed_bootstrap',
+    'trading.fee_policy_versions',
+    'trading.buying_power_buffer_policy_versions',
+    'backtest.execution_policy_versions',
+    '--single-transaction',
+    'policy_seed_sha256',
+    'policy_versions',
     '177'
 )) {
     Assert-Contains $bootstrap $needle "Host bootstrap safety or verification is missing: $needle"
@@ -90,9 +101,9 @@ if ($bootstrap -match '(?m)^\s*echo\s+["'']?\$(master_json|master_password|passw
     throw "Host bootstrap must not print credential-bearing variables."
 }
 
-$runtimeReferences = rg -n 'data\.aws_secretsmanager_secret\.runtime_database' `
-    (Join-Path $root 'infra/terraform/environments/development') 2>$null
-if ($LASTEXITCODE -eq 0 -or -not [string]::IsNullOrWhiteSpace(($runtimeReferences -join "`n"))) {
+$terraformFiles = Get-ChildItem -LiteralPath (Join-Path $root 'infra/terraform/environments/development') -Filter '*.tf' -File
+$runtimeReferences = @($terraformFiles | Select-String -Pattern 'data\.aws_secretsmanager_secret\.runtime_database')
+if ($runtimeReferences.Count -gt 0) {
     throw "Terraform still contains unmanaged runtime database secret references."
 }
 

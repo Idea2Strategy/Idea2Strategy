@@ -203,7 +203,9 @@ execution summary:
 
 ```powershell
 ./scripts/invoke-development-database-bootstrap.ps1 `
-  -ExpectedAwsAccountId <12-digit-development-account>
+  -ExpectedAwsAccountId <12-digit-development-account> `
+  -PolicySeedSqlPath <approved-policy-seed.sql> `
+  -PolicySeedSha256 <reviewed-lowercase-sha256>
 ```
 
 After reviewing the exact root SHA, Flyway manifest/archive hashes, target
@@ -213,6 +215,8 @@ change window:
 ```powershell
 ./scripts/invoke-development-database-bootstrap.ps1 `
   -ExpectedAwsAccountId <12-digit-development-account> `
+  -PolicySeedSqlPath <approved-policy-seed.sql> `
+  -PolicySeedSha256 <reviewed-lowercase-sha256> `
   -Execute -Confirm
 ```
 
@@ -222,7 +226,16 @@ write only the five runtime secret versions, and launches one encrypted
 `t3.small` with no inbound rules or SSH key. The x86 instance is intentional:
 the pinned reviewed Flyway image is amd64-only; all application runtimes remain
 ARM64. Systems Manager runs Flyway `migrate` once, then `validate`/`info`, checks
-177 application tables, creates or rotates five hardened LOGIN roles, removes
+177 application tables, and applies the separately approved, SHA-pinned policy
+seed artifact. The seed is mandatory and may insert only into
+`trading.fee_policy_versions`,
+`trading.buying_power_buffer_policy_versions`, and
+`backtest.execution_policy_versions`; it runs as a temporary LOGIN role with
+SELECT/INSERT access to only those tables. Forbidden DDL/DCL, transaction,
+psql-metacommand, or other-table targets fail closed. Bootstrap verifies at
+least one currently effective row in each policy family and records the seed
+SHA, row counts, and non-secret policy version/hash identifiers in the receipt.
+It then creates or rotates five hardened LOGIN roles, removes
 all old memberships, grants exactly one matching NOLOGIN group, verifies direct
 connections, and writes the required JSON values. The Pipeline value additionally
 contains a URL-encoded `PIPELINE_WORKER_DATABASE_URL` with `sslmode=require`.

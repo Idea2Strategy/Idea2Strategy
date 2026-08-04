@@ -15,6 +15,8 @@ bundle_sha256=''
 database_host=''
 database_name=''
 master_secret_arn=''
+policy_seed_sql=''
+policy_seed_sha256=''
 region=''
 root_sha=''
 runtime_secret_arns_base64=''
@@ -28,6 +30,8 @@ while (($#)); do
     --database-host) database_host="$2"; shift 2 ;;
     --database-name) database_name="$2"; shift 2 ;;
     --master-secret-arn) master_secret_arn="$2"; shift 2 ;;
+    --policy-seed-sql) policy_seed_sql="$2"; shift 2 ;;
+    --policy-seed-sha256) policy_seed_sha256="$2"; shift 2 ;;
     --region) region="$2"; shift 2 ;;
     --root-sha) root_sha="$2"; shift 2 ;;
     --runtime-secret-arns-base64) runtime_secret_arns_base64="$2"; shift 2 ;;
@@ -36,11 +40,12 @@ while (($#)); do
   esac
 done
 
-for required in archive archive_sha256 bundle_sha256 database_host database_name master_secret_arn region root_sha runtime_secret_arns_base64 work_directory; do
+for required in archive archive_sha256 bundle_sha256 database_host database_name master_secret_arn policy_seed_sql policy_seed_sha256 region root_sha runtime_secret_arns_base64 work_directory; do
   test -n "${!required}" || { echo "Missing required argument: $required" >&2; exit 64; }
 done
 [[ "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]
 [[ "$bundle_sha256" =~ ^[0-9a-f]{64}$ ]]
+[[ "$policy_seed_sha256" =~ ^[0-9a-f]{64}$ ]]
 [[ "$root_sha" =~ ^[0-9a-f]{40}$ ]]
 [[ "$region" == 'ap-northeast-2' ]]
 [[ "$database_host" =~ ^[A-Za-z0-9.-]+$ ]]
@@ -58,11 +63,15 @@ aws() {
 }
 
 master_json=''
+seed_role='idea2strategy_policy_seed_bootstrap'
 declare -A passwords=()
 cleanup() {
   local status=$?
   trap - EXIT
   set +e
+  if [[ -n "${PGHOST:-}" && -n "${master_username:-}" && -n "${master_password:-}" ]]; then
+    PGUSER="$master_username" PGPASSWORD="$master_password" psql -X -q -v ON_ERROR_STOP=1 -c "DROP ROLE IF EXISTS $seed_role;" >/dev/null 2>&1
+  fi
   master_json=''
   for consumer in "${CONSUMERS[@]}"; do passwords["$consumer"]=''; done
   find "$work_directory" -type f -exec chmod 0600 {} + 2>/dev/null
@@ -72,6 +81,23 @@ cleanup() {
 trap cleanup EXIT
 
 printf '%s  %s\n' "$archive_sha256" "$archive" | sha256sum --check --status
+printf '%s  %s\n' "$policy_seed_sha256" "$policy_seed_sql" | sha256sum --check --status
+if grep -Eq "^[[:space:]]*\\\\" "$policy_seed_sql" ||
+   grep -Eiq '(^|[^A-Za-z_])(alter|create|drop|grant|revoke|copy|do|call|truncate|delete|update|merge|begin|commit|rollback|set[[:space:]]+role|reset[[:space:]]+role)([^A-Za-z_]|$)' "$policy_seed_sql"; then
+  echo 'Policy seed SQL contains a forbidden command or psql metacommand.' >&2
+  exit 65
+fi
+mapfile -t policy_seed_targets < <(grep -Poi '\binsert\s+into\s+\K(?:(?:"?[a-z_]+"?)\.)?"?[a-z_]+"?' "$policy_seed_sql" | tr -d '"' | tr '[:upper:]' '[:lower:]')
+test "${#policy_seed_targets[@]}" -ge 3
+for required_target in trading.fee_policy_versions trading.buying_power_buffer_policy_versions backtest.execution_policy_versions; do
+  printf '%s\n' "${policy_seed_targets[@]}" | grep -Fxq "$required_target"
+done
+for target in "${policy_seed_targets[@]}"; do
+  case "$target" in
+    trading.fee_policy_versions|trading.buying_power_buffer_policy_versions|backtest.execution_policy_versions) ;;
+    *) echo "Policy seed SQL targets a forbidden table: $target" >&2; exit 65 ;;
+  esac
+done
 
 if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
   echo 'Unsafe path in Flyway archive.' >&2
@@ -140,6 +166,27 @@ export PGUSER="$master_username" PGPASSWORD="$master_password" PGSSLMODE=require
 group_count="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
   "SELECT count(*) FROM pg_roles WHERE rolname IN ('idea2strategy_backend','idea2strategy_batch','idea2strategy_backtest','idea2strategy_trading','idea2strategy_pipeline') AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls;")"
 test "$group_count" = '5'
+
+seed_password="$(openssl rand -hex 32)"
+psql -X -q -v ON_ERROR_STOP=1 <<SQL >/dev/null
+DROP ROLE IF EXISTS $seed_role;
+CREATE ROLE $seed_role LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 1 PASSWORD '$seed_password';
+GRANT CONNECT ON DATABASE "$database_name" TO $seed_role;
+GRANT USAGE ON SCHEMA trading, backtest TO $seed_role;
+GRANT SELECT, INSERT ON TABLE trading.fee_policy_versions, trading.buying_power_buffer_policy_versions, backtest.execution_policy_versions TO $seed_role;
+SQL
+PGUSER="$seed_role" PGPASSWORD="$seed_password" psql -X -q -v ON_ERROR_STOP=1 --single-transaction -f "$policy_seed_sql" >/dev/null
+PGUSER="$master_username" PGPASSWORD="$master_password" psql -X -q -v ON_ERROR_STOP=1 -c "DROP ROLE $seed_role;" >/dev/null
+seed_password=''
+
+policy_row_counts="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
+  "SELECT json_build_object('fee',(SELECT count(*) FROM trading.fee_policy_versions WHERE effective_from <= now() AND (effective_to IS NULL OR effective_to > now())),'buffer',(SELECT count(*) FROM trading.buying_power_buffer_policy_versions WHERE effective_from <= now() AND (effective_to IS NULL OR effective_to > now())),'execution',(SELECT count(*) FROM backtest.execution_policy_versions WHERE retired_at IS NULL));")"
+jq -e '.fee >= 1 and .buffer >= 1 and .execution >= 1' <<<"$policy_row_counts" >/dev/null
+policy_versions="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
+  "SELECT json_build_object('fee',COALESCE((SELECT json_agg(json_build_object('policy_code',policy_code,'version',version,'rules_hash',rules_hash) ORDER BY policy_code,version) FROM trading.fee_policy_versions WHERE effective_from <= now() AND (effective_to IS NULL OR effective_to > now())),'[]'::json),'buffer',COALESCE((SELECT json_agg(json_build_object('policy_code',policy_code,'version',version,'rules_hash',rules_hash) ORDER BY policy_code,version) FROM trading.buying_power_buffer_policy_versions WHERE effective_from <= now() AND (effective_to IS NULL OR effective_to > now())),'[]'::json),'execution',COALESCE((SELECT json_agg(json_build_object('version',version,'policy_artifact_hash',policy_artifact_hash) ORDER BY version) FROM backtest.execution_policy_versions WHERE retired_at IS NULL),'[]'::json));")"
+jq -e '.fee | length >= 1' <<<"$policy_versions" >/dev/null
+jq -e '.buffer | length >= 1' <<<"$policy_versions" >/dev/null
+jq -e '.execution | length >= 1' <<<"$policy_versions" >/dev/null
 
 for consumer in "${CONSUMERS[@]}"; do
   passwords["$consumer"]="$(openssl rand -hex 32)"
@@ -219,10 +266,13 @@ jq -cn \
   --arg status passed \
   --arg root_sha "$root_sha" \
   --arg bundle_sha256 "$bundle_sha256" \
+  --arg policy_seed_sha256 "$policy_seed_sha256" \
   --arg flyway_image "$FLYWAY_IMAGE" \
   --arg aws_cli_image "$AWS_CLI_IMAGE" \
   --argjson migrations "$EXPECTED_MIGRATION_COUNT" \
   --argjson tables "$table_count" \
   --argjson login_roles 5 \
+  --argjson policy_row_counts "$policy_row_counts" \
+  --argjson policy_versions "$policy_versions" \
   --argjson secret_versions "$versions" \
-  '{status:$status,root_sha:$root_sha,bundle_sha256:$bundle_sha256,flyway_image:$flyway_image,aws_cli_image:$aws_cli_image,migrations:$migrations,tables:$tables,login_roles:$login_roles,secret_versions:$secret_versions}'
+  '{status:$status,root_sha:$root_sha,bundle_sha256:$bundle_sha256,policy_seed_sha256:$policy_seed_sha256,flyway_image:$flyway_image,aws_cli_image:$aws_cli_image,migrations:$migrations,tables:$tables,login_roles:$login_roles,policy_row_counts:$policy_row_counts,policy_versions:$policy_versions,secret_versions:$secret_versions}'
