@@ -764,6 +764,9 @@ GRANT SELECT, INSERT, UPDATE ON TABLE "market_data"."providers" TO idea2strategy
 GRANT SELECT, INSERT, UPDATE ON TABLE "market_data"."quality_incidents" TO idea2strategy_pipeline;
 GRANT SELECT, INSERT, UPDATE ON TABLE "market_data"."stream_watermarks" TO idea2strategy_pipeline;
 GRANT SELECT, INSERT, UPDATE ON TABLE "market_data"."trading_sessions" TO idea2strategy_pipeline;
+GRANT SELECT ON TABLE "operations"."audit_events" TO idea2strategy_pipeline;
+GRANT SELECT ON TABLE "operations"."operator_accounts" TO idea2strategy_pipeline;
 GRANT SELECT, INSERT ON TABLE "storage"."objects" TO idea2strategy_pipeline;
 GRANT USAGE ON SCHEMA "market_data" TO idea2strategy_pipeline;
+GRANT USAGE ON SCHEMA "operations" TO idea2strategy_pipeline;
 GRANT USAGE ON SCHEMA "storage" TO idea2strategy_pipeline;

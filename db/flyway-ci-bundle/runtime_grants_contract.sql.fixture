@@ -65,3 +65,43 @@ END $$;
 
 RESET SESSION AUTHORIZATION;
 DROP ROLE idea2strategy_test_backend;
+
+CREATE ROLE idea2strategy_test_pipeline LOGIN INHERIT PASSWORD 'runtime-grant-contract-only';
+GRANT idea2strategy_pipeline TO idea2strategy_test_pipeline;
+
+SET SESSION AUTHORIZATION idea2strategy_test_pipeline;
+
+-- Corporate-action approval regeneration verifies only the two scalar evidence
+-- projections owned by Backend. Pipeline must not mutate either table.
+SELECT count(*) FROM operations.operator_accounts;
+SELECT count(*) FROM operations.audit_events;
+
+DO $$
+DECLARE
+    observed_state text;
+BEGIN
+    BEGIN
+        DELETE FROM operations.operator_accounts WHERE false;
+        RAISE EXCEPTION 'pipeline unexpectedly received operator-account DML';
+    EXCEPTION
+        WHEN insufficient_privilege THEN
+            GET STACKED DIAGNOSTICS observed_state = RETURNED_SQLSTATE;
+            IF observed_state <> '42501' THEN
+                RAISE EXCEPTION 'pipeline operator-account DML returned %, expected 42501', observed_state;
+            END IF;
+    END;
+
+    BEGIN
+        DELETE FROM operations.audit_events WHERE false;
+        RAISE EXCEPTION 'pipeline unexpectedly received audit-event DML';
+    EXCEPTION
+        WHEN insufficient_privilege THEN
+            GET STACKED DIAGNOSTICS observed_state = RETURNED_SQLSTATE;
+            IF observed_state <> '42501' THEN
+                RAISE EXCEPTION 'pipeline audit-event DML returned %, expected 42501', observed_state;
+            END IF;
+    END;
+END $$;
+
+RESET SESSION AUTHORIZATION;
+DROP ROLE idea2strategy_test_pipeline;
