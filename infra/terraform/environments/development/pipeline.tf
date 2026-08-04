@@ -73,6 +73,20 @@ data "aws_iam_policy_document" "pipeline_task" {
     actions   = ["ssm:GetParameter", "ssm:GetParametersByPath"]
     resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_path}/*"]
   }
+  statement {
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:ChangeMessageVisibility",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl"
+    ]
+    resources = [aws_sqs_queue.corporate_action_approval[0].arn]
+  }
+  statement {
+    actions   = ["sqs:SendMessage"]
+    resources = [aws_sqs_queue.corporate_action_approval_dlq[0].arn]
+  }
 }
 
 resource "aws_iam_role_policy" "pipeline_task" {
@@ -110,22 +124,48 @@ resource "aws_ecs_task_definition" "pipeline" {
     cpu_architecture        = "ARM64"
   }
 
+  volume {
+    name = "pipeline-state"
+  }
+
   container_definitions = jsonencode([{
-    name        = "pipeline-worker"
-    image       = "${data.aws_ecr_repository.this["pipeline-worker"].repository_url}@${var.container_image_digests["pipeline-worker"]}"
-    essential   = true
-    stopTimeout = 120
+    name                   = "pipeline-worker"
+    image                  = "${data.aws_ecr_repository.this["pipeline-worker"].repository_url}@${var.container_image_digests["pipeline-worker"]}"
+    essential              = true
+    stopTimeout            = 120
+    readonlyRootFilesystem = true
     environment = [
       { name = "PIPELINE_WORKER_ENVIRONMENT", value = var.environment },
-      { name = "PIPELINE_WORKER_MESSAGE_SOURCE", value = "inprocess" },
-      { name = "PIPELINE_WORKER_CATALOG_ROOT", value = "/var/lib/idea2strategy/catalog" },
-      { name = "PIPELINE_WORKER_OBJECT_STORE_ROOT", value = "/var/lib/idea2strategy/objects" },
+      { name = "PIPELINE_WORKER_MESSAGE_SOURCE", value = "sqs" },
+      { name = "PIPELINE_WORKER_QUEUE_URL", value = aws_sqs_queue.corporate_action_approval[0].url },
+      { name = "PIPELINE_WORKER_DEAD_LETTER_QUEUE_URL", value = aws_sqs_queue.corporate_action_approval_dlq[0].url },
+      { name = "PIPELINE_WORKER_MAX_RECEIVE_COUNT", value = "5" },
+      { name = "PIPELINE_WORKER_CATALOG_ROOT", value = "/var/lib/idea2strategy/pipeline/catalog-artifacts" },
+      { name = "PIPELINE_WORKER_OBJECT_STORE_ROOT", value = "/var/lib/idea2strategy/pipeline/local-objects" },
       { name = "PIPELINE_WORKER_AWS_REGION", value = var.aws_region },
       { name = "PIPELINE_WORKER_HEALTH_FILE", value = "/tmp/idea2strategy-ready.json" },
+      { name = "PIPELINE_WORKER_HEALTH_HOST", value = "0.0.0.0" },
+      { name = "PIPELINE_WORKER_HEALTH_PORT", value = "8080" },
+      {
+        name = "PIPELINE_WORKER_CORPORATE_ACTION_APPROVAL"
+        value = jsonencode({
+          adjusted_feed_id       = "706f33aa-a461-5376-ae25-9c1bb64b9277"
+          permission_id          = "20000000-0000-4000-8000-000000000012"
+          request_schema_version = "schema-v1"
+          object_bucket          = aws_s3_bucket.market_data.id
+          object_prefix          = "market-data"
+          staging_root           = "/var/lib/idea2strategy/pipeline/corporate-actions"
+        })
+      },
       { name = "MARKET_DATA_BUCKET", value = aws_s3_bucket.market_data.id },
       { name = "PIPELINE_MANIFEST_MODE", value = "content-addressed" },
-      { name = "PIPELINE_WORKER_EXIT_AFTER_IDLE_POLLS", value = "3" }
+      { name = "PIPELINE_WORKER_EXIT_AFTER_IDLE_POLLS", value = "6" }
     ]
+    mountPoints = [{
+      sourceVolume  = "pipeline-state"
+      containerPath = "/var/lib/idea2strategy/pipeline"
+      readOnly      = false
+    }]
     secrets = [
       { name = "ALPACA_API_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_api_key[0].arn}:ALPACA_API_KEY::" },
       { name = "ALPACA_SECRET_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_secret_key[0].arn}:ALPACA_SECRET_KEY::" },
@@ -147,6 +187,133 @@ resource "aws_ecs_task_definition" "pipeline" {
       startPeriod = 20
     }
   }])
+}
+
+resource "aws_ecs_service" "pipeline" {
+  count           = local.enable_service_stack ? 1 : 0
+  name            = "${local.name_prefix}-pipeline"
+  cluster         = aws_ecs_cluster.pipeline[0].id
+  task_definition = aws_ecs_task_definition.pipeline[0].arn
+  desired_count   = 0
+
+  capacity_provider_strategy {
+    capacity_provider = "FARGATE_SPOT"
+    weight            = 1
+  }
+
+  network_configuration {
+    subnets          = values(aws_subnet.public)[*].id
+    security_groups  = [aws_security_group.pipeline[0].id]
+    assign_public_ip = true
+  }
+
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+}
+
+resource "aws_appautoscaling_target" "pipeline" {
+  count              = local.enable_service_stack ? 1 : 0
+  max_capacity       = 1
+  min_capacity       = 0
+  resource_id        = "service/${aws_ecs_cluster.pipeline[0].name}/${aws_ecs_service.pipeline[0].name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "pipeline_scale_out" {
+  count              = local.enable_service_stack ? 1 : 0
+  name               = "${local.name_prefix}-pipeline-scale-out"
+  policy_type        = "StepScaling"
+  resource_id        = aws_appautoscaling_target.pipeline[0].resource_id
+  scalable_dimension = aws_appautoscaling_target.pipeline[0].scalable_dimension
+  service_namespace  = aws_appautoscaling_target.pipeline[0].service_namespace
+
+  step_scaling_policy_configuration {
+    adjustment_type         = "ExactCapacity"
+    cooldown                = 60
+    metric_aggregation_type = "Maximum"
+    step_adjustment {
+      metric_interval_lower_bound = 0
+      scaling_adjustment          = 1
+    }
+  }
+}
+
+resource "aws_appautoscaling_policy" "pipeline_scale_in" {
+  count              = local.enable_service_stack ? 1 : 0
+  name               = "${local.name_prefix}-pipeline-scale-in"
+  policy_type        = "StepScaling"
+  resource_id        = aws_appautoscaling_target.pipeline[0].resource_id
+  scalable_dimension = aws_appautoscaling_target.pipeline[0].scalable_dimension
+  service_namespace  = aws_appautoscaling_target.pipeline[0].service_namespace
+
+  step_scaling_policy_configuration {
+    adjustment_type         = "ExactCapacity"
+    cooldown                = 300
+    metric_aggregation_type = "Maximum"
+    step_adjustment {
+      metric_interval_upper_bound = 0
+      scaling_adjustment          = 0
+    }
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "pipeline_queue_has_work" {
+  count               = local.enable_service_stack ? 1 : 0
+  alarm_name          = "${local.name_prefix}-pipeline-queue-has-work"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  dimensions          = { QueueName = aws_sqs_queue.corporate_action_approval[0].name }
+  alarm_actions       = [aws_appautoscaling_policy.pipeline_scale_out[0].arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "pipeline_queue_idle" {
+  count               = local.enable_service_stack ? 1 : 0
+  alarm_name          = "${local.name_prefix}-pipeline-queue-idle"
+  evaluation_periods  = 2
+  datapoints_to_alarm = 2
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+  alarm_actions       = [aws_appautoscaling_policy.pipeline_scale_in[0].arn]
+
+  metric_query {
+    id          = "backlog"
+    expression  = "visible + in_flight"
+    label       = "Corporate action approval backlog"
+    return_data = true
+  }
+
+  metric_query {
+    id          = "visible"
+    return_data = false
+    metric {
+      namespace   = "AWS/SQS"
+      metric_name = "ApproximateNumberOfMessagesVisible"
+      period      = 60
+      stat        = "Maximum"
+      dimensions  = { QueueName = aws_sqs_queue.corporate_action_approval[0].name }
+    }
+  }
+
+  metric_query {
+    id          = "in_flight"
+    return_data = false
+    metric {
+      namespace   = "AWS/SQS"
+      metric_name = "ApproximateNumberOfMessagesNotVisible"
+      period      = 60
+      stat        = "Maximum"
+      dimensions  = { QueueName = aws_sqs_queue.corporate_action_approval[0].name }
+    }
+  }
 }
 
 resource "aws_cloudwatch_event_rule" "pipeline" {

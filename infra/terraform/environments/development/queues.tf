@@ -66,3 +66,51 @@ resource "aws_ssm_parameter" "backtest_total_concurrency" {
   value = "4"
 
 }
+
+resource "aws_sqs_queue" "corporate_action_approval_dlq" {
+  count                     = local.enable_service_stack ? 1 : 0
+  name                      = "${local.name_prefix}-corporate-action-approval-dlq"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+
+  tags = { Role = "dead-letter", Workload = "corporate-action-approval" }
+}
+
+resource "aws_sqs_queue" "corporate_action_approval" {
+  count                      = local.enable_service_stack ? 1 : 0
+  name                       = "${local.name_prefix}-corporate-action-approval"
+  visibility_timeout_seconds = 900
+  message_retention_seconds  = 345600
+  receive_wait_time_seconds  = 20
+  sqs_managed_sse_enabled    = true
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.corporate_action_approval_dlq[0].arn
+    maxReceiveCount     = 5
+  })
+
+  tags = { Role = "work", Workload = "corporate-action-approval" }
+}
+
+resource "aws_sqs_queue_redrive_allow_policy" "corporate_action_approval_dlq" {
+  count     = local.enable_service_stack ? 1 : 0
+  queue_url = aws_sqs_queue.corporate_action_approval_dlq[0].id
+  redrive_allow_policy = jsonencode({
+    redrivePermission = "byQueue"
+    sourceQueueArns   = [aws_sqs_queue.corporate_action_approval[0].arn]
+  })
+}
+
+resource "aws_ssm_parameter" "corporate_action_approval_queue_url" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = "${local.parameter_path}/queues/corporate-action-approval/url"
+  type  = "String"
+  value = aws_sqs_queue.corporate_action_approval[0].url
+}
+
+resource "aws_ssm_parameter" "corporate_action_approval_dlq_url" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = "${local.parameter_path}/queues/corporate-action-approval/dlq-url"
+  type  = "String"
+  value = aws_sqs_queue.corporate_action_approval_dlq[0].url
+}

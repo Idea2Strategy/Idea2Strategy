@@ -299,10 +299,13 @@ data "aws_iam_policy_document" "service_queue_publish" {
   count = local.enable_service_stack ? 1 : 0
 
   statement {
-    sid       = "PublishDurableWork"
-    effect    = "Allow"
-    actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"]
-    resources = values(aws_sqs_queue.backtest)[*].arn
+    sid     = "PublishDurableWork"
+    effect  = "Allow"
+    actions = ["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"]
+    resources = concat(
+      values(aws_sqs_queue.backtest)[*].arn,
+      [aws_sqs_queue.corporate_action_approval[0].arn]
+    )
   }
 }
 

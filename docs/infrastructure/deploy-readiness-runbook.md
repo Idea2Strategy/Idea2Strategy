@@ -31,6 +31,15 @@ backtest host, missing queue lanes, a Backtest limit other than Basic 2 / Custom
 1 / Competition 1 / total 4, missing `t4g.medium` saturation alarms, or a
 non-ARM64 Fargate pipeline.
 
+Corporate-action approval is a separate durable SQS handoff. Backend Worker
+publishes `CORPORATE_ACTION_APPROVAL_DECIDED` to its encrypted queue; the ARM64
+Fargate Spot Pipeline service has desired/minimum zero and maximum one. A queue
+backlog alarm raises desired count to one. Scale-in requires two consecutive
+minutes with both visible and in-flight message counts at zero, so an active
+regeneration is not terminated merely because its message became invisible.
+The worker retains PostgreSQL idempotency and claim ownership; SQS and the ECS
+desired count are transport/capacity signals, not business completion evidence.
+
 ## Release-candidate inputs
 
 Run the read-only AWS identity and input gate before creating a plan:
@@ -105,7 +114,8 @@ The following steps intentionally remain outside this repository-only readiness 
    every S3 version/checksum, authenticates to ECR, validates the Compose model,
    and starts the systemd-owned Core, Backtest, or Trading stack. Verify
    container health/readiness, three-lane queue processing, scheduled Trading
-   stop/drain/start, desired-zero Pipeline completion, and rollback.
+   stop/drain/start, corporate-action approval Queue/DLQ redrive, desired-zero
+   Pipeline 0→1→0 completion, and rollback.
 10. Continue only after the CloudFront viewer ACM certificate is `ISSUED` and the Core DNS-01 ACME certificate is trusted from CloudFront.
 11. Attach the exact plan, apply result, smoke-test evidence, and rollback outcome to the approved deployment record.
 

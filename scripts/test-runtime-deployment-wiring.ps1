@@ -145,6 +145,58 @@ foreach ($variable in @("backtest_policy_artifacts", "trading_runtime_artifacts"
         throw "Immutable runtime artifact input is missing: $variable"
     }
 }
+
+# Corporate-action approvals are a durable Backend -> Pipeline handoff.  The
+# desired-zero Fargate worker must wake from SQS backlog; an in-process source
+# would silently strand an approved decision after deployment.
+$queues = Get-Content (Join-Path $root "infra/terraform/environments/development/queues.tf") -Raw
+$pipeline = Get-Content (Join-Path $root "infra/terraform/environments/development/pipeline.tf") -Raw
+$iam = Get-Content (Join-Path $root "infra/terraform/environments/development/iam.tf") -Raw
+$userData = Get-Content (Join-Path $root "infra/terraform/environments/development/templates/ec2-user-data.sh.tftpl") -Raw
+
+foreach ($required in @(
+    'resource "aws_sqs_queue" "corporate_action_approval"',
+    'resource "aws_sqs_queue" "corporate_action_approval_dlq"',
+    'resource "aws_ssm_parameter" "corporate_action_approval_queue_url"',
+    'resource "aws_ssm_parameter" "corporate_action_approval_dlq_url"'
+)) {
+    if (-not $queues.Contains($required)) {
+        throw "Corporate-action durable queue wiring is missing: $required"
+    }
+}
+
+foreach ($required in @(
+    '{ name = "PIPELINE_WORKER_MESSAGE_SOURCE", value = "sqs" }',
+    'PIPELINE_WORKER_QUEUE_URL',
+    'PIPELINE_WORKER_DEAD_LETTER_QUEUE_URL',
+    'PIPELINE_WORKER_CORPORATE_ACTION_APPROVAL',
+    '706f33aa-a461-5376-ae25-9c1bb64b9277',
+    '20000000-0000-4000-8000-000000000012',
+    'request_schema_version',
+    'readonlyRootFilesystem = true',
+    'resource "aws_ecs_service" "pipeline"',
+    'desired_count   = 0',
+    'capacity_provider = "FARGATE_SPOT"',
+    'resource "aws_appautoscaling_target" "pipeline"',
+    'min_capacity       = 0',
+    'max_capacity       = 1',
+    'resource "aws_cloudwatch_metric_alarm" "pipeline_queue_has_work"',
+    'resource "aws_cloudwatch_metric_alarm" "pipeline_queue_idle"'
+)) {
+    if (-not $pipeline.Contains($required)) {
+        throw "Desired-zero Pipeline SQS wake-up wiring is missing: $required"
+    }
+}
+
+foreach ($required in @(
+    'CORPORATE_ACTION_APPROVAL_QUEUE_URL=',
+    'aws_sqs_queue.corporate_action_approval[0].arn',
+    'aws_sqs_queue.corporate_action_approval_dlq[0].arn'
+)) {
+    if (-not ($userData.Contains($required) -or $iam.Contains($required) -or $pipeline.Contains($required))) {
+        throw "Corporate-action runtime IAM/environment wiring is missing: $required"
+    }
+}
 if (-not $variables.Contains('variable "enable_backtest_outbox_relay"') -or
     -not $runtime.Contains('condition     = var.enable_backtest_outbox_relay')) {
     throw "Full runtime must fail closed until the verified Backtest Outbox relay is explicitly enabled."

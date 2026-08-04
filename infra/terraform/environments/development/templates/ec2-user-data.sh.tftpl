@@ -308,6 +308,7 @@ cat >>"$runtime_secret_env" <<EOF
 BACKTEST_BASIC_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/url')
 BACKTEST_CUSTOM_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-custom/url')
 BACKTEST_COMPETITION_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-competition/url')
+CORPORATE_ACTION_APPROVAL_QUEUE_URL=$(ssm_value '${parameter_path}/queues/corporate-action-approval/url')
 BACKTEST_OUTBOX_RELAY_ENABLED=${enable_backtest_outbox_relay}
 EOF
 
