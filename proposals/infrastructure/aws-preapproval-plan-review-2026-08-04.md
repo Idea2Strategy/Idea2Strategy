@@ -74,6 +74,13 @@ After architecture approval and the unresolved protected-contract work:
 
 - GitHub provider governance is `unknown`; protected `specs/**` and
   `contracts/**` cannot be changed or treated as approved.
+- EC2 bootstrap currently installs Docker, SSM, metrics and the Core origin
+  proxy, but it does not yet materialize or start the Core, Trading, or Backtest
+  application containers from the pinned SSM image values. The placement and
+  lifecycle of `backtest-api` also remain unresolved while the Backtest ASG is
+  allowed to scale to zero. A real-digest plan is therefore not deployable yet.
+- Frontend artifact upload, release-ID verification, CloudFront invalidation,
+  and post-deploy smoke-test automation are not yet implemented.
 - Backend contracts do not define Basic/Custom/Competition queue routing, and
   Competition currently emits no backtest work event.
 - Backtest recovery lacks a lease-expiry reclaim boundary and still retains
