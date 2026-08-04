@@ -1,5 +1,7 @@
 # Idea2Strategy Terraform
 
+배포 전 로컬/CI 검증과 AWS 작업자 체크리스트는 [deploy-readiness runbook](../../docs/infrastructure/deploy-readiness-runbook.md)을 따른다. 이 검증은 AWS 자격 증명이나 remote backend 없이 실행되며 실제 리소스를 변경하지 않는다.
+
 현재 구축 대상은 개인 AWS 계정의 `Development` 환경 하나다. Production 리소스는 이 디렉터리에서 생성하지 않는다.
 
 현재 구성의 24시간 월비용 추정은 [COST-ESTIMATE.md](COST-ESTIMATE.md)에서 확인한다.
