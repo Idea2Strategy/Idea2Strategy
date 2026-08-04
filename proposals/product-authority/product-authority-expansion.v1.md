@@ -211,3 +211,19 @@ revision 1 §5의 값이 이후 변경되었으므로 함께 정정했다.
 
 GitLab 미러(`Idea2Strategy-gitlab/.harness/governance.yaml`)는 §4 절차 5단계에
 따라 `develop` 병합 후 반영한다.
+
+### 6.4 검증 공백 — §5의 서술 정정
+
+revision 1 §5는 `scripts/verify-foundation-evidence.mjs`가 "CI에서 처음 검증된다"고
+기록했으나 이는 사실이 아니다. 그런 CI 단계는 존재하지 않는다.
+
+`.github/workflows/ci.yml`의 `schema-and-coordination` 잡은 Node 24를 설치하지만
+`pnpm dbml:validate*`, `pnpm dbml:export:test`, `git diff --check HEAD^`,
+submodule 포인터 검사만 실행한다. `verify-foundation-evidence.mjs`,
+`verify-collaboration-policy.ps1`, `test-local-harness.ps1` 중 어느 것도 CI에서
+호출되지 않는다. 이 머신에는 Node.js·pnpm·npm·bun·deno가 모두 없어 로컬 실행도
+불가능하다.
+
+따라서 `verify-foundation-evidence.mjs`의 기대 리터럴 변경(132·137·146행)은
+자동 검증 없이 육안 검토에만 의존한다. governance 검증기를 CI에 연결하는 작업은
+이 권한 변경과 분리된 별도 이슈로 다룬다.
