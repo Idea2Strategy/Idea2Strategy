@@ -51,10 +51,16 @@ if ($runtimeGrantEntries.Count -ne 1) {
 $runtimeGrantPath = Join-Path $bundle 'R__database_runtime_grants.sql'
 $runtimeGrantSql = Get-Content -LiteralPath $runtimeGrantPath -Raw
 foreach ($role in @('backend', 'batch', 'trading', 'backtest', 'pipeline')) {
-    $hardenedRole = "ALTER ROLE idea2strategy_$role NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;"
+    $hardenedRole = "ALTER ROLE idea2strategy_$role NOLOGIN NOCREATEDB NOCREATEROLE NOINHERIT;"
     if (-not $runtimeGrantSql.Contains($hardenedRole)) {
         throw "Runtime grant migration is missing the hardened $role group role."
     }
+    if (-not $runtimeGrantSql.Contains("application group role idea2strategy_$role has forbidden privileged attributes")) {
+        throw "Runtime grant migration is missing the fail-closed privilege check for $role."
+    }
+}
+if ($runtimeGrantSql.Contains('ALTER ROLE idea2strategy_backend NOLOGIN NOSUPERUSER')) {
+    throw 'Runtime grant migration must not require PostgreSQL superuser-only ALTER ROLE clauses on RDS.'
 }
 if (-not $runtimeGrantSql.Contains('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."accounts" TO idea2strategy_backend;')) {
     throw 'Runtime grant migration is missing the representative Backend identity ACL.'
