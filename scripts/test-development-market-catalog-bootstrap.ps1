@@ -46,6 +46,7 @@ foreach ($needle in @(
     'PutRolePolicy',
     'DeleteRolePolicy',
     'AWS-RunShellScript',
+    'Sanitized bootstrap diagnostics:',
     'HttpTokens=required',
     'sha256sum --check',
     'market-catalog-bootstrap/',

@@ -310,7 +310,19 @@ touch /var/lib/idea2strategy-market-catalog-bootstrap-ready
     $sent = Invoke-AwsJson @("ssm", "send-command", "--instance-ids", $instanceId, "--document-name", "AWS-RunShellScript", "--comment", "Idea2Strategy exact market catalog $Phase $head", "--parameters", "file://$parametersPath", "--timeout-seconds", "3600")
     $commandId = [string]$sent.Command.CommandId
     & $script:aws ssm wait command-executed --command-id $commandId --instance-id $instanceId --profile $AwsProfile --region $Region
-    if ($LASTEXITCODE -ne 0) { throw "Market catalog SSM command did not succeed; inspect protected SSM diagnostics." }
+    if ($LASTEXITCODE -ne 0) {
+        try {
+            $failedInvocation = Invoke-AwsJson @("ssm", "get-command-invocation", "--command-id", $commandId, "--instance-id", $instanceId)
+            $diagnostics = ([string]$failedInvocation.StandardErrorContent).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($diagnostics)) {
+                Write-Warning "Sanitized bootstrap diagnostics:`n$diagnostics"
+            }
+        }
+        catch {
+            Write-Warning "The failed SSM invocation diagnostics could not be retrieved before cleanup."
+        }
+        throw "Market catalog SSM command did not succeed."
+    }
     $invocation = Invoke-AwsJson @("ssm", "get-command-invocation", "--command-id", $commandId, "--instance-id", $instanceId)
     if ($invocation.Status -ne "Success") { throw "Market catalog SSM command failed with status '$($invocation.Status)'." }
     $receipt = [string]$invocation.StandardOutputContent | ConvertFrom-Json
