@@ -10,18 +10,13 @@ output "vpc_id" {
 }
 
 output "public_subnet_ids" {
-  description = "Public subnets used by ALB and EC2."
+  description = "Public application subnets used by egress-only runtimes and the CloudFront-restricted Core origin."
   value       = values(aws_subnet.public)[*].id
 }
 
 output "private_db_subnet_ids" {
   description = "Private subnets used only by the RDS subnet group."
   value       = values(aws_subnet.private_db)[*].id
-}
-
-output "alb_dns_name" {
-  description = "Development ALB DNS name."
-  value       = try(aws_lb.this[0].dns_name, null)
 }
 
 output "service_url" {
@@ -40,10 +35,9 @@ output "route53_name_servers" {
 }
 
 output "acm_certificate_status" {
-  description = "CloudFront and origin ACM certificate ARNs. Check both before enabling HTTPS."
+  description = "CloudFront viewer ACM certificate ARN. The Core origin uses automated DNS-01 ACME on-host."
   value = {
     frontend = try(aws_acm_certificate.frontend[0].arn, null)
-    origin   = try(aws_acm_certificate.cloudfront_origin[0].arn, null)
   }
 }
 
@@ -57,24 +51,9 @@ output "trading_instance_id" {
   value       = try(aws_instance.trading[0].id, null)
 }
 
-output "batch_instance_id" {
-  description = "Preserved historical bootstrap Batch EC2 ID. Retire only after an explicit data review."
-  value       = aws_instance.batch.id
-}
-
-output "compute_instance_id" {
-  description = "Private Compute EC2 ID for backtest and pipeline deployment."
-  value       = try(aws_instance.compute[0].id, null)
-}
-
-output "batch_instance_type" {
-  description = "Applied batch EC2 instance type."
-  value       = aws_instance.batch.instance_type
-}
-
-output "batch_root_volume_gib" {
-  description = "Applied batch EC2 root volume size in GiB."
-  value       = aws_instance.batch.root_block_device[0].volume_size
+output "backtest_autoscaling_group" {
+  description = "Scale-to-zero Backtest worker Auto Scaling Group."
+  value       = try(aws_autoscaling_group.backtest[0].name, null)
 }
 
 output "rds_endpoint" {
@@ -115,13 +94,18 @@ output "cloudfront_distribution_id" {
 }
 
 output "queue_urls" {
-  description = "Durable worker queue URLs keyed by workflow."
-  value       = { for key, queue in aws_sqs_queue.work : key => queue.url }
+  description = "Durable backtest queue URLs keyed by lane."
+  value       = { for key, queue in aws_sqs_queue.backtest : key => queue.url }
 }
 
 output "cache_endpoint" {
-  description = "Private TLS-only Valkey primary endpoint."
-  value       = try(aws_elasticache_replication_group.this[0].primary_endpoint_address, null)
+  description = "Private TLS-only Valkey Serverless endpoint."
+  value       = try(aws_elasticache_serverless_cache.this[0].endpoint[0].address, null)
+}
+
+output "core_elastic_ip" {
+  description = "Fixed Core origin IPv4 address. Inbound is restricted to the CloudFront origin-facing prefix list."
+  value       = try(aws_eip.service[0].public_ip, null)
 }
 
 output "ecr_repository_urls" {

@@ -5,12 +5,13 @@ expected_aws_account_id = "__AWS_ACCOUNT_ID__"
 # Create only the resources needed to load historical market data.
 deployment_phase = "market_data_bootstrap"
 
-service_instance_type = "t3.small"
-batch_instance_type   = "m7i-flex.large"
+service_instance_type  = "t4g.small"
+trading_instance_type  = "c7g.xlarge"
+backtest_instance_type = "t4g.medium"
 
 service_root_volume_gib = 30
-batch_root_volume_gib   = 100
-batch_swap_gib          = 4
+trading_root_volume_gib = 20
+backtest_root_volume_gib = 40
 
 # A new Route 53 Hosted Zone is created while this is empty.
 # Do not change Gabia nameservers until existing DNS records are copied and reviewed.

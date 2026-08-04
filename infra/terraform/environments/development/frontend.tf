@@ -68,6 +68,10 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
+data "aws_cloudfront_response_headers_policy" "security" {
+  name = "Managed-SecurityHeadersPolicy"
+}
+
 resource "aws_acm_certificate" "frontend" {
   count    = local.enable_service_stack && var.enable_https ? 1 : 0
   provider = aws.us_east_1
@@ -106,54 +110,14 @@ resource "aws_acm_certificate_validation" "frontend" {
   validation_record_fqdns = [for record in aws_route53_record.frontend_certificate_validation : record.fqdn]
 }
 
-resource "aws_acm_certificate" "cloudfront_origin" {
-  count = local.enable_service_stack && var.enable_https ? 1 : 0
-
-  domain_name       = var.origin_domain_name
-  validation_method = "DNS"
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "aws_route53_record" "cloudfront_origin_certificate_validation" {
-  for_each = local.enable_service_stack && var.enable_https ? {
-    for option in aws_acm_certificate.cloudfront_origin[0].domain_validation_options :
-    option.domain_name => {
-      name   = option.resource_record_name
-      record = option.resource_record_value
-      type   = option.resource_record_type
-    }
-  } : {}
-
-  allow_overwrite = true
-  zone_id         = local.hosted_zone_id
-  name            = each.value.name
-  type            = each.value.type
-  ttl             = 60
-  records         = [each.value.record]
-}
-
-resource "aws_acm_certificate_validation" "cloudfront_origin" {
-  count = local.enable_service_stack && var.enable_https ? 1 : 0
-
-  certificate_arn         = aws_acm_certificate.cloudfront_origin[0].arn
-  validation_record_fqdns = [for record in aws_route53_record.cloudfront_origin_certificate_validation : record.fqdn]
-}
-
 resource "aws_route53_record" "cloudfront_origin" {
-  count = local.enable_service_stack && var.enable_https ? 1 : 0
+  count = local.enable_service_stack ? 1 : 0
 
   zone_id = local.hosted_zone_id
   name    = var.origin_domain_name
   type    = "A"
-
-  alias {
-    name                   = aws_lb.this[0].dns_name
-    zone_id                = aws_lb.this[0].zone_id
-    evaluate_target_health = true
-  }
+  ttl     = 60
+  records = [aws_eip.service[0].public_ip]
 }
 
 resource "aws_cloudfront_distribution" "frontend" {
@@ -174,13 +138,13 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   origin {
-    domain_name = var.enable_https ? var.origin_domain_name : aws_lb.this[0].dns_name
-    origin_id   = "application-alb"
+    domain_name = var.origin_domain_name
+    origin_id   = "core-ec2"
 
     custom_origin_config {
       http_port                = 80
       https_port               = 443
-      origin_protocol_policy   = var.enable_https ? "https-only" : "http-only"
+      origin_protocol_policy   = "https-only"
       origin_ssl_protocols     = ["TLSv1.2"]
       origin_keepalive_timeout = 5
       origin_read_timeout      = 60
@@ -199,31 +163,34 @@ resource "aws_cloudfront_distribution" "frontend" {
     cached_methods         = ["GET", "HEAD"]
     compress               = true
 
-    cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id            = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
   }
 
   ordered_cache_behavior {
     path_pattern           = "/api/*"
-    target_origin_id       = "application-alb"
+    target_origin_id       = "core-ec2"
     viewer_protocol_policy = "https-only"
     allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods         = ["GET", "HEAD"]
     compress               = true
 
-    cache_policy_id          = "413f1600-996d-4c66-baf4-05b711d5fe6c"
-    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    cache_policy_id            = "413f1600-996d-4c66-baf4-05b711d5fe6c"
+    origin_request_policy_id   = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
   }
 
   ordered_cache_behavior {
     path_pattern           = "/ws/*"
-    target_origin_id       = "application-alb"
+    target_origin_id       = "core-ec2"
     viewer_protocol_policy = "https-only"
     allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods         = ["GET", "HEAD"]
     compress               = false
 
-    cache_policy_id          = "413f1600-996d-4c66-baf4-05b711d5fe6c"
-    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    cache_policy_id            = "413f1600-996d-4c66-baf4-05b711d5fe6c"
+    origin_request_policy_id   = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
   }
 
   custom_error_response {

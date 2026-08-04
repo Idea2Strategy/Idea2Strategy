@@ -32,21 +32,6 @@ locals {
     }
   }
 
-  private_app_subnets = {
-    a = {
-      cidr_block = var.private_app_subnet_cidrs[0]
-      az         = data.aws_availability_zones.available.names[0]
-    }
-    b = {
-      cidr_block = var.private_app_subnet_cidrs[1]
-      az         = data.aws_availability_zones.available.names[1]
-    }
-  }
-
-  nat_gateway_keys = local.enable_service_stack ? (
-    var.nat_gateway_mode == "per_az" ? toset(["a", "b"]) : toset(["a"])
-  ) : toset([])
-
   market_data_bucket_name = "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-market-data"
   result_bucket_name      = "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-backtest-results"
   frontend_bucket_name    = "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-frontend"
@@ -75,16 +60,7 @@ locals {
     "trading-worker"
   ])
 
-  work_queues = local.enable_service_stack ? {
-    official_backtest = {
-      name                       = "${local.name_prefix}-official-backtest-requests"
-      visibility_timeout_seconds = var.queue_visibility_timeout_seconds
-    }
-    pipeline = {
-      name                       = "${local.name_prefix}-pipeline-work"
-      visibility_timeout_seconds = var.queue_visibility_timeout_seconds
-    }
-  } : {}
+  backtest_lanes = local.enable_service_stack ? toset(["basic", "custom", "competition"]) : toset([])
 
   parameter_path = "/${var.project_name}/${var.environment}"
 

@@ -1,58 +1,66 @@
-resource "aws_sqs_queue" "dead_letter" {
-  for_each = local.work_queues
+resource "aws_sqs_queue" "backtest_dlq" {
+  for_each = local.backtest_lanes
 
-  name                      = "${each.value.name}-dlq"
+  name                      = "${local.name_prefix}-backtest-${each.key}-dlq"
   message_retention_seconds = 1209600
   sqs_managed_sse_enabled   = true
 
-  tags = {
-    Workload = each.key
-    Role     = "dead-letter"
-  }
+  tags = { Lane = each.key, Role = "dead-letter" }
 }
 
-resource "aws_sqs_queue" "work" {
-  for_each = local.work_queues
+resource "aws_sqs_queue" "backtest" {
+  for_each = local.backtest_lanes
 
-  name                       = each.value.name
-  visibility_timeout_seconds = each.value.visibility_timeout_seconds
+  name                       = "${local.name_prefix}-backtest-${each.key}"
+  visibility_timeout_seconds = var.queue_visibility_timeout_seconds
   message_retention_seconds  = 345600
   receive_wait_time_seconds  = 20
   sqs_managed_sse_enabled    = true
 
   redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.dead_letter[each.key].arn
+    deadLetterTargetArn = aws_sqs_queue.backtest_dlq[each.key].arn
     maxReceiveCount     = var.queue_max_receive_count
   })
 
-  tags = {
-    Workload = each.key
-    Role     = "work"
-  }
+  tags = { Lane = each.key, Role = "work" }
 }
 
-resource "aws_sqs_queue_redrive_allow_policy" "dead_letter" {
-  for_each = local.work_queues
+resource "aws_sqs_queue_redrive_allow_policy" "backtest_dlq" {
+  for_each = local.backtest_lanes
 
-  queue_url = aws_sqs_queue.dead_letter[each.key].id
+  queue_url = aws_sqs_queue.backtest_dlq[each.key].id
   redrive_allow_policy = jsonencode({
     redrivePermission = "byQueue"
-    sourceQueueArns   = [aws_sqs_queue.work[each.key].arn]
+    sourceQueueArns   = [aws_sqs_queue.backtest[each.key].arn]
   })
 }
 
-resource "aws_ssm_parameter" "queue_url" {
-  for_each = local.work_queues
+resource "aws_ssm_parameter" "backtest_queue_url" {
+  for_each = local.backtest_lanes
 
-  name  = "${local.parameter_path}/queues/${replace(each.key, "_", "-")}/url"
+  name  = "${local.parameter_path}/queues/backtest-${each.key}/url"
   type  = "String"
-  value = aws_sqs_queue.work[each.key].url
+  value = aws_sqs_queue.backtest[each.key].url
 }
 
-resource "aws_ssm_parameter" "queue_dlq_url" {
-  for_each = local.work_queues
+resource "aws_ssm_parameter" "backtest_lane_concurrency" {
+  for_each = local.backtest_lanes
 
-  name  = "${local.parameter_path}/queues/${replace(each.key, "_", "-")}/dlq-url"
+  name  = "${local.parameter_path}/backtest/lanes/${each.key}/max-concurrency"
   type  = "String"
-  value = aws_sqs_queue.dead_letter[each.key].url
+  value = each.key == "basic" ? "2" : "1"
+}
+
+resource "aws_ssm_parameter" "backtest_total_concurrency" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = "${local.parameter_path}/backtest/max-total-concurrency"
+  type  = "String"
+  value = "1"
+
+  lifecycle {
+    precondition {
+      condition     = var.backtest_idle_grace_minutes >= 15
+      error_message = "Backtest scale-down requires an idle grace period of at least 15 minutes."
+    }
+  }
 }

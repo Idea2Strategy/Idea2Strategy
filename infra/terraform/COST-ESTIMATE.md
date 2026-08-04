@@ -1,40 +1,75 @@
-# Development 월비용 추정
+# Development monthly cost model
 
-기준일: 2026-07-29
-리전: Asia Pacific (Seoul), `ap-northeast-2`
-기준 시간: 월 730시간
-세금, 데이터 전송, ALB LCU, S3 객체·요청, CloudWatch 로그 수집량과 Free Plan 크레딧 차감 전 금액
+Basis date: 2026-08-04. Region: Asia Pacific (Seoul), `ap-northeast-2`.
+The model uses a 730-hour month, the US-market weekday schedule for Trading,
+100 Backtest instance-hours, and event-only Pipeline work. Taxes, credits, Free
+Tier, data transfer, and request-dependent charges are not deducted.
 
-## 현재: Market Data Bootstrap
+## Why the old USD 96.83 estimate became approximately USD 240
 
-과거 시장 데이터 적재를 위해 먼저 생성하는 최소 구성이다.
+The change was primarily a scope and uptime-model change, not AWS price
+inflation. The original USD 96.83 estimate was a preliminary extension of the
+USD 36.17 market-data bootstrap. It counted a small service EC2 host, RDS,
+basic storage, one ALB, Route 53, ACM, Results S3, and ECR. It explicitly said
+that actual service sizing and data usage still had to be determined.
 
-| 항목 | 단가 | 수량 | 월 추정 |
-|---|---:|---:|---:|
-| EC2 `t3.micro` | USD 0.013/시간 | 1대 | USD 9.49 |
-| RDS PostgreSQL `db.t4g.micro`, Single-AZ | USD 0.025/시간 | 1대 | USD 18.25 |
-| Public IPv4 | USD 0.005/시간 | EC2 1개 | USD 3.65 |
-| EC2 gp3 | USD 0.0912/GB-월 | 16GB | USD 1.46 |
-| RDS gp3 | USD 0.131/GB-월 | 20GB | USD 2.62 |
-| CloudWatch 표준 Alarm | 일반적인 USD 0.10/Alarm-월 기준 | 3개 | 약 USD 0.30 |
-| RDS 관리형 비밀 | Secrets Manager 비밀 1개 | 1개 | 약 USD 0.40 |
+The first diagram-based production-like interpretation added costs that the
+USD 96.83 model did not include or did not run continuously:
 
-고정 사용량 기준 합계는 대략 **USD 36.17/월**이다. 실제 청구액에는 S3 저장량·요청, 데이터 전송, CloudWatch Logs와 세금이 추가될 수 있다. AWS Free Plan 크레딧과 적용 가능한 무료 사용량은 청구액에서 차감될 수 있다.
+| Added or changed assumption | Approximate monthly impact | Why it mattered |
+| --- | ---: | --- |
+| NAT Gateway | +USD 43 before data processing | A NAT is billed every hour and per GB; private runtime subnets made it a fixed cost. |
+| ALB | +USD 16 before LCU | An ALB cannot be stopped, so the hourly charge remains even with no traffic. |
+| Always-on `m7i-flex.large` compute host | +USD 86 | The diagram grouped Backtest and Pipeline on a large x86 host instead of scaling them to zero. |
+| Separate/always-on service roles | variable, material | Core, Trading, and workers were initially interpreted as continuously running deployment units. |
+| Managed cache, logs, queues, secrets, public IPv4, transfer | +usage-dependent amount | These services were absent or only partially represented in the preliminary estimate. |
 
-## 향후: 전체 서비스 구성
+Those additions alone explain roughly USD 145 of uplift (43 + 16 + 86), which
+is approximately the gap from USD 96.83 to USD 240. The USD 240 number should
+therefore be understood as an over-provisioned architecture scenario, not as a
+like-for-like revision of the original bill.
 
-`deployment_phase = "full"`로 변경하면 서비스 EC2, ALB, Route 53, ACM, Results S3와 ECR이 추가된다. 기존 전체 구성의 고정 사용량 추정은 약 **USD 96.83/월**이며, 실제 사양과 데이터 사용량을 확인한 뒤 다시 산정한다.
+## Selected low-cost design
 
-## 비용을 줄이는 운영 방법
+| Component | Planning assumption | Monthly USD |
+| --- | --- | ---: |
+| Core EC2 | `t4g.small`, USD 0.0208/h x 730 h | 15.18 |
+| Trading EC2 | `c7g.xlarge`, USD 0.1632/h x about 196 h | 31.95 |
+| Backtest EC2 | `t4g.medium`, USD 0.0416/h x 100 h | 4.16 |
+| Pipeline | ARM64 Fargate Spot, event-only | 1-3 |
+| RDS PostgreSQL | `db.t4g.small`, USD 0.051/h x 730 h, plus gp3/backup | 39-45 |
+| Valkey | Serverless, low-usage 100 MB floor | 6-10 |
+| EBS | Encrypted gp3 runtime and scratch volumes | 4-7 |
+| Public IPv4 | Fixed Core EIP plus scheduled runtime hours | 5-6 |
+| Edge | CloudFront, WAF, Route 53, viewer certificate | 10-15 |
+| Object and artifact storage | S3 and ECR | 2-4 |
+| Operations | CloudWatch, SQS, Secrets Manager, EventBridge | 8-15 |
+| **Expected range** | usage-dependent Development workload | **126-166** |
+| **Normal review target** | budgeted operating band | **135-150** |
 
-- 애플리케이션 개발이 시작되기 전에는 전체 Development plan을 적용하지 않는다.
-- 사용하지 않는 백테스트·배치 EC2는 중지한다. 중지 중에는 EC2 컴퓨팅 비용과 해당 Public IPv4 비용은 발생하지 않지만 EBS 비용은 유지된다.
-- RDS는 단기 중지가 가능하지만 AWS가 최대 중지 기간 뒤 자동 재시작할 수 있으므로 장기 절감 수단으로 가정하지 않는다.
-- ALB는 중지 기능이 없으므로 생성된 동안 시간당 비용과 Public IPv4 비용이 계속 발생한다.
-- 7일간 실제 사용량을 측정한 뒤 EC2 가동 시간과 사양을 다시 결정한다.
+The EC2 and RDS hourly rates were queried from the AWS Price List API on
+2026-08-04 for Linux On-Demand/shared tenancy and PostgreSQL Single-AZ in Seoul.
+AWS documents the public IPv4 price as USD 0.005 per IP-hour, Route 53 as USD
+0.50 per month for each of the first 25 hosted zones, and Valkey Serverless with
+a 100 MB minimum measured storage floor. WAF, CloudWatch, S3, SQS, Valkey ECPU,
+backup, and transfer charges depend on actual traffic, so the estimate is a
+range rather than a false-precision single number.
 
-## 가격 근거
+## Cost controls and sensitivity
 
-- EC2, RDS, EBS, RDS Storage, ALB 단가는 AWS Price List API에서 현재 계정의 임시 자격 증명으로 조회했다.
-- Public IPv4는 [Amazon VPC Pricing](https://aws.amazon.com/vpc/pricing/)의 USD 0.005/IP-시간을 사용했다.
-- 서비스별 최종 청구액은 [AWS Pricing Calculator](https://calculator.aws/)와 AWS Billing에서 다시 확인한다.
+- Terraform contains no NAT Gateway and no ALB.
+- Trading runs only 08:00-17:00 `America/New_York` on weekdays.
+- Backtest ASG is `min=0`, `desired=0`, `max=1`; each additional 100 hours adds
+  about USD 4.16 before storage and logs.
+- Pipeline has no ECS service and uses ARM64 Fargate Spot RunTask invocations.
+- Raising Core to `t4g.medium` adds about USD 15 per month and requires measured
+  memory, CPU-credit, GC, OOM, or latency evidence.
+- One NAT Gateway would add about USD 43 per month before per-GB processing.
+- One ALB would add about USD 16 per month before LCU and data charges.
+- RDS Multi-AZ approximately doubles database instance cost and adds storage/I/O
+  variance; it is intentionally deferred for Development.
+- The Terraform budget default is USD 150. A budget alarm warns; it does not
+  enforce a hard spending limit.
+
+A plan with real immutable image digests and a final AWS Pricing Calculator or
+Billing comparison is required before any apply.

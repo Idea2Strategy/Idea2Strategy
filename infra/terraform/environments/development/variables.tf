@@ -68,35 +68,13 @@ variable "vpc_cidr" {
 }
 
 variable "public_subnet_cidrs" {
-  description = "Two public subnet CIDRs used only by the ALB and managed egress."
+  description = "Two public application subnets. Runtime security groups remain egress-only except the CloudFront-restricted Core origin."
   type        = list(string)
   default     = ["10.20.0.0/24", "10.20.1.0/24"]
 
   validation {
     condition     = length(var.public_subnet_cidrs) == 2
     error_message = "Exactly two public subnet CIDRs are required."
-  }
-}
-
-variable "private_app_subnet_cidrs" {
-  description = "Two private application subnet CIDRs used by the three runtime hosts and managed cache."
-  type        = list(string)
-  default     = ["10.20.4.0/24", "10.20.5.0/24"]
-
-  validation {
-    condition     = length(var.private_app_subnet_cidrs) == 2
-    error_message = "Exactly two private application subnet CIDRs are required."
-  }
-}
-
-variable "nat_gateway_mode" {
-  description = "Development egress topology. single minimizes cost; per_az avoids a cross-AZ egress dependency."
-  type        = string
-  default     = "single"
-
-  validation {
-    condition     = contains(["single", "per_az"], var.nat_gateway_mode)
-    error_message = "nat_gateway_mode must be single or per_az."
   }
 }
 
@@ -112,21 +90,21 @@ variable "private_db_subnet_cidrs" {
 }
 
 variable "service_instance_type" {
-  description = "Initial service EC2 measurement size."
+  description = "Core EC2 size. Increase only after memory, GC, latency and CPU-credit evidence."
   type        = string
-  default     = "t3.small"
+  default     = "t4g.small"
 }
 
 variable "trading_instance_type" {
-  description = "Initial market-gateway and trading-worker EC2 measurement size."
+  description = "On-Demand ARM64 trading runtime size."
   type        = string
-  default     = "t3.small"
+  default     = "c7g.xlarge"
 }
 
-variable "batch_instance_type" {
-  description = "Initial batch and backtest EC2 measurement size."
+variable "backtest_instance_type" {
+  description = "Scale-to-zero ARM64 backtest worker size."
   type        = string
-  default     = "m7i-flex.large"
+  default     = "t4g.medium"
 }
 
 variable "service_root_volume_gib" {
@@ -140,44 +118,32 @@ variable "service_root_volume_gib" {
   }
 }
 
-variable "batch_root_volume_gib" {
-  description = "Encrypted gp3 root volume size for batch staging and temporary Parquet files."
+variable "trading_root_volume_gib" {
+  description = "Encrypted gp3 root volume size for the trading runtime."
   type        = number
-  default     = 100
+  default     = 20
 
   validation {
-    condition     = var.batch_root_volume_gib >= 30
-    error_message = "batch_root_volume_gib must be at least 30 GiB."
+    condition     = var.trading_root_volume_gib >= 8
+    error_message = "trading_root_volume_gib must be at least 8 GiB."
   }
 }
 
-variable "batch_swap_gib" {
-  description = "Swap file size that keeps host management agents responsive during batch memory pressure."
+variable "backtest_root_volume_gib" {
+  description = "Encrypted gp3 scratch volume for streaming backtests; durable recovery remains in S3 and PostgreSQL."
   type        = number
-  default     = 4
+  default     = 40
 
   validation {
-    condition     = var.batch_swap_gib >= 2 && var.batch_swap_gib <= 16
-    error_message = "batch_swap_gib must be between 2 and 16 GiB."
+    condition     = var.backtest_root_volume_gib >= 20
+    error_message = "backtest_root_volume_gib must be at least 20 GiB."
   }
 }
 
 variable "service_target_port" {
-  description = "Caddy target port reached only from the ALB security group."
+  description = "Core HTTPS origin port reached only from the CloudFront origin-facing prefix list."
   type        = number
-  default     = 8080
-}
-
-variable "backtest_internal_port" {
-  description = "Private Backtest Spring port reached only from the service EC2 security group."
-  type        = number
-  default     = 8081
-}
-
-variable "trading_internal_port" {
-  description = "Private market gateway port reached only by approved application runtimes."
-  type        = number
-  default     = 8090
+  default     = 443
 }
 
 variable "frontend_domain_name" {
@@ -187,7 +153,7 @@ variable "frontend_domain_name" {
 }
 
 variable "origin_domain_name" {
-  description = "Private-to-CloudFront ALB origin hostname."
+  description = "Public DNS name for the fixed-EIP Core HTTPS origin. The security group permits CloudFront origin-facing addresses only."
   type        = string
   default     = "origin.dev.ideatostrategy.com"
 }
@@ -198,12 +164,6 @@ variable "domain_name" {
   default     = "ideatostrategy.com"
 }
 
-variable "service_domain_name" {
-  description = "Public Development service hostname."
-  type        = string
-  default     = "dev.ideatostrategy.com"
-}
-
 variable "existing_hosted_zone_id" {
   description = "Existing Route 53 Hosted Zone ID. Empty creates a new zone without changing registrar delegation."
   type        = string
@@ -212,24 +172,6 @@ variable "existing_hosted_zone_id" {
 
 variable "enable_https" {
   description = "Enable ACM validation, HTTPS listener, and HTTP redirect after Route 53 delegation is complete."
-  type        = bool
-  default     = false
-}
-
-variable "cache_node_type" {
-  description = "Cost-controlled Development Valkey node type."
-  type        = string
-  default     = "cache.t4g.micro"
-}
-
-variable "cache_engine_version" {
-  description = "AWS-supported Valkey engine version."
-  type        = string
-  default     = "8.0"
-}
-
-variable "cache_automatic_failover" {
-  description = "Create a second cache node and enable automatic failover. Keep false for low-cost Development."
   type        = bool
   default     = false
 }
@@ -249,7 +191,7 @@ variable "queue_max_receive_count" {
 variable "rds_instance_class" {
   description = "Initial low-cost RDS measurement size."
   type        = string
-  default     = "db.t4g.micro"
+  default     = "db.t4g.small"
 }
 
 variable "rds_allocated_storage_gib" {
@@ -303,7 +245,19 @@ variable "operations_alert_email" {
 variable "monthly_budget_usd" {
   description = "Development monthly cost budget in USD."
   type        = number
-  default     = 300
+  default     = 150
+}
+
+variable "backtest_idle_grace_minutes" {
+  description = "Minimum verified idle period before a worker may set the Backtest ASG to zero."
+  type        = number
+  default     = 15
+}
+
+variable "pipeline_schedule_expression" {
+  description = "Optional EventBridge schedule for the desired-zero pipeline task. Empty disables scheduled runs."
+  type        = string
+  default     = ""
 }
 
 variable "container_image_digests" {

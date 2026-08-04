@@ -24,6 +24,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-terraform-r
 
 These checks validate formatting, provider lockfile integrity, Terraform configuration with the S3 backend disabled, the merged Compose model, localhost-only published ports, ignored generated inputs, and secret-free examples. They do not contact AWS and do not produce a plan.
 
+CI also runs TFLint, Checkov with the documented Development exceptions in
+`infra/terraform/checkov.yaml`, and the low-cost architecture policy test. That
+test rejects NAT Gateway, ALB, x86 runtime AMIs, open/SSH ingress, an always-on
+backtest host, missing queue lanes, or a non-ARM64 Fargate pipeline.
+
 ## Release-candidate inputs
 
 Run the read-only AWS identity and input gate before creating a plan:
@@ -50,7 +55,8 @@ Before requesting an AWS plan, record and review all of the following:
 - approved AWS account ID, region, and operator identity from `aws sts get-caller-identity`;
 - reviewed `terraform.tfvars` values, with no credentials in the file;
 - reviewed S3 backend bucket, key, region, and lockfile settings in ignored `backend.hcl`;
-- expected create/update/destroy/replace counts from a saved plan;
+- expected create/update/destroy/replace counts from a saved plan; snapshot the
+  stopped historical Batch volume before approving its instance deletion;
 - current cost estimate and an owner for every recurring-cost resource;
 - database migration/rollback evidence and application image digests for a full rollout;
 - DNS record inventory and rollback owner before any registrar delegation change.
@@ -67,9 +73,17 @@ The following steps intentionally remain outside this repository-only readiness 
 4. Run `terraform init -backend-config=backend.hcl`, then create a saved plan with `terraform plan -parallelism=1 -out deployment.tfplan`.
 5. Review the complete plan, cost impact, replacements, deletions, IAM changes, public network paths, and database consequences. A non-zero destroy count requires a separate explicit decision.
 6. Apply only that reviewed plan file. Do not run an unsaved `terraform apply`.
-7. Verify S3 public-access blocks/versioning/encryption, RDS private reachability/deletion protection/backups, EC2 IMDSv2/SSM access, security-group paths, CloudWatch logs/alarms, and Secrets Manager references.
+   The pre-approval plan uses deliberately invalid all-zero image digests and is
+   never applyable. Create ECR repositories first after approval, publish ARM64
+   images, then save and re-review a second full plan containing real digests.
+7. Verify S3 public-access blocks/versioning/encryption, isolated RDS and Valkey
+   reachability, RDS deletion protection/backups, EC2 IMDSv2/SSM access,
+   CloudFront-prefix-list-only Core ingress, secret-header rejection, no SSH,
+   no NAT/ALB, CloudWatch logs/alarms, and Secrets Manager references.
 8. For the full phase, publish immutable application images, configure runtime secrets through AWS-managed stores, run Flyway once, verify health/readiness and worker processing, and test rollback.
-9. Copy and verify every existing DNS record before changing registrar nameservers. Enable HTTPS only after ACM reports `ISSUED`.
+9. Copy and verify every existing DNS record before changing registrar
+   nameservers. Continue only after the CloudFront viewer ACM certificate is
+   `ISSUED` and the Core DNS-01 ACME certificate is trusted from CloudFront.
 10. Attach the exact plan, apply result, smoke-test evidence, and rollback outcome to the approved deployment record.
 
 No step above should expose credential values in command output, logs, CI artifacts, or issue comments.

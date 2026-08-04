@@ -214,8 +214,7 @@ data "aws_iam_policy_document" "rds_secret_access" {
     actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     resources = [
       aws_db_instance.this.master_user_secret[0].secret_arn,
-      aws_secretsmanager_secret.market_loader.arn,
-      try(aws_secretsmanager_secret.cache[0].arn, aws_secretsmanager_secret.market_loader.arn)
+      aws_secretsmanager_secret.market_loader.arn
     ]
   }
 }
@@ -249,7 +248,7 @@ data "aws_iam_policy_document" "service_queue_publish" {
     sid       = "PublishDurableWork"
     effect    = "Allow"
     actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"]
-    resources = values(aws_sqs_queue.work)[*].arn
+    resources = values(aws_sqs_queue.backtest)[*].arn
   }
 }
 
@@ -274,14 +273,14 @@ data "aws_iam_policy_document" "batch_queue_consume" {
       "sqs:GetQueueAttributes",
       "sqs:GetQueueUrl"
     ]
-    resources = values(aws_sqs_queue.work)[*].arn
+    resources = values(aws_sqs_queue.backtest)[*].arn
   }
 
   statement {
     sid       = "PublishPoisonMessages"
     effect    = "Allow"
     actions   = ["sqs:SendMessage"]
-    resources = values(aws_sqs_queue.dead_letter)[*].arn
+    resources = values(aws_sqs_queue.backtest_dlq)[*].arn
   }
 }
 
@@ -291,4 +290,42 @@ resource "aws_iam_role_policy" "batch_queue_consume" {
   name   = "${local.name_prefix}-batch-queue-consume"
   role   = aws_iam_role.batch.id
   policy = data.aws_iam_policy_document.batch_queue_consume[0].json
+}
+
+data "aws_iam_policy_document" "backtest_scale_down" {
+  count = local.enable_service_stack ? 1 : 0
+  statement {
+    actions   = ["autoscaling:DescribeAutoScalingGroups", "autoscaling:SetDesiredCapacity"]
+    resources = [aws_autoscaling_group.backtest[0].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "backtest_scale_down" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-backtest-safe-scale-down"
+  role   = aws_iam_role.batch.id
+  policy = data.aws_iam_policy_document.backtest_scale_down[0].json
+}
+
+data "aws_iam_policy_document" "service_origin_tls" {
+  count = local.enable_service_stack ? 1 : 0
+  statement {
+    actions   = ["route53:ChangeResourceRecordSets", "route53:GetChange"]
+    resources = ["arn:aws:route53:::hostedzone/${local.hosted_zone_id}", "arn:aws:route53:::change/*"]
+  }
+  statement {
+    actions   = ["route53:ListHostedZones", "route53:ListHostedZonesByName"]
+    resources = ["*"]
+  }
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.cloudfront_origin_header[0].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "service_origin_tls" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-service-origin-tls"
+  role   = aws_iam_role.service[0].id
+  policy = data.aws_iam_policy_document.service_origin_tls[0].json
 }

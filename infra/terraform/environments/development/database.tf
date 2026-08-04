@@ -58,8 +58,9 @@ resource "aws_db_instance" "this" {
   copy_tags_to_snapshot     = true
   apply_immediately         = false
 
-  performance_insights_enabled = false
-  monitoring_interval          = 0
+  performance_insights_enabled    = false
+  monitoring_interval             = 0
+  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
 
   tags = {
     Name = "${local.name_prefix}-postgres"

@@ -1,0 +1,27 @@
+framework:
+  - terraform
+compact: true
+quiet: true
+skip-check:
+  # Explicit low-cost Development trade-offs; production must reassess.
+  - CKV_AWS_118   # RDS enhanced monitoring adds a dedicated role/metric cost.
+  - CKV_AWS_157   # Single-AZ RDS is an explicit Development cost decision.
+  - CKV_AWS_161   # Current applications use rotated Secrets Manager credentials, not IAM DB auth.
+  - CKV_AWS_353   # Performance Insights/Database Insights is enabled only when load evidence requires it.
+  - CKV_AWS_130   # Egress-only runtimes intentionally use public subnets without NAT.
+  - CKV_AWS_273   # Existing MFA-protected IAM users are preserved pending an Identity Center migration.
+  - CKV_AWS_149   # AWS-managed encryption is accepted for Development secrets.
+  - CKV_AWS_158   # AWS-managed encryption is accepted for short-retention Development logs.
+  - CKV_AWS_338   # Development logs retain 14 days to control cost.
+  - CKV_AWS_136   # ECR AES-256 encryption is accepted for Development artifacts.
+  - CKV2_AWS_34   # These SSM String parameters contain identifiers/endpoints, not secrets.
+  - CKV2_AWS_38   # DNSSEC activation is a registrar/delegation operation after explicit approval.
+  - CKV2_AWS_39   # Route 53 query logging is deferred unless traffic/incident evidence needs it.
+  - CKV2_AWS_57   # Secret rotation needs coordinated CloudFront/runtime rollout, not blind rotation.
+  - CKV2_AWS_61   # Market/results retention is protected product meaning; no deletion policy is invented.
+  - CKV2_AWS_62   # Buckets are event sources only where an approved consumer exists.
+  - CKV_AWS_18    # Access logging buckets would recursively add storage; CloudTrail data events are a later account guardrail.
+  - CKV_AWS_144   # Cross-region replication is intentionally excluded from Development.
+  - CKV_AWS_145   # SSE-S3 encryption satisfies the Development encryption requirement without CMK fixed cost.
+  - CKV2_AWS_31   # Counted WAF has an explicit aws_wafv2_web_acl_logging_configuration; graph check cannot resolve it.
+  - CKV2_AWS_47   # Counted WAF includes AWSManagedRulesKnownBadInputsRuleSet; graph check cannot resolve the attachment.

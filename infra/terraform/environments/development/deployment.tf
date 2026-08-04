@@ -19,6 +19,11 @@ resource "terraform_data" "full_release_guard" {
     }
 
     precondition {
+      condition     = var.enable_https
+      error_message = "The full phase requires end-to-end HTTPS, including the CloudFront-to-Core origin connection."
+    }
+
+    precondition {
       condition = (
         toset(keys(var.container_image_digests)) == local.required_runtime_images &&
         var.frontend_release_id != ""

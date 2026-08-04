@@ -47,6 +47,11 @@ try {
             $env:TF_DATA_DIR = $previousDataDir
         }
     }
+
+    & (Join-Path $PSScriptRoot "test-full-terraform-architecture.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Low-cost full Terraform architecture checks failed."
+    }
 } finally {
     Pop-Location
 }

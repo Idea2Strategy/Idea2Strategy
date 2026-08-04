@@ -4,7 +4,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y ca-certificates curl docker.io docker-compose-v2 unzip
+apt-get install -y ca-certificates certbot curl docker.io docker-compose-v2 jq nginx python3-certbot-dns-route53 unzip
 systemctl enable --now docker
 
 if snap list amazon-ssm-agent >/dev/null 2>&1; then
@@ -13,7 +13,7 @@ fi
 
 curl --fail --silent --show-error \
   --output /tmp/amazon-cloudwatch-agent.deb \
-  https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+  https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/arm64/latest/amazon-cloudwatch-agent.deb
 dpkg -i /tmp/amazon-cloudwatch-agent.deb
 rm -f /tmp/amazon-cloudwatch-agent.deb
 
@@ -79,3 +79,66 @@ EOF
 chmod 0640 /etc/idea2strategy/runtime.env
 
 touch /opt/idea2strategy/bootstrap-complete
+
+%{ if runtime_role == "service" ~}
+cat >/usr/local/sbin/configure-core-origin <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+origin_secret="$(aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${origin_header_secret_arn}' --query SecretString --output text)"
+certbot certonly --non-interactive --agree-tos --register-unsafely-without-email --dns-route53 --domain '${origin_domain_name}' --keep-until-expiring
+
+cat >/etc/nginx/conf.d/idea2strategy-origin.conf <<NGINX
+server {
+  listen 443 ssl;
+  server_name ${origin_domain_name};
+  ssl_certificate /etc/letsencrypt/live/${origin_domain_name}/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/${origin_domain_name}/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+
+  if (\$http_x_idea2strategy_origin_verify != "$${origin_secret}") { return 403; }
+
+  location / {
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_pass http://127.0.0.1:${backend_port};
+  }
+}
+NGINX
+
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl enable --now nginx
+systemctl reload nginx
+SCRIPT
+chmod 0700 /usr/local/sbin/configure-core-origin
+
+cat >/etc/systemd/system/idea2strategy-origin-cert.service <<'UNIT'
+[Unit]
+Description=Renew the Core origin certificate and restore the secret-header proxy
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/configure-core-origin
+UNIT
+
+cat >/etc/systemd/system/idea2strategy-origin-cert.timer <<'UNIT'
+[Unit]
+Description=Daily Core origin certificate renewal check
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1d
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now idea2strategy-origin-cert.timer
+%{ endif ~}

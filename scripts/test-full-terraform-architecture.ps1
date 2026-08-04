@@ -5,118 +5,161 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $environmentRoot = Join-Path $root "infra/terraform/environments/development"
 
-$requiredFiles = @(
-    "frontend.tf",
-    "cache.tf",
-    "queues.tf",
-    "deployment.tf",
-    "waf.tf",
-    "notifications.tf"
-)
+function Read-TerraformFile([string]$Name) {
+    $path = Join-Path $environmentRoot $Name
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Full Terraform architecture is missing $Name."
+    }
+    Get-Content -LiteralPath $path -Raw
+}
 
-foreach ($file in $requiredFiles) {
-    if (-not (Test-Path -LiteralPath (Join-Path $environmentRoot $file) -PathType Leaf)) {
-        throw "Full Terraform architecture is missing $file."
+$all = (Get-ChildItem -LiteralPath $environmentRoot -Filter *.tf | ForEach-Object {
+    Get-Content -LiteralPath $_.FullName -Raw
+}) -join "`n"
+$network = Read-TerraformFile "network.tf"
+$compute = Read-TerraformFile "compute.tf"
+$frontend = Read-TerraformFile "frontend.tf"
+$cache = Read-TerraformFile "cache.tf"
+$queues = Read-TerraformFile "queues.tf"
+$security = Read-TerraformFile "security.tf"
+$pipeline = Read-TerraformFile "pipeline.tf"
+$scheduling = Read-TerraformFile "scheduling.tf"
+$providers = Read-TerraformFile "providers.tf"
+$userData = Get-Content -LiteralPath (Join-Path $environmentRoot "templates/ec2-user-data.sh.tftpl") -Raw
+
+foreach ($forbidden in @(
+    'resource "aws_nat_gateway"',
+    'resource "aws_lb"',
+    'resource "aws_instance" "batch"',
+    'resource "aws_instance" "compute"',
+    'm7i-flex',
+    'x86_64',
+    'amd64-server'
+)) {
+    if ($all.Contains($forbidden)) {
+        throw "Low-cost Development architecture forbids: $forbidden"
     }
 }
 
-$network = Get-Content -LiteralPath (Join-Path $environmentRoot "network.tf") -Raw
-$compute = Get-Content -LiteralPath (Join-Path $environmentRoot "compute.tf") -Raw
-$frontend = Get-Content -LiteralPath (Join-Path $environmentRoot "frontend.tf") -Raw
-$cache = Get-Content -LiteralPath (Join-Path $environmentRoot "cache.tf") -Raw
-$queues = Get-Content -LiteralPath (Join-Path $environmentRoot "queues.tf") -Raw
-$security = Get-Content -LiteralPath (Join-Path $environmentRoot "security.tf") -Raw
-$edge = Get-Content -LiteralPath (Join-Path $environmentRoot "edge.tf") -Raw
-$deployment = Get-Content -LiteralPath (Join-Path $environmentRoot "deployment.tf") -Raw
-$providers = Get-Content -LiteralPath (Join-Path $environmentRoot "providers.tf") -Raw
-
 foreach ($required in @(
-    'resource "aws_subnet" "private_app"',
-    'resource "aws_nat_gateway" "this"',
+    'resource "aws_subnet" "public"',
+    'resource "aws_subnet" "private_db"',
     'resource "aws_vpc_endpoint" "s3"'
 )) {
     if (-not $network.Contains($required)) {
         throw "Network architecture is missing: $required"
     }
 }
-if (-not $network.Contains('variable "nat_gateway_mode"') -and
-    -not (Get-Content -LiteralPath (Join-Path $environmentRoot "variables.tf") -Raw).Contains('variable "nat_gateway_mode"')) {
-    throw "The NAT availability/cost choice must remain an explicit reviewed input."
-}
 
-foreach ($runtime in @("service", "trading", "compute")) {
-    if (-not $compute.Contains("resource `"aws_instance`" `"$runtime`"")) {
-        throw "Compute architecture is missing the $runtime runtime."
+foreach ($required in @(
+    'resource "aws_instance" "service"',
+    'resource "aws_eip" "service"',
+    'resource "aws_instance" "trading"',
+    'resource "aws_launch_template" "backtest"',
+    'resource "aws_autoscaling_group" "backtest"',
+    'desired_capacity',
+    'max_size',
+    'http_put_response_hop_limit'
+)) {
+    if (-not $compute.Contains($required)) {
+        throw "Compute architecture is missing: $required"
     }
 }
-$privateRuntimeCount = ([regex]::Matches($compute, '(?m)^\s*associate_public_ip_address\s*=\s*false')).Count
-$publicRuntimeCount = ([regex]::Matches($compute, '(?m)^\s*associate_public_ip_address\s*=\s*true')).Count
-if ($privateRuntimeCount -lt 3 -or $publicRuntimeCount -gt 1) {
-    throw "Core, Trading and Compute must be private; only the preserved bootstrap host may retain its legacy public-IP setting."
+if ($compute -notmatch 'desired_capacity\s*=\s*0' -or
+    $compute -notmatch 'max_size\s*=\s*1' -or
+    $compute -notmatch 'http_put_response_hop_limit\s*=\s*1') {
+    throw "Backtest must scale from zero to one and every EC2 launch path must enforce IMDS hop limit 1."
+}
+
+foreach ($size in @('t4g.small', 'c7g.xlarge', 't4g.medium')) {
+    if ($all -notmatch ('default\s*=\s*"' + [regex]::Escape($size) + '"')) {
+        throw "ARM64 sizing boundary is missing: $size"
+    }
 }
 
 foreach ($required in @(
     'resource "aws_cloudfront_origin_access_control" "frontend"',
     'resource "aws_cloudfront_distribution" "frontend"',
-    'resource "aws_s3_bucket_policy" "frontend_cloudfront"'
-)) {
-    if (-not $frontend.Contains($required)) {
-        throw "Frontend edge architecture is missing: $required"
-    }
-}
-foreach ($required in @(
+    'resource "aws_s3_bucket_policy" "frontend_cloudfront"',
     'X-Idea2Strategy-Origin-Verify',
-    'random_password.cloudfront_origin_header',
-    'fixed-response'
+    'aws_eip.service[0].public_ip'
 )) {
-    if (-not ($frontend.Contains($required) -or $edge.Contains($required) -or $security.Contains($required))) {
-        throw "CloudFront-to-ALB origin protection is missing: $required"
+    if (-not ($frontend.Contains($required) -or $security.Contains($required))) {
+        throw "CloudFront-to-Core boundary is missing: $required"
+    }
+}
+if ($frontend -notmatch 'origin_protocol_policy\s*=\s*"https-only"') {
+    throw "CloudFront must use HTTPS to the fixed Core origin."
+}
+foreach ($required in @('certbot', '--dns-route53', 'secretsmanager get-secret-value', 'http_x_idea2strategy_origin_verify', 'proxy_pass http://127.0.0.1')) {
+    if (-not $userData.Contains($required)) {
+        throw "Core reverse-proxy bootstrap is missing: $required"
     }
 }
 
+if (-not $security.Contains('prefix_list_id') -or
+    -not $security.Contains('cloudfront_origin') -or
+    $security -match '(?s)ingress[^}]*cidr_ipv4\s*=\s*"0\.0\.0\.0/0"' -or
+    $security -match '(?s)from_port\s*=\s*22') {
+    throw "Core ingress must be CloudFront-prefix-list-only and SSH-free."
+}
+
 foreach ($required in @(
-    'resource "aws_elasticache_replication_group" "this"',
-    'transit_encryption_enabled = true',
-    'at_rest_encryption_enabled = true'
+    'resource "aws_elasticache_serverless_cache" "this"',
+    'resource "aws_elasticache_serverless_cache"'
 )) {
     if (-not $cache.Contains($required)) {
-        throw "Cache architecture is missing: $required"
+        throw "Private Valkey Serverless architecture is missing: $required"
     }
 }
-foreach ($required in @(
-    'auth_token',
-    'aws_secretsmanager_secret',
-    'aws_elasticache_subnet_group'
-)) {
-    if (-not $cache.Contains($required)) {
-        throw "Cache authentication or private placement is missing: $required"
-    }
+if ($cache -notmatch 'engine\s*=\s*"valkey"') {
+    throw "The serverless cache must use Valkey."
 }
 
-foreach ($required in @(
-    'resource "aws_sqs_queue" "work"',
-    'resource "aws_sqs_queue" "dead_letter"',
-    'redrive_policy'
-)) {
+foreach ($lane in @('basic', 'custom', 'competition')) {
+    if (-not $all.Contains($lane)) {
+        throw "Backtest queue lane is missing: $lane"
+    }
+}
+foreach ($required in @('resource "aws_sqs_queue" "backtest"', 'resource "aws_sqs_queue" "backtest_dlq"', 'redrive_policy', 'sqs_managed_sse_enabled')) {
     if (-not $queues.Contains($required)) {
-        throw "Durable queue architecture is missing: $required"
-    }
-}
-foreach ($required in @("sqs_managed_sse_enabled", "aws_sqs_queue_redrive_allow_policy")) {
-    if (-not $queues.Contains($required)) {
-        throw "Durable queue safety is missing: $required"
+        throw "Durable backtest queue safety is missing: $required"
     }
 }
 
-if (-not $providers.Contains("allowed_account_ids")) {
-    throw "The AWS provider must reject an unexpected account."
-}
-if (-not $deployment.Contains("container_image_digests") -or -not $deployment.Contains('@${each.value}')) {
-    throw "Runtime deployment must use immutable ECR digests."
-}
-if (-not $deployment.Contains('resource "terraform_data" "full_release_guard"') -or
-    -not $deployment.Contains("precondition")) {
-    throw "Full release inputs must be enforced by a plan-blocking precondition."
+foreach ($required in @(
+    'resource "aws_scheduler_schedule" "trading_start"',
+    'resource "aws_scheduler_schedule" "trading_stop"',
+    'America/New_York',
+    'start',
+    'stop'
+)) {
+    if (-not $scheduling.Contains($required)) {
+        throw "Trading time-control boundary is missing: $required"
+    }
 }
 
-Write-Output "Full Terraform architecture boundary checks passed."
+foreach ($required in @(
+    'resource "aws_ecs_cluster" "pipeline"',
+    'resource "aws_ecs_task_definition" "pipeline"',
+    'capacity_provider_strategy',
+    'FARGATE_SPOT',
+    'cpu_architecture',
+    'ARM64',
+    'assign_public_ip'
+)) {
+    if (-not $pipeline.Contains($required)) {
+        throw "Scale-to-zero ARM64 pipeline boundary is missing: $required"
+    }
+}
+if ($pipeline -notmatch 'assign_public_ip\s*=\s*true') {
+    throw "The desired-zero Fargate task needs public-IP egress because the design intentionally has no NAT gateway."
+}
+
+foreach ($required in @('allowed_account_ids', 'architecture', 'arm64')) {
+    if (-not $providers.Contains($required)) {
+        throw "Provider/AMI safety is missing: $required"
+    }
+}
+
+Write-Output "Low-cost full Terraform architecture boundary checks passed."

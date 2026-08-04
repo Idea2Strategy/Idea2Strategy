@@ -71,14 +71,13 @@ data "aws_iam_policy_document" "development_ssm_access" {
     effect  = "Allow"
     actions = ["ssm:StartSession"]
     resources = concat([
-      aws_instance.batch.arn,
+      "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
       "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:document/SSM-SessionManagerRunShell",
       "arn:aws:ssm:${var.aws_region}::document/AWS-StartPortForwardingSession",
       "arn:aws:ssm:${var.aws_region}::document/AWS-StartPortForwardingSessionToRemoteHost"
       ], local.enable_service_stack ? [
       aws_instance.service[0].arn,
-      aws_instance.trading[0].arn,
-      aws_instance.compute[0].arn
+      aws_instance.trading[0].arn
     ] : [])
 
     condition {
