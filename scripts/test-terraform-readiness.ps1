@@ -34,12 +34,12 @@ try {
         $previousDataDir = $env:TF_DATA_DIR
         try {
             $env:TF_DATA_DIR = $dataDir
-            & terraform -chdir=$absolutePath init -backend=false -input=false -lockfile=readonly
+            & terraform "-chdir=$absolutePath" init -backend=false -input=false -lockfile=readonly
             if ($LASTEXITCODE -ne 0) {
                 throw "terraform init failed for $relativePath."
             }
 
-            & terraform -chdir=$absolutePath validate
+            & terraform "-chdir=$absolutePath" validate
             if ($LASTEXITCODE -ne 0) {
                 throw "terraform validate failed for $relativePath."
             }
