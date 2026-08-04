@@ -158,7 +158,7 @@ contracts:
   - id: contract.backtest.execution.v1
     kind: data
     status: approved
-    revision: 1
+    revision: 2
     source: data/backtest-execution.v1.md
     compatibility: additive
     providers: [workspace.root, workspace.backend]
