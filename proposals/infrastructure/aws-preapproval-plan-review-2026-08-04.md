@@ -2,6 +2,11 @@
 
 Status: **read-only evidence; not approved for apply**
 
+> Superseded for apply: the requester subsequently selected Core `t4g.medium`
+> and apex DNS. The saved plan below contains the earlier Core and hostname
+> inputs and must not be applied. A fresh plan is required after runtime
+> integration and real artifact digests exist.
+
 The plan was generated against the authenticated Development account in
 `ap-northeast-2` with `deployment_phase=full`, HTTPS enabled, and the selected
 low-cost instance classes. Terraform performed state refresh and planning only;

@@ -1,6 +1,6 @@
 # AWS Development architecture review proposal — 2026-08-04
 
-Status: **isolated proposal; implementation may be reviewed, but protected product meaning is not approved**
+Status: **technical topology accepted by the requester; protected product and contract meaning remains an isolated proposal until the GitHub governance gate passes**
 
 The supplied diagram is a useful logical responsibility map, but it is not safe
 to deploy unchanged. It omits subnet and route boundaries, concrete queue
@@ -14,7 +14,7 @@ does not edit `specs/**` or `contracts/**`.
 flowchart TB
   Client["User / operator"] --> R53["Route 53"] --> Edge["CloudFront + WAF"]
   Edge -->|"default + OAC"| Web["Private frontend S3"]
-  Edge -->|"/api/* and /ws/*; HTTPS + secret header"| Core["Core EC2 t4g.medium recommended\ncurrent plan t4g.small; fixed EIP"]
+  Edge -->|"/api/* and /ws/*; HTTPS + secret header"| Core["Core EC2 t4g.medium\nfixed EIP"]
 
   subgraph VPC["Development VPC — ap-northeast-2"]
     subgraph Public["Public application subnets — 2 AZ"]
@@ -90,24 +90,63 @@ strict security groups and host hardening.
   Orders, fills, ledgers, claims, and outbox records remain authoritative in
   PostgreSQL.
 
-## Deployment-unit correction still requiring approval
+## Requester-confirmed decisions
+
+The requester confirmed the following technical decisions on 2026-08-04. This
+record is deliberately outside the protected canonical paths; the product and
+cross-service contract portions must still receive an exact GitHub provider
+approval before they can be integrated into `specs/**` or `contracts/**`.
+
+- Core is `t4g.medium`. `backend-api`, `backend-worker`, and the result-reading
+  `backtest-api` are continuous; `backend-batch` and `admin-mcp` are on demand.
+- Backtest is `t4g.medium` ASG `0/0/1`, with Basic 2, Custom 1, and Competition
+  1 logical execution slots. Excess lane requests remain in their SQS queues.
+- Trading is scheduled `c7g.xlarge` On-Demand. Pipeline is desired-zero ARM64
+  Fargate Spot.
+- The public hostname is the apex `ideatostrategy.com`. Neither
+  `dev.ideatostrategy.com` nor `origin.dev.ideatostrategy.com` is used. The
+  required non-user-facing CloudFront origin is `origin.ideatostrategy.com` to
+  avoid an apex-to-itself routing loop and to provide origin TLS.
+- Route 53 becomes authoritative after existing DNS records are copied and
+  checked by GitHub owner `Juwon-Na` and AWS operator `admin-Pearwon99`.
+- CI/CD uses GitHub OIDC, immutable image digests, a reviewed Terraform plan,
+  a protected Development environment, and an explicit apply approval. No
+  long-lived AWS access key is stored in GitHub.
+- Frontend assets use immutable versioned keys. Deployment invalidates only
+  entry documents; rollback restores the previous entry document/release
+  manifest and invalidates those same paths.
+- The accepted low-cost Development availability posture is Single-AZ RDS,
+  one Core host, one-at-a-time Backtest host, scheduled Trading, and Spot
+  Pipeline. Queues, database backups, S3 versioning, health alarms, and tested
+  reconstruction are the recovery controls; this is not a production HA SLA.
+
+## Read-only AWS inventory observed at confirmation
+
+The authenticated `idea2strategy-terraform` profile resolves to IAM user
+`admin-Pearwon99` in the intended account. No secret values were read.
+
+- No Route 53 hosted zone for `ideatostrategy.com` exists yet.
+- No matching ACM certificate exists in Seoul or `us-east-1`.
+- No CloudFront distribution currently has a custom alias.
+- Secrets Manager contains `idea2strategy-dev/database/market-loader`.
+- Parameter Store already contains the database host, port, name, master and
+  market-loader secret ARNs, plus the market-data bucket name under
+  `/idea2strategy/dev/**`.
+- The account API cannot enumerate registrar domains because Route 53 Domains
+  is unavailable for this Free Tier account. Registrar delegation therefore
+  remains a controlled human step with the original nameservers retained for
+  rollback.
+
+## Deployment-unit implementation boundary
 
 The current Terraform plan is an infrastructure envelope, not a complete
 application rollout. Its EC2 bootstrap does not start application containers,
 and the diagram's process grouping cannot be copied onto the selected sizes
 without correction:
 
-- A `t4g.small` has 2 GiB memory. Running `backend-api`, `backend-worker`,
-  `backend-batch`, and `admin-mcp` as four continuous JVMs on it is predictably
-  memory-constrained before normal OS, Docker, Nginx, and CloudWatch Agent
-  overhead. This is an under-provisioned deployment unit, not merely a future
-  traffic-scaling concern.
-- Recommended Core placement is `backend-api` plus the durable outbox relay
-  `backend-worker` continuously, with explicit heap/container limits. Start
-  `backend-batch` only for scheduled jobs and `admin-mcp` only for an authorized
-  operator session. Use `t4g.medium` initially unless a representative
-  container memory/GC test proves the two continuous processes and host agents
-  stay within a safe `t4g.small` envelope.
+- Core placement is `backend-api`, the durable outbox relay `backend-worker`,
+  and `backtest-api` continuously on `t4g.medium`, with explicit heap/container
+  limits. `backend-batch` and `admin-mcp` start only on demand.
 - The Backtest worker remains the approved `t4g.medium` ASG `0/0/1` with Basic
   2, Custom 1, Competition 1, total 4. The recommended placement for the
   independently packaged `backtest-api` is Core, bound to an internal/loopback
@@ -121,11 +160,11 @@ without correction:
   placement decision. Terraform must not be applied as a service rollout before
   those units and tests exist.
 
-Cost impact of the recommended Core `t4g.medium` starting point is about USD 15
-per 730-hour month above the current `t4g.small` plan, before tax and transfer.
-Keeping `t4g.small` is acceptable only as a measured optimization after the
-real container bundle exists; it is not assumed safe for the original four-JVM
-diagram.
+The accepted planning envelope is USD 150-165/month under the documented usage
+assumptions, with a USD 180 monthly budget and alerts at 80% and 100%. A USD 200
+operational boundary triggers explicit resizing or schedule review. Tax,
+internet transfer, unexpected log volume, Backtest burst hours, and Alpaca
+market-data subscription charges remain outside or variable.
 
 ## Approval and apply gates
 

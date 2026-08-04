@@ -92,7 +92,7 @@ variable "private_db_subnet_cidrs" {
 variable "service_instance_type" {
   description = "Core EC2 size. Increase only after memory, GC, latency and CPU-credit evidence."
   type        = string
-  default     = "t4g.small"
+  default     = "t4g.medium"
 }
 
 variable "trading_instance_type" {
@@ -149,13 +149,13 @@ variable "service_target_port" {
 variable "frontend_domain_name" {
   description = "Public hostname served by CloudFront."
   type        = string
-  default     = "dev.ideatostrategy.com"
+  default     = "ideatostrategy.com"
 }
 
 variable "origin_domain_name" {
   description = "Public DNS name for the fixed-EIP Core HTTPS origin. The security group permits CloudFront origin-facing addresses only."
   type        = string
-  default     = "origin.dev.ideatostrategy.com"
+  default     = "origin.ideatostrategy.com"
 }
 
 variable "domain_name" {
