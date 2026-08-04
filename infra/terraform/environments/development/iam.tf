@@ -304,9 +304,40 @@ data "aws_iam_policy_document" "service_queue_publish" {
     actions = ["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"]
     resources = concat(
       values(aws_sqs_queue.backtest)[*].arn,
-      [aws_sqs_queue.corporate_action_approval[0].arn]
+      [
+        aws_sqs_queue.corporate_action_approval[0].arn,
+        aws_sqs_queue.room_ledger_opened[0].arn,
+        aws_sqs_queue.room_ledger_open_rejected[0].arn
+      ]
     )
   }
+}
+
+data "aws_iam_policy_document" "service_queue_consume" {
+  count = local.enable_service_stack ? 1 : 0
+
+  statement {
+    sid    = "ConsumeRoomLedgerResults"
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:ChangeMessageVisibility",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl"
+    ]
+    resources = [
+      aws_sqs_queue.room_ledger_opened[0].arn,
+      aws_sqs_queue.room_ledger_open_rejected[0].arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "service_queue_consume" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-service-queue-consume"
+  role   = aws_iam_role.service[0].id
+  policy = data.aws_iam_policy_document.service_queue_consume[0].json
 }
 
 resource "aws_iam_role_policy" "service_queue_publish" {

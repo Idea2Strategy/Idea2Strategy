@@ -114,3 +114,81 @@ resource "aws_ssm_parameter" "corporate_action_approval_dlq_url" {
   type  = "String"
   value = aws_sqs_queue.corporate_action_approval_dlq[0].url
 }
+
+resource "aws_sqs_queue" "room_ledger_opened_dlq" {
+  count                     = local.enable_service_stack ? 1 : 0
+  name                      = "${local.name_prefix}-room-ledger-opened-dlq"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+
+  tags = { Role = "dead-letter", Workload = "room-ledger-opened" }
+}
+
+resource "aws_sqs_queue" "room_ledger_open_rejected_dlq" {
+  count                     = local.enable_service_stack ? 1 : 0
+  name                      = "${local.name_prefix}-room-ledger-open-rejected-dlq"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+
+  tags = { Role = "dead-letter", Workload = "room-ledger-open-rejected" }
+}
+
+resource "aws_sqs_queue" "room_ledger_opened" {
+  count                      = local.enable_service_stack ? 1 : 0
+  name                       = "${local.name_prefix}-room-ledger-opened"
+  visibility_timeout_seconds = 180
+  message_retention_seconds  = 345600
+  receive_wait_time_seconds  = 20
+  sqs_managed_sse_enabled    = true
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.room_ledger_opened_dlq[0].arn
+    maxReceiveCount     = 5
+  })
+  tags = { Role = "work", Workload = "room-ledger-opened" }
+}
+
+resource "aws_sqs_queue" "room_ledger_open_rejected" {
+  count                      = local.enable_service_stack ? 1 : 0
+  name                       = "${local.name_prefix}-room-ledger-open-rejected"
+  visibility_timeout_seconds = 180
+  message_retention_seconds  = 345600
+  receive_wait_time_seconds  = 20
+  sqs_managed_sse_enabled    = true
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.room_ledger_open_rejected_dlq[0].arn
+    maxReceiveCount     = 5
+  })
+  tags = { Role = "work", Workload = "room-ledger-open-rejected" }
+}
+
+resource "aws_sqs_queue_redrive_allow_policy" "room_ledger_opened_dlq" {
+  count     = local.enable_service_stack ? 1 : 0
+  queue_url = aws_sqs_queue.room_ledger_opened_dlq[0].id
+  redrive_allow_policy = jsonencode({
+    redrivePermission = "byQueue"
+    sourceQueueArns   = [aws_sqs_queue.room_ledger_opened[0].arn]
+  })
+}
+
+resource "aws_sqs_queue_redrive_allow_policy" "room_ledger_open_rejected_dlq" {
+  count     = local.enable_service_stack ? 1 : 0
+  queue_url = aws_sqs_queue.room_ledger_open_rejected_dlq[0].id
+  redrive_allow_policy = jsonencode({
+    redrivePermission = "byQueue"
+    sourceQueueArns   = [aws_sqs_queue.room_ledger_open_rejected[0].arn]
+  })
+}
+
+resource "aws_ssm_parameter" "room_ledger_opened_queue_url" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = "${local.parameter_path}/queues/room-ledger-opened/url"
+  type  = "String"
+  value = aws_sqs_queue.room_ledger_opened[0].url
+}
+
+resource "aws_ssm_parameter" "room_ledger_rejected_queue_url" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = "${local.parameter_path}/queues/room-ledger-open-rejected/url"
+  type  = "String"
+  value = aws_sqs_queue.room_ledger_open_rejected[0].url
+}

@@ -94,13 +94,27 @@ output "cloudfront_distribution_id" {
 }
 
 output "queue_urls" {
-  description = "Durable backtest queue URLs keyed by lane."
-  value       = { for key, queue in aws_sqs_queue.backtest : key => queue.url }
+  description = "Durable runtime queue URLs keyed by workload."
+  value = merge(
+    { for key, queue in aws_sqs_queue.backtest : "backtest-${key}" => queue.url },
+    local.enable_service_stack ? {
+      corporate-action-approval = aws_sqs_queue.corporate_action_approval[0].url
+      room-ledger-opened        = aws_sqs_queue.room_ledger_opened[0].url
+      room-ledger-open-rejected = aws_sqs_queue.room_ledger_open_rejected[0].url
+    } : {}
+  )
 }
 
 output "queue_dlq_urls" {
-  description = "Durable backtest dead-letter queue URLs keyed by lane."
-  value       = { for key, queue in aws_sqs_queue.backtest_dlq : key => queue.url }
+  description = "Durable runtime dead-letter queue URLs keyed by workload."
+  value = merge(
+    { for key, queue in aws_sqs_queue.backtest_dlq : "backtest-${key}" => queue.url },
+    local.enable_service_stack ? {
+      corporate-action-approval = aws_sqs_queue.corporate_action_approval_dlq[0].url
+      room-ledger-opened        = aws_sqs_queue.room_ledger_opened_dlq[0].url
+      room-ledger-open-rejected = aws_sqs_queue.room_ledger_open_rejected_dlq[0].url
+    } : {}
+  )
 }
 
 output "cache_endpoint" {

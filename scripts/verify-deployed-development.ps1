@@ -94,7 +94,7 @@ foreach ($queueProperty in $outputs.queue_urls.value.PSObject.Properties) {
 
 $logGroups = Invoke-AwsJson -Arguments @('logs', 'describe-log-groups', '--log-group-name-prefix', '/idea2strategy/dev/')
 $names = @($logGroups.logGroups | ForEach-Object { $_.logGroupName })
-foreach ($requiredLog in @('/idea2strategy/dev/core', '/idea2strategy/dev/trading', '/idea2strategy/dev/backtest')) {
+foreach ($requiredLog in @('/idea2strategy/dev/core', '/idea2strategy/dev/trading', '/idea2strategy/dev/backtest', '/idea2strategy/dev/pipeline')) {
     if ($names -notcontains $requiredLog) { throw "CloudWatch log group is missing: $requiredLog" }
 }
 

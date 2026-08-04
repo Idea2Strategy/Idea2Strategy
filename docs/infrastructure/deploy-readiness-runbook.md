@@ -40,6 +40,14 @@ regeneration is not terminated merely because its message became invisible.
 The worker retains PostgreSQL idempotency and claim ownership; SQS and the ECS
 desired count are transport/capacity signals, not business completion evidence.
 
+Room ledger opening uses the shared transactional outbox as F's request source.
+Trading Worker must explicitly set `TRADING_ROOM_ACCOUNT_OPEN_ENABLED=true` only
+after the migration is present. Its `OPENED` and `OPEN_REJECTED` completion facts
+are published through two encrypted SQS queues with independent DLQs; Backend
+Worker enables the result consumer and advances `PENDING_LEDGER` only from a
+content-hash-bound durable receipt. Verify both the success and permanent
+rejection routes before enabling room evaluation traffic.
+
 ## Release-candidate inputs
 
 Run the read-only AWS identity and input gate before creating a plan:

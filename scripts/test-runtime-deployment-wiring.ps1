@@ -10,6 +10,7 @@ $iam = Get-Content -LiteralPath (Join-Path $environmentRoot "iam.tf") -Raw
 $runtime = Get-Content -LiteralPath (Join-Path $environmentRoot "runtime.tf") -Raw
 $variables = Get-Content -LiteralPath (Join-Path $environmentRoot "variables.tf") -Raw
 $pipeline = Get-Content -LiteralPath (Join-Path $environmentRoot "pipeline.tf") -Raw
+$queues = Get-Content -LiteralPath (Join-Path $environmentRoot "queues.tf") -Raw
 $prerequisites = Get-Content -LiteralPath (Join-Path $root "scripts/test-aws-deployment-prerequisites.ps1") -Raw
 
 foreach ($required in @(
@@ -29,6 +30,17 @@ foreach ($required in @(
 )) {
     if (-not $userData.Contains($required)) {
         throw "EC2 runtime bootstrap is missing: $required"
+    }
+}
+
+foreach ($required in @(
+    'resource "aws_sqs_queue" "room_ledger_opened"',
+    'resource "aws_sqs_queue" "room_ledger_open_rejected"',
+    'resource "aws_sqs_queue" "room_ledger_opened_dlq"',
+    'resource "aws_sqs_queue" "room_ledger_open_rejected_dlq"'
+)) {
+    if (-not $queues.Contains($required)) {
+        throw "Room-ledger result queue wiring is missing: $required"
     }
 }
 if (-not $userData.Contains('runtime_role == "trading"') -or -not $userData.Contains('shutdown -h now')) {
@@ -92,6 +104,23 @@ foreach ($required in @(
 )) {
     if (-not $userData.Contains($required)) {
         throw "Backtest bounded worker runtime is missing: $required"
+    }
+}
+
+
+foreach ($required in @(
+    'ROOM_LEDGER_RESULT_CONSUMER_ENABLED=true',
+    'ROOM_LEDGER_OPENED_QUEUE_URL=',
+    'ROOM_LEDGER_REJECTED_QUEUE_URL=',
+    'TRADING_ROOM_ACCOUNT_OPEN_ENABLED=true',
+    'aws_sqs_queue.room_ledger_opened[0].arn',
+    'aws_sqs_queue.room_ledger_open_rejected[0].arn',
+    'sqs:ReceiveMessage',
+    'sqs:DeleteMessage',
+    'sqs:ChangeMessageVisibility'
+)) {
+    if (-not ($userData.Contains($required) -or $iam.Contains($required))) {
+        throw "Room-ledger provider/consumer deployment wiring is missing: $required"
     }
 }
 

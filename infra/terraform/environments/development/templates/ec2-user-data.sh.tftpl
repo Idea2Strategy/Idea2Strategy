@@ -309,6 +309,9 @@ BACKTEST_BASIC_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/ur
 BACKTEST_CUSTOM_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-custom/url')
 BACKTEST_COMPETITION_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-competition/url')
 CORPORATE_ACTION_APPROVAL_QUEUE_URL=$(ssm_value '${parameter_path}/queues/corporate-action-approval/url')
+ROOM_LEDGER_OPENED_QUEUE_URL=$(ssm_value '${parameter_path}/queues/room-ledger-opened/url')
+ROOM_LEDGER_REJECTED_QUEUE_URL=$(ssm_value '${parameter_path}/queues/room-ledger-open-rejected/url')
+ROOM_LEDGER_RESULT_CONSUMER_ENABLED=true
 BACKTEST_OUTBOX_RELAY_ENABLED=${enable_backtest_outbox_relay}
 EOF
 
@@ -468,6 +471,7 @@ TRADING_WARMUP_MANIFEST_KEY=manifest.json
 TRADING_WARMUP_MATERIALIZATION_RECEIPT_PATH=/runtime/trading-worker/materialization.properties
 TRADING_BOT_CONTROL_WORKER_ID=trading-worker-development-1
 TRADING_RUNTIME_LIFECYCLE_ENABLED=true
+TRADING_ROOM_ACCOUNT_OPEN_ENABLED=true
 TRADING_RUNTIME_SHUTDOWN_DRAIN_TIMEOUT=PT30S
 EOF
 cat >/opt/idea2strategy/compose.yaml <<EOF
