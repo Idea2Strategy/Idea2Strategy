@@ -32,7 +32,7 @@ test("keeps every approved fail-closed transition", () => {
     "do not trigger regeneration again",
     "explicit withdrawal event",
     "SUPERSEDED",
-    "explicitly names the prior candidate",
+    "explicitly name the prior candidate",
   ]) assert.ok(contract.includes(phrase), `missing obligation: ${phrase}`);
 });
 
