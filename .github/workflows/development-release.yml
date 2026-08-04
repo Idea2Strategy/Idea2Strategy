@@ -298,8 +298,8 @@ jobs:
           if (-not $config.ContainsKey('dns_delegation_verified') -or $config.dns_delegation_verified -ne $true) {
             throw 'TF_VARS_JSON must carry independently reviewed public DNS delegation evidence.'
           }
-          if ([string]$config.operator_oidc_issuer -cne '${{ vars.OPERATOR_OIDC_ISSUER }}' -or
-              [string]$config.operator_oidc_audience -cne '${{ vars.OPERATOR_OIDC_AUDIENCE }}') {
+          if ([string]$config.operator_auth_issuer -cne '${{ vars.OPERATOR_OIDC_ISSUER }}' -or
+              [string]$config.operator_auth_audience -cne '${{ vars.OPERATOR_OIDC_AUDIENCE }}') {
             throw 'Frontend OIDC issuer/audience must exactly match the Terraform runtime inputs.'
           }
           $config.aws_profile = ''
