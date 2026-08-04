@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "policies": [
+    {
+      "version": "development-official-backtest-2026-q3-v1",
+      "releaseQuarter": "2026-Q3",
+      "periodStart": "2016-07-01T04:00:00Z",
+      "periodEnd": "2026-07-01T04:00:00Z",
+      "feeRate": "0.002",
+      "slippageRateBps": 5,
+      "timezone": "America/New_York",
+      "sessionCalendar": "XNYS",
+      "timestampUnit": "us",
+      "priceArrowType": "double",
+      "volumeArrowType": "int64",
+      "marketDataSchemaVersion": "market-bars-v2",
+      "calculationModelVersion": "backtest-calculation-v1",
+      "marketRulesVersion": "market:1.0.0",
+      "accountingRulesVersion": "accounting:1.0.0",
+      "precisionRulesVersion": "precision:1.0.0",
+      "feePolicyId": "6f2eae59-bc3d-4fc2-9330-a544d4c7e101",
+      "buyingPowerBufferPolicyId": "a27b9962-56cc-41f8-b98c-9311833ff201",
+      "goodTillCancelledHorizonSeconds": 7776000,
+      "maxOrderHorizonSeconds": 7776000
+    }
+  ]
+}
