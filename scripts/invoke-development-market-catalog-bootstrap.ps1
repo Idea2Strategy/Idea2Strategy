@@ -18,7 +18,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$pipelineSourceCommit = "41ea8bc1e5939aa9841100d2b06c5e9b34e0494e"
+$pipelineSourceCommit = "ac3cecf5fcd1918d6902fbbaa38ce347af56c23b"
 $inlinePolicyName = "idea2strategy-development-market-catalog-bootstrap-transient"
 $purposeTag = "idea2strategy-development-market-catalog-bootstrap"
 $awsCliImage = "amazon/aws-cli@sha256:310813a7eae8fd88da1cc9c37970e3500b0ff3984479e1012f0a6fd44e453f63"
