@@ -52,6 +52,12 @@ jobs:
       - name: Parse the one-shot host bootstrap
         shell: bash
         run: bash -n scripts/aws/development-database-bootstrap.sh
+      - name: Validate one-shot Development market catalog bootstrap boundaries
+        shell: pwsh
+        run: ./scripts/test-development-market-catalog-bootstrap.ps1
+      - name: Parse the market catalog host bootstrap
+        shell: bash
+        run: bash -n scripts/aws/development-market-catalog-bootstrap.sh
 
   schema-and-coordination:
     runs-on: ubuntu-latest
