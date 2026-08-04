@@ -133,6 +133,19 @@ foreach ($required in @(
 if ($frontend -notmatch 'origin_protocol_policy\s*=\s*"https-only"') {
     throw "CloudFront must use HTTPS to the fixed Core origin."
 }
+if ($frontend -match 'custom_error_response') {
+    throw "Distribution-wide custom error responses must not convert API 403/404 responses into SPA success pages."
+}
+foreach ($spaBoundary in @(
+    'resource "aws_cloudfront_function" "spa_rewrite"',
+    'event_type   = "viewer-request"',
+    'function_arn = aws_cloudfront_function.spa_rewrite[0].arn',
+    "request.uri = '/index.html'"
+)) {
+    if (-not $frontend.Contains($spaBoundary)) {
+        throw "The frontend-only SPA rewrite boundary is missing: $spaBoundary"
+    }
+}
 foreach ($required in @('certbot', '--dns-route53', 'secretsmanager get-secret-value', 'http_x_idea2strategy_origin_verify', 'proxy_pass http://127.0.0.1')) {
     if (-not $userData.Contains($required)) {
         throw "Core reverse-proxy bootstrap is missing: $required"

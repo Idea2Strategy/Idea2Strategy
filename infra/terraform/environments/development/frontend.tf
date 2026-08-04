@@ -72,6 +72,26 @@ data "aws_cloudfront_response_headers_policy" "security" {
   name = "Managed-SecurityHeadersPolicy"
 }
 
+resource "aws_cloudfront_function" "spa_rewrite" {
+  count   = local.enable_service_stack ? 1 : 0
+  name    = "${local.name_prefix}-spa-rewrite"
+  runtime = "cloudfront-js-2.0"
+  comment = "Rewrite only frontend navigation routes to index.html without masking API errors"
+  publish = true
+  code    = <<-JAVASCRIPT
+    function handler(event) {
+      var request = event.request;
+      var uri = request.uri;
+      if (uri.endsWith('/')) {
+        request.uri = uri + 'index.html';
+      } else if (uri.lastIndexOf('.') < uri.lastIndexOf('/')) {
+        request.uri = '/index.html';
+      }
+      return request;
+    }
+  JAVASCRIPT
+}
+
 resource "aws_acm_certificate" "frontend" {
   count    = local.enable_service_stack && var.enable_https ? 1 : 0
   provider = aws.us_east_1
@@ -165,6 +185,11 @@ resource "aws_cloudfront_distribution" "frontend" {
 
     cache_policy_id            = "658327ea-f89d-4fab-a63d-7e88639e58f6"
     response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_rewrite[0].arn
+    }
   }
 
   ordered_cache_behavior {
@@ -191,20 +216,6 @@ resource "aws_cloudfront_distribution" "frontend" {
     cache_policy_id            = "413f1600-996d-4c66-baf4-05b711d5fe6c"
     origin_request_policy_id   = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
     response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
-  }
-
-  custom_error_response {
-    error_code            = 403
-    response_code         = 200
-    response_page_path    = "/index.html"
-    error_caching_min_ttl = 0
-  }
-
-  custom_error_response {
-    error_code            = 404
-    response_code         = 200
-    response_page_path    = "/index.html"
-    error_caching_min_ttl = 0
   }
 
   restrictions {
