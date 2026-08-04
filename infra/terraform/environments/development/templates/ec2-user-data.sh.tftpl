@@ -135,7 +135,7 @@ append_env_value() {
   local destination="$1"
   local name="$2"
   local value="$3"
-  jq -nr --arg name "$name" --arg value "$value" '$name + "=" + ($value | @json)' >>"$destination"
+  printf '%s' "$value" | jq -Rrs --arg name "$name" '$name + "=" + (. | @json)' >>"$destination"
 }
 
 append_json_field() {
@@ -235,15 +235,14 @@ primary_db_secret="$(secret_json '${trading_database_secret_arn}')"
 db_username="$(jq -er '.username' <<<"$primary_db_secret")"
 db_password="$(jq -er '.password' <<<"$primary_db_secret")"
 %{ if runtime_role != "trading" ~}
-backtest_db_username="$(jq -er '.username' <<<"$backtest_db_secret")"
-backtest_db_password="$(jq -er '.password' <<<"$backtest_db_secret")"
-backtest_database_url="$(DB_USERNAME="$backtest_db_username" DB_PASSWORD="$backtest_db_password" python3 - <<'PY'
-import os
+backtest_database_url="$(printf '%s' "$backtest_db_secret" | python3 -c '
+import json
+import sys
 from urllib.parse import quote
+document = json.load(sys.stdin)
 print("postgresql+psycopg://%s:%s@${database_host}:5432/${database_name}?sslmode=require" % (
-    quote(os.environ["DB_USERNAME"], safe=""), quote(os.environ["DB_PASSWORD"], safe="")))
-PY
-)"
+    quote(document["username"], safe=""), quote(document["password"], safe="")))
+')"
 %{ endif ~}
 
 runtime_secret_env=/etc/idea2strategy/runtime-secret.env
@@ -287,7 +286,7 @@ unset batch_db_secret
 %{ endif ~}
 unset primary_db_secret db_username db_password
 %{ if runtime_role != "trading" ~}
-unset backtest_db_secret backtest_db_username backtest_db_password backtest_database_url backtest_internal_secret
+unset backtest_db_secret backtest_database_url backtest_internal_secret
 %{ endif ~}
 %{ if runtime_role == "service" ~}
 unset core_internal_secret

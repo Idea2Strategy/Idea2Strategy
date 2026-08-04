@@ -37,6 +37,15 @@ if (-not $userData.Contains('runtime_role == "trading"') -or -not $userData.Cont
 if (-not $userData.Contains('chmod 0600 /etc/nginx/conf.d/idea2strategy-origin.conf')) {
     throw "The Nginx origin-header secret configuration must be root-readable only."
 }
+foreach ($forbiddenSecretTransport in @('--arg value', 'DB_PASSWORD=', 'DB_USERNAME=')) {
+    if ($userData.Contains($forbiddenSecretTransport)) {
+        throw "Runtime bootstrap must not expose secret values through process argv/environment: $forbiddenSecretTransport"
+    }
+}
+if (-not $userData.Contains("jq -Rrs --arg name") -or
+    -not $userData.Contains("json.load(sys.stdin)")) {
+    throw "Runtime bootstrap must pass generated env values and database credentials through stdin."
+}
 
 foreach ($service in @("backend-api", "backend-worker", "backtest-api")) {
     if (-not $userData.Contains($service)) {
