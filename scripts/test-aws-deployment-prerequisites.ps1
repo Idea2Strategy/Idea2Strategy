@@ -2,6 +2,7 @@
 param(
     [string]$TerraformRoot = "infra/terraform/environments/development",
     [string]$ExpectedRegion = "ap-northeast-2",
+    [string]$AwsProfile = "idea2strategy-terraform",
     [switch]$RequireInputs
 )
 
@@ -18,8 +19,12 @@ if ($null -eq $aws) {
     throw "AWS CLI is not installed. Install AWS CLI v2, then authenticate with short-lived credentials."
 }
 
-$callerJson = & aws sts get-caller-identity --output json 2>$null
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($callerJson)) {
+$strictErrorPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$callerJson = & $aws.Source sts get-caller-identity --profile $AwsProfile --output json 2>$null
+$callerExitCode = $LASTEXITCODE
+$ErrorActionPreference = $strictErrorPreference
+if ($callerExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($callerJson)) {
     throw "AWS authentication is unavailable. Use an approved short-lived profile; do not create long-lived keys for this check."
 }
 $caller = $callerJson | ConvertFrom-Json
@@ -27,7 +32,13 @@ if ([string]::IsNullOrWhiteSpace([string]$caller.Account) -or [string]::IsNullOr
     throw "AWS caller identity was incomplete."
 }
 
-$configuredRegion = (& aws configure get region 2>$null).Trim()
+$ErrorActionPreference = "Continue"
+$configuredRegion = (& $aws.Source configure get region --profile $AwsProfile 2>$null).Trim()
+$regionExitCode = $LASTEXITCODE
+$ErrorActionPreference = $strictErrorPreference
+if ($regionExitCode -ne 0) {
+    $configuredRegion = ""
+}
 if ([string]::IsNullOrWhiteSpace($configuredRegion)) {
     $configuredRegion = $env:AWS_REGION
 }
@@ -57,6 +68,7 @@ if ($RequireInputs -and $missingInputs.Count -gt 0) {
     account_masked         = $maskedAccount
     principal              = $principal
     region                 = $configuredRegion
+    profile                = $AwsProfile
     terraform_root         = $TerraformRoot
     deployment_inputs_ready = $missingInputs.Count -eq 0
 } | ConvertTo-Json -Compress
