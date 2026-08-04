@@ -206,7 +206,7 @@ contracts:
       - scenario.strategy.release
       - ui.backtest.results
       - quality.failure-safety
-    fingerprint: sha256:93644da6a5dc7a7ffbf6e8d24ca2145a4cc019e9a3e76d7bdcc8ab9ce697357f
+    fingerprint: sha256:068cc5203b616d0b1db78f4eaa16ade3cc6a00ef805cf894fc00dc1ec3e0c144
   - id: contract.market-data.publication.v1
     kind: data
     status: approved
