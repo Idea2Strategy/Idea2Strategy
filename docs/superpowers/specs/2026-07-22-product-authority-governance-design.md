@@ -2,7 +2,7 @@
 
 ## Objective
 
-Idea2Strategy must fail closed when an actor attempts to change canonical product meaning without product-owner authority. The product authorities are the GitHub accounts `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, and `user:Pearone99`. `user:Juwon-Na` and `user:Pearone99` are both accounts of the same person. The known owner email remains ignored local contact metadata, not authentication evidence.
+Idea2Strategy must fail closed when an actor attempts to change canonical product meaning without product-owner authority. The product authorities are the GitHub accounts `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, `user:Pearone99`, and `user:hjcud`. `user:Juwon-Na` and `user:Pearone99` are both accounts of the same person. The known owner email remains ignored local contact metadata, not authentication evidence.
 
 ## Current gap
 
@@ -12,7 +12,7 @@ The repository already tells agents to run `stackcord governance check`, but `.h
 
 - Selected review provider: GitHub.
 - Canonical review repository: `Idea2Strategy/Idea2Strategy`.
-- Normalized product authorities: `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, and `user:Pearone99`, with equal scope.
+- Normalized product authorities: `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, `user:Pearone99`, and `user:hjcud`, with equal scope.
 - Protected semantic kinds: `product`, `policy`, `business`, and `contract`. Every configured authority covers all of them; there is no per-kind or per-area restriction.
 - Required approval count: one.
 - Authority self-approval: allowed for any configured authority.

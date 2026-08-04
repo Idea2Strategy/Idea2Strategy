@@ -3,7 +3,7 @@ schema_version: 1
 id: decision.governance.product-authority-expansion
 kind: decision
 status: applied-by-authority-instruction
-revision: 1
+revision: 2
 refs:
   - docs/superpowers/specs/2026-07-22-product-authority-governance-design.md
   - docs/collaboration-policy.md
@@ -155,3 +155,59 @@ product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:Pearone99
   실행하지 못했다. CI에서 처음 검증된다.
 - `worktrees/com07-root`는 별도 브랜치 워크트리이므로 이 변경을 반영하지 않았다.
   해당 브랜치가 `develop`을 병합할 때 함께 반영된다.
+
+## 6. Revision 2 — `user:hjcud` 추가 (2026-08-04)
+
+권한자 `user:kcrmin`이 "나주원, 박준유, 손현준을 나와 완전히 동일한 권한(서비스
+방향성 변경 가능)으로 승격"을 지시했다. `user:Juwon-Na`(나주원)와
+`user:pjy008008`(박준유)은 revision 1에서 이미 등록되어 정본에 반영되어 있으므로,
+실제 변경 집합은 **`user:hjcud`(구성원 B 손현준, 전략·봇) 한 명 추가**다.
+
+- 기준 브랜치: `chore/product-authority-hjcud` (기점 `develop` = `fdb8802`)
+- 이 시점 `stackcord governance check --json`: `status: unknown`, exit 6,
+  blocker `governance.approval-unknown` — `.harness/local/governance` 관찰 부재.
+  `scripts/initialize-local-harness.ps1 -Verify`는 통과했으나 이 디렉터리는
+  실제 provider 승인 관찰로만 생성되므로 gate는 여전히 닫혀 있다.
+- 따라서 이 변경은 승인·통합·릴리스된 변경이 **아니다**. GitHub PR에서 정확한 head
+  커밋과 보호 fingerprint에 대해 권한자 승인을 받아야 정본이 된다.
+
+### 6.1 확인된 협력자 권한 (2026-08-04)
+
+revision 1 §5의 값이 이후 변경되었으므로 함께 정정했다.
+
+| 계정 | revision 1 | 2026-08-04 확인 | PR 승인 가능 |
+| --- | --- | --- | --- |
+| `user:kcrmin` | `admin` | `admin` | 가능 |
+| `user:pjy008008` | `admin` | `admin` | 가능 |
+| `user:Juwon-Na` | `write` | `admin` | 가능 |
+| `user:Pearone99` | `none` | `read` | **불가** |
+| `user:hjcud` | 미등록 | `admin` | 가능 |
+
+`user:hjcud`는 GitHub에서 이미 `admin`이므로 등록 즉시 승인에 사용할 수 있다.
+`user:Pearone99`는 `read`로 승격되었으나 `read`는 PR 승인 권한을 포함하지 않아
+여전히 승인에 사용할 수 없다.
+
+### 6.2 정족수 영향
+
+`approval.minimum: 1`과 `authority_self_approval: true`를 권한자 지시대로 유지한다.
+등록 항목은 다섯이지만 `user:Juwon-Na`·`user:Pearone99`가 동일인이므로 실질 권한자는
+넷(민경철·박준유·나주원·손현준)이며, 각자 단독 자기 승인으로 `protected_kinds`
+전체를 확정할 수 있다. 이중 확인(`minimum: 2`)은 채택하지 않았다.
+
+### 6.3 변경 파일
+
+`.harness/governance.yaml`, `AGENTS.md`,
+`.agents/skills/use-project-harness/SKILL.md`,
+`.agents/skills/use-project-harness/references/fallback.md`,
+`scripts/initialize-local-harness.ps1`, `scripts/test-local-harness.ps1`,
+`scripts/verify-collaboration-policy.ps1`, `scripts/verify-foundation-evidence.mjs`,
+`docs/collaboration-policy.md`,
+`docs/superpowers/specs/2026-07-22-product-authority-governance-design.md`,
+이 문서.
+
+`docs/prompts/stackcord-pre-mutation-governance.md:32-33`의 `user:kcrmin` 언급은
+프롬프트 내 acceptance example이고 검증기 요구 목록에 없어 revision 1과 동일하게
+갱신하지 않았다.
+
+GitLab 미러(`Idea2Strategy-gitlab/.harness/governance.yaml`)는 §4 절차 5단계에
+따라 `develop` 병합 후 반영한다.
