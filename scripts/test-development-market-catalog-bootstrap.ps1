@@ -39,7 +39,7 @@ foreach ($needle in @(
     'terraform output -json',
     'market_loader_secret_arn',
     'runtime_database_secrets.pipeline',
-    'ecr_repository_urls',
+    'describe-repositories',
     'GetSecretValue',
     'ecr:GetAuthorizationToken',
     's3:GetObjectVersion',
@@ -54,6 +54,10 @@ foreach ($needle in @(
     'finally'
 )) {
     Assert-Contains $orchestrator $needle "Market catalog orchestrator safety boundary is missing: $needle"
+}
+
+if ($orchestrator.Contains('Get-TerraformOutput "ecr_repository_urls"')) {
+    throw "Artifact-foundation ECR must be discovered from the authenticated AWS account, not the runtime Terraform state."
 }
 
 foreach ($needle in @(

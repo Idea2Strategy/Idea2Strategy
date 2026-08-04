@@ -93,8 +93,6 @@ $script:terraformPath = Join-Path $root $TerraformRoot
 $target = Get-TerraformOutput "database_bootstrap"
 $marketLoaderSecretArn = [string](Get-TerraformOutput "market_loader_secret_arn")
 $marketDataBucket = [string](Get-TerraformOutput "market_data_bucket")
-$repositoryUrls = Get-TerraformOutput "ecr_repository_urls"
-$pipelineRepository = [string]$repositoryUrls."pipeline-worker"
 $pipelineSecretArn = [string]$target.runtime_database_secrets.pipeline
 
 $caller = Invoke-AwsJson @("sts", "get-caller-identity")
@@ -102,6 +100,15 @@ if ([string]::IsNullOrWhiteSpace($ExpectedAwsAccountId) -or $ExpectedAwsAccountI
     throw "ExpectedAwsAccountId must be the reviewed 12-digit Development account."
 }
 if ([string]$caller.Account -cne $ExpectedAwsAccountId) { throw "AWS account mismatch." }
+
+# ECR is owned by the isolated artifact-foundation state, not the Development
+# runtime state. Discover the one fixed repository from the already verified
+# account instead of coupling this one-shot operation to another Terraform state.
+$repositoryName = "idea2strategy-dev/pipeline-worker"
+$repository = Invoke-AwsJson @("ecr", "describe-repositories", "--repository-names", $repositoryName)
+if (@($repository.repositories).Count -ne 1) { throw "The pipeline-worker ECR repository was not found." }
+$pipelineRepository = [string]$repository.repositories[0].repositoryUri
+$repositoryArn = [string]$repository.repositories[0].repositoryArn
 
 foreach ($secretArn in @($marketLoaderSecretArn, $pipelineSecretArn)) {
     if ($secretArn -notmatch '^arn:aws:secretsmanager:') { throw "Terraform returned a malformed database secret ARN." }
@@ -111,9 +118,9 @@ foreach ($secretArn in @($marketLoaderSecretArn, $pipelineSecretArn)) {
 }
 if ($marketDataBucket -notmatch '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') { throw "Terraform returned a malformed market-data bucket." }
 if ($pipelineRepository -notmatch '^\d{12}\.dkr\.ecr\.ap-northeast-2\.amazonaws\.com/(.+)$') {
-    throw "Terraform returned a malformed pipeline-worker ECR repository URL."
+    throw "AWS returned a malformed pipeline-worker ECR repository URL."
 }
-$repositoryName = $Matches[1]
+if ($Matches[1] -cne $repositoryName) { throw "AWS returned an unexpected pipeline-worker ECR repository." }
 $pipelineImage = "$pipelineRepository@$PipelineImageDigest"
 
 if (-not $pipelineRepository.StartsWith("$ExpectedAwsAccountId.dkr.ecr.")) { throw "ECR repository belongs to a different AWS account." }
@@ -199,7 +206,6 @@ try {
     $scriptUpload = Invoke-AwsJson @("s3api", "put-object", "--bucket", $marketDataBucket, "--key", $hostScriptKey, "--body", $hostScriptPath)
     if ([string]::IsNullOrWhiteSpace([string]$scriptUpload.VersionId)) { throw "Host script must be stored as a versioned S3 object." }
 
-    $repositoryArn = "arn:aws:ecr:${Region}:${ExpectedAwsAccountId}:repository/$repositoryName"
     $policyDocument = [ordered]@{
         Version = "2012-10-17"
         Statement = @(
