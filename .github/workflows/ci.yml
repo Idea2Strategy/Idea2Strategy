@@ -43,6 +43,9 @@ jobs:
       - name: Validate secret-safe deployment inputs and Compose model
         shell: pwsh
         run: ./scripts/test-deployment-inputs.ps1
+      - name: Validate manual Development release safety boundaries
+        shell: pwsh
+        run: ./scripts/test-development-release-workflow.ps1
 
   schema-and-coordination:
     runs-on: ubuntu-latest
