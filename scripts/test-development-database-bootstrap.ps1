@@ -118,6 +118,10 @@ Assert-Contains $orchestrator 'function Write-Utf8NoBomFile' "Orchestrator must 
 if ($orchestrator.Contains('-Encoding utf8NoBOM')) {
     throw "The utf8NoBOM encoding name is unavailable in Windows PowerShell 5.1."
 }
+Assert-Contains $orchestrator '$existing.Reservations | ForEach-Object { $_.Instances }' "Empty AWS Reservations arrays must be flattened safely on Windows PowerShell 5.1."
+if ($orchestrator.Contains('@($existing.Reservations.Instances).Count')) {
+    throw "Windows PowerShell 5.1 miscounts a property projection over an empty AWS Reservations array."
+}
 
 foreach ($consumer in @("backend", "batch", "backtest", "trading", "pipeline")) {
     Assert-Contains $bootstrap "idea2strategy_${consumer}_runtime" "Bootstrap LOGIN role is missing for $consumer."
