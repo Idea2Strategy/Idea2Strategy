@@ -10,6 +10,13 @@ resource "aws_security_group" "alb" {
   }
 }
 
+resource "random_password" "cloudfront_origin_header" {
+  count = local.enable_service_stack ? 1 : 0
+
+  length  = 48
+  special = false
+}
+
 resource "aws_vpc_security_group_ingress_rule" "alb_http" {
   count = local.enable_service_stack ? 1 : 0
 
@@ -18,7 +25,7 @@ resource "aws_vpc_security_group_ingress_rule" "alb_http" {
   from_port         = 80
   to_port           = 80
   ip_protocol       = "tcp"
-  cidr_ipv4         = "0.0.0.0/0"
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront_origin[0].id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "alb_https" {
@@ -29,7 +36,7 @@ resource "aws_vpc_security_group_ingress_rule" "alb_https" {
   from_port         = 443
   to_port           = 443
   ip_protocol       = "tcp"
-  cidr_ipv4         = "0.0.0.0/0"
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront_origin[0].id
 }
 
 resource "aws_vpc_security_group_egress_rule" "alb_to_service" {
@@ -66,13 +73,115 @@ resource "aws_vpc_security_group_ingress_rule" "service_from_alb" {
   referenced_security_group_id = aws_security_group.alb[0].id
 }
 
-resource "aws_vpc_security_group_egress_rule" "service_all" {
+resource "aws_vpc_security_group_egress_rule" "service_https" {
   count = local.enable_service_stack ? 1 : 0
 
   security_group_id = aws_security_group.service[0].id
-  description       = "AWS APIs, SIP, package repositories, RDS and internal backtest API"
-  ip_protocol       = "-1"
+  description       = "TLS egress to AWS APIs, package repositories and approved external services"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
   cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "service_to_trading" {
+  count = local.enable_service_stack ? 1 : 0
+
+  security_group_id            = aws_security_group.service[0].id
+  description                  = "Core to private trading gateway"
+  from_port                    = var.trading_internal_port
+  to_port                      = var.trading_internal_port
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.trading[0].id
+}
+
+resource "aws_vpc_security_group_egress_rule" "service_to_batch" {
+  count = local.enable_service_stack ? 1 : 0
+
+  security_group_id            = aws_security_group.service[0].id
+  description                  = "Core to private backtest API"
+  from_port                    = var.backtest_internal_port
+  to_port                      = var.backtest_internal_port
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.batch.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "service_to_rds" {
+  count = local.enable_service_stack ? 1 : 0
+
+  security_group_id            = aws_security_group.service[0].id
+  description                  = "Core to PostgreSQL"
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.rds.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "service_to_cache" {
+  count = local.enable_service_stack ? 1 : 0
+
+  security_group_id            = aws_security_group.service[0].id
+  description                  = "Core to Valkey TLS"
+  from_port                    = 6379
+  to_port                      = 6379
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.cache[0].id
+}
+
+resource "aws_security_group" "trading" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name        = "${local.name_prefix}-trading-ec2-sg"
+  description = "Trading runtime has no public ingress"
+  vpc_id      = aws_vpc.this.id
+
+  tags = {
+    Name = "${local.name_prefix}-trading-ec2-sg"
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "trading_from_service" {
+  count = local.enable_service_stack ? 1 : 0
+
+  security_group_id            = aws_security_group.trading[0].id
+  description                  = "Private market gateway from the core runtime only"
+  from_port                    = var.trading_internal_port
+  to_port                      = var.trading_internal_port
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.service[0].id
+}
+
+resource "aws_vpc_security_group_egress_rule" "trading_https" {
+  count = local.enable_service_stack ? 1 : 0
+
+  security_group_id = aws_security_group.trading[0].id
+  description       = "TLS egress to AWS APIs and Alpaca SIP"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "trading_to_rds" {
+  count = local.enable_service_stack ? 1 : 0
+
+  security_group_id            = aws_security_group.trading[0].id
+  description                  = "Trading to PostgreSQL"
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.rds.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "trading_to_cache" {
+  count = local.enable_service_stack ? 1 : 0
+
+  security_group_id            = aws_security_group.trading[0].id
+  description                  = "Trading to Valkey TLS"
+  from_port                    = 6379
+  to_port                      = 6379
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.cache[0].id
 }
 
 resource "aws_security_group" "batch" {
@@ -98,9 +207,20 @@ resource "aws_vpc_security_group_ingress_rule" "batch_backtest_from_service" {
 
 resource "aws_vpc_security_group_egress_rule" "batch_all" {
   security_group_id = aws_security_group.batch.id
-  description       = "AWS APIs, Alpaca, package repositories and RDS"
-  ip_protocol       = "-1"
+  description       = "TLS egress to AWS APIs, Alpaca and package repositories"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
   cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "batch_to_rds" {
+  security_group_id            = aws_security_group.batch.id
+  description                  = "Compute to PostgreSQL"
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.rds.id
 }
 
 resource "aws_security_group" "rds" {
@@ -133,6 +253,19 @@ resource "aws_vpc_security_group_ingress_rule" "rds_from_batch" {
   referenced_security_group_id = aws_security_group.batch.id
 }
 
+resource "aws_vpc_security_group_ingress_rule" "rds_from_trading" {
+  count = local.enable_service_stack ? 1 : 0
+
+  security_group_id            = aws_security_group.rds.id
+  description                  = "PostgreSQL from trading EC2"
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.trading[0].id
+}
+
+# Preserve the existing managed rule during the Development transition. RDS does
+# not initiate application connections, so this does not create an ingress path.
 resource "aws_vpc_security_group_egress_rule" "rds_all" {
   security_group_id = aws_security_group.rds.id
   description       = "Default RDS egress"

@@ -3,10 +3,10 @@ resource "aws_instance" "service" {
 
   ami                         = data.aws_ami.ubuntu_2404.id
   instance_type               = var.service_instance_type
-  subnet_id                   = aws_subnet.public["a"].id
+  subnet_id                   = aws_subnet.private_app["a"].id
   vpc_security_group_ids      = [aws_security_group.service[0].id]
   iam_instance_profile        = aws_iam_instance_profile.service[0].name
-  associate_public_ip_address = true
+  associate_public_ip_address = false
   source_dest_check           = true
 
   user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
@@ -42,9 +42,7 @@ resource "aws_instance" "service" {
   monitoring = false
 
   lifecycle {
-    # A stopped instance temporarily loses its auto-assigned public IPv4
-    # association. Do not replace healthy compute solely because of that drift.
-    ignore_changes = [associate_public_ip_address]
+    create_before_destroy = true
   }
 
   tags = {
@@ -55,6 +53,64 @@ resource "aws_instance" "service" {
   depends_on = [
     aws_route_table_association.public,
     aws_iam_role_policy_attachment.service_managed
+  ]
+}
+
+resource "aws_instance" "trading" {
+  count = local.enable_service_stack ? 1 : 0
+
+  ami                         = data.aws_ami.ubuntu_2404.id
+  instance_type               = var.trading_instance_type
+  subnet_id                   = aws_subnet.private_app["b"].id
+  vpc_security_group_ids      = [aws_security_group.trading[0].id]
+  iam_instance_profile        = aws_iam_instance_profile.trading[0].name
+  associate_public_ip_address = false
+  source_dest_check           = true
+
+  user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
+    runtime_role   = "trading"
+    aws_region     = var.aws_region
+    parameter_path = local.parameter_path
+    log_group_name = aws_cloudwatch_log_group.trading[0].name
+  })
+  user_data_replace_on_change = true
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+    instance_metadata_tags      = "enabled"
+  }
+
+  root_block_device {
+    volume_type           = "gp3"
+    volume_size           = var.service_root_volume_gib
+    encrypted             = true
+    delete_on_termination = true
+  }
+
+  dynamic "credit_specification" {
+    for_each = startswith(var.trading_instance_type, "t") ? [1] : []
+
+    content {
+      cpu_credits = "standard"
+    }
+  }
+
+  monitoring = false
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = {
+    Name = "${local.name_prefix}-trading-ec2"
+    Role = "trading"
+  }
+
+  depends_on = [
+    aws_route_table_association.private_app,
+    aws_iam_role_policy_attachment.trading_managed
   ]
 }
 
@@ -100,8 +156,8 @@ resource "aws_instance" "batch" {
   monitoring = false
 
   lifecycle {
-    # A stopped instance temporarily loses its auto-assigned public IPv4
-    # association. Preserve the instance and its staging volume during resize.
+    # Preserve the historical bootstrap host until its data has been checked and
+    # a separate retirement plan is explicitly approved.
     ignore_changes = [associate_public_ip_address]
   }
 
@@ -112,6 +168,56 @@ resource "aws_instance" "batch" {
 
   depends_on = [
     aws_route_table_association.public,
+    aws_iam_role_policy_attachment.batch_managed
+  ]
+}
+
+resource "aws_instance" "compute" {
+  count = local.enable_service_stack ? 1 : 0
+
+  ami                         = data.aws_ami.ubuntu_2404.id
+  instance_type               = var.batch_instance_type
+  subnet_id                   = aws_subnet.private_app["b"].id
+  vpc_security_group_ids      = [aws_security_group.batch.id]
+  iam_instance_profile        = aws_iam_instance_profile.batch.name
+  associate_public_ip_address = false
+  source_dest_check           = true
+
+  user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
+    runtime_role   = "compute"
+    aws_region     = var.aws_region
+    parameter_path = local.parameter_path
+    log_group_name = aws_cloudwatch_log_group.compute[0].name
+  })
+  user_data_replace_on_change = true
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+    instance_metadata_tags      = "enabled"
+  }
+
+  root_block_device {
+    volume_type           = "gp3"
+    volume_size           = var.batch_root_volume_gib
+    encrypted             = true
+    delete_on_termination = true
+  }
+
+  monitoring = false
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = {
+    Name = "${local.name_prefix}-compute-ec2"
+    Role = "compute"
+  }
+
+  depends_on = [
+    aws_route_table_association.private_app,
     aws_iam_role_policy_attachment.batch_managed
   ]
 }
@@ -135,5 +241,33 @@ resource "aws_ssm_parameter" "backtest_base_url" {
 
   name  = "${local.parameter_path}/services/backtest-base-url"
   type  = "String"
-  value = "http://${aws_instance.batch.private_ip}:${var.backtest_internal_port}"
+  value = "http://compute.${var.environment}.${var.project_name}.internal:${var.backtest_internal_port}"
+}
+
+resource "aws_ssm_parameter" "trading_base_url" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name  = "${local.parameter_path}/services/trading-base-url"
+  type  = "String"
+  value = "http://trading.${var.environment}.${var.project_name}.internal:${var.trading_internal_port}"
+}
+
+resource "aws_route53_record" "trading_private" {
+  count = local.enable_service_stack ? 1 : 0
+
+  zone_id = aws_route53_zone.private[0].zone_id
+  name    = "trading.${var.environment}.${var.project_name}.internal"
+  type    = "A"
+  ttl     = 30
+  records = [aws_instance.trading[0].private_ip]
+}
+
+resource "aws_route53_record" "compute_private" {
+  count = local.enable_service_stack ? 1 : 0
+
+  zone_id = aws_route53_zone.private[0].zone_id
+  name    = "compute.${var.environment}.${var.project_name}.internal"
+  type    = "A"
+  ttl     = 30
+  records = [aws_instance.compute[0].private_ip]
 }

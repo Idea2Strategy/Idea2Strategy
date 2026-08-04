@@ -83,3 +83,84 @@ flowchart TB
 
 Until all gates pass, the attached architecture and this correction are neither
 approved nor Deploy Ready.
+
+## Recommended Development decision for approval
+
+The balanced Development choice is **three isolated runtime roles without
+production-grade multi-AZ duplication**:
+
+1. **Edge:** Route 53 -> CloudFront + a small WAF policy. The default behavior
+   serves a private, versioned frontend S3 bucket through OAC. `/api/*` and
+   `/ws/*` use a public ALB because the current application requires WebSocket
+   compatibility. The ALB accepts only the AWS CloudFront origin-facing prefix
+   list and forwards only when a distribution-specific secret header matches.
+2. **Network:** two public ALB/NAT subnets, two private application subnets and
+   two isolated database subnets across two AZs. Development uses one NAT
+   Gateway plus the free S3 Gateway Endpoint. This deliberately accepts one
+   egress-AZ dependency to avoid the cost of a second NAT Gateway; production
+   must use one NAT per AZ.
+3. **Compute:** Core, Trading and Compute remain separate because their latency,
+   failure and resource profiles differ. Each starts as one private EC2 host,
+   has no SSH/public IP, uses IMDSv2 and SSM, and is recovered in place by a
+   CloudWatch EC2 recovery alarm. This is an accepted Development availability
+   trade-off, not a production HA claim. Trading and Compute should be stopped
+   outside their test/market windows after deployment validation.
+4. **Data:** encrypted, non-public PostgreSQL 16 remains Single-AZ with deletion
+   protection, forced TLS and at least seven days of PITR. Multi-AZ and RDS Proxy
+   are intentionally deferred as excessive for Development.
+5. **Cache:** managed Valkey 8.0, cluster mode disabled for compatibility, in
+   private application subnets with TLS, at-rest encryption and an AUTH token in
+   Secrets Manager. One node is the low-cost Development default; cache loss must
+   fail closed and recover from authoritative data. Production requires an
+   approved failover topology.
+6. **Durable work:** separate SQS Standard queues and DLQs for official backtests
+   and pipeline work, SSE, long polling, explicit visibility, redrive allow
+   policy and least-privilege producer/consumer IAM. Consumers must heartbeat
+   work longer than the visibility timeout and remain idempotent. No trading
+   command FIFO queue is created until ordering semantics are approved.
+7. **Delivery:** private ECR repositories exist for every deployable process and
+   the full phase rejects mutable tags or missing image digests. Frontend builds
+   use an immutable release ID. Terraform provisions infrastructure; reviewed CI
+   publishes artifacts and SSM performs rollout/rollback.
+8. **Operations:** CloudWatch logs and alarms, SNS ownership, queue/DLQ/cache
+   alarms and a USD 300 Development budget are provisioned. Application, ALB,
+   RDS, queue and cache verification remains a mandatory post-apply gate.
+
+### Explicitly not selected
+
+- ECS/EKS migration, two NAT Gateways, Multi-AZ RDS, RDS Proxy and three
+  always-on duplicated runtime fleets are excessive for the current Development
+  load.
+- Public-IP application EC2, self-managed Redis 7.4, Redis as a durable queue,
+  direct public admin MCP access, mutable image tags and shared static AWS access
+  keys are not acceptable shortcuts.
+- ElastiCache Serverless is cheaper at its storage floor and automatically
+  Multi-AZ, but it is not selected until the current standalone Redis clients
+  pass cluster-mode and TLS/AUTH compatibility tests.
+
+### Cost envelope before an exact plan
+
+At 730 hours/month in Seoul, the conservative always-on topology is expected to
+be roughly **USD 240-270/month plus request, log and transfer variance**. The
+largest inputs are Compute `m7i-flex.large` (~USD 86), Core/Trading EC2 (~USD
+57 combined at the current sizes), one NAT Gateway and IPv4 (~USD 47 before
+data), RDS (~USD 21 including storage), ALB (~USD 16 before LCU), node-based
+Valkey (~USD 14), EBS (~USD 15), and WAF/CloudWatch/Secrets/S3/CloudFront usage.
+Stopping Trading and Compute outside a roughly 220-hour monthly window is
+expected to reduce the envelope to about **USD 165-190/month**. These are design
+inputs, not the final estimate; the exact saved plan and current pricing are
+reviewed only after approval.
+
+### Approval requested
+
+Approve this proposal only if all four choices are accepted together:
+
+- three private singleton Development runtimes with EC2 auto-recovery;
+- one NAT Gateway in Development and the documented single-AZ egress risk;
+- node-based Valkey 8.0 single-node Development cache with TLS/AUTH;
+- SQS Standard queues for backtest and pipeline work, with no unapproved trading
+  FIFO semantics.
+
+Fresh GitHub provider approval by a configured product authority is still
+required before this proposal can change protected canonical architecture or be
+used for an AWS apply.

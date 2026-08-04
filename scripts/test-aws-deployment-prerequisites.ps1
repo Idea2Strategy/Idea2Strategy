@@ -16,12 +16,19 @@ if (-not (Test-Path -LiteralPath $terraformPath -PathType Container)) {
 
 $aws = Get-Command aws -ErrorAction SilentlyContinue
 if ($null -eq $aws) {
-    throw "AWS CLI is not installed. Install AWS CLI v2, then authenticate with short-lived credentials."
+    $defaultAwsCli = Join-Path $env:ProgramFiles "Amazon\AWSCLIV2\aws.exe"
+    if (Test-Path -LiteralPath $defaultAwsCli -PathType Leaf) {
+        $awsExecutable = $defaultAwsCli
+    } else {
+        throw "AWS CLI is not installed. Install AWS CLI v2, then authenticate with short-lived credentials."
+    }
+} else {
+    $awsExecutable = $aws.Source
 }
 
 $strictErrorPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-$callerJson = & $aws.Source sts get-caller-identity --profile $AwsProfile --output json 2>$null
+$callerJson = & $awsExecutable sts get-caller-identity --profile $AwsProfile --output json 2>$null
 $callerExitCode = $LASTEXITCODE
 $ErrorActionPreference = $strictErrorPreference
 if ($callerExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($callerJson)) {
@@ -33,7 +40,7 @@ if ([string]::IsNullOrWhiteSpace([string]$caller.Account) -or [string]::IsNullOr
 }
 
 $ErrorActionPreference = "Continue"
-$configuredRegion = (& $aws.Source configure get region --profile $AwsProfile 2>$null).Trim()
+$configuredRegion = (& $awsExecutable configure get region --profile $AwsProfile 2>$null).Trim()
 $regionExitCode = $LASTEXITCODE
 $ErrorActionPreference = $strictErrorPreference
 if ($regionExitCode -ne 0) {

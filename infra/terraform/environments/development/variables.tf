@@ -10,6 +10,17 @@ variable "aws_profile" {
   default     = "idea2strategy-terraform"
 }
 
+variable "expected_aws_account_id" {
+  description = "Exact AWS account allowed for this Development stack. Required for the full phase."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.expected_aws_account_id == "" || can(regex("^[0-9]{12}$", var.expected_aws_account_id))
+    error_message = "expected_aws_account_id must be empty or an exact 12-digit AWS account ID."
+  }
+}
+
 variable "development_iam_user_names" {
   description = "IAM users who receive MFA-protected Development application access. Login profiles and passwords remain outside Terraform."
   type        = set(string)
@@ -57,13 +68,35 @@ variable "vpc_cidr" {
 }
 
 variable "public_subnet_cidrs" {
-  description = "Two public subnet CIDRs used by ALB and EC2."
+  description = "Two public subnet CIDRs used only by the ALB and managed egress."
   type        = list(string)
   default     = ["10.20.0.0/24", "10.20.1.0/24"]
 
   validation {
     condition     = length(var.public_subnet_cidrs) == 2
     error_message = "Exactly two public subnet CIDRs are required."
+  }
+}
+
+variable "private_app_subnet_cidrs" {
+  description = "Two private application subnet CIDRs used by the three runtime hosts and managed cache."
+  type        = list(string)
+  default     = ["10.20.4.0/24", "10.20.5.0/24"]
+
+  validation {
+    condition     = length(var.private_app_subnet_cidrs) == 2
+    error_message = "Exactly two private application subnet CIDRs are required."
+  }
+}
+
+variable "nat_gateway_mode" {
+  description = "Development egress topology. single minimizes cost; per_az avoids a cross-AZ egress dependency."
+  type        = string
+  default     = "single"
+
+  validation {
+    condition     = contains(["single", "per_az"], var.nat_gateway_mode)
+    error_message = "nat_gateway_mode must be single or per_az."
   }
 }
 
@@ -80,6 +113,12 @@ variable "private_db_subnet_cidrs" {
 
 variable "service_instance_type" {
   description = "Initial service EC2 measurement size."
+  type        = string
+  default     = "t3.small"
+}
+
+variable "trading_instance_type" {
+  description = "Initial market-gateway and trading-worker EC2 measurement size."
   type        = string
   default     = "t3.small"
 }
@@ -135,6 +174,24 @@ variable "backtest_internal_port" {
   default     = 8081
 }
 
+variable "trading_internal_port" {
+  description = "Private market gateway port reached only by approved application runtimes."
+  type        = number
+  default     = 8090
+}
+
+variable "frontend_domain_name" {
+  description = "Public hostname served by CloudFront."
+  type        = string
+  default     = "dev.ideatostrategy.com"
+}
+
+variable "origin_domain_name" {
+  description = "Private-to-CloudFront ALB origin hostname."
+  type        = string
+  default     = "origin.dev.ideatostrategy.com"
+}
+
 variable "domain_name" {
   description = "Authoritative domain to move to Route 53 after existing records are copied."
   type        = string
@@ -157,6 +214,36 @@ variable "enable_https" {
   description = "Enable ACM validation, HTTPS listener, and HTTP redirect after Route 53 delegation is complete."
   type        = bool
   default     = false
+}
+
+variable "cache_node_type" {
+  description = "Cost-controlled Development Valkey node type."
+  type        = string
+  default     = "cache.t4g.micro"
+}
+
+variable "cache_engine_version" {
+  description = "AWS-supported Valkey engine version."
+  type        = string
+  default     = "8.0"
+}
+
+variable "cache_automatic_failover" {
+  description = "Create a second cache node and enable automatic failover. Keep false for low-cost Development."
+  type        = bool
+  default     = false
+}
+
+variable "queue_visibility_timeout_seconds" {
+  description = "Visibility timeout for durable worker queues."
+  type        = number
+  default     = 900
+}
+
+variable "queue_max_receive_count" {
+  description = "Receive attempts before SQS moves a message to its DLQ."
+  type        = number
+  default     = 5
 }
 
 variable "rds_instance_class" {
@@ -193,4 +280,47 @@ variable "cloudwatch_log_retention_days" {
   description = "CloudWatch application and host log retention."
   type        = number
   default     = 14
+}
+
+variable "enable_waf" {
+  description = "Attach a minimal CloudFront WAF policy before public Development access."
+  type        = bool
+  default     = true
+}
+
+variable "waf_rate_limit" {
+  description = "Maximum requests from one IP in a five-minute WAF evaluation window."
+  type        = number
+  default     = 2000
+}
+
+variable "operations_alert_email" {
+  description = "Optional operations email for SNS alarms. Subscription remains pending until confirmed."
+  type        = string
+  default     = ""
+}
+
+variable "monthly_budget_usd" {
+  description = "Development monthly cost budget in USD."
+  type        = number
+  default     = 300
+}
+
+variable "container_image_digests" {
+  description = "Immutable sha256 digests keyed by every deployable runtime image. Required for the full phase."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for digest in values(var.container_image_digests) : can(regex("^sha256:[0-9a-f]{64}$", digest))
+    ])
+    error_message = "Every container image digest must use the exact sha256:<64 lowercase hex> form."
+  }
+}
+
+variable "frontend_release_id" {
+  description = "Immutable frontend build/release identifier uploaded to the private frontend bucket."
+  type        = string
+  default     = ""
 }

@@ -7,6 +7,26 @@ resource "aws_db_subnet_group" "this" {
   }
 }
 
+resource "aws_db_parameter_group" "postgres16" {
+  name        = "${local.name_prefix}-postgres16"
+  family      = "postgres16"
+  description = "Idea2Strategy Development PostgreSQL 16 security parameters"
+
+  parameter {
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "immediate"
+  }
+}
+
+resource "random_id" "rds_final_snapshot" {
+  byte_length = 4
+
+  keepers = {
+    identifier = "${local.name_prefix}-postgres"
+  }
+}
+
 resource "aws_db_instance" "this" {
   identifier = "${local.name_prefix}-postgres"
 
@@ -22,6 +42,7 @@ resource "aws_db_instance" "this" {
   publicly_accessible         = false
   db_subnet_group_name        = aws_db_subnet_group.this.name
   vpc_security_group_ids      = [aws_security_group.rds.id]
+  parameter_group_name        = aws_db_parameter_group.postgres16.name
   port                        = 5432
   db_name                     = "idea2strategy"
   username                    = "idea2strategy_admin"
@@ -33,9 +54,9 @@ resource "aws_db_instance" "this" {
 
   deletion_protection       = var.rds_deletion_protection
   skip_final_snapshot       = false
-  final_snapshot_identifier = "${local.name_prefix}-postgres-final-snapshot"
+  final_snapshot_identifier = "${local.name_prefix}-postgres-final-${random_id.rds_final_snapshot.hex}"
   copy_tags_to_snapshot     = true
-  apply_immediately         = true
+  apply_immediately         = false
 
   performance_insights_enabled = false
   monitoring_interval          = 0

@@ -54,8 +54,32 @@ resource "aws_lb_listener" "http_forward" {
   protocol          = "HTTP"
 
   default_action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Forbidden"
+      status_code  = "403"
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "http_cloudfront" {
+  count = local.enable_service_stack && !var.enable_https ? 1 : 0
+
+  listener_arn = aws_lb_listener.http_forward[0].arn
+  priority     = 10
+
+  action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.service[0].arn
+  }
+
+  condition {
+    http_header {
+      http_header_name = "X-Idea2Strategy-Origin-Verify"
+      values           = [random_password.cloudfront_origin_header[0].result]
+    }
   }
 }
 
@@ -67,12 +91,12 @@ resource "aws_lb_listener" "http_redirect" {
   protocol          = "HTTP"
 
   default_action {
-    type = "redirect"
+    type = "fixed-response"
 
-    redirect {
-      port        = "443"
-      protocol    = "HTTPS"
-      status_code = "HTTP_301"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Forbidden"
+      status_code  = "403"
     }
   }
 }
@@ -87,42 +111,6 @@ resource "aws_route53_zone" "this" {
   }
 }
 
-resource "aws_acm_certificate" "service" {
-  count = local.enable_service_stack ? 1 : 0
-
-  domain_name       = var.service_domain_name
-  validation_method = "DNS"
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "aws_route53_record" "certificate_validation" {
-  for_each = local.enable_service_stack ? {
-    for option in aws_acm_certificate.service[0].domain_validation_options :
-    option.domain_name => {
-      name   = option.resource_record_name
-      record = option.resource_record_value
-      type   = option.resource_record_type
-    }
-  } : {}
-
-  allow_overwrite = true
-  zone_id         = local.hosted_zone_id
-  name            = each.value.name
-  type            = each.value.type
-  ttl             = 60
-  records         = [each.value.record]
-}
-
-resource "aws_acm_certificate_validation" "service" {
-  count = local.enable_service_stack && var.enable_https ? 1 : 0
-
-  certificate_arn         = aws_acm_certificate.service[0].arn
-  validation_record_fqdns = [for record in aws_route53_record.certificate_validation : record.fqdn]
-}
-
 resource "aws_lb_listener" "https" {
   count = local.enable_service_stack && var.enable_https ? 1 : 0
 
@@ -130,24 +118,48 @@ resource "aws_lb_listener" "https" {
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.service[0].certificate_arn
+  certificate_arn   = aws_acm_certificate_validation.cloudfront_origin[0].certificate_arn
 
   default_action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Forbidden"
+      status_code  = "403"
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "https_cloudfront" {
+  count = local.enable_service_stack && var.enable_https ? 1 : 0
+
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = 10
+
+  action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.service[0].arn
+  }
+
+  condition {
+    http_header {
+      http_header_name = "X-Idea2Strategy-Origin-Verify"
+      values           = [random_password.cloudfront_origin_header[0].result]
+    }
   }
 }
 
 resource "aws_route53_record" "service" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_service_stack && var.enable_https ? 1 : 0
 
   zone_id = local.hosted_zone_id
-  name    = var.service_domain_name
+  name    = var.frontend_domain_name
   type    = "A"
 
   alias {
-    name                   = aws_lb.this[0].dns_name
-    zone_id                = aws_lb.this[0].zone_id
-    evaluate_target_health = true
+    name                   = aws_cloudfront_distribution.frontend[0].domain_name
+    zone_id                = aws_cloudfront_distribution.frontend[0].hosted_zone_id
+    evaluate_target_health = false
   }
 }

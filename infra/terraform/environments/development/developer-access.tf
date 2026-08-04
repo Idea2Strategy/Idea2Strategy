@@ -6,7 +6,17 @@ locals {
   ]
   development_object_arns = [for arn in local.development_bucket_arns : "${arn}/*"]
   development_ecr_repository_arns = [
-    for name in ["frontend", "backend", "batch", "backtest", "market-data-worker"] :
+    for name in [
+      "admin-mcp",
+      "backend-api",
+      "backend-batch",
+      "backend-worker",
+      "backtest-api",
+      "backtest-worker",
+      "market-gateway",
+      "pipeline-worker",
+      "trading-worker"
+    ] :
     "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${local.name_prefix}/${name}"
   ]
 }
@@ -60,12 +70,16 @@ data "aws_iam_policy_document" "development_ssm_access" {
     sid     = "StartSessionOnDevelopmentBatchInstance"
     effect  = "Allow"
     actions = ["ssm:StartSession"]
-    resources = [
+    resources = concat([
       aws_instance.batch.arn,
       "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:document/SSM-SessionManagerRunShell",
       "arn:aws:ssm:${var.aws_region}::document/AWS-StartPortForwardingSession",
       "arn:aws:ssm:${var.aws_region}::document/AWS-StartPortForwardingSessionToRemoteHost"
-    ]
+      ], local.enable_service_stack ? [
+      aws_instance.service[0].arn,
+      aws_instance.trading[0].arn,
+      aws_instance.compute[0].arn
+    ] : [])
 
     condition {
       test     = "Bool"

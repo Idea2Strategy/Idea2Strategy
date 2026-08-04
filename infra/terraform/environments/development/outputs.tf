@@ -26,7 +26,7 @@ output "alb_dns_name" {
 
 output "service_url" {
   description = "Development service URL. HTTPS becomes valid after DNS delegation and enable_https=true."
-  value       = local.enable_service_stack ? (var.enable_https ? "https://${var.service_domain_name}" : "http://${var.service_domain_name}") : null
+  value       = local.enable_service_stack ? (var.enable_https ? "https://${var.frontend_domain_name}" : "https://${aws_cloudfront_distribution.frontend[0].domain_name}") : null
 }
 
 output "route53_zone_id" {
@@ -40,8 +40,11 @@ output "route53_name_servers" {
 }
 
 output "acm_certificate_status" {
-  description = "ACM certificate ARN. Check status with AWS CLI before enabling HTTPS."
-  value       = try(aws_acm_certificate.service[0].arn, null)
+  description = "CloudFront and origin ACM certificate ARNs. Check both before enabling HTTPS."
+  value = {
+    frontend = try(aws_acm_certificate.frontend[0].arn, null)
+    origin   = try(aws_acm_certificate.cloudfront_origin[0].arn, null)
+  }
 }
 
 output "service_instance_id" {
@@ -49,9 +52,19 @@ output "service_instance_id" {
   value       = try(aws_instance.service[0].id, null)
 }
 
+output "trading_instance_id" {
+  description = "Trading EC2 ID for SSM deployment and diagnostics."
+  value       = try(aws_instance.trading[0].id, null)
+}
+
 output "batch_instance_id" {
-  description = "Batch EC2 ID for SSM Session Manager and deployment."
+  description = "Preserved historical bootstrap Batch EC2 ID. Retire only after an explicit data review."
   value       = aws_instance.batch.id
+}
+
+output "compute_instance_id" {
+  description = "Private Compute EC2 ID for backtest and pipeline deployment."
+  value       = try(aws_instance.compute[0].id, null)
 }
 
 output "batch_instance_type" {
@@ -89,6 +102,26 @@ output "market_data_bucket" {
 output "result_bucket" {
   description = "Development backtest and performance result bucket."
   value       = try(aws_s3_bucket.results[0].id, null)
+}
+
+output "frontend_bucket" {
+  description = "Private frontend artifact bucket served only through CloudFront OAC."
+  value       = try(aws_s3_bucket.frontend[0].id, null)
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution used for frontend and application ingress."
+  value       = try(aws_cloudfront_distribution.frontend[0].id, null)
+}
+
+output "queue_urls" {
+  description = "Durable worker queue URLs keyed by workflow."
+  value       = { for key, queue in aws_sqs_queue.work : key => queue.url }
+}
+
+output "cache_endpoint" {
+  description = "Private TLS-only Valkey primary endpoint."
+  value       = try(aws_elasticache_replication_group.this[0].primary_endpoint_address, null)
 }
 
 output "ecr_repository_urls" {

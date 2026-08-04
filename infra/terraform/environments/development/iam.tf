@@ -22,6 +22,13 @@ resource "aws_iam_role" "batch" {
   assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
 }
 
+resource "aws_iam_role" "trading" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name               = "${local.name_prefix}-trading-ec2-role"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+}
+
 locals {
   ec2_managed_policy_arns = toset([
     "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
@@ -41,6 +48,13 @@ resource "aws_iam_role_policy_attachment" "batch_managed" {
   for_each = local.ec2_managed_policy_arns
 
   role       = aws_iam_role.batch.name
+  policy_arn = each.value
+}
+
+resource "aws_iam_role_policy_attachment" "trading_managed" {
+  for_each = local.enable_service_stack ? local.ec2_managed_policy_arns : toset([])
+
+  role       = aws_iam_role.trading[0].name
   policy_arn = each.value
 }
 
@@ -151,6 +165,29 @@ resource "aws_iam_role_policy" "batch_workload" {
   policy = data.aws_iam_policy_document.batch_workload.json
 }
 
+data "aws_iam_policy_document" "trading_workload" {
+  count = local.enable_service_stack ? 1 : 0
+
+  statement {
+    sid    = "ReadDevelopmentParameters"
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:GetParametersByPath"
+    ]
+    resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_path}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "trading_workload" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name   = "${local.name_prefix}-trading-workload"
+  role   = aws_iam_role.trading[0].id
+  policy = data.aws_iam_policy_document.trading_workload[0].json
+}
+
 resource "aws_iam_instance_profile" "service" {
   count = local.enable_service_stack ? 1 : 0
 
@@ -163,6 +200,13 @@ resource "aws_iam_instance_profile" "batch" {
   role = aws_iam_role.batch.name
 }
 
+resource "aws_iam_instance_profile" "trading" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name = "${local.name_prefix}-trading-instance-profile"
+  role = aws_iam_role.trading[0].name
+}
+
 data "aws_iam_policy_document" "rds_secret_access" {
   statement {
     sid     = "ReadDatabaseCredentials"
@@ -170,7 +214,8 @@ data "aws_iam_policy_document" "rds_secret_access" {
     actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     resources = [
       aws_db_instance.this.master_user_secret[0].secret_arn,
-      aws_secretsmanager_secret.market_loader.arn
+      aws_secretsmanager_secret.market_loader.arn,
+      try(aws_secretsmanager_secret.cache[0].arn, aws_secretsmanager_secret.market_loader.arn)
     ]
   }
 }
@@ -187,4 +232,63 @@ resource "aws_iam_role_policy" "batch_rds_secret" {
   name   = "${local.name_prefix}-batch-rds-secret"
   role   = aws_iam_role.batch.id
   policy = data.aws_iam_policy_document.rds_secret_access.json
+}
+
+resource "aws_iam_role_policy" "trading_rds_secret" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name   = "${local.name_prefix}-trading-rds-secret"
+  role   = aws_iam_role.trading[0].id
+  policy = data.aws_iam_policy_document.rds_secret_access.json
+}
+
+data "aws_iam_policy_document" "service_queue_publish" {
+  count = local.enable_service_stack ? 1 : 0
+
+  statement {
+    sid       = "PublishDurableWork"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"]
+    resources = values(aws_sqs_queue.work)[*].arn
+  }
+}
+
+resource "aws_iam_role_policy" "service_queue_publish" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name   = "${local.name_prefix}-service-queue-publish"
+  role   = aws_iam_role.service[0].id
+  policy = data.aws_iam_policy_document.service_queue_publish[0].json
+}
+
+data "aws_iam_policy_document" "batch_queue_consume" {
+  count = local.enable_service_stack ? 1 : 0
+
+  statement {
+    sid    = "ConsumeDurableWork"
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:ChangeMessageVisibility",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl"
+    ]
+    resources = values(aws_sqs_queue.work)[*].arn
+  }
+
+  statement {
+    sid       = "PublishPoisonMessages"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = values(aws_sqs_queue.dead_letter)[*].arn
+  }
+}
+
+resource "aws_iam_role_policy" "batch_queue_consume" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name   = "${local.name_prefix}-batch-queue-consume"
+  role   = aws_iam_role.batch.id
+  policy = data.aws_iam_policy_document.batch_queue_consume[0].json
 }
