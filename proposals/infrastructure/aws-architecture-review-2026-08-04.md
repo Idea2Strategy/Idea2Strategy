@@ -14,7 +14,7 @@ does not edit `specs/**` or `contracts/**`.
 flowchart TB
   Client["User / operator"] --> R53["Route 53"] --> Edge["CloudFront + WAF"]
   Edge -->|"default + OAC"| Web["Private frontend S3"]
-  Edge -->|"/api/* and /ws/*; HTTPS + secret header"| Core["Core EC2 t4g.small\nfixed EIP, public subnet"]
+  Edge -->|"/api/* and /ws/*; HTTPS + secret header"| Core["Core EC2 t4g.medium recommended\ncurrent plan t4g.small; fixed EIP"]
 
   subgraph VPC["Development VPC — ap-northeast-2"]
     subgraph Public["Public application subnets — 2 AZ"]
@@ -66,10 +66,11 @@ strict security groups and host hardening.
 
 ## Runtime and recovery rules
 
-- Core is the only 24-hour application process. It receives webhooks, commits
-  authoritative PostgreSQL transactions, and publishes durable work through an
-  outbox. It must not continuously run batch, MCP, pipeline, backtest, or trading
-  worker JVMs.
+- Core is the only 24-hour application host. The recommended continuous units
+  are `backend-api`, the durable outbox `backend-worker`, and the result-reading
+  `backtest-api`. `backend-batch` runs only for scheduled jobs and `admin-mcp`
+  only during an authorized operator session. Pipeline, Trading, and the
+  compute-heavy Backtest worker do not run on Core.
 - Trading is On-Demand, never Spot. EventBridge Scheduler starts it at 08:00 and
   stops it at 17:00 in `America/New_York`. Startup and shutdown reconciliation
   must compare Alpaca orders/fills with PostgreSQL, preserve idempotency, and
@@ -108,11 +109,12 @@ without correction:
   container memory/GC test proves the two continuous processes and host agents
   stay within a safe `t4g.small` envelope.
 - The Backtest worker remains the approved `t4g.medium` ASG `0/0/1` with Basic
-  2, Custom 1, Competition 1, total 4. That decision does not determine where
-  the independently packaged `backtest-api` runs. Putting the API only on the
-  scale-to-zero worker would make it unavailable while the ASG is zero; putting
-  it on Core changes the Core memory and internal routing boundary. The existing
-  protected sources do not settle this placement.
+  2, Custom 1, Competition 1, total 4. The recommended placement for the
+  independently packaged `backtest-api` is Core, bound to an internal/loopback
+  route, because its durable result-read endpoints must remain available while
+  the worker ASG is zero. This recommendation increases the Core memory envelope
+  and still requires the API's production collaborator factories and auth route
+  to be implemented and verified; those are not invented by Terraform.
 - A complete rollout therefore still needs reviewed systemd/container units,
   runtime secret and database/cache/queue wiring, health checks, graceful drain,
   frontend artifact publication/invalidation, and an explicit `backtest-api`
