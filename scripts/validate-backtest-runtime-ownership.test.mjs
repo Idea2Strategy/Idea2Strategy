@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+
+const contract = readFileSync(new URL('../contracts/data/backtest-execution.v1.md', import.meta.url), 'utf8');
+const schema = readFileSync(new URL('../db/schema.dbml', import.meta.url), 'utf8');
+
+test('approved contract binds producer identity, policy, and atomic competition linkage', () => {
+  assert.match(contract, /revision: 2/);
+  assert.match(contract, /stable `runId`/);
+  assert.match(contract, /`executionPolicyVersion`/);
+  assert.match(contract, /`\(participationId, evaluationPeriodId, runId\)`/);
+  assert.match(contract, /zero rows is a stale-owner failure/);
+  assert.match(contract, /`LEASE_EXPIRED`/);
+});
+
+test('canonical DBML exposes fenced attempts and durable cancellation', () => {
+  assert.match(schema, /Enum backtest\.run_lane \{[\s\S]*BASIC[\s\S]*CUSTOM[\s\S]*COMPETITION/);
+  for (const field of [
+    'execution_policy_version', 'canonical_payload_hash', 'claim_token', 'claim_expires_at',
+    'last_heartbeat_at', 'previous_attempt_id', 'terminal_reason_code', 'cancellation_requested_at',
+  ]) assert.match(schema, new RegExp(`\\b${field}\\b`));
+  assert.match(schema, /\(participation_id, evaluation_period_id, run_id\) \[pk\]/);
+  assert.match(schema, /Ref: backtest\.run_attempts\.previous_attempt_id > backtest\.run_attempts\.id/);
+  assert.match(schema, /Table backtest\.execution_policy_versions \{[\s\S]*policy_artifact_hash[\s\S]*policy_document[\s\S]*locked_at/);
+  assert.match(schema, /Ref: backtest\.runs\.execution_policy_version > backtest\.execution_policy_versions\.version/);
+});
+
+test('canonical DBML preserves content hashes while exempting zero-object manifests', () => {
+  assert.match(schema, /dataset_hash varchar\(128\) \[not null\]/);
+  assert.match(schema, /object_count bigint \[not null, default: 0/);
+  assert.match(schema, /dataset_hash WHERE object_count > 0.*uq_dataset_manifests_dataset_hash/);
+});
+
+test('bot-wide ledger entries directly retain their transaction header', () => {
+  assert.match(schema, /Ref ledger_entry_transaction_header_fk: trading\.ledger_entries\.transaction_id > trading\.ledger_transactions\.id \[delete: restrict\]/);
+  assert.match(schema, /Table operations\.outbox_messages \{[\s\S]*event_schema_version varchar\(80\)/);
+});

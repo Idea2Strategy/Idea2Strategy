@@ -3,7 +3,7 @@ schema_version: 1
 id: contract.backtest.execution.v1
 kind: data
 status: approved
-revision: 1
+revision: 2
 refs:
   - capability.backtest.automatic
   - journey.backtest.review
@@ -36,9 +36,25 @@ strategy drafts, object bodies, credentials, or provider secrets. A request is
 accepted only after every referenced release, policy, period, and manifest is
 locked and mutually compatible.
 
+`executionPolicyVersion` is an immutable identifier from the locked Backtest
+execution-policy catalog. It is copied unchanged to the registered Run and its
+work message. Accounting, fee, scoring-template, or room-policy identifiers are
+not substitutes. Missing catalog versions or pinned artifacts fail closed
+before either a Run or an Outbox event is committed.
+
 ## 2. Idempotency and ordering
 
-The producer commits the run and outbox event in one PostgreSQL transaction.
+The Backend producer generates a stable `runId` before publication and commits
+the Run and lane-specific Outbox event in one PostgreSQL transaction. The
+Outbox payload carries that same `runId`, lane, `executionPolicyVersion`,
+producer idempotency key, canonical payload hash, and aggregate sequence. The
+consumer never creates or replaces Run identity.
+
+For a Competition period, the producer also commits the unique
+`(participationId, evaluationPeriodId, runId)` link in that transaction, before
+work is visible. Relay cannot be enabled until the Run, link, and Outbox write
+are proven atomic.
+
 The idempotency identity is scoped by lane and owner. Repeating the same key
 with the same canonical payload hash returns the existing run. Reusing it with
 different semantic input fails with a stable conflict and emits no new event.
@@ -51,10 +67,13 @@ overwrite a newer accepted state.
 ## 3. Claim, lease, heartbeat, and reclaim
 
 PostgreSQL is authoritative for execution state. Claim atomically records a
-random claim token, worker identity, attempt number, claim time, and
-`claim_expires_at` using database time. The current worker renews the claim with
-a bounded heartbeat. An expired claim is reclaimable; reclaim closes the prior
-attempt as lease-expired and issues a new token.
+random `claimToken`, `workerId`, attempt number, `claimedAt`,
+`claimExpiresAt`, and `lastHeartbeatAt` using database time. Every ownership
+mutation compares both `attemptId` and `claimToken` and must affect exactly one
+row; zero rows is a stale-owner failure. The current worker renews the claim
+with a bounded heartbeat. An expired claim is reclaimable; reclaim closes the
+prior attempt with terminal reason `LEASE_EXPIRED` and inserts the next attempt
+with `previousAttemptId` lineage in the same transaction.
 
 Only the current unexpired claim token may publish progress, checkpoint,
 success, retry, failure, or cancellation. A late worker fails closed. SQS
@@ -63,10 +82,13 @@ receipt alone never proves database ownership or completion.
 
 ## 4. Cancellation, retry, and scale-down
 
-Cancellation is persisted before its delivery is acknowledged. The worker
-checks it before execution and at bounded checkpoints. Once accepted, no
-success may be published; partial artifacts are either unreferenced and later
-collected or retained as explicitly non-result audit evidence.
+Cancellation is persisted on the Run as request time and stable reason before
+its delivery is acknowledged. The worker checks it before execution and at
+bounded checkpoints. Cancellation completion and terminal publication use
+database time and the current fenced claim. Once accepted, no success may be
+published; cancellation and success are mutually exclusive terminal outcomes.
+Partial artifacts are either unreferenced and later collected or retained as
+explicitly non-result audit evidence.
 
 Retryable failure records a stable code and schedules a policy-versioned retry.
 Permanent or exhausted failure records one terminal result and leaves the
@@ -98,6 +120,8 @@ positions, or the official trading ledger.
 - duplicate, reversed sequence, crash, visibility renewal failure, and DLQ
   handoff do not duplicate effects;
 - lease expiry permits reclaim and rejects the first worker's late completion;
+- PostgreSQL 16 races cover heartbeat versus reclaim, cancellation versus
+  checkpoint/success, duplicate claim, and duplicate terminal delivery;
 - cancellation wins against checkpoint and terminal publication races;
 - result manifest cannot become available before every object verifies;
 - worker shutdown with visible, in-flight, claimed, or unpublished work is
