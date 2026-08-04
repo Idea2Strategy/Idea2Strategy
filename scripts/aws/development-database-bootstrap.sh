@@ -14,6 +14,7 @@ archive_sha256=''
 bundle_sha256=''
 database_host=''
 database_name=''
+database_port=''
 master_secret_arn=''
 policy_seed_sql=''
 policy_seed_sha256=''
@@ -29,6 +30,7 @@ while (($#)); do
     --bundle-sha256) bundle_sha256="$2"; shift 2 ;;
     --database-host) database_host="$2"; shift 2 ;;
     --database-name) database_name="$2"; shift 2 ;;
+    --database-port) database_port="$2"; shift 2 ;;
     --master-secret-arn) master_secret_arn="$2"; shift 2 ;;
     --policy-seed-sql) policy_seed_sql="$2"; shift 2 ;;
     --policy-seed-sha256) policy_seed_sha256="$2"; shift 2 ;;
@@ -40,7 +42,7 @@ while (($#)); do
   esac
 done
 
-for required in archive archive_sha256 bundle_sha256 database_host database_name master_secret_arn policy_seed_sql policy_seed_sha256 region root_sha runtime_secret_arns_base64 work_directory; do
+for required in archive archive_sha256 bundle_sha256 database_host database_name database_port master_secret_arn policy_seed_sql policy_seed_sha256 region root_sha runtime_secret_arns_base64 work_directory; do
   test -n "${!required}" || { echo "Missing required argument: $required" >&2; exit 64; }
 done
 [[ "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]
@@ -50,6 +52,7 @@ done
 [[ "$region" == 'ap-northeast-2' ]]
 [[ "$database_host" =~ ^[A-Za-z0-9.-]+$ ]]
 [[ "$database_name" =~ ^[A-Za-z0-9_]+$ ]]
+[[ "$database_port" =~ ^[0-9]+$ ]]
 [[ "$master_secret_arn" == arn:aws:secretsmanager:* ]]
 
 mkdir -p "$work_directory"
@@ -139,7 +142,6 @@ master_json="$(aws secretsmanager get-secret-value \
   --output text)"
 master_username="$(jq -er '.username | select(length > 0)' <<<"$master_json")"
 master_password="$(jq -er '.password | select(length > 0)' <<<"$master_json")"
-database_port="$(jq -er '.port | tostring | select(test("^[0-9]+$"))' <<<"$master_json")"
 
 export FLYWAY_URL="jdbc:postgresql://${database_host}:${database_port}/${database_name}?sslmode=require"
 export FLYWAY_USER="$master_username"

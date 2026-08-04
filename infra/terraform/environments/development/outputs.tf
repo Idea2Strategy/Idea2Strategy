@@ -73,6 +73,7 @@ output "database_bootstrap" {
     artifact_bucket          = aws_s3_bucket.market_data.id
     database_host            = aws_db_instance.this.address
     database_name            = aws_db_instance.this.db_name
+    database_port            = aws_db_instance.this.port
     instance_profile_name    = aws_iam_instance_profile.database_bootstrap.name
     role_name                = aws_iam_role.database_bootstrap.name
     security_group_id        = aws_security_group.database_bootstrap.id

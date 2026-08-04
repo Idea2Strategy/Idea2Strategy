@@ -92,6 +92,7 @@ foreach ($needle in @(
     Assert-Contains ($iam + $security) $needle "Dedicated database bootstrap IAM/network boundary is missing: $needle"
 }
 Assert-Contains $outputs 'output "database_bootstrap"' "Terraform must expose a credential-free bootstrap target descriptor."
+Assert-Contains $outputs 'database_port            = aws_db_instance.this.port' "Database bootstrap must receive the exact Terraform-managed RDS port."
 
 foreach ($needle in @(
     '[switch]$Execute',
@@ -99,6 +100,7 @@ foreach ($needle in @(
     '[string]$PolicySeedSha256',
     'policy-seed.sql',
     'policy_seed_sha256',
+    '--database-port',
     'PutRolePolicy',
     'DeleteRolePolicy',
     'TerminateInstances',
