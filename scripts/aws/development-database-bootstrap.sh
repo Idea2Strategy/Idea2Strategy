@@ -68,12 +68,23 @@ aws() {
 master_json=''
 seed_role='idea2strategy_policy_seed_bootstrap'
 declare -A passwords=()
+drop_seed_role() {
+  local exists
+  exists="$(PGUSER="$master_username" PGPASSWORD="$master_password" psql -X -qAt -v ON_ERROR_STOP=1 -c \
+    "SELECT 1 FROM pg_roles WHERE rolname = '$seed_role';")"
+  if [[ "$exists" == '1' ]]; then
+    PGUSER="$master_username" PGPASSWORD="$master_password" psql -X -q -v ON_ERROR_STOP=1 <<SQL >/dev/null
+DROP OWNED BY $seed_role;
+DROP ROLE $seed_role;
+SQL
+  fi
+}
 cleanup() {
   local status=$?
   trap - EXIT
   set +e
-  if [[ -n "${PGHOST:-}" && -n "${master_username:-}" && -n "${master_password:-}" ]]; then
-    PGUSER="$master_username" PGPASSWORD="$master_password" psql -X -q -v ON_ERROR_STOP=1 -c "DROP ROLE IF EXISTS $seed_role;" >/dev/null 2>&1
+  if [[ -n "${PGHOST:-}" && -n "${PGDATABASE:-}" && -n "${master_username:-}" && -n "${master_password:-}" ]]; then
+    drop_seed_role >/dev/null 2>&1
   fi
   master_json=''
   for consumer in "${CONSUMERS[@]}"; do passwords["$consumer"]=''; done
@@ -186,15 +197,15 @@ group_count="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
 test "$group_count" = '5'
 
 seed_password="$(openssl rand -hex 32)"
+drop_seed_role
 psql -X -q -v ON_ERROR_STOP=1 <<SQL >/dev/null
-DROP ROLE IF EXISTS $seed_role;
 CREATE ROLE $seed_role LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 1 PASSWORD '$seed_password';
 GRANT CONNECT ON DATABASE "$database_name" TO $seed_role;
 GRANT USAGE ON SCHEMA trading, backtest TO $seed_role;
 GRANT SELECT, INSERT ON TABLE trading.fee_policy_versions, trading.buying_power_buffer_policy_versions, backtest.execution_policy_versions TO $seed_role;
 SQL
 PGUSER="$seed_role" PGPASSWORD="$seed_password" psql -X -q -v ON_ERROR_STOP=1 --single-transaction -f "$policy_seed_sql" >/dev/null
-PGUSER="$master_username" PGPASSWORD="$master_password" psql -X -q -v ON_ERROR_STOP=1 -c "DROP ROLE $seed_role;" >/dev/null
+drop_seed_role
 seed_password=''
 
 policy_row_counts="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
@@ -217,7 +228,8 @@ roles_sql="$work_directory/runtime-roles.sql"
     login_role="idea2strategy_${consumer}_runtime"
     password="${passwords[$consumer]}"
     printf "DO \$bootstrap\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '%s') THEN CREATE ROLE %s; END IF; END \$bootstrap\$;\n" "$login_role" "$login_role"
-    printf "ALTER ROLE %s LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1 PASSWORD '%s';\n" "$login_role" "$password"
+    printf "ALTER ROLE %s LOGIN INHERIT NOCREATEDB NOCREATEROLE CONNECTION LIMIT -1 PASSWORD '%s';\n" "$login_role" "$password"
+    printf "DO \$bootstrap\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '%s' AND (rolsuper OR rolreplication OR rolbypassrls)) THEN RAISE EXCEPTION 'runtime login role %s has forbidden privileged attributes'; END IF; END \$bootstrap\$;\n" "$login_role" "$login_role"
     printf "SELECT format('REVOKE %%I FROM %%I', granted.rolname, '%s') FROM pg_auth_members membership JOIN pg_roles granted ON granted.oid = membership.roleid JOIN pg_roles member ON member.oid = membership.member WHERE member.rolname = '%s' \\gexec\n" "$login_role" "$login_role"
     printf 'GRANT idea2strategy_%s TO %s;\n' "$consumer" "$login_role"
   done
