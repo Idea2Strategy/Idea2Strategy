@@ -100,7 +100,7 @@ if ($workflow -notmatch "(?s)Build same-origin frontend without AWS credentials.
     throw "The production frontend build must fail closed with the reviewed public OIDC inputs before pnpm build."
 }
 
-if ($workflow -notmatch "(?s)operator_oidc_issuer.*?OPERATOR_OIDC_ISSUER.*?operator_oidc_audience.*?OPERATOR_OIDC_AUDIENCE") {
+if ($workflow -notmatch "(?s)operator_auth_issuer.*?OPERATOR_OIDC_ISSUER.*?operator_auth_audience.*?OPERATOR_OIDC_AUDIENCE") {
     throw "The frontend OIDC issuer and audience must be cross-checked against the Terraform runtime inputs."
 }
 
