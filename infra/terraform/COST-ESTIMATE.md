@@ -18,16 +18,18 @@ USD 96.83 model did not include or did not run continuously:
 
 | Added or changed assumption | Approximate monthly impact | Why it mattered |
 | --- | ---: | --- |
-| NAT Gateway | +USD 43 before data processing | A NAT is billed every hour and per GB; private runtime subnets made it a fixed cost. |
-| ALB | +USD 16 before LCU | An ALB cannot be stopped, so the hourly charge remains even with no traffic. |
+| NAT Gateway | +USD 43 before data processing | A NAT was not in the USD 96.83 model. Private runtime subnets made it a new fixed cost. |
 | Always-on `m7i-flex.large` compute host | +USD 86 | The diagram grouped Backtest and Pipeline on a large x86 host instead of scaling them to zero. |
-| Separate/always-on service roles | variable, material | Core, Trading, and workers were initially interpreted as continuously running deployment units. |
-| Managed cache, logs, queues, secrets, public IPv4, transfer | +usage-dependent amount | These services were absent or only partially represented in the preliminary estimate. |
+| Separate/always-on service roles | variable, material | Trading and workers were interpreted as continuously running deployment units rather than scheduled or desired-zero units. |
+| Managed cache, logs, queues, secrets, extra public IPv4 and transfer | at least the remaining USD 14, then usage-dependent | These services were absent or only partially represented in the preliminary estimate. |
 
-Those additions alone explain roughly USD 145 of uplift (43 + 16 + 86), which
-is approximately the gap from USD 96.83 to USD 240. The USD 240 number should
-therefore be understood as an over-provisioned architecture scenario, not as a
-like-for-like revision of the original bill.
+The two dominant newly modeled fixed charges explain about USD 129 of the USD
+143.17 gap (43 + 86). The remaining roughly USD 14.17 is readily consumed by
+cache, additional runtime hours, IPv4, logging, queues, secrets, and transfer.
+The ALB's roughly USD 16 monthly charge was already included in the USD 96.83
+model, so it is part of the USD 240 total but must not be counted again as an
+increase. The USD 240 number should therefore be understood as an
+over-provisioned architecture scenario, not as a like-for-like price revision.
 
 ## Selected low-cost design
 
