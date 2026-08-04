@@ -21,6 +21,7 @@ $compute = Read-TerraformFile "compute.tf"
 $frontend = Read-TerraformFile "frontend.tf"
 $edge = Read-TerraformFile "edge.tf"
 $cache = Read-TerraformFile "cache.tf"
+$database = Read-TerraformFile "database.tf"
 $queues = Read-TerraformFile "queues.tf"
 $security = Read-TerraformFile "security.tf"
 $pipeline = Read-TerraformFile "pipeline.tf"
@@ -90,6 +91,9 @@ if ($storage.Contains('resource "aws_ecr_repository"')) {
 }
 if ($compute -notmatch '(?s)resource\s+"aws_launch_template"\s+"backtest".*?credit_specification\s*\{.*?cpu_credits\s*=\s*"standard"') {
     throw "Backtest t4g.medium must use standard CPU credits so saturation is visible without surplus-credit spend."
+}
+if ($database -notmatch '(?s)name\s*=\s*"rds\.force_ssl".*?apply_method\s*=\s*"pending-reboot"') {
+    throw "The static rds.force_ssl parameter must use pending-reboot so an applied configuration converges without perpetual drift."
 }
 foreach ($required in @(
     'BACKTEST_BASIC_QUEUE_URL',
