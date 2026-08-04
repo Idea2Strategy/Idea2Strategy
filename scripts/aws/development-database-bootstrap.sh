@@ -74,7 +74,9 @@ drop_seed_role() {
     "SELECT 1 FROM pg_roles WHERE rolname = '$seed_role';")"
   if [[ "$exists" == '1' ]]; then
     PGUSER="$master_username" PGPASSWORD="$master_password" psql -X -q -v ON_ERROR_STOP=1 <<SQL >/dev/null
-DROP OWNED BY $seed_role;
+REVOKE CONNECT ON DATABASE "$database_name" FROM $seed_role;
+REVOKE USAGE ON SCHEMA trading, backtest FROM $seed_role;
+REVOKE SELECT, INSERT ON TABLE trading.fee_policy_versions, trading.buying_power_buffer_policy_versions, backtest.execution_policy_versions FROM $seed_role;
 DROP ROLE $seed_role;
 SQL
   fi
