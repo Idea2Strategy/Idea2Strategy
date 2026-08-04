@@ -9,6 +9,7 @@ refs:
   - journey.backtest.review
   - scenario.strategy.release
   - quality.failure-safety
+  - quality.reproducibility
 ---
 
 # contract.backtest.execution.v1
