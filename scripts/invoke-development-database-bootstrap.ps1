@@ -42,6 +42,10 @@ function ConvertTo-BashLiteral([string]$Value) {
     return "'$Value'"
 }
 
+function Write-Utf8NoBomFile([string]$LiteralPath, [string]$Content) {
+    [IO.File]::WriteAllText($LiteralPath, $Content, [Text.UTF8Encoding]::new($false))
+}
+
 if ($Region -ne "ap-northeast-2") { throw "The Development database bootstrap is restricted to ap-northeast-2." }
 if ($InstanceType -notmatch '^t3\.(micro|small|medium)$') { throw "Use a bounded x86 t3 instance for the amd64-only Flyway image." }
 if ([string]::IsNullOrWhiteSpace($PolicySeedSqlPath) -or -not (Test-Path -LiteralPath $PolicySeedSqlPath -PathType Leaf)) {
@@ -193,13 +197,13 @@ try {
         )
     }
     $policyPath = Join-Path $temporaryRoot "transient-secret-policy.json"
-    $policyDocument | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $policyPath -Encoding utf8NoBOM
+    Write-Utf8NoBomFile $policyPath ($policyDocument | ConvertTo-Json -Depth 8)
     # PutRolePolicy: this exact secret policy exists only for the command window.
     $null = Invoke-AwsJson @("iam", "put-role-policy", "--role-name", [string]$target.role_name, "--policy-name", $inlinePolicyName, "--policy-document", "file://$policyPath")
     $policyAttached = $true
 
     $userDataPath = Join-Path $temporaryRoot "bootstrap-user-data.sh"
-    @'
+    $userData = @'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 set +x
@@ -209,7 +213,8 @@ apt-get update -qq
 apt-get install -y -qq docker.io jq postgresql-client python3 openssl ca-certificates
 systemctl enable --now docker
 touch /var/lib/idea2strategy-database-bootstrap-ready
-'@ | Set-Content -LiteralPath $userDataPath -Encoding utf8NoBOM
+'@
+    Write-Utf8NoBomFile $userDataPath $userData
 
     $existing = Invoke-AwsJson @("ec2", "describe-instances", "--filters", "Name=tag:Purpose,Values=idea2strategy-development-database-bootstrap", "Name=instance-state-name,Values=pending,running,stopping,stopped")
     if (@($existing.Reservations.Instances).Count -ne 0) { throw "Another database bootstrap instance is still present." }
@@ -264,7 +269,7 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         "$(ConvertTo-BashLiteral $scriptRemote) --archive $(ConvertTo-BashLiteral $archiveRemote) --archive-sha256 $(ConvertTo-BashLiteral $archiveDigest) --bundle-sha256 $(ConvertTo-BashLiteral $bundleDigest) --database-host $(ConvertTo-BashLiteral ([string]$target.database_host)) --database-name $(ConvertTo-BashLiteral ([string]$target.database_name)) --master-secret-arn $(ConvertTo-BashLiteral ([string]$target.master_secret_arn)) --policy-seed-sql $(ConvertTo-BashLiteral $policySeedRemote) --policy-seed-sha256 $(ConvertTo-BashLiteral $PolicySeedSha256) --region $(ConvertTo-BashLiteral $Region) --root-sha $(ConvertTo-BashLiteral $head) --runtime-secret-arns-base64 $(ConvertTo-BashLiteral $secretArnBase64) --work-directory $(ConvertTo-BashLiteral "$remoteRoot/work")"
     )
     $commandParametersPath = Join-Path $temporaryRoot "ssm-command-parameters.json"
-    @{ commands = $command } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $commandParametersPath -Encoding utf8NoBOM
+    Write-Utf8NoBomFile $commandParametersPath (@{ commands = $command } | ConvertTo-Json -Depth 5)
     $sent = Invoke-AwsJson @("ssm", "send-command", "--instance-ids", $instanceId, "--document-name", "AWS-RunShellScript", "--comment", "Idea2Strategy exact database bootstrap $head", "--parameters", "file://$commandParametersPath", "--timeout-seconds", "1800")
     $commandId = [string]$sent.Command.CommandId
     # AWS-RunShellScript emits only a credential-free JSON receipt on stdout.
@@ -280,7 +285,7 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         throw "Database bootstrap receipt did not match the exact release candidate."
     }
     $receiptPath = Join-Path $temporaryRoot "receipt.json"
-    $receipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receiptPath -Encoding utf8NoBOM
+    Write-Utf8NoBomFile $receiptPath ($receipt | ConvertTo-Json -Depth 8)
     $null = Invoke-AwsJson @("s3api", "put-object", "--bucket", [string]$target.artifact_bucket, "--key", $receiptKey, "--body", $receiptPath)
 
     $result = [ordered]@{

@@ -114,6 +114,10 @@ foreach ($needle in @(
 if ($orchestrator -match '(?i)Write-(Host|Output).*(password|SecretString)') {
     throw "Orchestrator must not print password or SecretString values."
 }
+Assert-Contains $orchestrator 'function Write-Utf8NoBomFile' "Orchestrator must provide a PowerShell 5.1-compatible UTF-8 no-BOM writer."
+if ($orchestrator.Contains('-Encoding utf8NoBOM')) {
+    throw "The utf8NoBOM encoding name is unavailable in Windows PowerShell 5.1."
+}
 
 foreach ($consumer in @("backend", "batch", "backtest", "trading", "pipeline")) {
     Assert-Contains $bootstrap "idea2strategy_${consumer}_runtime" "Bootstrap LOGIN role is missing for $consumer."
