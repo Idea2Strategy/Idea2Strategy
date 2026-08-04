@@ -18,6 +18,8 @@ function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
 
 $database = Read-RequiredFile "infra/terraform/environments/development/database.tf"
 $runtime = Read-RequiredFile "infra/terraform/environments/development/runtime.tf"
+$variables = Read-RequiredFile "infra/terraform/environments/development/variables.tf"
+$compute = Read-RequiredFile "infra/terraform/environments/development/compute.tf"
 $iam = Read-RequiredFile "infra/terraform/environments/development/iam.tf"
 $security = Read-RequiredFile "infra/terraform/environments/development/security.tf"
 $outputs = Read-RequiredFile "infra/terraform/environments/development/outputs.tf"
@@ -93,6 +95,9 @@ foreach ($needle in @(
 }
 Assert-Contains $outputs 'output "database_bootstrap"' "Terraform must expose a credential-free bootstrap target descriptor."
 Assert-Contains $outputs 'database_port            = aws_db_instance.this.port' "Database bootstrap must receive the exact Terraform-managed RDS port."
+Assert-Contains $variables 'variable "runtime_database_name"' "The canonical runtime database must be separate from the preserved legacy loader database."
+Assert-Contains $outputs 'database_name            = var.runtime_database_name' "Database bootstrap must target the canonical runtime database."
+Assert-Contains $compute 'database_name                               = var.runtime_database_name' "Every runtime host must target the canonical runtime database."
 
 foreach ($needle in @(
     '[switch]$Execute',
@@ -154,6 +159,8 @@ foreach ($needle in @(
     '--single-transaction',
     'policy_seed_sha256',
     'policy_versions',
+    'PGDATABASE=postgres',
+    'CREATE DATABASE',
     '177'
 )) {
     Assert-Contains $bootstrap $needle "Host bootstrap safety or verification is missing: $needle"

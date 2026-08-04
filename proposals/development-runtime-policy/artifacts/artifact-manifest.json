@@ -6,6 +6,6 @@
   "artifacts": {
     "execution-policy.json": "c65484d8d981c6631a0d03772c7e1d772f9b176ba6922f8fadbfd5dfde7370eb",
     "runtime-policy.json": "7930efefde46d2a870627189ad9ae1535f2ef1218fe46b295c7b04a2118e058b",
-    "policy-seed.sql": "090fb6a01859b6c5a1066a738fb5d548441f78c28b0902ed99c77fa7926694d2"
+    "policy-seed.sql": "8d1e0b9ed6de1a4c028f83427c9a29a64191fa96a8876c75b0fe690409ad8005"
   }
 }

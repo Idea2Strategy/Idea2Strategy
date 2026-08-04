@@ -61,6 +61,17 @@ variable "deployment_phase" {
   }
 }
 
+variable "runtime_database_name" {
+  description = "Canonical application database created additively by the reviewed bootstrap; the legacy market-loader database remains preserved."
+  type        = string
+  default     = "idea2strategy_runtime"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9_]{2,62}$", var.runtime_database_name)) && var.runtime_database_name != "idea2strategy"
+    error_message = "runtime_database_name must be a safe PostgreSQL identifier distinct from the preserved legacy idea2strategy database."
+  }
+}
+
 variable "vpc_cidr" {
   description = "Development VPC CIDR."
   type        = string

@@ -143,6 +143,20 @@ master_json="$(aws secretsmanager get-secret-value \
 master_username="$(jq -er '.username | select(length > 0)' <<<"$master_json")"
 master_password="$(jq -er '.password | select(length > 0)' <<<"$master_json")"
 
+database_exists="$(PGHOST="$database_host" PGPORT="$database_port" PGDATABASE=postgres \
+  PGUSER="$master_username" PGPASSWORD="$master_password" PGSSLMODE=require \
+  psql -X -qAt -v ON_ERROR_STOP=1 -v target_database="$database_name" \
+  -c "SELECT 1 FROM pg_database WHERE datname = :'target_database';")"
+if [[ "$database_exists" != '1' ]]; then
+  PGHOST="$database_host" PGPORT="$database_port" PGDATABASE=postgres \
+    PGUSER="$master_username" PGPASSWORD="$master_password" PGSSLMODE=require \
+    psql -X -q -v ON_ERROR_STOP=1 -v target_database="$database_name" <<'SQL' >/dev/null
+SELECT format('CREATE DATABASE %I', :'target_database')
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'target_database')
+\gexec
+SQL
+fi
+
 export FLYWAY_URL="jdbc:postgresql://${database_host}:${database_port}/${database_name}?sslmode=require"
 export FLYWAY_USER="$master_username"
 export FLYWAY_PASSWORD="$master_password"

@@ -19,7 +19,7 @@ resource "aws_instance" "service" {
     origin_header_secret_arn                    = aws_secretsmanager_secret.cloudfront_origin_header[0].arn
     backend_port                                = 8080
     database_host                               = aws_db_instance.this.address
-    database_name                               = aws_db_instance.this.db_name
+    database_name                               = var.runtime_database_name
     core_database_secret_arn                    = aws_secretsmanager_secret.runtime_database["backend"].arn
     batch_database_secret_arn                   = aws_secretsmanager_secret.runtime_database["batch"].arn
     backtest_database_secret_arn                = aws_secretsmanager_secret.runtime_database["backtest"].arn
@@ -109,7 +109,7 @@ resource "aws_instance" "trading" {
     origin_header_secret_arn                    = ""
     backend_port                                = 0
     database_host                               = aws_db_instance.this.address
-    database_name                               = aws_db_instance.this.db_name
+    database_name                               = var.runtime_database_name
     core_database_secret_arn                    = aws_secretsmanager_secret.runtime_database["backend"].arn
     batch_database_secret_arn                   = aws_secretsmanager_secret.runtime_database["batch"].arn
     backtest_database_secret_arn                = aws_secretsmanager_secret.runtime_database["backtest"].arn
@@ -206,7 +206,7 @@ resource "aws_launch_template" "backtest" {
     origin_header_secret_arn                    = ""
     backend_port                                = 0
     database_host                               = aws_db_instance.this.address
-    database_name                               = aws_db_instance.this.db_name
+    database_name                               = var.runtime_database_name
     core_database_secret_arn                    = aws_secretsmanager_secret.runtime_database["backend"].arn
     batch_database_secret_arn                   = aws_secretsmanager_secret.runtime_database["batch"].arn
     backtest_database_secret_arn                = aws_secretsmanager_secret.runtime_database["backtest"].arn
