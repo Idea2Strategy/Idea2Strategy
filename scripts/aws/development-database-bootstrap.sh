@@ -145,8 +145,10 @@ master_password="$(jq -er '.password | select(length > 0)' <<<"$master_json")"
 
 database_exists="$(PGHOST="$database_host" PGPORT="$database_port" PGDATABASE=postgres \
   PGUSER="$master_username" PGPASSWORD="$master_password" PGSSLMODE=require \
-  psql -X -qAt -v ON_ERROR_STOP=1 -v target_database="$database_name" \
-  -c "SELECT 1 FROM pg_database WHERE datname = :'target_database';")"
+  psql -X -qAt -v ON_ERROR_STOP=1 -v target_database="$database_name" <<'SQL'
+SELECT 1 FROM pg_database WHERE datname = :'target_database';
+SQL
+)"
 if [[ "$database_exists" != '1' ]]; then
   PGHOST="$database_host" PGPORT="$database_port" PGDATABASE=postgres \
     PGUSER="$master_username" PGPASSWORD="$master_password" PGSSLMODE=require \
