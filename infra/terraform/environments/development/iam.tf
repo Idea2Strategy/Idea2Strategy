@@ -22,6 +22,13 @@ resource "aws_iam_role" "batch" {
   assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
 }
 
+resource "aws_iam_role" "trading" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name               = "${local.name_prefix}-trading-ec2-role"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+}
+
 locals {
   ec2_managed_policy_arns = toset([
     "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
@@ -41,6 +48,13 @@ resource "aws_iam_role_policy_attachment" "batch_managed" {
   for_each = local.ec2_managed_policy_arns
 
   role       = aws_iam_role.batch.name
+  policy_arn = each.value
+}
+
+resource "aws_iam_role_policy_attachment" "trading_managed" {
+  for_each = local.enable_service_stack ? local.ec2_managed_policy_arns : toset([])
+
+  role       = aws_iam_role.trading[0].name
   policy_arn = each.value
 }
 
@@ -151,6 +165,47 @@ resource "aws_iam_role_policy" "batch_workload" {
   policy = data.aws_iam_policy_document.batch_workload.json
 }
 
+data "aws_iam_policy_document" "trading_workload" {
+  count = local.enable_service_stack ? 1 : 0
+
+  statement {
+    sid    = "ReadPinnedTradingArtifacts"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:ListBucket"
+    ]
+    resources = [aws_s3_bucket.market_data.arn, "${aws_s3_bucket.market_data.arn}/*"]
+  }
+
+  statement {
+    sid    = "ReadDevelopmentParameters"
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:GetParametersByPath"
+    ]
+    resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_path}/*"]
+  }
+
+  statement {
+    sid       = "ReadAlpacaDataFeedCredentials"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [data.aws_secretsmanager_secret.alpaca_api_key[0].arn, data.aws_secretsmanager_secret.alpaca_secret_key[0].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "trading_workload" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name   = "${local.name_prefix}-trading-workload"
+  role   = aws_iam_role.trading[0].id
+  policy = data.aws_iam_policy_document.trading_workload[0].json
+}
+
 resource "aws_iam_instance_profile" "service" {
   count = local.enable_service_stack ? 1 : 0
 
@@ -163,28 +218,202 @@ resource "aws_iam_instance_profile" "batch" {
   role = aws_iam_role.batch.name
 }
 
+resource "aws_iam_instance_profile" "trading" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name = "${local.name_prefix}-trading-instance-profile"
+  role = aws_iam_role.trading[0].name
+}
+
 data "aws_iam_policy_document" "rds_secret_access" {
   statement {
-    sid     = "ReadDatabaseCredentials"
-    effect  = "Allow"
+    sid       = "ReadMarketLoaderCredentials"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [aws_secretsmanager_secret.market_loader.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "batch_loader_secret" {
+  count  = local.enable_service_stack ? 0 : 1
+  name   = "${local.name_prefix}-batch-loader-secret"
+  role   = aws_iam_role.batch.id
+  policy = data.aws_iam_policy_document.rds_secret_access.json
+}
+
+data "aws_iam_policy_document" "service_runtime_secrets" {
+  count = local.enable_service_stack ? 1 : 0
+  statement {
     actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     resources = [
-      aws_db_instance.this.master_user_secret[0].secret_arn,
-      aws_secretsmanager_secret.market_loader.arn
+      data.aws_secretsmanager_secret.runtime_database["backend"].arn,
+      data.aws_secretsmanager_secret.runtime_database["batch"].arn,
+      data.aws_secretsmanager_secret.runtime_database["backtest"].arn,
+      aws_secretsmanager_secret.core_internal[0].arn,
+      aws_secretsmanager_secret.backtest_internal[0].arn
     ]
   }
 }
 
-resource "aws_iam_role_policy" "service_rds_secret" {
-  count = local.enable_service_stack ? 1 : 0
-
-  name   = "${local.name_prefix}-service-rds-secret"
+resource "aws_iam_role_policy" "service_runtime_secrets" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-service-runtime-secrets"
   role   = aws_iam_role.service[0].id
-  policy = data.aws_iam_policy_document.rds_secret_access.json
+  policy = data.aws_iam_policy_document.service_runtime_secrets[0].json
 }
 
-resource "aws_iam_role_policy" "batch_rds_secret" {
-  name   = "${local.name_prefix}-batch-rds-secret"
+data "aws_iam_policy_document" "batch_runtime_secrets" {
+  count = local.enable_service_stack ? 1 : 0
+  statement {
+    actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [
+      data.aws_secretsmanager_secret.runtime_database["backtest"].arn,
+      aws_secretsmanager_secret.backtest_internal[0].arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "batch_runtime_secrets" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-batch-runtime-secrets"
   role   = aws_iam_role.batch.id
-  policy = data.aws_iam_policy_document.rds_secret_access.json
+  policy = data.aws_iam_policy_document.batch_runtime_secrets[0].json
+}
+
+data "aws_iam_policy_document" "trading_database_secret" {
+  count = local.enable_service_stack ? 1 : 0
+  statement {
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [data.aws_secretsmanager_secret.runtime_database["trading"].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "trading_database_secret" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-trading-database-secret"
+  role   = aws_iam_role.trading[0].id
+  policy = data.aws_iam_policy_document.trading_database_secret[0].json
+}
+
+data "aws_iam_policy_document" "service_queue_publish" {
+  count = local.enable_service_stack ? 1 : 0
+
+  statement {
+    sid     = "PublishDurableWork"
+    effect  = "Allow"
+    actions = ["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"]
+    resources = concat(
+      values(aws_sqs_queue.backtest)[*].arn,
+      [
+        aws_sqs_queue.corporate_action_approval[0].arn,
+        aws_sqs_queue.room_ledger_opened[0].arn,
+        aws_sqs_queue.room_ledger_open_rejected[0].arn
+      ]
+    )
+  }
+}
+
+data "aws_iam_policy_document" "service_queue_consume" {
+  count = local.enable_service_stack ? 1 : 0
+
+  statement {
+    sid    = "ConsumeRoomLedgerResults"
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:ChangeMessageVisibility",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl"
+    ]
+    resources = [
+      aws_sqs_queue.room_ledger_opened[0].arn,
+      aws_sqs_queue.room_ledger_open_rejected[0].arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "service_queue_consume" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-service-queue-consume"
+  role   = aws_iam_role.service[0].id
+  policy = data.aws_iam_policy_document.service_queue_consume[0].json
+}
+
+resource "aws_iam_role_policy" "service_queue_publish" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name   = "${local.name_prefix}-service-queue-publish"
+  role   = aws_iam_role.service[0].id
+  policy = data.aws_iam_policy_document.service_queue_publish[0].json
+}
+
+data "aws_iam_policy_document" "batch_queue_consume" {
+  count = local.enable_service_stack ? 1 : 0
+
+  statement {
+    sid    = "ConsumeDurableWork"
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:ChangeMessageVisibility",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl"
+    ]
+    resources = values(aws_sqs_queue.backtest)[*].arn
+  }
+
+  statement {
+    sid       = "PublishPoisonMessages"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = values(aws_sqs_queue.backtest_dlq)[*].arn
+  }
+
+  statement {
+    sid       = "ScaleDownOnlyThisBacktestGroup"
+    effect    = "Allow"
+    actions   = ["autoscaling:SetDesiredCapacity"]
+    resources = [aws_autoscaling_group.backtest[0].arn]
+  }
+
+
+  statement {
+    sid       = "ReadAlpacaHistoricalDataCredentials"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [data.aws_secretsmanager_secret.alpaca_api_key[0].arn, data.aws_secretsmanager_secret.alpaca_secret_key[0].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "batch_queue_consume" {
+  count = local.enable_service_stack ? 1 : 0
+
+  name   = "${local.name_prefix}-batch-queue-consume"
+  role   = aws_iam_role.batch.id
+  policy = data.aws_iam_policy_document.batch_queue_consume[0].json
+}
+
+data "aws_iam_policy_document" "service_origin_tls" {
+  count = local.enable_service_stack ? 1 : 0
+  statement {
+    actions   = ["route53:ChangeResourceRecordSets", "route53:GetChange"]
+    resources = ["arn:aws:route53:::hostedzone/${local.hosted_zone_id}", "arn:aws:route53:::change/*"]
+  }
+  statement {
+    actions   = ["route53:ListHostedZones", "route53:ListHostedZonesByName"]
+    resources = ["*"]
+  }
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.cloudfront_origin_header[0].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "service_origin_tls" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-service-origin-tls"
+  role   = aws_iam_role.service[0].id
+  policy = data.aws_iam_policy_document.service_origin_tls[0].json
 }

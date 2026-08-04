@@ -1,24 +1,81 @@
 aws_region  = "ap-northeast-2"
 aws_profile = "idea2strategy-terraform"
+expected_aws_account_id = "__AWS_ACCOUNT_ID__"
 
-# Create only the resources needed to load historical market data.
+# Use dns_foundation first, apply only its reviewed plan, copy all DNS records,
+# delegate at Gabia, and verify public NS before changing this to full.
 deployment_phase = "market_data_bootstrap"
 
-service_instance_type = "t3.small"
-batch_instance_type   = "m7i-flex.large"
+service_instance_type  = "t4g.medium"
+trading_instance_type  = "c7g.xlarge"
+backtest_instance_type = "t4g.medium"
 
 service_root_volume_gib = 30
-batch_root_volume_gib   = 100
-batch_swap_gib          = 4
+trading_root_volume_gib = 20
+backtest_root_volume_gib = 40
 
 # A new Route 53 Hosted Zone is created while this is empty.
 # Do not change Gabia nameservers until existing DNS records are copied and reviewed.
 existing_hosted_zone_id = ""
+dns_delegation_verified = false
+
+# The public application uses the apex. The separate origin hostname is a
+# technical CloudFront-to-Core endpoint and is not a user-facing environment URL.
+frontend_domain_name = "ideatostrategy.com"
+origin_domain_name   = "origin.ideatostrategy.com"
 
 # Set true only after Route 53 delegation completes and the ACM certificate is issued.
 enable_https = false
+monthly_budget_usd = 180
+alpaca_api_key_secret_name    = "idea2strategy-dev/backtest/alpaca"
+alpaca_secret_key_secret_name = "idea2strategy-dev/backtest/alpaca-secret"
 
 rds_instance_class       = "db.t4g.micro"
 rds_max_allocated_storage_gib = 0 # Disable autoscaling while the account is on Free Plan.
 rds_backup_retention_days     = 1 # Raise to 7 after switching to Paid Plan.
 rds_deletion_protection       = true
+
+# Full-phase release inputs. Replace every digest with the exact ECR digest
+# produced by the reviewed CI build; Terraform rejects mutable tags.
+frontend_release_id = ""
+container_image_digests = {}
+
+# Full phase database secret metadata. Populate their JSON values with the
+# reviewed one-shot database bootstrap; never place passwords in this file.
+runtime_database_secret_names = {
+  backend  = "idea2strategy-dev/database/backend-runtime"
+  batch    = "idea2strategy-dev/database/batch-runtime"
+  backtest = "idea2strategy-dev/database/backtest-runtime"
+  trading  = "idea2strategy-dev/database/trading-runtime"
+  pipeline = "idea2strategy-dev/database/pipeline-runtime"
+}
+
+# Set true only for an exact Backend commit whose three-lane Outbox relay tests passed.
+enable_backtest_outbox_relay = false
+
+# Dedicated operator OIDC trust. Use the exact reviewed provider values and an
+# access token that contains one exact aud plus auth_time and an approved MFA
+# acr/amr claim. Amazon Cognito's default token shape does not supply amr/acr;
+# do not substitute a customer login or mark MFA optional.
+operator_auth_issuer             = ""
+operator_auth_jwk_set_uri        = ""
+operator_auth_audience           = ""
+operator_auth_allowed_acr_values = []
+operator_auth_allowed_amr_values = []
+
+# These must match the immutable catalog installed by the reviewed one-shot
+# operator bootstrap receipt. They are identifiers, not secrets.
+operator_rbac_catalog_version                 = ""
+operator_rbac_catalog_read_permission_id      = ""
+operator_rbac_assignment_read_permission_id   = ""
+
+# Full phase also requires checksum- and S3-version-pinned runtime inputs.
+# backtest_policy_artifacts = {
+#   execution-policy = { key = "runtime/backtest/execution-policy.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__" }
+#   runtime-policy   = { key = "runtime/backtest/runtime-policy.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__" }
+# }
+# trading_runtime_artifacts = {
+#   instrument-mapping = { runtime = "market-gateway", key = "runtime/trading/instruments.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__", local_path = "instruments.json" }
+#   provider-rights    = { runtime = "market-gateway", key = "runtime/trading/alpaca-sip-rights.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__", local_path = "alpaca-sip-rights.json" }
+#   warmup-manifest    = { runtime = "trading-worker", key = "runtime/trading/warmup/manifest.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__", local_path = "warmup/manifest.json" }
+# }

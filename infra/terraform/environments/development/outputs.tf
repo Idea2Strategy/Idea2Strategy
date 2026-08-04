@@ -10,7 +10,7 @@ output "vpc_id" {
 }
 
 output "public_subnet_ids" {
-  description = "Public subnets used by ALB and EC2."
+  description = "Public application subnets used by egress-only runtimes and the CloudFront-restricted Core origin."
   value       = values(aws_subnet.public)[*].id
 }
 
@@ -19,29 +19,26 @@ output "private_db_subnet_ids" {
   value       = values(aws_subnet.private_db)[*].id
 }
 
-output "alb_dns_name" {
-  description = "Development ALB DNS name."
-  value       = try(aws_lb.this[0].dns_name, null)
-}
-
 output "service_url" {
   description = "Development service URL. HTTPS becomes valid after DNS delegation and enable_https=true."
-  value       = local.enable_service_stack ? (var.enable_https ? "https://${var.service_domain_name}" : "http://${var.service_domain_name}") : null
+  value       = local.enable_service_stack ? (var.enable_https ? "https://${var.frontend_domain_name}" : "https://${aws_cloudfront_distribution.frontend[0].domain_name}") : null
 }
 
 output "route53_zone_id" {
   description = "Hosted Zone used for ideatostrategy.com."
-  value       = local.enable_service_stack ? local.hosted_zone_id : null
+  value       = local.enable_dns_foundation ? local.hosted_zone_id : null
 }
 
 output "route53_name_servers" {
   description = "Copy and verify all existing DNS records before setting these at Gabia."
-  value       = local.enable_service_stack && var.existing_hosted_zone_id == "" ? aws_route53_zone.this[0].name_servers : []
+  value       = local.enable_dns_foundation && var.existing_hosted_zone_id == "" ? aws_route53_zone.this[0].name_servers : []
 }
 
 output "acm_certificate_status" {
-  description = "ACM certificate ARN. Check status with AWS CLI before enabling HTTPS."
-  value       = try(aws_acm_certificate.service[0].arn, null)
+  description = "CloudFront viewer ACM certificate ARN. The Core origin uses automated DNS-01 ACME on-host."
+  value = {
+    frontend = try(aws_acm_certificate.frontend[0].arn, null)
+  }
 }
 
 output "service_instance_id" {
@@ -49,19 +46,14 @@ output "service_instance_id" {
   value       = try(aws_instance.service[0].id, null)
 }
 
-output "batch_instance_id" {
-  description = "Batch EC2 ID for SSM Session Manager and deployment."
-  value       = aws_instance.batch.id
+output "trading_instance_id" {
+  description = "Trading EC2 ID for SSM deployment and diagnostics."
+  value       = try(aws_instance.trading[0].id, null)
 }
 
-output "batch_instance_type" {
-  description = "Applied batch EC2 instance type."
-  value       = aws_instance.batch.instance_type
-}
-
-output "batch_root_volume_gib" {
-  description = "Applied batch EC2 root volume size in GiB."
-  value       = aws_instance.batch.root_block_device[0].volume_size
+output "backtest_autoscaling_group" {
+  description = "Scale-to-zero Backtest worker Auto Scaling Group."
+  value       = try(aws_autoscaling_group.backtest[0].name, null)
 }
 
 output "rds_endpoint" {
@@ -91,7 +83,51 @@ output "result_bucket" {
   value       = try(aws_s3_bucket.results[0].id, null)
 }
 
+output "frontend_bucket" {
+  description = "Private versioned frontend artifact bucket. It is created during dns_foundation so an immutable release can be uploaded before the full saved plan."
+  value       = try(aws_s3_bucket.frontend[0].id, null)
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution used for frontend and application ingress."
+  value       = try(aws_cloudfront_distribution.frontend[0].id, null)
+}
+
+output "queue_urls" {
+  description = "Durable runtime queue URLs keyed by workload."
+  value = merge(
+    { for key, queue in aws_sqs_queue.backtest : "backtest-${key}" => queue.url },
+    local.enable_service_stack ? {
+      corporate-action-approval = aws_sqs_queue.corporate_action_approval[0].url
+      room-ledger-opened        = aws_sqs_queue.room_ledger_opened[0].url
+      room-ledger-open-rejected = aws_sqs_queue.room_ledger_open_rejected[0].url
+    } : {}
+  )
+}
+
+output "queue_dlq_urls" {
+  description = "Durable runtime dead-letter queue URLs keyed by workload."
+  value = merge(
+    { for key, queue in aws_sqs_queue.backtest_dlq : "backtest-${key}" => queue.url },
+    local.enable_service_stack ? {
+      corporate-action-approval = aws_sqs_queue.corporate_action_approval_dlq[0].url
+      room-ledger-opened        = aws_sqs_queue.room_ledger_opened_dlq[0].url
+      room-ledger-open-rejected = aws_sqs_queue.room_ledger_open_rejected_dlq[0].url
+    } : {}
+  )
+}
+
+output "cache_endpoint" {
+  description = "Private TLS-only Valkey Serverless endpoint."
+  value       = try(aws_elasticache_serverless_cache.this[0].endpoint[0].address, null)
+}
+
+output "core_elastic_ip" {
+  description = "Fixed Core origin IPv4 address. Inbound is restricted to the CloudFront origin-facing prefix list."
+  value       = try(aws_eip.service[0].public_ip, null)
+}
+
 output "ecr_repository_urls" {
   description = "ECR repository URLs keyed by deployable component."
-  value       = { for name, repository in aws_ecr_repository.this : name => repository.repository_url }
+  value       = { for name, repository in data.aws_ecr_repository.this : name => repository.repository_url }
 }

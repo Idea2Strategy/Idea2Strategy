@@ -16,6 +16,7 @@
     "dbml:validate:backtest-performance-proposal": "node scripts/validate-backtest-performance-dbml.mjs proposals/dbml-redesign/schema.draft.dbml",
     "proposal:validate:boundary": "node scripts/validate-proposal-boundary.mjs origin/develop",
     "proposal:validate:corporate-action-approval": "node --test proposals/corporate-action-approval/validate-contract.test.mjs",
+    "contract:validate:corporate-action-approval": "node --test scripts/validate-corporate-action-approval-canonical.test.mjs",
     "dbdiagram": "dbdiagram"
   },
   "devDependencies": {

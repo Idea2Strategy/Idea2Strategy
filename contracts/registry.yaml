@@ -155,3 +155,96 @@ contracts:
       - scenario.account.sanction
       - capability.audit.evidence
     fingerprint: sha256:32b2a4918f823b21e76f9b362f1e186b4c78d5bc5f7ed0527fa208f834c74596
+  - id: contract.operations.corporate-action-approval.v1
+    kind: data
+    status: approved
+    revision: 1
+    source: data/corporate-action-approval.v1.md
+    compatibility: additive
+    providers: [workspace.root, workspace.backend]
+    consumers: [workspace.backend, workspace.data-pipeline]
+    product_ids:
+      - role.operator
+      - journey.operator.administer
+      - capability.audit.evidence
+      - policy.legal.block-uncertain
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - role.operator
+      - journey.operator.administer
+      - capability.audit.evidence
+      - policy.legal.block-uncertain
+      - contract.operations.operator-trust.v1
+      - contract.operations.outbox-delivery.v1
+      - quality.failure-safety
+    fingerprint: sha256:9e3564980423cf602823d3221bb1abb8beb096cbabf557c044e8c77f15b44a13
+  - id: contract.backtest.execution.v1
+    kind: data
+    status: approved
+    revision: 2
+    source: data/backtest-execution.v1.md
+    compatibility: additive
+    providers: [workspace.root, workspace.backend]
+    consumers: [workspace.backend, workspace.backtest-engine]
+    product_ids:
+      - capability.backtest.automatic
+      - journey.backtest.review
+    scenario_ids: [scenario.strategy.release]
+    data_ids: []
+    ui_ids: [ui.backtest.results]
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - capability.backtest.automatic
+      - journey.backtest.review
+      - scenario.strategy.release
+      - ui.backtest.results
+      - quality.failure-safety
+    fingerprint: sha256:068cc5203b616d0b1db78f4eaa16ade3cc6a00ef805cf894fc00dc1ec3e0c144
+  - id: contract.market-data.publication.v1
+    kind: data
+    status: approved
+    revision: 1
+    source: data/market-data-publication.v1.md
+    compatibility: additive
+    providers: [workspace.root, workspace.data-pipeline]
+    consumers: [workspace.backtest-engine, workspace.trading-engine]
+    product_ids: []
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - technology.need.market-data
+      - technology.need.object-storage
+      - quality.failure-safety
+    fingerprint: sha256:b6adb283fe109e071a47332c80565ceb85f35d8d6024adea25c74ff071cd6237
+  - id: contract.trading.virtual-execution.v1
+    kind: business
+    status: approved
+    revision: 3
+    source: business/virtual-trading-scope.v1.md
+    compatibility: additive
+    providers: [workspace.root]
+    consumers: [workspace.backend, workspace.trading-engine]
+    product_ids:
+      - policy.user.no-direct-orders
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - policy.user.no-direct-orders
+      - quality.failure-safety
+      - contract.operations.outbox-delivery.v1
+    fingerprint: sha256:9aab46814209a012c89c71cbe4c104d28984f6cfe04c8f6a97b93f034ec32425

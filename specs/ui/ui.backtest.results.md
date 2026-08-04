@@ -3,7 +3,7 @@ schema_version: 1
 id: ui.backtest.results
 kind: ui
 status: approved
-revision: 1
+revision: 2
 refs:
     - role.strategy-author
     - journey.backtest.review
@@ -11,4 +11,4 @@ refs:
 
 # ui.backtest.results
 
-Required states: queued, running, complete, failed, unavailable
+Required states: loading, empty, queued, running, cancelling, cancelled, complete, failed, unavailable, forbidden. Automatic, user-selected period, and eligible competition results are visibly distinguished; the UI never fabricates a successful result while an API, manifest, or permission check is unavailable.

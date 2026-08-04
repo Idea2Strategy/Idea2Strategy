@@ -345,7 +345,14 @@ Enum backtest.run_status {
   RUNNING
   COMPLETED
   FAILED
+  CANCELLED
   UNAVAILABLE
+}
+
+Enum backtest.run_lane {
+  BASIC
+  CUSTOM
+  COMPETITION
 }
 
 Enum performance.snapshot_type {
@@ -1777,6 +1784,7 @@ Table market_data.dataset_manifests {
   period_end timestamptz [not null]
   schema_version varchar(40) [not null]
   dataset_hash varchar(128) [not null]
+  object_count bigint [not null, default: 0, note: '현재 등록된 content object 수. 중앙 Flyway가 트랜잭션으로 유지하며 zero-object manifest는 content-hash uniqueness에서 제외한다.']
   supersedes_manifest_id uuid
   created_at timestamptz [not null, default: `now()`]
   available_at timestamptz
@@ -1784,10 +1792,14 @@ Table market_data.dataset_manifests {
   indexes {
     (feed_id, instrument_id, data_layer, resolution, period_start, revision_number) [unique]
     (status, period_start, period_end)
-    (dataset_hash) [unique]
+    `dataset_hash WHERE object_count > 0` [unique, name: 'uq_dataset_manifests_dataset_hash']
   }
 
-  Note: '다중 종목 데이터셋의 null-safe 유일성은 마이그레이션에서 강제해야 한다.'
+  checks {
+    `object_count >= 0` [name: 'dataset_manifest_object_count_nonnegative']
+  }
+
+  Note: 'dataset_hash는 object content set의 hash 의미를 유지한다. 객체가 없는 QUARANTINED manifest는 같은 빈 content hash를 가질 수 있고, 객체가 하나 이상인 manifest만 동일 content hash가 금지된다. 다중 종목 데이터셋의 null-safe 유일성과 object_count 유지 trigger는 중앙 마이그레이션에서 강제한다.'
 
   Records (id, feed_id, instrument_id, data_layer, resolution, revision_number, status, period_start, period_end, schema_version, dataset_hash, supersedes_manifest_id, created_at, available_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'REVIEW_EXAMPLE', '1m', 1, 'AVAILABLE', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '1.0.0', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '00000000-0000-4000-8000-000000000001', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
@@ -3506,37 +3518,66 @@ Table trading.partition_budget_projections {
 // backtest: repeatable whole-bot runs, independent from live runtime.
 // -----------------------------------------------------------------------------
 
+Table backtest.execution_policy_versions {
+  version varchar(80) [pk]
+  policy_artifact_hash varchar(128) [not null, unique]
+  policy_document jsonb [not null]
+  locked_at timestamptz [not null]
+  retired_at timestamptz
+
+  checks {
+    `retired_at IS NULL OR retired_at >= locked_at` [name: 'backtest_execution_policy_retirement_after_lock']
+  }
+
+  Note: 'A backtest run may reference only an explicitly selected immutable execution-policy version. There is no default or fallback policy; changing behavior requires a new locked catalog row.'
+}
+
 Table backtest.runs {
   id uuid [pk, default: `gen_random_uuid()`]
+  lane backtest.run_lane [not null]
+  message_id uuid [not null, unique]
   bot_id uuid [not null]
   owner_account_id uuid
   owner_anonymized_at timestamptz
   configuration_hash varchar(128) [not null]
+  canonical_payload_hash varchar(128) [not null]
+  aggregate_sequence bigint [not null]
   status backtest.run_status [not null]
   evaluation_start date [not null]
   evaluation_end date [not null]
   initial_cash_amount numeric(24,8) [not null]
   market_rules_version varchar(80) [not null]
   accounting_rules_version varchar(80) [not null]
+  execution_policy_version varchar(80) [not null]
   precision_rules_version varchar(80) [not null]
   fee_policy_id uuid [not null]
   slippage_rate_bps int [not null]
   buying_power_buffer_policy_id uuid [not null]
-  idempotency_key varchar(160) [not null, unique]
+  idempotency_scope varchar(160) [not null]
+  idempotency_key varchar(160) [not null]
   queued_at timestamptz [not null]
   started_at timestamptz
   completed_at timestamptz
   failure_code varchar(80)
   result_hash varchar(128)
+  cancellation_requested_at timestamptz
+  cancellation_reason_code varchar(80)
+  cancelled_at timestamptz
 
   indexes {
     (bot_id, queued_at)
     (status, queued_at)
     (owner_account_id, queued_at)
+    (lane, idempotency_scope, idempotency_key) [unique]
+    (execution_policy_version, queued_at)
   }
 
   checks {
     `(owner_account_id IS NOT NULL AND owner_anonymized_at IS NULL) OR (owner_account_id IS NULL AND owner_anonymized_at IS NOT NULL)` [name: 'backtest_owner_or_anonymized_evidence']
+    `aggregate_sequence >= 1` [name: 'backtest_aggregate_sequence_positive']
+    `(cancellation_requested_at IS NULL AND cancellation_reason_code IS NULL AND cancelled_at IS NULL) OR (cancellation_requested_at IS NOT NULL AND cancellation_reason_code IS NOT NULL AND (cancelled_at IS NULL OR cancelled_at >= cancellation_requested_at))` [name: 'backtest_cancellation_state_consistent']
+    `status <> 'CANCELLED' OR cancelled_at IS NOT NULL` [name: 'backtest_cancelled_run_has_time']
+    `status <> 'COMPLETED' OR (cancelled_at IS NULL AND cancellation_requested_at IS NULL)` [name: 'backtest_success_not_cancelled']
   }
 
   Note: '봇 생성 트랜잭션에서 최초 자동 백테스트 한 건을 원자적으로 생성하고, 이후 같은 봇에 사용자가 선택한 기간 또는 공식 BACKTEST 대회의 잠긴 기간마다 실행을 추가할 수 있다. 대회 실행 소유권은 backtest.runs에 nullable competition 컬럼을 섞지 않고 competition.backtest_period_runs가 관리한다. COMPETITION_RESULT_EVIDENCE로 보존하는 공식 대회 실행은 참가자 비식별화와 같은 트랜잭션에서 owner_account_id를 제거하고 owner_anonymized_at을 기록한다. 각 실행은 configuration_hash, 평가 기간, 초기 자금과 정책 버전을 독립적으로 고정하며 idempotency_key는 동일 요청의 중복 생성만 막는다. 백테스트 지연·실패는 라이브 봇 생명주기와 원장을 절대 바꾸지 않는다.'
@@ -3555,12 +3596,28 @@ Table backtest.run_attempts {
   attempt_number int [not null]
   worker_execution_key varchar(160) [not null, unique]
   status operations.work_status [not null]
+  claim_token uuid
+  worker_id varchar(160)
+  claimed_at timestamptz
+  claim_expires_at timestamptz
+  last_heartbeat_at timestamptz
+  previous_attempt_id uuid
+  terminal_reason_code varchar(80)
   started_at timestamptz [not null]
   completed_at timestamptz
   failure_code varchar(80)
 
   indexes {
     (run_id, attempt_number) [unique]
+    (claim_token) [unique]
+    (run_id, claim_expires_at)
+  }
+
+  checks {
+    `(claim_token IS NULL AND worker_id IS NULL AND claimed_at IS NULL AND claim_expires_at IS NULL AND last_heartbeat_at IS NULL) OR (claim_token IS NOT NULL AND worker_id IS NOT NULL AND claimed_at IS NOT NULL AND claim_expires_at IS NOT NULL AND last_heartbeat_at IS NOT NULL)` [name: 'backtest_attempt_claim_fields_together']
+    `status <> 'RUNNING' OR claim_expires_at > GREATEST(claimed_at, last_heartbeat_at)` [name: 'backtest_running_attempt_claim_expiry_after_activity']
+    `status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED') OR (completed_at IS NOT NULL AND terminal_reason_code IS NOT NULL)` [name: 'backtest_terminal_attempt_has_completion']
+    `terminal_reason_code IS NULL OR status IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED')` [name: 'backtest_attempt_terminal_reason_only_terminal']
   }
 
   Note: '백테스트 실행 시도 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
@@ -4144,7 +4201,8 @@ Table competition.backtest_period_runs {
   locked_result_hash varchar(128)
 
   indexes {
-    (participation_id, evaluation_period_id) [pk]
+    (participation_id, evaluation_period_id, run_id) [pk]
+    (participation_id, evaluation_period_id) [unique]
     (run_id) [unique]
   }
 
@@ -4201,9 +4259,9 @@ Table competition.live_evaluation_segments {
   segment_type varchar(40) [not null]
   starts_at timestamptz [not null]
   ends_at timestamptz [not null]
-  start_event_sequence bigint [not null]
+  start_event_sequence bigint
   end_event_sequence bigint
-  initial_state_hash varchar(128) [not null]
+  initial_state_hash varchar(128)
   final_state_hash varchar(128)
   source_set_hash varchar(128)
   virtual_liquidation_document jsonb
@@ -4213,7 +4271,12 @@ Table competition.live_evaluation_segments {
     (participation_id, starts_at) [unique]
   }
 
-  Note: 'LIVE_PAPER Participation에만 존재하는 공식 평가 구간. 가상 청산은 채점 전용 증거이며 라이브 체결·예약·원장 분개를 생성하지 않는다. Participation의 Room 유형은 deferred trigger가 검증한다.'
+  checks {
+    `(start_event_sequence IS NULL AND initial_state_hash IS NULL) OR (start_event_sequence IS NOT NULL AND initial_state_hash IS NOT NULL)` [name: 'live_evaluation_segment_ledger_evidence_pair']
+    `start_event_sequence IS NULL OR start_event_sequence > 0` [name: 'live_evaluation_segment_start_sequence_positive']
+  }
+
+  Note: 'LIVE_PAPER Participation의 공식 평가 구간. PENDING_LEDGER 동안만 start_event_sequence와 initial_state_hash가 함께 null일 수 있고 Trading OPENED 결과가 두 값을 한 번만 채운 뒤 EVALUATING 전이를 허용한다. Pair 완전성, 양수 sequence, 설정 후 불변성과 Participation 상태 경계는 중앙 Flyway deferred trigger가 강제한다. 가상 청산은 채점 전용 증거이며 라이브 체결·예약·원장 분개를 생성하지 않는다.'
 }
 
 Table competition.leaderboard_snapshots {
@@ -4451,7 +4514,7 @@ Table operations.outbox_messages {
   aggregate_id uuid [not null]
   aggregate_sequence bigint
   event_type varchar(100) [not null]
-  event_schema_version varchar(40) [not null]
+  event_schema_version varchar(80) [not null]
   payload_document jsonb [not null]
   payload_hash varchar(128) [not null]
   producer_idempotency_key varchar(160) [not null]
@@ -5082,6 +5145,7 @@ Ref: trading.ledger_transactions.(bot_id, partition_id) > bot.bot_partitions.(bo
 Ref: trading.ledger_transactions.(bot_id, bot_event_id) > bot.bot_events.(bot_id, id)
 Ref: trading.ledger_transactions.(bot_id, reversal_of_transaction_id) > trading.ledger_transactions.(bot_id, id)
 Ref: trading.ledger_entries.(bot_id, partition_id, transaction_id) > trading.ledger_transactions.(bot_id, partition_id, id)
+Ref ledger_entry_transaction_header_fk: trading.ledger_entries.transaction_id > trading.ledger_transactions.id [delete: restrict]
 Ref: trading.ledger_entries.(bot_id, partition_id, ledger_account_id) > trading.ledger_accounts.(bot_id, partition_id, id)
 Ref: trading.ledger_entries.(bot_id, partition_id, order_component_id) > trading.order_components.(bot_id, partition_id, id)
 Ref: trading.position_lots.bot_id > bot.bots.id
@@ -5121,9 +5185,11 @@ Ref: trading.partition_budget_projections.(bot_id, partition_id) > bot.bot_parti
 
 Ref: backtest.runs.bot_id > bot.bots.id
 Ref: backtest.runs.owner_account_id > identity.accounts.id
+Ref: backtest.runs.execution_policy_version > backtest.execution_policy_versions.version
 Ref: backtest.runs.buying_power_buffer_policy_id > trading.buying_power_buffer_policy_versions.id
 Ref: backtest.runs.fee_policy_id > trading.fee_policy_versions.id
 Ref: backtest.run_attempts.run_id > backtest.runs.id
+Ref: backtest.run_attempts.previous_attempt_id > backtest.run_attempts.id
 Ref: backtest.input_bundles.run_id > backtest.runs.id
 Ref: backtest.input_datasets.input_bundle_id > backtest.input_bundles.id
 Ref: backtest.input_datasets.dataset_manifest_id > market_data.dataset_manifests.id

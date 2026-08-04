@@ -1,159 +1,123 @@
-# Idea2Strategy 인프라 아키텍처
+# Idea2Strategy Development AWS 아키텍처
 
-상태: **Draft — 최신 백엔드·AWS 배치 기준 반영**
+상태: **배포 전 확정 설계**. 실제 AWS 구축 완료를 뜻하지 않는다. 실행 입력과
+차단 조건은 [deploy-readiness-runbook.md](deploy-readiness-runbook.md), 구현은
+`infra/terraform/environments/development`가 기준이다. 제품 의미·서비스 의무는
+각각 `specs/**`, `contracts/**`가 우선한다.
 
-이 문서는 인프라 전체 구조를 빠르게 이해하기 위한 요약이다. 세부 실행 App, 리포지토리 구조, 통신과 DB 접근 기준은 [백엔드·AWS 아키텍처 기준](backend-and-aws-architecture.md)을 따른다. 제품·데이터 의미의 정본은 `specs/`, `docs/product-discovery.md`, `db/schema.dbml`이며 이 문서는 배포 완료 상태를 뜻하지 않는다.
+## 확정 배치
 
-최신 구조도는 다음 두 파일에서 확인한다.
-
-- [전체 서비스 아이콘 구조도](diagrams/idea2strategy-icon-architecture.svg)
-- [AWS 전용 구조도](diagrams/idea2strategy-aws-architecture.svg)
-- [구조도 해설](architecture-diagrams.md)
-- [아이콘 출처](diagrams/logo-sources.md)
-
-## 1. 현재 실제 구축 상태
-
-현재 AWS에는 완성된 서비스가 아니라 과거 시장 데이터 적재를 위한 Development 기반만 있다.
-
-- 서울 리전 Development VPC
-- Public Subnet 두 개와 Private DB Subnet 두 개
-- 외부 인바운드와 SSH Key Pair가 없는 배치 EC2 한 대
-- Private RDS PostgreSQL 16.13 Single-AZ
-- Private Market Data S3와 별도 Terraform State S3
-- Systems Manager, Parameter Store, Secrets Manager, CloudWatch
-- 위 리소스를 다시 만들 수 있는 Terraform 코드
-
-다음 목표 구조의 Core·Trading·Compute EC2, Lambda, ALB와 Redis 서비스는 아직 모두 배포된 상태가 아니다.
-
-## 2. 최신 목표 구조
-
-현재 목표 배치는 ALB가 사용하는 두 Availability Zone과, 초기 애플리케이션을 배치할 단일 Availability Zone의 EC2 세 대를 전제로 한다.
-
-| 실행 경계 | 실행 단위 | 주 책임 |
+| 경계 | 실행 단위 | 동작 방식 |
 |---|---|---|
-| Core EC2 | `backend-api`, `backend-batch`, `backend-worker`, `admin-mcp` | 사용자 API, 운영 배치, Outbox·알림, 관리자 작업 |
-| Trading EC2 | `market-gateway`, `trading-worker` | 실시간 시장 데이터 수신, 전략 평가, 주문·가상 체결·원장 |
-| Compute EC2 | `backtest-api`, `backtest-worker`, `pipeline-worker` | 백테스트, 대용량 시장 데이터 처리, Parquet·Manifest 발행 |
-| Lambda | 기업행사 조사, Pipeline Trigger, 경량 검증 | 짧고 간헐적인 조사·제어 작업 |
+| Edge | Route 53, ACM, CloudFront, WAF, private Frontend S3 | Apex HTTPS, S3 OAC, `/api/*`와 `/ws/*`만 Core로 전달 |
+| Core `t4g.medium` | `backend-api`, `backend-worker`, 조회용 `backtest-api` | 상시 실행 |
+| Core 수동 profile | `backend-batch`, read-only `admin-mcp` | SSM 승인 작업 때만 실행 |
+| Backtest `t4g.medium` ASG | `backtest-worker` | min/desired/max `0/0/1`, Basic/Custom/Competition 동시성 `2/1/1` |
+| Trading `c7g.xlarge` | `market-gateway`, `trading-worker` | 미국 시장 시간 예약 실행, 종료 전 drain |
+| Pipeline | ARM64 Fargate Spot `pipeline-worker` | desired zero, 이벤트/운영 작업 때만 실행 |
+| Data | PostgreSQL 16, Valkey Serverless, S3 | RDS·Valkey는 private, S3는 public access 차단 |
+| Durable work | SQS Standard + lane별 DLQ | Backtest 3개 lane, at-least-once와 애플리케이션 멱등성 |
 
-브라우저는 전략 평가, 주문, 가상 체결, 백테스트와 배치를 실행하지 않는다. UI는 `backend-api`와 허용된 관리자 진입점만 호출하고 실제 업무 실행은 서버가 담당한다.
-
-### 리포지토리 경계
-
-| 리포지토리 | 기술 | 배포 대상 |
-|---|---|---|
-| `backend` | Java, Spring Boot, Spring Batch | Core EC2 |
-| `trading-engine` | Java, Spring Boot | Trading EC2 |
-| `backtest-engine` | Python, FastAPI, Polars, PyArrow | Compute EC2 |
-| `data-pipeline` | Python, Polars, PyArrow, Lambda Handler | Compute EC2와 Lambda |
-
-서로 다른 Git 리포는 JPA Entity나 Java 도메인 코드를 직접 공유하지 않는다. API, 이벤트, 전략 문서, DBML과 Flyway SQL을 계약 경계로 사용한다.
-
-## 3. 주요 통신 흐름
-
-### 사용자 요청
-
-```text
-Web UI → Route 53 → ALB(HTTPS·ACM) → backend-api → PostgreSQL 또는 Queue
+```mermaid
+flowchart LR
+  U["User"] --> R53["Route 53"]
+  R53 --> CF["CloudFront + WAF + ACM"]
+  CF --> S3F["Private Frontend S3"]
+  CF -->|"/api/*, /ws/* + origin secret"| CORE["Core t4g.medium"]
+  CORE --> RDS["Private RDS PostgreSQL 16"]
+  CORE --> V["Private Valkey Serverless"]
+  CORE --> Q["SQS Basic / Custom / Competition"]
+  Q --> BT["Backtest ASG t4g.medium 0/0/1"]
+  BT --> RDS
+  BT --> S3R["Private Results S3"]
+  TR["Scheduled Trading c7g.xlarge"] --> V
+  TR --> RDS
+  FP["Fargate Spot Pipeline desired zero"] --> RDS
+  FP --> S3M["Private Market Data S3"]
 ```
 
-공개 진입점은 Application Load Balancer로 결정한다. Route 53이 서비스 도메인을 ALB로 연결하고 ACM 인증서를 ALB HTTPS Listener에 연결한다. ALB는 서로 다른 두 Availability Zone의 Public Subnet을 사용하고 Core EC2로만 외부 요청을 전달한다.
+## 네트워크와 보안
 
-### 실시간 트레이딩
+- NAT Gateway와 ALB는 사용하지 않는다. 공개 IPv4 비용을 감수하는 ARM64 EC2가
+  직접 outbound하고, Core inbound 443은 AWS 관리 CloudFront origin-facing
+  prefix list로 제한한다.
+- CloudFront는 Core에 별도 검증 헤더를 추가한다. Core reverse proxy는 이 값이
+  없거나 다르면 거절한다. 값은 Terraform state와 전용 Secrets Manager secret의
+  민감정보다.
+- S3 기본 behavior에만 SPA rewrite 함수를 연결한다. API의 403/404/5xx를
+  `index.html`의 200 응답으로 바꾸지 않는다.
+- RDS와 Valkey에는 public endpoint가 없다. Security Group은 필요한 runtime
+  Security Group에서 오는 PostgreSQL/TLS 연결만 허용한다.
+- SSH, key pair, bastion을 사용하지 않는다. 운영 접속과 수동 profile 실행은
+  Systems Manager로 수행한다.
+- EC2는 IMDSv2, 암호화된 root volume, rootless application container, read-only
+  filesystem/capability drop/resource limit을 적용한다.
+- CI는 GitHub OIDC의 `environment: development` subject만 신뢰한다. 장기 AWS
+  access key를 GitHub에 저장하지 않는다.
 
-```text
-Market Data Provider → market-gateway → Redis Streams·Cache
-  → trading-worker → PostgreSQL 주문·체결·포지션·원장
-```
+## 데이터와 비밀정보 경계
 
-Market Gateway는 처음 한 개로 시작한다. 이후 부하와 장애 요구가 확인되면 Active/Standby 또는 중복 제거 계약과 함께 두 개 운영을 검토한다.
+- Flyway만 DDL을 수행한다. Backend가 조립한 중앙 bundle과 Trading의 pinned
+  test baseline은 동일 digest를 가진다.
+- runtime은 RDS master secret을 읽지 않는다. `backend`, `batch`, `backtest`,
+  `trading`, `pipeline` LOGIN은 정확히 하나의 NOLOGIN 그룹 역할만 상속한다.
+- Alpaca key/secret은 서로 분리된 Secrets Manager secret을 참조한다. 값은
+  Terraform 변수, GitHub 로그, plan 텍스트, 명령 인자에 넣지 않는다.
+- Backtest/Trading 정책 입력은 S3 version ID와 SHA-256을 동시에 고정하고
+  시작 전에 검증한다.
+- PostgreSQL은 상태와 manifest를, S3는 immutable 대용량 객체를 소유한다.
+  Valkey는 재구축 가능한 stream/cache이며 공식 원장이 아니다.
 
-### 백테스트
+## Backtest 포화와 축소
 
-```text
-backend-api → Queue → backtest-worker
-  → PostgreSQL 실행 상태·요약 + S3 상세 Parquet
-```
+한 호스트 안에서 Basic 2개, Custom 1개, Competition 1개까지만 동시에
+실행한다. 초과 요청은 각 SQS lane에 남고 다른 lane의 자리를 빌리지 않는다.
+ASG 최대값 1은 처리량보다 비용 상한을 우선한 결정이다.
 
-FastAPI 기반 `backtest-api`는 내부 작업 접수·상태·진단 경계다. CPU 집약 계산은 HTTP 요청이나 FastAPI `BackgroundTasks`가 아니라 별도 Worker가 실행한다.
+자동 scale-down은 현재 비활성이다. canonical DBML에 claim token, DB-time lease,
+heartbeat, reclaim lineage와 cancellation 경계가 반영되고 race test가 통과하기
+전에는 SQS approximate metric만으로 인스턴스를 종료할 수 없다. 그 전에는
+queue/in-flight/DB claim을 확인한 운영자만 desired zero로 되돌린다.
 
-### 시장 데이터 Pipeline
+## 장애와 복구 기준
 
-```text
-실시간·과거 시장 데이터 → pipeline-worker → 검증·조정·집계·압축
-  → S3 새 Parquet 객체 → PostgreSQL Object·Manifest·Lineage
-```
+- Development는 RDS Single-AZ와 단일 Core/Trading host를 사용하므로 무중단
+  서비스를 보장하지 않는다. 복구 목표는 자동 재시작과 검증된 재배포다.
+- Full 단계는 RDS PITR 7일 이상, deletion protection, S3 versioning, CloudWatch
+  log/metric/alarm을 강제한다.
+- Trading 시작은 durable reconciliation과 입력 materialization 검증 후에만
+  열리고, 종료는 intake close → drain → checkpoint 순서다.
+- Frontend는 `dns_foundation` 단계에 만든 private/versioned bucket의
+  `/_releases/<root-sha-run-attempt>/`에 새 빌드를 한 번만 올린다. 저장된 full
+  plan이 CloudFront S3 origin path를 그 불변 prefix로 전환하므로 mutable root
+  복사와 invalidation이 없다. 롤백도 검증된 이전 release ID를 지정한 새 saved
+  plan을 검토·적용한다.
+- Terraform은 저장된 plan 파일만 apply하며 plan SHA-256과 S3 VersionId를
+  Development 환경 승인 사이에서 검증한다. destroy/replace가 있으면 별도
+  승인 없이 진행하지 않는다.
 
-Pipeline은 기존 객체를 덮어쓰지 않는다. 객체 검증을 완료한 후 새 Manifest를 발행하며 기존 백테스트가 잠근 Manifest를 몰래 교체하지 않는다.
+## 비용 경계
 
-### 기업행사 조사
+서울 리전의 현재 추정치는 월 **USD 141–181**, 보통 사용량 **USD 150–165**다.
+월 예산은 USD 180, 경보는 80%/100%, USD 200은 운영 재검토 경계다. 변동폭은
+Trading 실행일/시간, Valkey 사용량, CloudFront·S3 전송량, 로그 보존량,
+Fargate Spot 실행량에서 발생한다. NAT Gateway, ALB, 상시 Backtest/Pipeline을
+제외한 이유도 이 비용 경계를 지키기 위해서다.
 
-```text
-EventBridge Scheduler → Lambda → 기업행사 공식 정보원·AI 조사
-  → 관리자 검토 후보 → 결정론적 공식 반영
-```
+## 배포 전 남은 외부 단계
 
-AI 조사는 후보와 공식 근거를 제출할 뿐 adjusted 데이터나 공식 원장을 직접 변경하지 않는다.
+코드가 준비되어도 다음은 AWS 변경이므로 별도 최종 plan·비용 승인 후에만 한다.
 
-## 4. 데이터 저장 원칙
+1. 기존 bootstrap state를 복구하고 isolated artifact/OIDC state plan을 검토한다.
+2. GitHub `development` Environment에 승인자와 비밀이 아닌 AWS/TF 변수를 등록한다.
+3. 다섯 runtime LOGIN과 Secrets Manager 값을 private-path one-shot 절차로 만든다.
+4. 이미지 digest, frontend release, 정책 S3 version/checksum을 넣어 destroy 0의
+   saved full plan을 만든다.
+5. plan/비용/IAM/public path 검토 후 정확한 파일을 apply한다.
+6. Gabia DNS 레코드를 모두 복제·검증한 뒤 nameserver를 Route 53으로 위임한다.
+7. HTTPS, UI/API, RDS, Valkey, queue, service-to-service, health, logs, rollback을
+   실제 환경에서 검증한다.
 
-### RDS PostgreSQL
-
-PostgreSQL은 사용자·전략·봇, 주문·체결·포지션·원장, 백테스트 상태·요약, 대회·성과, S3 Object·Manifest·Lineage와 Transactional Outbox를 저장한다.
-
-Java 서비스는 CQRS-lite를 적용한다. Command는 주로 JPA, Query는 jOOQ를 사용한다. Python 서비스는 자신이 소유한 일부 스키마에 SQLAlchemy Core로 접근한다. 모든 Migration은 Flyway 하나로 관리하고 Alembic은 사용하지 않는다.
-
-### S3
-
-S3에는 과거·실시간 시장 데이터 Parquet, RAW·ADJUSTED·파생 데이터, 백테스트 상세 결과, 계산·재현 데이터와 Terraform State를 저장한다.
-
-업무 데이터는 Market Data와 Results 저장 경계로 나누고 Terraform State는 애플리케이션 역할이 접근할 수 없는 별도 버킷으로 유지한다. 기존 세 버킷 경계는 최신 기준의 “S3 1개 이상” 조건과 충돌하지 않으므로 유지한다.
-
-### Redis
-
-Redis는 실시간 시장 사건 전달과 종목별 최신값 Cache에 사용한다. 공식 장기 정본으로 사용하지 않으며 PostgreSQL, S3와 공급자 데이터로부터 재구축할 수 있어야 한다.
-
-Redis 사용을 확정한다. Redis는 Private Data Subnet의 공유 서비스로 두고 실시간 시장 사건과 최신값 Cache를 담당한다.
-
-### Queue
-
-Backend의 봇 제어 명령, 백테스트 작업과 일반 도메인 사건은 Redis와 분리된 Queue로 전달한다. Queue 제품과 배치 방식은 아직 확정하지 않았으며, 다이어그램에서는 `Queue — technology and placement TBD`로 표시한다. Redis Streams는 실시간 시장 사건에만 사용하고 durable command/job queue로 사용하지 않는다.
-
-## 5. 배포와 운영
-
-```text
-GitHub → GitHub Actions → 테스트·Docker 이미지 빌드 → Amazon ECR
-  → AWS Systems Manager → EC2별 Docker Compose 갱신
-```
-
-- EC2에서 저장소를 직접 `git pull`하지 않는다.
-- 배포할 이미지 Digest를 고정한다.
-- EC2 SSH 포트를 공개하지 않고 운영 접속과 배포는 SSM을 사용한다.
-- Flyway는 배포 Pipeline의 전용 Migration 단계에서 한 번 실행한다.
-- EC2 로컬 디스크를 공식 영속 데이터의 기준으로 사용하지 않는다.
-
-## 6. 확장 방향
-
-1. Market Gateway 이중화와 중복 제거 방식 결정
-2. Trading Worker 봇 Shard와 시장 사건 Routing 결정
-3. Backtest·Pipeline Worker 동시 작업 수 확대
-4. Compute 병목 시 Backtest와 Pipeline을 별도 EC2로 분리
-5. 사용자 API 부하 증가 시 `backend-api`만 별도 확장
-6. 실제 가용성 요구가 생길 때 Multi-AZ 재검토
-
-현재 단일 AZ 정책에서는 Multi-AZ 장애 복구를 보장한다고 표현하지 않는다.
-
-## 7. 아직 확정하지 않은 항목
-
-- Core·Trading EC2 인스턴스 타입과 CPU·메모리
-- Queue 제품·배치 방식과 재시도·DLQ·순서·멱등 계약
-- Redis 운영 제품
-- Trading EC2 시작·종료 시간
-- 백테스트·Pipeline 동시 실행 수와 자원 한도
-- Lambda와 Compute Worker 사이의 작업 크기 기준
-- Parquet 최종 압축 Codec과 파티션 크기
-- 실시간 원천 시세 저장·재배포 범위
-- 서비스별 PostgreSQL Role과 테이블 권한
-- 관측성, 장애 알림, Backup과 복구 목표
-
-현재 질문과 결정 순서는 [인프라 질문 목록](questions.md)에서 관리한다.
+과거 ALB·3대 상시 EC2·Compute 공유 배치 문서는 역사적 검토 자료다. 현재 구현과
+충돌하면 이 문서, deploy-readiness runbook, Terraform 순서로 확인하고 역사적
+ADR을 현재 실행 지침으로 사용하지 않는다.

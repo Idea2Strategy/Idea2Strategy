@@ -1,5 +1,9 @@
 # Idea2Strategy 백엔드·AWS 아키텍처 기준
 
+> **Superseded:** 이 문서의 ALB·Core/Trading/Compute 3 EC2 배치는 역사적
+> 기준이다. 현재 배포 기준은 [architecture.md](architecture.md)와
+> [deploy-readiness-runbook.md](deploy-readiness-runbook.md)다.
+
 > **2026-07-31 후속 결정:** 공개 진입점은 두 Availability Zone의 Public Subnet을 사용하는 ALB로 확정한다. 초기 Core·Trading·Compute EC2는 Availability Zone A의 Public Application Subnet에 배치하되 Core만 ALB 요청을 받고 Trading·Compute는 공개 인바운드를 허용하지 않는다. Queue와 Redis는 분리하며, Queue 제품과 배치 방식은 아직 확정하지 않는다. Redis는 실시간 시장 사건과 최신값 Cache를 담당한다. 이 결정은 아래 본문에 남아 있는 관련 미정 표현보다 우선한다.
 
 ## 1. 문서 목적과 상태

@@ -1,5 +1,10 @@
 # Idea2Strategy 아키텍처 구조도 해설
 
+> **Superseded visual reference:** 이 문서와 연결된 기존 그림은 ALB와 상시
+> Compute EC2를 전제로 한 역사적 검토 자료다. 현재 배포 설계는
+> [architecture.md](architecture.md)의 CloudFront 직접 origin, scale-to-zero
+> Backtest ASG, scheduled Trading, desired-zero Fargate 배치를 따른다.
+
 상태: **Draft — 3 EC2 백엔드·AWS 기준**
 
 구조도에는 서비스명, 실행 경계와 연결선만 표시한다. 배치 이유와 데이터 저장 방식은 이 문서에서 설명한다.

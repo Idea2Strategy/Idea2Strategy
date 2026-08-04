@@ -1,76 +1,84 @@
-resource "aws_security_group" "alb" {
-  count = local.enable_service_stack ? 1 : 0
-
-  name        = "${local.name_prefix}-alb-sg"
-  description = "Internet ingress to the public ALB only"
-  vpc_id      = aws_vpc.this.id
-
-  tags = {
-    Name = "${local.name_prefix}-alb-sg"
-  }
+resource "random_password" "cloudfront_origin_header" {
+  count   = local.enable_service_stack ? 1 : 0
+  length  = 48
+  special = false
 }
 
-resource "aws_vpc_security_group_ingress_rule" "alb_http" {
-  count = local.enable_service_stack ? 1 : 0
-
-  security_group_id = aws_security_group.alb[0].id
-  description       = "Public HTTP; redirected after HTTPS activation"
-  from_port         = 80
-  to_port           = 80
-  ip_protocol       = "tcp"
-  cidr_ipv4         = "0.0.0.0/0"
+resource "aws_secretsmanager_secret" "cloudfront_origin_header" {
+  count                   = local.enable_service_stack ? 1 : 0
+  name                    = "${local.name_prefix}/edge/origin-header"
+  recovery_window_in_days = 7
+  lifecycle { prevent_destroy = true }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "alb_https" {
-  count = local.enable_service_stack && var.enable_https ? 1 : 0
-
-  security_group_id = aws_security_group.alb[0].id
-  description       = "Public HTTPS"
-  from_port         = 443
-  to_port           = 443
-  ip_protocol       = "tcp"
-  cidr_ipv4         = "0.0.0.0/0"
+resource "aws_secretsmanager_secret_version" "cloudfront_origin_header" {
+  count         = local.enable_service_stack ? 1 : 0
+  secret_id     = aws_secretsmanager_secret.cloudfront_origin_header[0].id
+  secret_string = random_password.cloudfront_origin_header[0].result
 }
 
-resource "aws_vpc_security_group_egress_rule" "alb_to_service" {
+data "aws_secretsmanager_secret" "alpaca_api_key" {
   count = local.enable_service_stack ? 1 : 0
+  name  = var.alpaca_api_key_secret_name
+}
 
-  security_group_id            = aws_security_group.alb[0].id
-  description                  = "ALB to Caddy target"
-  from_port                    = var.service_target_port
-  to_port                      = var.service_target_port
-  ip_protocol                  = "tcp"
-  referenced_security_group_id = aws_security_group.service[0].id
+data "aws_secretsmanager_secret" "alpaca_secret_key" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = var.alpaca_secret_key_secret_name
+}
+
+resource "aws_ssm_parameter" "alpaca_api_key_secret_arn" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = "${local.parameter_path}/provider/alpaca-api-key-secret-arn"
+  type  = "String"
+  value = data.aws_secretsmanager_secret.alpaca_api_key[0].arn
+}
+
+resource "aws_ssm_parameter" "alpaca_secret_key_secret_arn" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = "${local.parameter_path}/provider/alpaca-secret-key-secret-arn"
+  type  = "String"
+  value = data.aws_secretsmanager_secret.alpaca_secret_key[0].arn
 }
 
 resource "aws_security_group" "service" {
-  count = local.enable_service_stack ? 1 : 0
-
-  name        = "${local.name_prefix}-service-ec2-sg"
-  description = "Service EC2 accepts only the ALB Caddy target"
+  count       = local.enable_service_stack ? 1 : 0
+  name        = "${local.name_prefix}-core"
+  description = "Core HTTPS origin restricted to the CloudFront origin-facing prefix list"
   vpc_id      = aws_vpc.this.id
-
-  tags = {
-    Name = "${local.name_prefix}-service-ec2-sg"
-  }
+  tags        = { Name = "${local.name_prefix}-core" }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "service_from_alb" {
-  count = local.enable_service_stack ? 1 : 0
-
-  security_group_id            = aws_security_group.service[0].id
-  description                  = "Caddy target from ALB only"
-  from_port                    = var.service_target_port
-  to_port                      = var.service_target_port
-  ip_protocol                  = "tcp"
-  referenced_security_group_id = aws_security_group.alb[0].id
+resource "aws_vpc_security_group_ingress_rule" "service_from_cloudfront" {
+  count             = local.enable_service_stack ? 1 : 0
+  security_group_id = aws_security_group.service[0].id
+  description       = "HTTPS origin traffic from CloudFront only"
+  from_port         = var.service_target_port
+  to_port           = var.service_target_port
+  ip_protocol       = "tcp"
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront_origin[0].id
 }
 
 resource "aws_vpc_security_group_egress_rule" "service_all" {
-  count = local.enable_service_stack ? 1 : 0
-
+  count             = local.enable_service_stack ? 1 : 0
   security_group_id = aws_security_group.service[0].id
-  description       = "AWS APIs, SIP, package repositories, RDS and internal backtest API"
+  description       = "Core runtime egress to AWS APIs, package sources and private data endpoints"
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_security_group" "trading" {
+  count       = local.enable_service_stack ? 1 : 0
+  name        = "${local.name_prefix}-trading"
+  description = "Trading runtime has no inbound rules"
+  vpc_id      = aws_vpc.this.id
+  tags        = { Name = "${local.name_prefix}-trading" }
+}
+
+resource "aws_vpc_security_group_egress_rule" "trading_all" {
+  count             = local.enable_service_stack ? 1 : 0
+  security_group_id = aws_security_group.trading[0].id
+  description       = "Trading egress to Alpaca, AWS APIs and private data endpoints"
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
 }
@@ -79,26 +87,12 @@ resource "aws_security_group" "batch" {
   name        = "${local.name_prefix}-batch-ec2-sg"
   description = "Batch EC2 has no public ingress"
   vpc_id      = aws_vpc.this.id
-
-  tags = {
-    Name = "${local.name_prefix}-batch-ec2-sg"
-  }
-}
-
-resource "aws_vpc_security_group_ingress_rule" "batch_backtest_from_service" {
-  count = local.enable_service_stack ? 1 : 0
-
-  security_group_id            = aws_security_group.batch.id
-  description                  = "Private Backtest Spring API from service EC2 only"
-  from_port                    = var.backtest_internal_port
-  to_port                      = var.backtest_internal_port
-  ip_protocol                  = "tcp"
-  referenced_security_group_id = aws_security_group.service[0].id
+  tags        = { Name = "${local.name_prefix}-batch-ec2-sg" }
 }
 
 resource "aws_vpc_security_group_egress_rule" "batch_all" {
   security_group_id = aws_security_group.batch.id
-  description       = "AWS APIs, Alpaca, package repositories and RDS"
+  description       = "Backtest egress to S3, SQS, AWS APIs and private PostgreSQL"
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
 }
@@ -107,35 +101,21 @@ resource "aws_security_group" "rds" {
   name        = "${local.name_prefix}-rds-sg"
   description = "Private PostgreSQL from approved application EC2 security groups only"
   vpc_id      = aws_vpc.this.id
-
-  tags = {
-    Name = "${local.name_prefix}-rds-sg"
-  }
+  tags        = { Name = "${local.name_prefix}-rds-sg" }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "rds_from_service" {
-  count = local.enable_service_stack ? 1 : 0
+resource "aws_vpc_security_group_ingress_rule" "rds_from_runtime" {
+  for_each = local.enable_service_stack ? {
+    core     = aws_security_group.service[0].id
+    trading  = aws_security_group.trading[0].id
+    backtest = aws_security_group.batch.id
+    pipeline = aws_security_group.pipeline[0].id
+  } : { backtest = aws_security_group.batch.id }
 
   security_group_id            = aws_security_group.rds.id
-  description                  = "PostgreSQL from service EC2"
+  description                  = "PostgreSQL from ${each.key}"
   from_port                    = 5432
   to_port                      = 5432
   ip_protocol                  = "tcp"
-  referenced_security_group_id = aws_security_group.service[0].id
-}
-
-resource "aws_vpc_security_group_ingress_rule" "rds_from_batch" {
-  security_group_id            = aws_security_group.rds.id
-  description                  = "PostgreSQL from batch EC2"
-  from_port                    = 5432
-  to_port                      = 5432
-  ip_protocol                  = "tcp"
-  referenced_security_group_id = aws_security_group.batch.id
-}
-
-resource "aws_vpc_security_group_egress_rule" "rds_all" {
-  security_group_id = aws_security_group.rds.id
-  description       = "Default RDS egress"
-  ip_protocol       = "-1"
-  cidr_ipv4         = "0.0.0.0/0"
+  referenced_security_group_id = each.value
 }

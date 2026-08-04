@@ -1,5 +1,9 @@
 # Idea2Strategy 백엔드·AWS 아키텍처 기준
 
+> **Superseded:** 현재 AWS 배포 기준은
+> [infrastructure/architecture.md](infrastructure/architecture.md)다. 아래 본문은
+> 과거 ALB·3 EC2 검토 기록이며 배포 입력으로 사용하지 않는다.
+
 ## 1. 문서 목적과 상태
 
 이 문서는 Idea2Strategy의 AWS 배치도와 서비스 아키텍처 그림을 작성하기 위한 현재 기준이다.

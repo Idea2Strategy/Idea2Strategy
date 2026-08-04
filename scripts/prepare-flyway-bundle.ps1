@@ -46,6 +46,59 @@ function Quote-ApplicationArgument([string]$Value) {
     return '"' + $Value + '"'
 }
 
+function Convert-CrlfToLf([byte[]]$Bytes) {
+    $normalized = New-Object System.IO.MemoryStream
+    try {
+        for ($index = 0; $index -lt $Bytes.Length; $index++) {
+            if ($Bytes[$index] -eq 13 -and $index + 1 -lt $Bytes.Length -and $Bytes[$index + 1] -eq 10) {
+                $normalized.WriteByte(10)
+                $index++
+            } else {
+                $normalized.WriteByte($Bytes[$index])
+            }
+        }
+        return $normalized.ToArray()
+    } finally {
+        $normalized.Dispose()
+    }
+}
+
+function Normalize-BundleForCrossPlatformUse([string]$BundlePath) {
+    $manifestPath = Join-Path $BundlePath 'migration-bundle.manifest'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw 'Generated Flyway manifest is missing before normalization.'
+    }
+    $manifestLines = @(Get-Content -LiteralPath $manifestPath)
+    if ($manifestLines.Count -lt 2 -or $manifestLines[0] -cne 'idea2strategy-flyway-bundle-v1') {
+        throw 'Generated Flyway manifest has an unsupported format.'
+    }
+
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $normalizedManifest = New-Object System.Text.StringBuilder
+    [void]$normalizedManifest.Append("idea2strategy-flyway-bundle-v1`n")
+    foreach ($line in $manifestLines[1..($manifestLines.Count - 1)]) {
+        if ($line -notmatch '^([^\t]+[.]sql)\t[0-9a-f]{64}$') {
+            throw "Generated Flyway manifest entry is invalid: $line"
+        }
+        $fileName = $Matches[1]
+        $migrationPath = Join-Path $BundlePath $fileName
+        if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) {
+            throw "Generated Flyway migration is missing: $fileName"
+        }
+        $normalizedBytes = Convert-CrlfToLf ([System.IO.File]::ReadAllBytes($migrationPath))
+        [System.IO.File]::WriteAllBytes($migrationPath, $normalizedBytes)
+        $migrationHash = (Get-FileHash -LiteralPath $migrationPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        [void]$normalizedManifest.Append("$fileName`t$migrationHash`n")
+    }
+
+    [System.IO.File]::WriteAllBytes($manifestPath, $utf8.GetBytes($normalizedManifest.ToString()))
+    $bundleHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    [System.IO.File]::WriteAllBytes(
+        (Join-Path $BundlePath 'migration-bundle.sha256'),
+        $utf8.GetBytes($bundleHash)
+    )
+}
+
 $root = Get-FullPath (Split-Path -Parent $PSScriptRoot)
 $backendRoot = Join-Path $root 'backend'
 $tradingRoot = Join-Path $root 'trading-engine'
@@ -120,6 +173,8 @@ if ($null -ne $java) {
         throw 'The containerized backend migration bundle assembler failed.'
     }
 }
+
+Normalize-BundleForCrossPlatformUse $bundle
 
 foreach ($required in @('V1__initial_schema.sql', 'migration-bundle.manifest', 'migration-bundle.sha256')) {
     if (-not (Test-Path -LiteralPath (Join-Path $bundle $required) -PathType Leaf)) {

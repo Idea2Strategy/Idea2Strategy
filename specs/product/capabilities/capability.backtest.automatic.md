@@ -3,10 +3,10 @@ schema_version: 1
 id: capability.backtest.automatic
 kind: capability
 status: approved
-revision: 1
+revision: 2
 refs: []
 ---
 
 # capability.backtest.automatic
 
-Run one automatic official backtest per released strategy version using locked data and calculation assumptions.
+Run one automatic official backtest per released strategy version using locked data and calculation assumptions. The same immutable execution boundary also supports a user-selected period backtest and an official BACKTEST competition evaluation; each mode uses its own durable lane and cannot substitute mutable inputs for a locked release, dataset manifest, or policy version.

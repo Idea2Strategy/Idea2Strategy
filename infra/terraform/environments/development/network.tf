@@ -16,6 +16,52 @@ resource "aws_internet_gateway" "this" {
   }
 }
 
+resource "aws_default_security_group" "this" {
+  vpc_id = aws_vpc.this.id
+  tags   = { Name = "${local.name_prefix}-default-deny" }
+}
+
+resource "aws_cloudwatch_log_group" "vpc_flow" {
+  count             = local.enable_service_stack ? 1 : 0
+  name              = "/${var.project_name}/${var.environment}/vpc-flow-reject"
+  retention_in_days = var.cloudwatch_log_retention_days
+}
+
+data "aws_iam_policy_document" "vpc_flow_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["vpc-flow-logs.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "vpc_flow" {
+  count              = local.enable_service_stack ? 1 : 0
+  name               = "${local.name_prefix}-vpc-flow"
+  assume_role_policy = data.aws_iam_policy_document.vpc_flow_assume.json
+}
+
+resource "aws_iam_role_policy" "vpc_flow" {
+  count = local.enable_service_stack ? 1 : 0
+  role  = aws_iam_role.vpc_flow[0].id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [{
+    Effect   = "Allow"
+    Action   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"]
+    Resource = "${aws_cloudwatch_log_group.vpc_flow[0].arn}:*"
+  }] })
+}
+
+resource "aws_flow_log" "reject" {
+  count                = local.enable_service_stack ? 1 : 0
+  iam_role_arn         = aws_iam_role.vpc_flow[0].arn
+  log_destination      = aws_cloudwatch_log_group.vpc_flow[0].arn
+  log_destination_type = "cloud-watch-logs"
+  traffic_type         = "REJECT"
+  vpc_id               = aws_vpc.this.id
+}
+
 resource "aws_subnet" "public" {
   for_each = local.public_subnets
 
@@ -77,4 +123,17 @@ resource "aws_route_table_association" "private_db" {
 
   subnet_id      = each.value.id
   route_table_id = aws_route_table.private_db.id
+}
+
+resource "aws_vpc_endpoint" "s3" {
+  count = local.enable_service_stack ? 1 : 0
+
+  vpc_id            = aws_vpc.this.id
+  service_name      = "com.amazonaws.${var.aws_region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.public.id]
+
+  tags = {
+    Name = "${local.name_prefix}-s3-endpoint"
+  }
 }

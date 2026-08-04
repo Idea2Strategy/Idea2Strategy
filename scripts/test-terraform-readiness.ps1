@@ -5,6 +5,8 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $terraformRoots = @(
     "infra/terraform/bootstrap",
+    "infra/terraform/ci-identity",
+    "infra/terraform/artifact-foundation",
     "infra/terraform/environments/development"
 )
 
@@ -46,6 +48,16 @@ try {
         } finally {
             $env:TF_DATA_DIR = $previousDataDir
         }
+    }
+
+    & (Join-Path $PSScriptRoot "test-full-terraform-architecture.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Low-cost full Terraform architecture checks failed."
+    }
+
+    & (Join-Path $PSScriptRoot "test-runtime-deployment-wiring.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Deployment runtime wiring checks failed."
     }
 } finally {
     Pop-Location

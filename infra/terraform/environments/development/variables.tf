@@ -10,6 +10,17 @@ variable "aws_profile" {
   default     = "idea2strategy-terraform"
 }
 
+variable "expected_aws_account_id" {
+  description = "Exact AWS account allowed for this Development stack. Required for the full phase."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.expected_aws_account_id == "" || can(regex("^[0-9]{12}$", var.expected_aws_account_id))
+    error_message = "expected_aws_account_id must be empty or an exact 12-digit AWS account ID."
+  }
+}
+
 variable "development_iam_user_names" {
   description = "IAM users who receive MFA-protected Development application access. Login profiles and passwords remain outside Terraform."
   type        = set(string)
@@ -40,13 +51,13 @@ variable "environment" {
 }
 
 variable "deployment_phase" {
-  description = "Development rollout phase. market_data_bootstrap creates only historical-data loading prerequisites; full adds the public service stack."
+  description = "Development rollout phase. dns_foundation creates Route 53 before registrar delegation; full adds the public service stack only after delegation is verified."
   type        = string
   default     = "market_data_bootstrap"
 
   validation {
-    condition     = contains(["market_data_bootstrap", "full"], var.deployment_phase)
-    error_message = "deployment_phase must be market_data_bootstrap or full."
+    condition     = contains(["market_data_bootstrap", "dns_foundation", "full"], var.deployment_phase)
+    error_message = "deployment_phase must be market_data_bootstrap, dns_foundation, or full."
   }
 }
 
@@ -57,7 +68,7 @@ variable "vpc_cidr" {
 }
 
 variable "public_subnet_cidrs" {
-  description = "Two public subnet CIDRs used by ALB and EC2."
+  description = "Two public application subnets. Runtime security groups remain egress-only except the CloudFront-restricted Core origin."
   type        = list(string)
   default     = ["10.20.0.0/24", "10.20.1.0/24"]
 
@@ -79,15 +90,21 @@ variable "private_db_subnet_cidrs" {
 }
 
 variable "service_instance_type" {
-  description = "Initial service EC2 measurement size."
+  description = "Core EC2 size. Increase only after memory, GC, latency and CPU-credit evidence."
   type        = string
-  default     = "t3.small"
+  default     = "t4g.medium"
 }
 
-variable "batch_instance_type" {
-  description = "Initial batch and backtest EC2 measurement size."
+variable "trading_instance_type" {
+  description = "On-Demand ARM64 trading runtime size."
   type        = string
-  default     = "m7i-flex.large"
+  default     = "c7g.xlarge"
+}
+
+variable "backtest_instance_type" {
+  description = "Scale-to-zero ARM64 backtest worker size."
+  type        = string
+  default     = "t4g.medium"
 }
 
 variable "service_root_volume_gib" {
@@ -101,38 +118,44 @@ variable "service_root_volume_gib" {
   }
 }
 
-variable "batch_root_volume_gib" {
-  description = "Encrypted gp3 root volume size for batch staging and temporary Parquet files."
+variable "trading_root_volume_gib" {
+  description = "Encrypted gp3 root volume size for the trading runtime."
   type        = number
-  default     = 100
+  default     = 20
 
   validation {
-    condition     = var.batch_root_volume_gib >= 30
-    error_message = "batch_root_volume_gib must be at least 30 GiB."
+    condition     = var.trading_root_volume_gib >= 8
+    error_message = "trading_root_volume_gib must be at least 8 GiB."
   }
 }
 
-variable "batch_swap_gib" {
-  description = "Swap file size that keeps host management agents responsive during batch memory pressure."
+variable "backtest_root_volume_gib" {
+  description = "Encrypted gp3 scratch volume for streaming backtests; durable recovery remains in S3 and PostgreSQL."
   type        = number
-  default     = 4
+  default     = 40
 
   validation {
-    condition     = var.batch_swap_gib >= 2 && var.batch_swap_gib <= 16
-    error_message = "batch_swap_gib must be between 2 and 16 GiB."
+    condition     = var.backtest_root_volume_gib >= 20
+    error_message = "backtest_root_volume_gib must be at least 20 GiB."
   }
 }
 
 variable "service_target_port" {
-  description = "Caddy target port reached only from the ALB security group."
+  description = "Core HTTPS origin port reached only from the CloudFront origin-facing prefix list."
   type        = number
-  default     = 8080
+  default     = 443
 }
 
-variable "backtest_internal_port" {
-  description = "Private Backtest Spring port reached only from the service EC2 security group."
-  type        = number
-  default     = 8081
+variable "frontend_domain_name" {
+  description = "Public hostname served by CloudFront."
+  type        = string
+  default     = "ideatostrategy.com"
+}
+
+variable "origin_domain_name" {
+  description = "Public DNS name for the fixed-EIP Core HTTPS origin. The security group permits CloudFront origin-facing addresses only."
+  type        = string
+  default     = "origin.ideatostrategy.com"
 }
 
 variable "domain_name" {
@@ -141,16 +164,16 @@ variable "domain_name" {
   default     = "ideatostrategy.com"
 }
 
-variable "service_domain_name" {
-  description = "Public Development service hostname."
-  type        = string
-  default     = "dev.ideatostrategy.com"
-}
-
 variable "existing_hosted_zone_id" {
   description = "Existing Route 53 Hosted Zone ID. Empty creates a new zone without changing registrar delegation."
   type        = string
   default     = ""
+}
+
+variable "dns_delegation_verified" {
+  description = "Explicit operator evidence that the public registrar delegates the apex to the reviewed Route 53 zone. Required for full; never infer it from zone creation alone."
+  type        = bool
+  default     = false
 }
 
 variable "enable_https" {
@@ -159,10 +182,22 @@ variable "enable_https" {
   default     = false
 }
 
+variable "queue_visibility_timeout_seconds" {
+  description = "Visibility timeout for durable worker queues."
+  type        = number
+  default     = 900
+}
+
+variable "queue_max_receive_count" {
+  description = "Receive attempts before SQS moves a message to its DLQ."
+  type        = number
+  default     = 5
+}
+
 variable "rds_instance_class" {
   description = "Initial low-cost RDS measurement size."
   type        = string
-  default     = "db.t4g.micro"
+  default     = "db.t4g.small"
 }
 
 variable "rds_allocated_storage_gib" {
@@ -193,4 +228,211 @@ variable "cloudwatch_log_retention_days" {
   description = "CloudWatch application and host log retention."
   type        = number
   default     = 14
+}
+
+variable "enable_waf" {
+  description = "Attach a minimal CloudFront WAF policy before public Development access."
+  type        = bool
+  default     = true
+}
+
+variable "waf_rate_limit" {
+  description = "Maximum requests from one IP in a five-minute WAF evaluation window."
+  type        = number
+  default     = 2000
+}
+
+variable "operations_alert_email" {
+  description = "Optional operations email for SNS alarms. Subscription remains pending until confirmed."
+  type        = string
+  default     = ""
+}
+
+variable "monthly_budget_usd" {
+  description = "Development monthly cost budget in USD."
+  type        = number
+  default     = 180
+}
+
+variable "alpaca_api_key_secret_name" {
+  description = "Existing Secrets Manager secret containing the ALPACA_API_KEY JSON field. Terraform reads metadata only."
+  type        = string
+  default     = "idea2strategy-dev/backtest/alpaca"
+}
+
+variable "alpaca_secret_key_secret_name" {
+  description = "Existing Secrets Manager secret containing the ALPACA_SECRET_KEY JSON field. Terraform reads metadata only."
+  type        = string
+  default     = "idea2strategy-dev/backtest/alpaca-secret"
+}
+
+variable "pipeline_schedule_expression" {
+  description = "Optional EventBridge schedule for the desired-zero pipeline task. Empty disables scheduled runs."
+  type        = string
+  default     = ""
+}
+
+variable "container_image_digests" {
+  description = "Immutable sha256 digests keyed by every deployable runtime image. Required for the full phase."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for digest in values(var.container_image_digests) : can(regex("^sha256:[0-9a-f]{64}$", digest))
+    ])
+    error_message = "Every container image digest must use the exact sha256:<64 lowercase hex> form."
+  }
+}
+
+variable "frontend_release_id" {
+  description = "Immutable frontend build/release identifier uploaded to the private frontend bucket."
+  type        = string
+  default     = ""
+}
+
+variable "backtest_policy_artifacts" {
+  description = "Checksum- and S3-version-pinned Backtest policy objects in the market-data bucket. Required keys are execution-policy and runtime-policy."
+  type = map(object({
+    key        = string
+    version_id = string
+    sha256     = string
+  }))
+  default = {}
+
+  validation {
+    condition = alltrue([
+      for artifact in values(var.backtest_policy_artifacts) :
+      artifact.key != "" && artifact.version_id != "" && can(regex("^[0-9a-f]{64}$", artifact.sha256))
+    ])
+    error_message = "Every Backtest policy artifact needs an S3 key, immutable version_id, and lowercase SHA-256."
+  }
+}
+
+variable "trading_runtime_artifacts" {
+  description = "Checksum- and S3-version-pinned Trading materialization inputs. runtime is market-gateway or trading-worker and local_path is relative to that runtime's read-only mount."
+  type = map(object({
+    runtime    = string
+    key        = string
+    version_id = string
+    sha256     = string
+    local_path = string
+  }))
+  default = {}
+
+  validation {
+    condition = alltrue([
+      for artifact in values(var.trading_runtime_artifacts) :
+      contains(["market-gateway", "trading-worker"], artifact.runtime) &&
+      artifact.key != "" && artifact.version_id != "" &&
+      can(regex("^[0-9a-f]{64}$", artifact.sha256)) &&
+      can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*$", artifact.local_path)) &&
+      !strcontains(artifact.local_path, "..")
+    ])
+    error_message = "Every Trading artifact needs a supported runtime, immutable S3 version, lowercase SHA-256, and traversal-free relative local_path."
+  }
+}
+
+variable "runtime_database_secret_names" {
+  description = "Existing Secrets Manager JSON credentials for least-privilege LOGIN roles. Exact keys backend, batch, backtest, trading, and pipeline are mandatory for the full phase; Terraform reads metadata only."
+  type        = map(string)
+  default = {
+    backend  = "idea2strategy-dev/database/backend-runtime"
+    batch    = "idea2strategy-dev/database/batch-runtime"
+    backtest = "idea2strategy-dev/database/backtest-runtime"
+    trading  = "idea2strategy-dev/database/trading-runtime"
+    pipeline = "idea2strategy-dev/database/pipeline-runtime"
+  }
+
+  validation {
+    condition = (
+      toset(keys(var.runtime_database_secret_names)) == toset(["backend", "batch", "backtest", "trading", "pipeline"]) &&
+      alltrue([for name in values(var.runtime_database_secret_names) : name != ""])
+    )
+    error_message = "runtime_database_secret_names must contain only non-empty backend, batch, backtest, trading, and pipeline secret names."
+  }
+}
+
+variable "enable_backtest_outbox_relay" {
+  description = "Enable the verified Backend Outbox publisher for all three Backtest lanes. A full release candidate must explicitly set this true."
+  type        = bool
+  default     = false
+}
+
+variable "operator_auth_issuer" {
+  description = "Exact HTTPS issuer for the dedicated operator OIDC JWT. Required for a full release; it is not inferred from customer login."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.operator_auth_issuer == "" || can(regex("^https://[^/?#]+(?:/[^?#]*)?$", var.operator_auth_issuer))
+    error_message = "operator_auth_issuer must be empty or an exact HTTPS issuer without query or fragment."
+  }
+}
+
+variable "operator_auth_jwk_set_uri" {
+  description = "Exact HTTPS JWKS URI for the dedicated operator OIDC provider."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.operator_auth_jwk_set_uri == "" || can(regex("^https://[^/?#]+/[^?#]+$", var.operator_auth_jwk_set_uri))
+    error_message = "operator_auth_jwk_set_uri must be empty or an HTTPS JWKS URI without query or fragment."
+  }
+}
+
+variable "operator_auth_audience" {
+  description = "Single exact audience accepted by the Backend operator JWT verifier."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.operator_auth_audience == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", var.operator_auth_audience))
+    error_message = "operator_auth_audience must be a newline-free exact audience token."
+  }
+}
+
+variable "operator_auth_allowed_acr_values" {
+  description = "Exact OIDC acr values that prove recent operator MFA. At least one acr/amr value is required for full deployment."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for value in var.operator_auth_allowed_acr_values : can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", value))])
+    error_message = "operator_auth_allowed_acr_values must contain only bounded claim tokens."
+  }
+}
+
+variable "operator_auth_allowed_amr_values" {
+  description = "Exact OIDC amr values that prove recent operator MFA. At least one acr/amr value is required for full deployment."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for value in var.operator_auth_allowed_amr_values : can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", value))])
+    error_message = "operator_auth_allowed_amr_values must contain only bounded claim tokens."
+  }
+}
+
+variable "operator_rbac_catalog_version" {
+  description = "Immutable operator RBAC catalog version installed by the reviewed bootstrap receipt."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.operator_rbac_catalog_version == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$", var.operator_rbac_catalog_version))
+    error_message = "operator_rbac_catalog_version must be a bounded immutable identifier."
+  }
+}
+
+variable "operator_rbac_catalog_read_permission_id" {
+  description = "UUID of the catalog-read permission in the selected operator RBAC catalog."
+  type        = string
+  default     = ""
+}
+
+variable "operator_rbac_assignment_read_permission_id" {
+  description = "UUID of the assignment-read permission in the selected operator RBAC catalog."
+  type        = string
+  default     = ""
 }

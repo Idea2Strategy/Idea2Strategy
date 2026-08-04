@@ -4,7 +4,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y ca-certificates curl docker.io docker-compose-v2 unzip
+apt-get install -y awscli ca-certificates certbot curl docker.io docker-compose-v2 jq nginx python3-certbot-dns-route53 unzip
 systemctl enable --now docker
 
 if snap list amazon-ssm-agent >/dev/null 2>&1; then
@@ -13,7 +13,7 @@ fi
 
 curl --fail --silent --show-error \
   --output /tmp/amazon-cloudwatch-agent.deb \
-  https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+  https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/arm64/latest/amazon-cloudwatch-agent.deb
 dpkg -i /tmp/amazon-cloudwatch-agent.deb
 rm -f /tmp/amazon-cloudwatch-agent.deb
 
@@ -43,7 +43,8 @@ cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'
   "metrics": {
     "namespace": "Idea2Strategy/Development",
     "append_dimensions": {
-      "InstanceId": "$${aws:InstanceId}"
+      "InstanceId": "$${aws:InstanceId}",
+      "AutoScalingGroupName": "$${aws:AutoScalingGroupName}"
     },
     "metrics_collected": {
       "disk": {
@@ -78,4 +79,597 @@ SSM_PARAMETER_PATH=${parameter_path}
 EOF
 chmod 0640 /etc/idea2strategy/runtime.env
 
+ssm_value() {
+  local parameter_name="$1"
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if aws ssm get-parameter \
+      --region '${aws_region}' \
+      --name "$parameter_name" \
+      --query 'Parameter.Value' \
+      --output text; then
+      return 0
+    fi
+    sleep $((attempt * 2))
+  done
+  return 1
+}
+
+%{ if runtime_role == "backtest-worker" ~}
+cat >>/etc/idea2strategy/runtime.env <<EOF
+BACKTEST_BASIC_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/url')
+BACKTEST_BASIC_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/dlq-url')
+BACKTEST_BASIC_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/basic/max-concurrency')
+BACKTEST_CUSTOM_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-custom/url')
+BACKTEST_CUSTOM_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-custom/dlq-url')
+BACKTEST_CUSTOM_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/custom/max-concurrency')
+BACKTEST_COMPETITION_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-competition/url')
+BACKTEST_COMPETITION_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-competition/dlq-url')
+BACKTEST_COMPETITION_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/competition/max-concurrency')
+BACKTEST_MAX_TOTAL_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/max-total-concurrency')
+EOF
+%{ endif ~}
+
+umask 077
+
+aws_retry() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if aws "$@"; then
+      return 0
+    fi
+    sleep $((attempt * 2))
+  done
+  return 1
+}
+
+secret_json() {
+  aws_retry secretsmanager get-secret-value \
+    --region '${aws_region}' \
+    --secret-id "$1" \
+    --query SecretString \
+    --output text
+}
+
+append_env_value() {
+  local destination="$1"
+  local name="$2"
+  local value="$3"
+  printf '%s' "$value" | jq -Rrs --arg name "$name" '$name + "=" + (. | @json)' >>"$destination"
+}
+
+append_json_field() {
+  local destination="$1"
+  local name="$2"
+  local document="$3"
+  local field="$4"
+  local value
+  value="$(jq -er --arg field "$field" '.[$field] | select(type == "string" and length > 0)' <<<"$document")"
+  append_env_value "$destination" "$name" "$value"
+}
+
+materialize_backtest_policies() {
+  local manifest destination temporary artifact_id object_key version_id expected_sha target
+  manifest="$(printf '%s' '${backtest_policy_manifest}' | base64 --decode)"
+  destination=/var/lib/idea2strategy/backtest-policy
+  temporary="$(mktemp -d /var/lib/idea2strategy/backtest-policy.XXXXXX)"
+  while IFS= read -r artifact_id; do
+    object_key="$(jq -er --arg id "$artifact_id" '.[$id].key' <<<"$manifest")"
+    version_id="$(jq -er --arg id "$artifact_id" '.[$id].version_id' <<<"$manifest")"
+    expected_sha="$(jq -er --arg id "$artifact_id" '.[$id].sha256' <<<"$manifest")"
+    case "$artifact_id" in
+      execution-policy) target="$temporary/execution-policy.json" ;;
+      runtime-policy) target="$temporary/runtime-policy.json" ;;
+      *) echo "Unsupported Backtest policy artifact: $artifact_id" >&2; exit 1 ;;
+    esac
+    aws_retry s3api get-object --region '${aws_region}' --bucket '${market_data_bucket}' \
+      --key "$object_key" --version-id "$version_id" "$target" >/dev/null
+    printf '%s  %s\n' "$expected_sha" "$target" | sha256sum --check --status
+  done < <(jq -r 'keys[]' <<<"$manifest")
+  test -s "$temporary/execution-policy.json"
+  test -s "$temporary/runtime-policy.json"
+  chmod -R go-w "$temporary"
+  rm -rf "$destination.previous"
+  if test -d "$destination"; then mv "$destination" "$destination.previous"; fi
+  mv "$temporary" "$destination"
+}
+
+materialize_trading_artifacts() {
+  local manifest runtime destination temporary artifact_name artifact_id object_key version_id expected_sha relative_path target receipt count
+  manifest="$(printf '%s' '${trading_artifact_manifest}' | base64 --decode)"
+  for runtime in market-gateway trading-worker; do
+    destination="/var/lib/idea2strategy/$runtime"
+    temporary="$(mktemp -d "/var/lib/idea2strategy/$runtime.XXXXXX")"
+    receipt="$temporary/materialization.properties"
+    count="$(jq --arg runtime "$runtime" '[to_entries[] | select(.value.runtime == $runtime)] | length' <<<"$manifest")"
+    {
+      printf 'contract=i2s.materialization-receipt\n'
+      printf 'schema-version=1\n'
+      printf 'artifact-count=%s\n' "$count"
+    } >"$receipt"
+    local index=0
+    while IFS= read -r artifact_name; do
+      artifact_id="$artifact_name"
+      object_key="$(jq -er --arg id "$artifact_name" '.[$id].key' <<<"$manifest")"
+      version_id="$(jq -er --arg id "$artifact_name" '.[$id].version_id' <<<"$manifest")"
+      expected_sha="$(jq -er --arg id "$artifact_name" '.[$id].sha256' <<<"$manifest")"
+      relative_path="$(jq -er --arg id "$artifact_name" '.[$id].local_path' <<<"$manifest")"
+      target="$temporary/$relative_path"
+      install -d -m 0750 "$(dirname "$target")"
+      aws_retry s3api get-object --region '${aws_region}' --bucket '${market_data_bucket}' \
+        --key "$object_key" --version-id "$version_id" "$target" >/dev/null
+      printf '%s  %s\n' "$expected_sha" "$target" | sha256sum --check --status
+      {
+        printf 'artifact.%s.id=%s\n' "$index" "$artifact_id"
+        printf 'artifact.%s.source-bucket=%s\n' "$index" '${market_data_bucket}'
+        printf 'artifact.%s.source-key=%s\n' "$index" "$object_key"
+        printf 'artifact.%s.source-version-id=%s\n' "$index" "$version_id"
+        printf 'artifact.%s.sha256=%s\n' "$index" "$expected_sha"
+        printf 'artifact.%s.local-path=%s\n' "$index" "$destination/$relative_path"
+      } >>"$receipt"
+      index=$((index + 1))
+    done < <(jq -r --arg runtime "$runtime" 'to_entries[] | select(.value.runtime == $runtime) | .key' <<<"$manifest")
+    chmod -R go-w "$temporary"
+    rm -rf "$destination.previous"
+    if test -d "$destination"; then mv "$destination" "$destination.previous"; fi
+    mv "$temporary" "$destination"
+  done
+}
+
+%{ if runtime_role == "service" ~}
+primary_db_secret="$(secret_json '${core_database_secret_arn}')"
+batch_db_secret="$(secret_json '${batch_database_secret_arn}')"
+backtest_db_secret="$(secret_json '${backtest_database_secret_arn}')"
+core_internal_secret="$(secret_json '${core_internal_secret_arn}')"
+backtest_internal_secret="$(secret_json '${backtest_internal_secret_arn}')"
+%{ endif ~}
+%{ if runtime_role == "backtest-worker" ~}
+primary_db_secret="$(secret_json '${backtest_database_secret_arn}')"
+backtest_db_secret="$primary_db_secret"
+backtest_internal_secret="$(secret_json '${backtest_internal_secret_arn}')"
+%{ endif ~}
+%{ if runtime_role == "trading" ~}
+primary_db_secret="$(secret_json '${trading_database_secret_arn}')"
+%{ endif ~}
+
+db_username="$(jq -er '.username' <<<"$primary_db_secret")"
+db_password="$(jq -er '.password' <<<"$primary_db_secret")"
+%{ if runtime_role != "trading" ~}
+backtest_database_url="$(printf '%s' "$backtest_db_secret" | python3 -c '
+import json
+import sys
+from urllib.parse import quote
+document = json.load(sys.stdin)
+print("postgresql+psycopg://%s:%s@${database_host}:5432/${database_name}?sslmode=require" % (
+    quote(document["username"], safe=""), quote(document["password"], safe="")))
+')"
+%{ endif ~}
+
+runtime_secret_env=/etc/idea2strategy/runtime-secret.env
+: >"$runtime_secret_env"
+append_env_value "$runtime_secret_env" AWS_REGION '${aws_region}'
+append_env_value "$runtime_secret_env" SPRING_DATASOURCE_URL 'jdbc:postgresql://${database_host}:5432/${database_name}?sslmode=require'
+append_env_value "$runtime_secret_env" SPRING_DATASOURCE_USERNAME "$db_username"
+append_env_value "$runtime_secret_env" SPRING_DATASOURCE_PASSWORD "$db_password"
+append_env_value "$runtime_secret_env" SPRING_FLYWAY_ENABLED false
+%{ if runtime_role == "backtest-worker" ~}
+append_env_value "$runtime_secret_env" BACKTEST_DATABASE_URL "$backtest_database_url"
+append_json_field "$runtime_secret_env" BACKTEST_SESSION_HMAC_KEY_BASE64 "$backtest_internal_secret" BACKTEST_SESSION_HMAC_KEY_BASE64
+append_json_field "$runtime_secret_env" BACKTEST_RESULT_INGEST_TOKEN "$backtest_internal_secret" BACKTEST_RESULT_INGEST_TOKEN
+append_json_field "$runtime_secret_env" BACKTEST_RESULT_PRINCIPAL_ID "$backtest_internal_secret" BACKTEST_RESULT_PRINCIPAL_ID
+%{ endif ~}
+%{ if runtime_role == "service" ~}
+append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY "$core_internal_secret" IDENTITY_EMAIL_ENCRYPTION_KEY
+append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_LOOKUP_HMAC_KEY "$core_internal_secret" IDENTITY_LOOKUP_HMAC_KEY
+append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY "$core_internal_secret" IDENTITY_VERIFICATION_HMAC_KEY
+append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_SESSION_HMAC_KEY "$core_internal_secret" IDENTITY_SESSION_HMAC_KEY
+append_json_field "$runtime_secret_env" OPERATOR_AUTH_CURRENT_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_CURRENT_HMAC_KEY
+cat >>"$runtime_secret_env" <<EOF
+OPERATOR_AUTH_ENABLED=true
+OPERATOR_AUTH_ISSUER=${operator_auth_issuer}
+OPERATOR_AUTH_JWK_SET_URI=${operator_auth_jwk_set_uri}
+OPERATOR_AUTH_AUDIENCE=${operator_auth_audience}
+OPERATOR_AUTH_MAXIMUM_TOKEN_AGE=PT5M
+OPERATOR_AUTH_MAXIMUM_MFA_AGE=PT10M
+OPERATOR_AUTH_CLOCK_SKEW=PT30S
+OPERATOR_AUTH_ALLOWED_ACR_VALUES=${operator_auth_allowed_acr_values}
+OPERATOR_AUTH_ALLOWED_AMR_VALUES=${operator_auth_allowed_amr_values}
+OPERATOR_AUTH_CURRENT_HMAC_KEY_VERSION=1
+OPERATOR_RBAC_READ_ENABLED=true
+OPERATOR_RBAC_CATALOG_VERSION=${operator_rbac_catalog_version}
+OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID=${operator_rbac_catalog_read_permission_id}
+OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID=${operator_rbac_assignment_read_permission_id}
+OPERATOR_RBAC_CATALOG_READ_MFA_REQUIRED=true
+OPERATOR_RBAC_ASSIGNMENT_READ_MFA_REQUIRED=true
+EOF
+backtest_secret_env=/etc/idea2strategy/backtest-secret.env
+: >"$backtest_secret_env"
+append_env_value "$backtest_secret_env" AWS_REGION '${aws_region}'
+append_env_value "$backtest_secret_env" BACKTEST_DATABASE_URL "$backtest_database_url"
+append_json_field "$backtest_secret_env" BACKTEST_SESSION_HMAC_KEY_BASE64 "$backtest_internal_secret" BACKTEST_SESSION_HMAC_KEY_BASE64
+append_json_field "$backtest_secret_env" BACKTEST_RESULT_INGEST_TOKEN "$backtest_internal_secret" BACKTEST_RESULT_INGEST_TOKEN
+append_json_field "$backtest_secret_env" BACKTEST_RESULT_PRINCIPAL_ID "$backtest_internal_secret" BACKTEST_RESULT_PRINCIPAL_ID
+chmod 0600 "$backtest_secret_env"
+%{ endif ~}
+chmod 0600 "$runtime_secret_env"
+%{ if runtime_role == "service" ~}
+batch_secret_env=/etc/idea2strategy/batch-secret.env
+: >"$batch_secret_env"
+append_env_value "$batch_secret_env" AWS_REGION '${aws_region}'
+append_env_value "$batch_secret_env" SPRING_DATASOURCE_URL 'jdbc:postgresql://${database_host}:5432/${database_name}?sslmode=require'
+append_json_field "$batch_secret_env" SPRING_DATASOURCE_USERNAME "$batch_db_secret" username
+append_json_field "$batch_secret_env" SPRING_DATASOURCE_PASSWORD "$batch_db_secret" password
+append_env_value "$batch_secret_env" SPRING_FLYWAY_ENABLED false
+chmod 0600 "$batch_secret_env"
+unset batch_db_secret
+%{ endif ~}
+unset primary_db_secret db_username db_password
+%{ if runtime_role != "trading" ~}
+unset backtest_db_secret backtest_database_url backtest_internal_secret
+%{ endif ~}
+%{ if runtime_role == "service" ~}
+unset core_internal_secret
+%{ endif ~}
+
+image_value() {
+  ssm_value '${parameter_path}/deployment/images/'"$1"
+}
+
+%{ if runtime_role == "service" ~}
+materialize_backtest_policies
+backend_api_image="$(image_value backend-api)"
+backend_worker_image="$(image_value backend-worker)"
+backend_batch_image="$(image_value backend-batch)"
+admin_mcp_image="$(image_value admin-mcp)"
+backtest_api_image="$(image_value backtest-api)"
+
+cat >>"$runtime_secret_env" <<EOF
+BACKTEST_BASIC_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/url')
+BACKTEST_CUSTOM_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-custom/url')
+BACKTEST_COMPETITION_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-competition/url')
+CORPORATE_ACTION_APPROVAL_QUEUE_URL=$(ssm_value '${parameter_path}/queues/corporate-action-approval/url')
+ROOM_LEDGER_OPENED_QUEUE_URL=$(ssm_value '${parameter_path}/queues/room-ledger-opened/url')
+ROOM_LEDGER_REJECTED_QUEUE_URL=$(ssm_value '${parameter_path}/queues/room-ledger-open-rejected/url')
+ROOM_LEDGER_RESULT_CONSUMER_ENABLED=true
+BACKTEST_OUTBOX_RELAY_ENABLED=${enable_backtest_outbox_relay}
+EOF
+
+cat >>"$backtest_secret_env" <<EOF
+BACKTEST_AUTHENTICATOR=backtest_engine.production:api_authenticator
+BACKTEST_OBJECT_STORE=backtest_engine.production:s3_object_store
+BACKTEST_OWNER_DIRECTORY=backtest_engine.production:postgres_owner_directory
+BACKTEST_COMPILED_PLAN_SOURCE=backtest_engine.production:postgres_compiled_plan_source
+BACKTEST_DATASET_MANIFEST_SOURCE=backtest_engine.production:postgres_dataset_manifest_source
+BACKTEST_EXECUTION_POLICY_CATALOG=backtest_engine.production:execution_policy_catalog
+BACKTEST_DEAD_LETTER_SINK=backtest_engine.production:sqs_dead_letter_sink
+BACKTEST_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/url')
+BACKTEST_API_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/dlq-url')
+BACKTEST_API_HOST=0.0.0.0
+BACKTEST_API_PORT=8082
+BACKTEST_RESULTS_BUCKET=${result_bucket}
+BACKTEST_RESULTS_PREFIX=backtest-results
+BACKTEST_EXECUTION_POLICY_FILE=/runtime-policy/execution-policy.json
+EOF
+
+cat >/opt/idea2strategy/compose.yaml <<EOF
+services:
+  backend-api:
+    image: $backend_api_image
+    restart: unless-stopped
+    read_only: true
+    env_file: [/etc/idea2strategy/runtime-secret.env]
+    ports: ["127.0.0.1:8080:8080"]
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    logging: &awslogs
+      driver: awslogs
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backend-api}
+  backend-worker:
+    image: $backend_worker_image
+    restart: unless-stopped
+    read_only: true
+    env_file: [/etc/idea2strategy/runtime-secret.env]
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    logging:
+      <<: *awslogs
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backend-worker}
+  backtest-api:
+    image: $backtest_api_image
+    restart: unless-stopped
+    read_only: true
+    env_file: [/etc/idea2strategy/backtest-secret.env]
+    ports: ["127.0.0.1:8082:8082"]
+    volumes: [/var/lib/idea2strategy/backtest-policy:/runtime-policy:ro]
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    logging:
+      <<: *awslogs
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backtest-api}
+  backend-batch:
+    image: $backend_batch_image
+    profiles: [manual]
+    read_only: true
+    env_file: [/etc/idea2strategy/batch-secret.env]
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    logging:
+      <<: *awslogs
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backend-batch}
+  admin-mcp:
+    image: $admin_mcp_image
+    profiles: [manual]
+    restart: "no"
+    read_only: true
+    env_file: [/etc/idea2strategy/runtime-secret.env]
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    logging:
+      <<: *awslogs
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: admin-mcp}
+EOF
+%{ endif ~}
+
+%{ if runtime_role == "backtest-worker" ~}
+materialize_backtest_policies
+backtest_worker_image="$(image_value backtest-worker)"
+instance_id="$(curl --fail --silent --show-error -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token | xargs -I{} curl --fail --silent --show-error -H 'X-aws-ec2-metadata-token: {}' http://169.254.169.254/latest/meta-data/instance-id)"
+cat >>"$runtime_secret_env" <<EOF
+BACKTEST_JOB_HANDLER=backtest_engine.production:orchestrator_job_handler
+BACKTEST_EXECUTION_KEY_STORE=backtest_engine.production:postgres_execution_key_store
+BACKTEST_WORKER_ID=$instance_id
+BACKTEST_BASIC_MAX_CONCURRENCY=2
+BACKTEST_CUSTOM_MAX_CONCURRENCY=1
+BACKTEST_COMPETITION_MAX_CONCURRENCY=1
+BACKTEST_MAX_TOTAL_CONCURRENCY=4
+BACKTEST_RESULTS_BUCKET=${result_bucket}
+BACKTEST_RESULTS_PREFIX=backtest-results
+BACKTEST_MARKET_DATA_BUCKET=${market_data_bucket}
+BACKTEST_MARKET_DATA_CACHE=/tmp/idea2strategy-market-data
+BACKTEST_MARKET_DATA_BATCH_SIZE=65536
+BACKTEST_API_BASE_URL=${core_public_url}
+BACKTEST_EXECUTION_POLICY_FILE=/runtime-policy/execution-policy.json
+BACKTEST_RUNTIME_POLICY_FILE=/runtime-policy/runtime-policy.json
+BACKTEST_WORKER_CORRELATION_ID=$instance_id
+BACKTEST_VISIBILITY_TIMEOUT_SECONDS=900
+BACKTEST_HEARTBEAT_SECONDS=60
+BACKTEST_SCALE_DOWN_ENABLED=true
+BACKTEST_ASG_NAME=${backtest_asg_name}
+BACKTEST_SCALE_DOWN_POLL_SECONDS=60
+EOF
+cat >/opt/idea2strategy/compose.yaml <<EOF
+services:
+  backtest-worker:
+    image: $backtest_worker_image
+    command: [backtest-worker]
+    restart: unless-stopped
+    read_only: true
+    env_file: [/etc/idea2strategy/runtime.env, /etc/idea2strategy/runtime-secret.env]
+    volumes: [/var/lib/idea2strategy/backtest-policy:/runtime-policy:ro]
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 512
+    mem_limit: 3200m
+    logging:
+      driver: awslogs
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backtest-worker}
+EOF
+%{ endif ~}
+
+%{ if runtime_role == "trading" ~}
+materialize_trading_artifacts
+market_gateway_image="$(image_value market-gateway)"
+trading_worker_image="$(image_value trading-worker)"
+alpaca_key_json="$(secret_json '${alpaca_api_key_secret_arn}')"
+alpaca_secret_json="$(secret_json '${alpaca_secret_key_secret_arn}')"
+append_json_field "$runtime_secret_env" ALPACA_API_KEY "$alpaca_key_json" ALPACA_API_KEY
+append_json_field "$runtime_secret_env" ALPACA_API_SECRET "$alpaca_secret_json" ALPACA_SECRET_KEY
+unset alpaca_key_json alpaca_secret_json
+cat >>"$runtime_secret_env" <<EOF
+MARKET_GATEWAY_REDIS_URI=rediss://${cache_endpoint}:6379
+MARKET_GATEWAY_REDIS_KEY_PREFIX=i2s
+MARKET_GATEWAY_INSTRUMENT_MAPPING_PATH=/runtime/market-gateway/instruments.json
+MARKET_GATEWAY_RIGHTS_EVIDENCE_PATH=/runtime/market-gateway/alpaca-sip-rights.json
+MARKET_GATEWAY_MATERIALIZATION_RECEIPT_PATH=/runtime/market-gateway/materialization.properties
+MARKET_GATEWAY_ALPACA_ENDPOINT=wss://stream.data.alpaca.markets/v2/sip
+I2S_READINESS_FILE=/tmp/idea2strategy-ready
+TRADING_MARKET_EVENTS_REDIS_URI=rediss://${cache_endpoint}:6379
+TRADING_MARKET_EVENTS_REDIS_KEY_PREFIX=i2s
+TRADING_MARKET_EVENTS_CONSUMER_NAME=trading-worker-development-1
+TRADING_WARMUP_BUNDLE_ROOT=/runtime/trading-worker/warmup
+TRADING_WARMUP_MANIFEST_KEY=manifest.json
+TRADING_WARMUP_MATERIALIZATION_RECEIPT_PATH=/runtime/trading-worker/materialization.properties
+TRADING_BOT_CONTROL_WORKER_ID=trading-worker-development-1
+TRADING_RUNTIME_LIFECYCLE_ENABLED=true
+TRADING_ROOM_ACCOUNT_OPEN_ENABLED=true
+TRADING_RUNTIME_SHUTDOWN_DRAIN_TIMEOUT=PT30S
+EOF
+cat >/opt/idea2strategy/compose.yaml <<EOF
+services:
+  market-gateway:
+    image: $market_gateway_image
+    restart: unless-stopped
+    read_only: true
+    user: "10001:10001"
+    env_file: [/etc/idea2strategy/runtime-secret.env]
+    volumes: [/var/lib/idea2strategy/market-gateway:/runtime/market-gateway:ro]
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 0.50
+    stop_grace_period: 45s
+    logging:
+      driver: awslogs
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: market-gateway}
+  trading-worker:
+    image: $trading_worker_image
+    restart: unless-stopped
+    read_only: true
+    user: "10001:10001"
+    env_file: [/etc/idea2strategy/runtime-secret.env]
+    volumes: [/var/lib/idea2strategy/trading-worker:/runtime/trading-worker:ro]
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 384
+    mem_limit: 2304m
+    cpus: 1.25
+    stop_grace_period: 45s
+    logging:
+      driver: awslogs
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: trading-worker}
+EOF
+%{ endif ~}
+
+cat >/usr/local/sbin/idea2strategy-runtime-start <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+cd /opt/idea2strategy
+while IFS= read -r image; do
+  case "$image" in
+    *@sha256:*) ;;
+    *) echo "Mutable or malformed runtime image reference: $image" >&2; exit 1 ;;
+  esac
+done < <(docker compose --project-name idea2strategy config --images)
+registry="$(docker compose --project-name idea2strategy config --images | head -n1 | cut -d/ -f1)"
+test -n "$registry"
+aws ecr get-login-password --region '${aws_region}' | docker login --username AWS --password-stdin "$registry"
+docker compose --project-name idea2strategy config --quiet
+docker compose --project-name idea2strategy pull
+docker compose --project-name idea2strategy up --detach --remove-orphans --wait
+SCRIPT
+chmod 0700 /usr/local/sbin/idea2strategy-runtime-start
+
+cat >/etc/systemd/system/idea2strategy-runtime.service <<'UNIT'
+[Unit]
+Description=Idea2Strategy immutable application runtime
+Requires=docker.service
+After=network-online.target docker.service amazon-cloudwatch-agent.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/idea2strategy-runtime-start
+ExecStop=/usr/bin/docker compose --project-directory /opt/idea2strategy --project-name idea2strategy down --timeout 45
+TimeoutStartSec=10min
+TimeoutStopSec=2min
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable idea2strategy-runtime.service
+%{ if runtime_role != "trading" ~}
+systemctl start idea2strategy-runtime.service
+%{ endif ~}
+
 touch /opt/idea2strategy/bootstrap-complete
+
+%{ if runtime_role == "trading" ~}
+# A newly created Trading host is initialized but not left running. EventBridge
+# Scheduler starts it for the next market window; systemd then starts both runtimes.
+shutdown -h now
+%{ endif ~}
+
+%{ if runtime_role == "service" ~}
+cat >/usr/local/sbin/configure-core-origin <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+origin_secret="$(aws secretsmanager get-secret-value --region '${aws_region}' --secret-id '${origin_header_secret_arn}' --query SecretString --output text)"
+certbot certonly --non-interactive --agree-tos --register-unsafely-without-email --dns-route53 --domain '${origin_domain_name}' --keep-until-expiring
+
+cat >/etc/nginx/conf.d/idea2strategy-origin.conf <<NGINX
+server {
+  listen 443 ssl;
+  server_name ${origin_domain_name};
+  ssl_certificate /etc/letsencrypt/live/${origin_domain_name}/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/${origin_domain_name}/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+
+  if (\$http_x_idea2strategy_origin_verify != "$${origin_secret}") { return 403; }
+
+  location / {
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_pass http://127.0.0.1:${backend_port};
+  }
+
+  location = /api/healthz/backend {
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_pass http://127.0.0.1:8080/actuator/health;
+  }
+
+  location = /api/healthz/backtest {
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_pass http://127.0.0.1:8082/health;
+  }
+
+  location ^~ /api/v1/backtests {
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_pass http://127.0.0.1:8082;
+  }
+}
+NGINX
+
+chmod 0600 /etc/nginx/conf.d/idea2strategy-origin.conf
+
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl enable --now nginx
+systemctl reload nginx
+SCRIPT
+chmod 0700 /usr/local/sbin/configure-core-origin
+
+cat >/etc/systemd/system/idea2strategy-origin-cert.service <<'UNIT'
+[Unit]
+Description=Renew the Core origin certificate and restore the secret-header proxy
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/configure-core-origin
+UNIT
+
+cat >/etc/systemd/system/idea2strategy-origin-cert.timer <<'UNIT'
+[Unit]
+Description=Daily Core origin certificate renewal check
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1d
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now idea2strategy-origin-cert.timer
+%{ endif ~}
