@@ -32,3 +32,15 @@ variable "state_bucket_name" {
   type        = string
   default     = ""
 }
+
+variable "github_repository" {
+  description = "GitHub organization/repository allowed to assume the Development deploy role."
+  type        = string
+  default     = "Idea2Strategy/Idea2Strategy"
+}
+
+variable "github_environment" {
+  description = "Protected GitHub Actions Environment required in the OIDC subject."
+  type        = string
+  default     = "development"
+}

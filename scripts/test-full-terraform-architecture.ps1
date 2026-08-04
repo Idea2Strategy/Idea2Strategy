@@ -26,6 +26,9 @@ $pipeline = Read-TerraformFile "pipeline.tf"
 $scheduling = Read-TerraformFile "scheduling.tf"
 $providers = Read-TerraformFile "providers.tf"
 $userData = Get-Content -LiteralPath (Join-Path $environmentRoot "templates/ec2-user-data.sh.tftpl") -Raw
+$bootstrap = Get-Content -LiteralPath (Join-Path $root "infra/terraform/bootstrap/main.tf") -Raw
+$developmentVariables = Get-Content -LiteralPath (Join-Path $environmentRoot "variables.tf") -Raw
+$developmentLocals = Get-Content -LiteralPath (Join-Path $environmentRoot "locals.tf") -Raw
 
 foreach ($forbidden in @(
     'resource "aws_nat_gateway"',
@@ -48,6 +51,15 @@ foreach ($required in @(
 )) {
     if (-not $network.Contains($required)) {
         throw "Network architecture is missing: $required"
+    }
+}
+foreach ($required in @(
+    '"artifact_foundation"',
+    'enable_artifact_foundation',
+    'local.enable_artifact_foundation ? toset(['
+)) {
+    if (-not ($developmentVariables + $developmentLocals).Contains($required)) {
+        throw "Artifact foundation deployment phase is missing: $required"
     }
 }
 if ($compute -notmatch '(?s)resource\s+"aws_launch_template"\s+"backtest".*?credit_specification\s*\{.*?cpu_credits\s*=\s*"standard"') {
@@ -154,6 +166,19 @@ foreach ($required in @('resource "aws_sqs_queue" "backtest"', 'resource "aws_sq
 foreach ($required in @('ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'alpaca-api-key-secret-arn', 'alpaca-secret-key-secret-arn')) {
     if (-not $all.Contains($required)) {
         throw "Alpaca secret reference boundary is missing: $required"
+    }
+}
+foreach ($required in @(
+    'aws_iam_openid_connect_provider',
+    'token.actions.githubusercontent.com:aud',
+    'token.actions.githubusercontent.com:sub',
+    'environment:${var.github_environment}',
+    'PowerUserAccess',
+    'TerraformStateObject',
+    'iam:PassRole'
+)) {
+    if (-not $bootstrap.Contains($required)) {
+        throw "GitHub OIDC deployment boundary is missing: $required"
     }
 }
 if (-not $queues.Contains('resource "aws_ssm_parameter" "backtest_dlq_url"')) {

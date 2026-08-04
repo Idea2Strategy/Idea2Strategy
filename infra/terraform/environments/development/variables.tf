@@ -56,8 +56,8 @@ variable "deployment_phase" {
   default     = "market_data_bootstrap"
 
   validation {
-    condition     = contains(["market_data_bootstrap", "full"], var.deployment_phase)
-    error_message = "deployment_phase must be market_data_bootstrap or full."
+    condition     = contains(["market_data_bootstrap", "artifact_foundation", "full"], var.deployment_phase)
+    error_message = "deployment_phase must be market_data_bootstrap, artifact_foundation, or full."
   }
 }
 

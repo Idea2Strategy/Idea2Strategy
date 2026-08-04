@@ -53,7 +53,7 @@ Before requesting an AWS plan, record and review all of the following:
 - exact root commit and exact submodule commits;
 - successful CI URL for the exact root commit;
 - Terraform version `1.15.x` and AWS provider version from both lockfiles;
-- intended `deployment_phase` (`market_data_bootstrap` or `full`);
+- intended `deployment_phase` (`market_data_bootstrap`, `artifact_foundation`, or `full`);
 - approved AWS account ID, region, and operator identity from `aws sts get-caller-identity`;
 - reviewed `terraform.tfvars` values, with no credentials in the file;
 - reviewed S3 backend bucket, key, region, and lockfile settings in ignored `backend.hcl`;
@@ -70,14 +70,15 @@ Stop if the account, region, commit, provider lockfile, backend, or protected pr
 The following steps intentionally remain outside this repository-only readiness pass and require explicit authorization, short-lived credentials, and a reviewed change window:
 
 1. Authenticate to the intended AWS account and verify the caller identity and region.
-2. If it does not exist, plan and apply the bootstrap root to create the remote state bucket.
+2. If it does not exist, plan and apply the bootstrap root to create the remote state bucket and the GitHub Actions OIDC deploy role. Record the role ARN as the protected `AWS_DEPLOY_ROLE_ARN` GitHub Environment variable; do not create a long-lived AWS access key for CI.
 3. Populate ignored `backend.hcl` and `terraform.tfvars` from the examples; never commit them.
 4. Run `terraform init -backend-config=backend.hcl`, then create a saved plan with `terraform plan -parallelism=1 -out deployment.tfplan`.
 5. Review the complete plan, cost impact, replacements, deletions, IAM changes, public network paths, and database consequences. A non-zero destroy count requires a separate explicit decision.
 6. Apply only that reviewed plan file. Do not run an unsaved `terraform apply`.
    The pre-approval plan uses deliberately invalid all-zero image digests and is
-   never applyable. Create ECR repositories first after approval, publish ARM64
-   images, then save and re-review a second full plan containing real digests.
+   never applyable. Apply only an independently reviewed `artifact_foundation`
+   plan to create ECR repositories, publish ARM64 images, then save and re-review
+   a second `full` plan containing real digests.
 7. Verify S3 public-access blocks/versioning/encryption, isolated RDS and Valkey
    reachability, RDS deletion protection/backups, EC2 IMDSv2/SSM access,
    CloudFront-prefix-list-only Core ingress, secret-header rejection, no SSH,
