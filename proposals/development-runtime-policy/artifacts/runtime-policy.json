@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "attempt": {
+    "maxAttempts": 3,
+    "leaseDurationSeconds": 300,
+    "attemptTimeoutSeconds": 1800,
+    "maxCpuTimeSeconds": 300,
+    "maxMemoryBytes": 536870912
+  },
+  "microstructure": {
+    "version": "development-microstructure-v1",
+    "maxVolumeParticipationBps": 1000,
+    "buyingPowerBufferPolicyId": "a27b9962-56cc-41f8-b98c-9311833ff201",
+    "buyingPowerBufferBps": 1
+  },
+  "fractional": {
+    "policyVersion": "development-fractional-instruments-2026-q3-v1",
+    "instrumentIds": []
+  },
+  "riskLimits": {
+    "maxStrategyNotional": "1000000",
+    "maxGrossExposure": "1000000",
+    "maxInstrumentExposure": "250000"
+  }
+}

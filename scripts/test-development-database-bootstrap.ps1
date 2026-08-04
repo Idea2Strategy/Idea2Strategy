@@ -23,6 +23,53 @@ $security = Read-RequiredFile "infra/terraform/environments/development/security
 $outputs = Read-RequiredFile "infra/terraform/environments/development/outputs.tf"
 $orchestrator = Read-RequiredFile "scripts/invoke-development-database-bootstrap.ps1"
 $bootstrap = Read-RequiredFile "scripts/aws/development-database-bootstrap.sh"
+$artifactRoot = Join-Path $root "proposals/development-runtime-policy/artifacts"
+$artifactManifest = Read-RequiredFile "proposals/development-runtime-policy/artifacts/artifact-manifest.json" | ConvertFrom-Json
+$executionPolicy = Read-RequiredFile "proposals/development-runtime-policy/artifacts/execution-policy.json" | ConvertFrom-Json
+$runtimePolicy = Read-RequiredFile "proposals/development-runtime-policy/artifacts/runtime-policy.json" | ConvertFrom-Json
+$policySeed = Read-RequiredFile "proposals/development-runtime-policy/artifacts/policy-seed.sql"
+
+foreach ($artifactName in @("execution-policy.json", "runtime-policy.json", "policy-seed.sql")) {
+    $expectedHash = [string]$artifactManifest.artifacts.$artifactName
+    $actualHash = (Get-FileHash -LiteralPath (Join-Path $artifactRoot $artifactName) -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($expectedHash -cne $actualHash) { throw "Development policy artifact hash mismatch: $artifactName" }
+}
+if ($artifactManifest.sourceApprovalPullRequest -ne 225 -or
+    $artifactManifest.sourceApprovalCommit -cne "47932bf5febda9aa9603fd4d77e7f2ed2b60c23c") {
+    throw "Development policy artifacts must identify the exact reviewed proposal evidence."
+}
+if ($executionPolicy.schemaVersion -ne 1 -or $executionPolicy.policies.Count -ne 1) {
+    throw "Development execution policy must publish exactly one schema-v1 policy."
+}
+$policy = $executionPolicy.policies[0]
+if ($policy.version -cne "development-official-backtest-2026-q3-v1" -or
+    $policy.feeRate -cne "0.002" -or $policy.slippageRateBps -ne 5 -or
+    $policy.goodTillCancelledHorizonSeconds -ne 7776000 -or $policy.maxOrderHorizonSeconds -ne 7776000) {
+    throw "Development execution policy diverges from the reviewed proposal."
+}
+if ($runtimePolicy.schemaVersion -ne 1 -or $runtimePolicy.attempt.maxAttempts -ne 3 -or
+    $runtimePolicy.attempt.leaseDurationSeconds -ne 300 -or
+    $runtimePolicy.attempt.attemptTimeoutSeconds -ne 1800 -or
+    $runtimePolicy.attempt.maxCpuTimeSeconds -ne 300 -or
+    $runtimePolicy.attempt.maxMemoryBytes -ne 536870912 -or
+    $runtimePolicy.microstructure.maxVolumeParticipationBps -ne 1000 -or
+    $runtimePolicy.microstructure.buyingPowerBufferBps -ne 1 -or
+    $runtimePolicy.riskLimits.maxStrategyNotional -cne "1000000" -or
+    $runtimePolicy.riskLimits.maxGrossExposure -cne "1000000" -or
+    $runtimePolicy.riskLimits.maxInstrumentExposure -cne "250000") {
+    throw "Development runtime policy diverges from the reviewed proposal."
+}
+foreach ($needle in @(
+    "INSERT INTO trading.fee_policy_versions",
+    "INSERT INTO trading.buying_power_buffer_policy_versions",
+    "INSERT INTO backtest.execution_policy_versions",
+    [string]$artifactManifest.artifacts."execution-policy.json",
+    [string]$artifactManifest.artifacts."runtime-policy.json",
+    [string]$policy.feePolicyId,
+    [string]$policy.buyingPowerBufferPolicyId
+)) {
+    Assert-Contains $policySeed $needle "Development policy seed is missing reviewed value: $needle"
+}
 
 Assert-Contains $database 'resource "aws_secretsmanager_secret" "runtime_database"' "Terraform must own runtime database secret metadata."
 Assert-Contains $database 'for_each = var.runtime_database_secret_names' "All five configured runtime database secrets must be owned."
