@@ -74,10 +74,14 @@ strict security groups and host hardening.
   stops it at 17:00 in `America/New_York`. Startup and shutdown reconciliation
   must compare Alpaca orders/fills with PostgreSQL, preserve idempotency, and
   keep `extended_hours=false`.
-- Backtest starts when any lane has visible work. Scale-down is worker-initiated
-  only after all three queues have zero visible/in-flight messages, PostgreSQL
-  has no valid RUNNING claim, result/checkpoint persistence is confirmed, and a
-  15-minute idle grace elapsed. SQS approximate metrics alone never stop it.
+- Backtest starts when any lane has visible work. The single `t4g.medium` worker
+  target exposes four logical slots: Basic 2, Custom 1, and Competition 1; requests over
+  a lane limit remain queued. The instance uses Standard CPU credits and raises
+  CPU, credit-balance, memory, and queue-latency alarms so resizing is driven by
+  evidence. Scale-down is worker-initiated only after all three queues have zero
+  visible/in-flight messages, PostgreSQL has no valid RUNNING claim,
+  result/checkpoint persistence is confirmed, and a 15-minute idle grace elapsed.
+  SQS approximate metrics alone never stop it.
 - Pipeline has no ECS service. A schedule/event invokes one ARM64 Fargate Spot
   task with a public IP for egress; checkpoints and content-addressed manifests
   remain in S3.

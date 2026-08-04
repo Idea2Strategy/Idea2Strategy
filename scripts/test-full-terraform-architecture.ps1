@@ -50,6 +50,9 @@ foreach ($required in @(
         throw "Network architecture is missing: $required"
     }
 }
+if ($compute -notmatch '(?s)resource\s+"aws_launch_template"\s+"backtest".*?credit_specification\s*\{.*?cpu_credits\s*=\s*"standard"') {
+    throw "Backtest t4g.medium must use standard CPU credits so saturation is visible without surplus-credit spend."
+}
 
 foreach ($required in @(
     'resource "aws_instance" "service"',
@@ -124,6 +127,23 @@ foreach ($lane in @('basic', 'custom', 'competition')) {
 foreach ($required in @('resource "aws_sqs_queue" "backtest"', 'resource "aws_sqs_queue" "backtest_dlq"', 'redrive_policy', 'sqs_managed_sse_enabled')) {
     if (-not $queues.Contains($required)) {
         throw "Durable backtest queue safety is missing: $required"
+    }
+}
+if ($queues -notmatch 'value\s*=\s*each\.key\s*==\s*"basic"\s*\?\s*"2"\s*:\s*"1"') {
+    throw "Backtest lane concurrency must be basic=2, custom=1, competition=1."
+}
+if ($queues -notmatch '(?s)resource\s+"aws_ssm_parameter"\s+"backtest_total_concurrency".*?value\s*=\s*"4"') {
+    throw "Backtest total concurrency must allow all four lane slots on the single worker host."
+}
+foreach ($required in @(
+    'resource "aws_cloudwatch_metric_alarm" "backtest_cpu_high"',
+    'resource "aws_cloudwatch_metric_alarm" "backtest_cpu_credit_low"',
+    'resource "aws_cloudwatch_metric_alarm" "backtest_memory_high"',
+    'CPUCreditBalance',
+    'AutoScalingGroupName'
+)) {
+    if (-not $all.Contains($required)) {
+        throw "Backtest t4g.medium saturation monitoring is missing: $required"
     }
 }
 

@@ -61,8 +61,11 @@ range rather than a false-precision single number.
 
 - Terraform contains no NAT Gateway and no ALB.
 - Trading runs only 08:00-17:00 `America/New_York` on weekdays.
-- Backtest ASG is `min=0`, `desired=0`, `max=1`; each additional 100 hours adds
-  about USD 4.16 before storage and logs.
+- Backtest ASG is `min=0`, `desired=0`, `max=1` on `t4g.medium`. The target worker
+  has four logical slots (Basic 2, Custom 1, Competition 1); excess work remains in
+  its lane queue. Standard CPU credits and CPU, credit-balance, memory, and queue
+  latency alarms make saturation visible before a later sizing decision. Each
+  additional 100 host-hours adds about USD 4.16 before storage and logs.
 - Pipeline has no ECS service and uses ARM64 Fargate Spot RunTask invocations.
 - Raising Core to `t4g.medium` adds about USD 15 per month and requires measured
   memory, CPU-credit, GC, OOM, or latency evidence.

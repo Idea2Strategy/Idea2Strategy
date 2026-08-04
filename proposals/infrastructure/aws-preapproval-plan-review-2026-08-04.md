@@ -9,7 +9,7 @@ no AWS resource was created, changed, or deleted.
 
 ## Plan summary
 
-- Create: 154 managed resources
+- Create: 157 managed resources
 - Update in place: 7 managed resources
 - Delete: 7 managed resources
 - Read during apply: 9 data sources
@@ -17,7 +17,9 @@ no AWS resource was created, changed, or deleted.
 - ALB/ELB: 0
 - Core: one `t4g.small` ARM64 EC2 instance with a fixed EIP
 - Trading: one scheduled `c7g.xlarge` ARM64 EC2 instance
-- Backtest: `t4g.medium` ARM64 launch template and ASG `0/0/1`
+- Backtest: `t4g.medium` ARM64 launch template and ASG `0/0/1`; Terraform
+  publishes the target four-slot configuration (Basic 2, Custom 1, Competition
+  1), with Standard CPU credits and saturation alarms
 - Pipeline: desired-zero ARM64 Fargate Spot task definition
 - Database: private Single-AZ `db.t4g.small` PostgreSQL
 - Cache: private Valkey Serverless

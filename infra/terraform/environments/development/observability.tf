@@ -63,6 +63,57 @@ resource "aws_cloudwatch_metric_alarm" "runtime_memory_high" {
   dimensions          = { InstanceId = each.value }
 }
 
+resource "aws_cloudwatch_metric_alarm" "backtest_cpu_high" {
+  count = local.enable_service_stack ? 1 : 0
+
+  alarm_name          = "${local.name_prefix}-backtest-cpu-high"
+  alarm_description   = "Backtest CPU exceeded 80 percent for 15 minutes; review t4g.medium sizing and queue latency"
+  namespace           = "AWS/EC2"
+  metric_name         = "CPUUtilization"
+  statistic           = "Average"
+  period              = 300
+  evaluation_periods  = 3
+  threshold           = 80
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "missing"
+  alarm_actions       = local.alarm_action_arns
+  dimensions          = { AutoScalingGroupName = aws_autoscaling_group.backtest[0].name }
+}
+
+resource "aws_cloudwatch_metric_alarm" "backtest_cpu_credit_low" {
+  count = local.enable_service_stack ? 1 : 0
+
+  alarm_name          = "${local.name_prefix}-backtest-cpu-credit-low"
+  alarm_description   = "Backtest t4g.medium CPU credits fell below 20; inspect throttling before increasing instance size"
+  namespace           = "AWS/EC2"
+  metric_name         = "CPUCreditBalance"
+  statistic           = "Minimum"
+  period              = 300
+  evaluation_periods  = 2
+  threshold           = 20
+  comparison_operator = "LessThanOrEqualToThreshold"
+  treat_missing_data  = "missing"
+  alarm_actions       = local.alarm_action_arns
+  dimensions          = { AutoScalingGroupName = aws_autoscaling_group.backtest[0].name }
+}
+
+resource "aws_cloudwatch_metric_alarm" "backtest_memory_high" {
+  count = local.enable_service_stack ? 1 : 0
+
+  alarm_name          = "${local.name_prefix}-backtest-memory-high"
+  alarm_description   = "Backtest memory exceeded 80 percent for 5 minutes; inspect concurrency and t4g.medium sizing"
+  namespace           = "Idea2Strategy/Development"
+  metric_name         = "mem_used_percent"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 5
+  threshold           = 80
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "missing"
+  alarm_actions       = local.alarm_action_arns
+  dimensions          = { AutoScalingGroupName = aws_autoscaling_group.backtest[0].name }
+}
+
 resource "aws_cloudwatch_metric_alarm" "queue_oldest_message" {
   for_each = local.backtest_lanes
 

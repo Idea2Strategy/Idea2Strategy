@@ -55,7 +55,7 @@ resource "aws_ssm_parameter" "backtest_total_concurrency" {
   count = local.enable_service_stack ? 1 : 0
   name  = "${local.parameter_path}/backtest/max-total-concurrency"
   type  = "String"
-  value = "1"
+  value = "4"
 
   lifecycle {
     precondition {

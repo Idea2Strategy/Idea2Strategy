@@ -125,6 +125,10 @@ resource "aws_launch_template" "backtest" {
     instance_metadata_tags      = "enabled"
   }
 
+  credit_specification {
+    cpu_credits = "standard"
+  }
+
   block_device_mappings {
     device_name = "/dev/sda1"
     ebs {

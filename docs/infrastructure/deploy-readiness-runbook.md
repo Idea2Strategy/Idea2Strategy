@@ -27,7 +27,9 @@ These checks validate formatting, provider lockfile integrity, Terraform configu
 CI also runs TFLint, Checkov with the documented Development exceptions in
 `infra/terraform/checkov.yaml`, and the low-cost architecture policy test. That
 test rejects NAT Gateway, ALB, x86 runtime AMIs, open/SSH ingress, an always-on
-backtest host, missing queue lanes, or a non-ARM64 Fargate pipeline.
+backtest host, missing queue lanes, a Backtest limit other than Basic 2 / Custom
+1 / Competition 1 / total 4, missing `t4g.medium` saturation alarms, or a
+non-ARM64 Fargate pipeline.
 
 ## Release-candidate inputs
 
