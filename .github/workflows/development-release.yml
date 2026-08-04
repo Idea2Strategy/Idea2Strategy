@@ -190,6 +190,77 @@ jobs:
           }
           $digests | ConvertTo-Json -Compress | Set-Content -NoNewline "$env:RUNNER_TEMP/image-digests.json"
 
+      - name: Wait for ECR security scans
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $digests = Get-Content "$env:RUNNER_TEMP/image-digests.json" -Raw | ConvertFrom-Json -AsHashtable
+          $pending = @{}
+          foreach ($entry in $digests.GetEnumerator()) {
+            $name = [string]$entry.Key
+            $repository = "idea2strategy-dev/$name"
+            $indexDigest = [string]$entry.Value
+            $batchJson = aws ecr batch-get-image `
+              --repository-name $repository `
+              --image-ids "imageDigest=$indexDigest" `
+              --accepted-media-types 'application/vnd.oci.image.index.v1+json' `
+              --output json
+            if ($LASTEXITCODE -ne 0) { throw "Unable to read the published OCI index for $name." }
+            $batch = $batchJson | ConvertFrom-Json
+            $index = ([string]$batch.images[0].imageManifest) | ConvertFrom-Json
+            $arm64 = @($index.manifests | Where-Object {
+              $_.platform.os -eq 'linux' -and $_.platform.architecture -eq 'arm64'
+            })
+            if ($arm64.Count -ne 1) { throw "Published image $name must contain exactly one linux/arm64 manifest." }
+            $imageDigest = [string]$arm64[0].digest
+            $pending[$name] = @{ repository = $repository; digest = $imageDigest }
+
+            aws ecr describe-image-scan-findings `
+              --repository-name $repository `
+              --image-id "imageDigest=$imageDigest" `
+              --output json 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              aws ecr start-image-scan `
+                --repository-name $repository `
+                --image-id "imageDigest=$imageDigest" `
+                --output json | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Unable to start ECR image scan for $name." }
+            }
+          }
+          $deadline = [DateTime]::UtcNow.AddMinutes(10)
+
+          while ($pending.Count -gt 0 -and [DateTime]::UtcNow -lt $deadline) {
+            foreach ($name in @($pending.Keys)) {
+              $repository = [string]$pending[$name].repository
+              $digest = [string]$pending[$name].digest
+              $scanJson = aws ecr describe-image-scan-findings `
+                --repository-name $repository `
+                --image-id "imageDigest=$digest" `
+                --output json 2>$null
+              if ($LASTEXITCODE -ne 0) { continue }
+
+              $scan = $scanJson | ConvertFrom-Json
+              $status = [string]$scan.imageScanStatus.status
+              if ($status -eq 'FAILED' -or $status -eq 'UNSUPPORTED_IMAGE') {
+                throw "ECR image scan rejected $name with terminal status $status."
+              }
+              if ($status -ne 'COMPLETE') { continue }
+
+              $counts = $scan.imageScanFindings.findingSeverityCounts
+              $critical = if ($null -eq $counts.CRITICAL) { 0 } else { [int]$counts.CRITICAL }
+              $high = if ($null -eq $counts.HIGH) { 0 } else { [int]$counts.HIGH }
+              if ($critical -gt 0 -or $high -gt 0) {
+                throw "ECR image scan rejected $name: Critical=$critical High=$high."
+              }
+              $pending.Remove($name)
+            }
+            if ($pending.Count -gt 0) { Start-Sleep -Seconds 10 }
+          }
+
+          if ($pending.Count -gt 0) {
+            throw "ECR image scan did not complete for: $(@($pending.Keys) -join ', ')."
+          }
+
       - name: Publish immutable frontend prefix before planning
         shell: pwsh
         run: |

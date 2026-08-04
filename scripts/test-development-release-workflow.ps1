@@ -7,6 +7,7 @@ if (-not (Test-Path -LiteralPath $workflowPath)) {
 }
 
 $workflow = Get-Content -LiteralPath $workflowPath -Raw
+$ciIdentity = Get-Content -LiteralPath (Join-Path $PSScriptRoot "../infra/terraform/ci-identity/main.tf") -Raw
 
 $required = @(
     "workflow_dispatch:",
@@ -22,6 +23,11 @@ $required = @(
     "--platform linux/arm64",
     "--tag `$target",
     "idea2strategy-dev/",
+    "aws ecr describe-image-scan-findings",
+    "aws ecr batch-get-image",
+    "aws ecr start-image-scan",
+    "ECR image scan did not complete",
+    "ECR image scan rejected",
     "terraform plan -parallelism=1 -out=deployment.tfplan",
     "terraform apply -parallelism=1 deployment.tfplan",
     "aws s3api put-object",
@@ -93,6 +99,18 @@ if ($workflow -notmatch "(?s)Build same-origin frontend without AWS credentials.
 
 if ($workflow -notmatch "(?s)operator_oidc_issuer.*?OPERATOR_OIDC_ISSUER.*?operator_oidc_audience.*?OPERATOR_OIDC_AUDIENCE") {
     throw "The frontend OIDC issuer and audience must be cross-checked against the Terraform runtime inputs."
+}
+
+if ($workflow -notmatch "(?s)Publish immutable ARM64 images.*?Wait for ECR security scans.*?Publish immutable frontend prefix") {
+    throw "Every published runtime image must pass the ECR scan before frontend publication and planning."
+}
+
+if ($workflow -notmatch "(?s)findingSeverityCounts.*?CRITICAL.*?HIGH") {
+    throw "The release scan gate must reject Critical and High findings."
+}
+
+if (-not $ciIdentity.Contains('"ecr:StartImageScan"')) {
+    throw "The scoped plan role must be allowed to start scans for its exact ECR repositories."
 }
 
 Write-Host "Development release workflow policy checks passed."

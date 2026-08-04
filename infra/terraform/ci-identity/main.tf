@@ -61,6 +61,7 @@ data "aws_iam_policy_document" "github_plan_artifacts" {
       "ecr:CompleteLayerUpload",
       "ecr:InitiateLayerUpload",
       "ecr:PutImage",
+      "ecr:StartImageScan",
       "ecr:UploadLayerPart"
     ]
     resources = [local.ecr_repository_arn]
