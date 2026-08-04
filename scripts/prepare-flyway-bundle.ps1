@@ -149,9 +149,14 @@ if ($null -ne $java) {
     }
     $applicationArgs = @($centralMigration, $bundle, $tradingContribution) |
         ForEach-Object { Quote-ApplicationArgument $_ }
-    & $gradleWrapper --no-daemon :db-migration:run "--args=$($applicationArgs -join ' ')"
-    if ($LASTEXITCODE -ne 0) {
-        throw 'The backend migration bundle assembler failed.'
+    Push-Location $backendRoot
+    try {
+        & $gradleWrapper --no-daemon :db-migration:run "--args=$($applicationArgs -join ' ')"
+        if ($LASTEXITCODE -ne 0) {
+            throw 'The backend migration bundle assembler failed.'
+        }
+    } finally {
+        Pop-Location
     }
 } else {
     $docker = Get-Command docker -ErrorAction SilentlyContinue

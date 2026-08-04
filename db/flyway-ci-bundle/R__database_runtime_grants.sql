@@ -2,7 +2,12 @@
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_backend') THEN CREATE ROLE idea2strategy_backend NOLOGIN; END IF;
 END $$;
-ALTER ROLE idea2strategy_backend NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+ALTER ROLE idea2strategy_backend NOLOGIN NOCREATEDB NOCREATEROLE NOINHERIT;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_backend' AND (rolsuper OR rolreplication OR rolbypassrls OR rolcanlogin OR rolcreatedb OR rolcreaterole OR rolinherit)) THEN
+    RAISE EXCEPTION 'application group role idea2strategy_backend has forbidden privileged attributes';
+  END IF;
+END $$;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_database WHERE datdba = 'idea2strategy_backend'::regrole) OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = 'idea2strategy_backend'::regrole) OR EXISTS (SELECT 1 FROM pg_class WHERE relowner = 'idea2strategy_backend'::regrole) THEN
     RAISE EXCEPTION 'application group role idea2strategy_backend must not own database objects';
@@ -42,7 +47,12 @@ REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "trading" FROM idea2strategy_ba
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_batch') THEN CREATE ROLE idea2strategy_batch NOLOGIN; END IF;
 END $$;
-ALTER ROLE idea2strategy_batch NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+ALTER ROLE idea2strategy_batch NOLOGIN NOCREATEDB NOCREATEROLE NOINHERIT;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_batch' AND (rolsuper OR rolreplication OR rolbypassrls OR rolcanlogin OR rolcreatedb OR rolcreaterole OR rolinherit)) THEN
+    RAISE EXCEPTION 'application group role idea2strategy_batch has forbidden privileged attributes';
+  END IF;
+END $$;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_database WHERE datdba = 'idea2strategy_batch'::regrole) OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = 'idea2strategy_batch'::regrole) OR EXISTS (SELECT 1 FROM pg_class WHERE relowner = 'idea2strategy_batch'::regrole) THEN
     RAISE EXCEPTION 'application group role idea2strategy_batch must not own database objects';
@@ -82,7 +92,12 @@ REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "trading" FROM idea2strategy_ba
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_trading') THEN CREATE ROLE idea2strategy_trading NOLOGIN; END IF;
 END $$;
-ALTER ROLE idea2strategy_trading NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+ALTER ROLE idea2strategy_trading NOLOGIN NOCREATEDB NOCREATEROLE NOINHERIT;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_trading' AND (rolsuper OR rolreplication OR rolbypassrls OR rolcanlogin OR rolcreatedb OR rolcreaterole OR rolinherit)) THEN
+    RAISE EXCEPTION 'application group role idea2strategy_trading has forbidden privileged attributes';
+  END IF;
+END $$;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_database WHERE datdba = 'idea2strategy_trading'::regrole) OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = 'idea2strategy_trading'::regrole) OR EXISTS (SELECT 1 FROM pg_class WHERE relowner = 'idea2strategy_trading'::regrole) THEN
     RAISE EXCEPTION 'application group role idea2strategy_trading must not own database objects';
@@ -122,7 +137,12 @@ REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "trading" FROM idea2strategy_tr
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_backtest') THEN CREATE ROLE idea2strategy_backtest NOLOGIN; END IF;
 END $$;
-ALTER ROLE idea2strategy_backtest NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+ALTER ROLE idea2strategy_backtest NOLOGIN NOCREATEDB NOCREATEROLE NOINHERIT;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_backtest' AND (rolsuper OR rolreplication OR rolbypassrls OR rolcanlogin OR rolcreatedb OR rolcreaterole OR rolinherit)) THEN
+    RAISE EXCEPTION 'application group role idea2strategy_backtest has forbidden privileged attributes';
+  END IF;
+END $$;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_database WHERE datdba = 'idea2strategy_backtest'::regrole) OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = 'idea2strategy_backtest'::regrole) OR EXISTS (SELECT 1 FROM pg_class WHERE relowner = 'idea2strategy_backtest'::regrole) THEN
     RAISE EXCEPTION 'application group role idea2strategy_backtest must not own database objects';
@@ -162,7 +182,12 @@ REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "trading" FROM idea2strategy_ba
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_pipeline') THEN CREATE ROLE idea2strategy_pipeline NOLOGIN; END IF;
 END $$;
-ALTER ROLE idea2strategy_pipeline NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+ALTER ROLE idea2strategy_pipeline NOLOGIN NOCREATEDB NOCREATEROLE NOINHERIT;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_pipeline' AND (rolsuper OR rolreplication OR rolbypassrls OR rolcanlogin OR rolcreatedb OR rolcreaterole OR rolinherit)) THEN
+    RAISE EXCEPTION 'application group role idea2strategy_pipeline has forbidden privileged attributes';
+  END IF;
+END $$;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_database WHERE datdba = 'idea2strategy_pipeline'::regrole) OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = 'idea2strategy_pipeline'::regrole) OR EXISTS (SELECT 1 FROM pg_class WHERE relowner = 'idea2strategy_pipeline'::regrole) THEN
     RAISE EXCEPTION 'application group role idea2strategy_pipeline must not own database objects';
