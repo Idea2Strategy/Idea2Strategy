@@ -14,6 +14,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  infrastructure-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Validate Terraform without AWS credentials or remote backend
+        shell: pwsh
+        run: ./scripts/test-terraform-readiness.ps1
+      - name: Validate secret-safe deployment inputs and Compose model
+        shell: pwsh
+        run: ./scripts/test-deployment-inputs.ps1
+
   schema-and-coordination:
     runs-on: ubuntu-latest
     timeout-minutes: 10
