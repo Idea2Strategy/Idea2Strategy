@@ -37,3 +37,27 @@ rds_deletion_protection       = true
 # produced by the reviewed CI build; Terraform rejects mutable tags.
 frontend_release_id = ""
 container_image_digests = {}
+
+# Full phase database secret metadata. Populate their JSON values with the
+# reviewed one-shot database bootstrap; never place passwords in this file.
+runtime_database_secret_names = {
+  backend  = "idea2strategy-dev/database/backend-runtime"
+  batch    = "idea2strategy-dev/database/batch-runtime"
+  backtest = "idea2strategy-dev/database/backtest-runtime"
+  trading  = "idea2strategy-dev/database/trading-runtime"
+  pipeline = "idea2strategy-dev/database/pipeline-runtime"
+}
+
+# Set true only for an exact Backend commit whose three-lane Outbox relay tests passed.
+enable_backtest_outbox_relay = false
+
+# Full phase also requires checksum- and S3-version-pinned runtime inputs.
+# backtest_policy_artifacts = {
+#   execution-policy = { key = "runtime/backtest/execution-policy.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__" }
+#   runtime-policy   = { key = "runtime/backtest/runtime-policy.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__" }
+# }
+# trading_runtime_artifacts = {
+#   instrument-mapping = { runtime = "market-gateway", key = "runtime/trading/instruments.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__", local_path = "instruments.json" }
+#   provider-rights    = { runtime = "market-gateway", key = "runtime/trading/alpaca-sip-rights.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__", local_path = "alpaca-sip-rights.json" }
+#   warmup-manifest    = { runtime = "trading-worker", key = "runtime/trading/warmup/manifest.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__", local_path = "warmup/manifest.json" }
+# }

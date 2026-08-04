@@ -109,6 +109,7 @@ resource "aws_vpc_security_group_ingress_rule" "rds_from_runtime" {
     core     = aws_security_group.service[0].id
     trading  = aws_security_group.trading[0].id
     backtest = aws_security_group.batch.id
+    pipeline = aws_security_group.pipeline[0].id
   } : { backtest = aws_security_group.batch.id }
 
   security_group_id            = aws_security_group.rds.id

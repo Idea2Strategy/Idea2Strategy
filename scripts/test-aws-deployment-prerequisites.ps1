@@ -5,8 +5,16 @@ param(
     [string]$AwsProfile = "idea2strategy-terraform",
     [switch]$RequireInputs,
     [switch]$RequireAlpacaSecrets,
+    [switch]$RequireRuntimeDatabaseSecrets,
     [string]$AlpacaApiKeySecretName = "idea2strategy-dev/backtest/alpaca",
-    [string]$AlpacaSecretKeySecretName = "idea2strategy-dev/backtest/alpaca-secret"
+    [string]$AlpacaSecretKeySecretName = "idea2strategy-dev/backtest/alpaca-secret",
+    [hashtable]$RuntimeDatabaseSecretNames = @{
+        backend  = "idea2strategy-dev/database/backend-runtime"
+        batch    = "idea2strategy-dev/database/batch-runtime"
+        backtest = "idea2strategy-dev/database/backtest-runtime"
+        trading  = "idea2strategy-dev/database/trading-runtime"
+        pipeline = "idea2strategy-dev/database/pipeline-runtime"
+    }
 )
 
 $ErrorActionPreference = "Stop"
@@ -113,6 +121,57 @@ if ($RequireAlpacaSecrets) {
     $alpacaSecretsReady = $true
 }
 
+$runtimeDatabaseSecretsReady = $false
+if ($RequireRuntimeDatabaseSecrets) {
+    $expectedConsumers = @("backend", "batch", "backtest", "trading", "pipeline")
+    $observedConsumers = @($RuntimeDatabaseSecretNames.Keys | Sort-Object)
+    if (($observedConsumers -join ',') -ne (($expectedConsumers | Sort-Object) -join ',')) {
+        throw "Runtime database secret names must contain exactly backend, batch, backtest, trading, and pipeline."
+    }
+
+    foreach ($consumer in $expectedConsumers) {
+        $secretName = [string]$RuntimeDatabaseSecretNames[$consumer]
+        $ErrorActionPreference = "Continue"
+        $databaseSecretJson = & $awsExecutable secretsmanager get-secret-value `
+            --profile $AwsProfile `
+            --region $ExpectedRegion `
+            --secret-id $secretName `
+            --query SecretString `
+            --output text 2>$null
+        $secretExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $strictErrorPreference
+        if ($secretExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($databaseSecretJson)) {
+            throw "Required runtime database secret is unavailable for '$consumer'."
+        }
+        try {
+            $databaseSecretDocument = $databaseSecretJson | ConvertFrom-Json
+        } catch {
+            throw "Runtime database secret for '$consumer' must contain a JSON object."
+        }
+        $requiredDatabaseFields = @("engine", "host", "port", "dbname", "username", "password")
+        if ($consumer -eq "pipeline") {
+            $requiredDatabaseFields += "PIPELINE_WORKER_DATABASE_URL"
+        }
+        foreach ($fieldName in $requiredDatabaseFields) {
+            $property = $databaseSecretDocument.PSObject.Properties[$fieldName]
+            if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+                throw "Runtime database secret for '$consumer' is missing required field '$fieldName'."
+            }
+        }
+        if ([string]$databaseSecretDocument.engine -ne "postgres") {
+            throw "Runtime database secret for '$consumer' must declare engine=postgres."
+        }
+        if ($consumer -eq "pipeline" -and
+            [string]$databaseSecretDocument.PIPELINE_WORKER_DATABASE_URL -notmatch '^postgresql\+psycopg://\S+$') {
+            throw "Pipeline runtime database URL must be a whitespace-free postgresql+psycopg URI with URL-encoded credentials."
+        }
+        $databaseSecretJson = $null
+        $databaseSecretDocument = $null
+        $property = $null
+    }
+    $runtimeDatabaseSecretsReady = $true
+}
+
 $env:AWS_REGION = $previousAwsRegion
 $env:AWS_DEFAULT_REGION = $previousAwsDefaultRegion
 
@@ -125,4 +184,5 @@ $env:AWS_DEFAULT_REGION = $previousAwsDefaultRegion
     terraform_root         = $TerraformRoot
     deployment_inputs_ready = $missingInputs.Count -eq 0
     alpaca_secrets_ready     = $alpacaSecretsReady
+    runtime_database_secrets_ready = $runtimeDatabaseSecretsReady
 } | ConvertTo-Json -Compress

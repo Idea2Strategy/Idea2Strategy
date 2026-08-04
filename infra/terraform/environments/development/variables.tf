@@ -260,12 +260,6 @@ variable "alpaca_secret_key_secret_name" {
   default     = "idea2strategy-dev/backtest/alpaca-secret"
 }
 
-variable "backtest_idle_grace_minutes" {
-  description = "Minimum verified idle period before a worker may set the Backtest ASG to zero."
-  type        = number
-  default     = 15
-}
-
 variable "pipeline_schedule_expression" {
   description = "Optional EventBridge schedule for the desired-zero pipeline task. Empty disables scheduled runs."
   type        = string
@@ -289,4 +283,72 @@ variable "frontend_release_id" {
   description = "Immutable frontend build/release identifier uploaded to the private frontend bucket."
   type        = string
   default     = ""
+}
+
+variable "backtest_policy_artifacts" {
+  description = "Checksum- and S3-version-pinned Backtest policy objects in the market-data bucket. Required keys are execution-policy and runtime-policy."
+  type = map(object({
+    key        = string
+    version_id = string
+    sha256     = string
+  }))
+  default = {}
+
+  validation {
+    condition = alltrue([
+      for artifact in values(var.backtest_policy_artifacts) :
+      artifact.key != "" && artifact.version_id != "" && can(regex("^[0-9a-f]{64}$", artifact.sha256))
+    ])
+    error_message = "Every Backtest policy artifact needs an S3 key, immutable version_id, and lowercase SHA-256."
+  }
+}
+
+variable "trading_runtime_artifacts" {
+  description = "Checksum- and S3-version-pinned Trading materialization inputs. runtime is market-gateway or trading-worker and local_path is relative to that runtime's read-only mount."
+  type = map(object({
+    runtime    = string
+    key        = string
+    version_id = string
+    sha256     = string
+    local_path = string
+  }))
+  default = {}
+
+  validation {
+    condition = alltrue([
+      for artifact in values(var.trading_runtime_artifacts) :
+      contains(["market-gateway", "trading-worker"], artifact.runtime) &&
+      artifact.key != "" && artifact.version_id != "" &&
+      can(regex("^[0-9a-f]{64}$", artifact.sha256)) &&
+      can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*$", artifact.local_path)) &&
+      !strcontains(artifact.local_path, "..")
+    ])
+    error_message = "Every Trading artifact needs a supported runtime, immutable S3 version, lowercase SHA-256, and traversal-free relative local_path."
+  }
+}
+
+variable "runtime_database_secret_names" {
+  description = "Existing Secrets Manager JSON credentials for least-privilege LOGIN roles. Exact keys backend, batch, backtest, trading, and pipeline are mandatory for the full phase; Terraform reads metadata only."
+  type        = map(string)
+  default = {
+    backend  = "idea2strategy-dev/database/backend-runtime"
+    batch    = "idea2strategy-dev/database/batch-runtime"
+    backtest = "idea2strategy-dev/database/backtest-runtime"
+    trading  = "idea2strategy-dev/database/trading-runtime"
+    pipeline = "idea2strategy-dev/database/pipeline-runtime"
+  }
+
+  validation {
+    condition = (
+      toset(keys(var.runtime_database_secret_names)) == toset(["backend", "batch", "backtest", "trading", "pipeline"]) &&
+      alltrue([for name in values(var.runtime_database_secret_names) : name != ""])
+    )
+    error_message = "runtime_database_secret_names must contain only non-empty backend, batch, backtest, trading, and pipeline secret names."
+  }
+}
+
+variable "enable_backtest_outbox_relay" {
+  description = "Enable the verified Backend Outbox publisher for all three Backtest lanes. A full release candidate must explicitly set this true."
+  type        = bool
+  default     = false
 }

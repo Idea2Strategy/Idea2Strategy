@@ -10,13 +10,30 @@ resource "aws_instance" "service" {
   source_dest_check           = true
 
   user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
-    runtime_role             = "service"
-    aws_region               = var.aws_region
-    parameter_path           = local.parameter_path
-    log_group_name           = aws_cloudwatch_log_group.service[0].name
-    origin_domain_name       = var.origin_domain_name
-    origin_header_secret_arn = aws_secretsmanager_secret.cloudfront_origin_header[0].arn
-    backend_port             = 8080
+    runtime_role                 = "service"
+    aws_region                   = var.aws_region
+    parameter_path               = local.parameter_path
+    log_group_name               = aws_cloudwatch_log_group.service[0].name
+    origin_domain_name           = var.origin_domain_name
+    origin_header_secret_arn     = aws_secretsmanager_secret.cloudfront_origin_header[0].arn
+    backend_port                 = 8080
+    database_host                = aws_db_instance.this.address
+    database_name                = aws_db_instance.this.db_name
+    core_database_secret_arn     = data.aws_secretsmanager_secret.runtime_database["backend"].arn
+    batch_database_secret_arn    = data.aws_secretsmanager_secret.runtime_database["batch"].arn
+    backtest_database_secret_arn = data.aws_secretsmanager_secret.runtime_database["backtest"].arn
+    trading_database_secret_arn  = data.aws_secretsmanager_secret.runtime_database["trading"].arn
+    core_internal_secret_arn     = aws_secretsmanager_secret.core_internal[0].arn
+    backtest_internal_secret_arn = aws_secretsmanager_secret.backtest_internal[0].arn
+    alpaca_api_key_secret_arn    = data.aws_secretsmanager_secret.alpaca_api_key[0].arn
+    alpaca_secret_key_secret_arn = data.aws_secretsmanager_secret.alpaca_secret_key[0].arn
+    market_data_bucket           = aws_s3_bucket.market_data.id
+    result_bucket                = aws_s3_bucket.results[0].id
+    cache_endpoint               = aws_elasticache_serverless_cache.this[0].endpoint[0].address
+    core_public_url              = "https://${var.frontend_domain_name}"
+    backtest_policy_manifest     = base64encode(jsonencode(var.backtest_policy_artifacts))
+    trading_artifact_manifest    = base64encode(jsonencode(var.trading_runtime_artifacts))
+    enable_backtest_outbox_relay = var.enable_backtest_outbox_relay
   })
   user_data_replace_on_change = true
 
@@ -73,13 +90,30 @@ resource "aws_instance" "trading" {
   source_dest_check           = true
 
   user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
-    runtime_role             = "trading"
-    aws_region               = var.aws_region
-    parameter_path           = local.parameter_path
-    log_group_name           = aws_cloudwatch_log_group.trading[0].name
-    origin_domain_name       = ""
-    origin_header_secret_arn = ""
-    backend_port             = 0
+    runtime_role                 = "trading"
+    aws_region                   = var.aws_region
+    parameter_path               = local.parameter_path
+    log_group_name               = aws_cloudwatch_log_group.trading[0].name
+    origin_domain_name           = ""
+    origin_header_secret_arn     = ""
+    backend_port                 = 0
+    database_host                = aws_db_instance.this.address
+    database_name                = aws_db_instance.this.db_name
+    core_database_secret_arn     = data.aws_secretsmanager_secret.runtime_database["backend"].arn
+    batch_database_secret_arn    = data.aws_secretsmanager_secret.runtime_database["batch"].arn
+    backtest_database_secret_arn = data.aws_secretsmanager_secret.runtime_database["backtest"].arn
+    trading_database_secret_arn  = data.aws_secretsmanager_secret.runtime_database["trading"].arn
+    core_internal_secret_arn     = aws_secretsmanager_secret.core_internal[0].arn
+    backtest_internal_secret_arn = aws_secretsmanager_secret.backtest_internal[0].arn
+    alpaca_api_key_secret_arn    = data.aws_secretsmanager_secret.alpaca_api_key[0].arn
+    alpaca_secret_key_secret_arn = data.aws_secretsmanager_secret.alpaca_secret_key[0].arn
+    market_data_bucket           = aws_s3_bucket.market_data.id
+    result_bucket                = aws_s3_bucket.results[0].id
+    cache_endpoint               = aws_elasticache_serverless_cache.this[0].endpoint[0].address
+    core_public_url              = "https://${var.frontend_domain_name}"
+    backtest_policy_manifest     = base64encode(jsonencode(var.backtest_policy_artifacts))
+    trading_artifact_manifest    = base64encode(jsonencode(var.trading_runtime_artifacts))
+    enable_backtest_outbox_relay = var.enable_backtest_outbox_relay
   })
   user_data_replace_on_change = true
 
@@ -140,13 +174,30 @@ resource "aws_launch_template" "backtest" {
   }
 
   user_data = base64encode(templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
-    runtime_role             = "backtest-worker"
-    aws_region               = var.aws_region
-    parameter_path           = local.parameter_path
-    log_group_name           = aws_cloudwatch_log_group.compute[0].name
-    origin_domain_name       = ""
-    origin_header_secret_arn = ""
-    backend_port             = 0
+    runtime_role                 = "backtest-worker"
+    aws_region                   = var.aws_region
+    parameter_path               = local.parameter_path
+    log_group_name               = aws_cloudwatch_log_group.compute[0].name
+    origin_domain_name           = ""
+    origin_header_secret_arn     = ""
+    backend_port                 = 0
+    database_host                = aws_db_instance.this.address
+    database_name                = aws_db_instance.this.db_name
+    core_database_secret_arn     = data.aws_secretsmanager_secret.runtime_database["backend"].arn
+    batch_database_secret_arn    = data.aws_secretsmanager_secret.runtime_database["batch"].arn
+    backtest_database_secret_arn = data.aws_secretsmanager_secret.runtime_database["backtest"].arn
+    trading_database_secret_arn  = data.aws_secretsmanager_secret.runtime_database["trading"].arn
+    core_internal_secret_arn     = aws_secretsmanager_secret.core_internal[0].arn
+    backtest_internal_secret_arn = aws_secretsmanager_secret.backtest_internal[0].arn
+    alpaca_api_key_secret_arn    = data.aws_secretsmanager_secret.alpaca_api_key[0].arn
+    alpaca_secret_key_secret_arn = data.aws_secretsmanager_secret.alpaca_secret_key[0].arn
+    market_data_bucket           = aws_s3_bucket.market_data.id
+    result_bucket                = aws_s3_bucket.results[0].id
+    cache_endpoint               = aws_elasticache_serverless_cache.this[0].endpoint[0].address
+    core_public_url              = "https://${var.frontend_domain_name}"
+    backtest_policy_manifest     = base64encode(jsonencode(var.backtest_policy_artifacts))
+    trading_artifact_manifest    = base64encode(jsonencode(var.trading_runtime_artifacts))
+    enable_backtest_outbox_relay = var.enable_backtest_outbox_relay
   }))
 
   tag_specifications {

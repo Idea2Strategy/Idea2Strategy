@@ -20,11 +20,12 @@
 `full`에는 NAT Gateway와 ALB가 없다. EC2는 ARM64이고 SSH를 열지 않으며,
 Core 443은 AWS 관리 CloudFront origin-facing prefix list에서만 받는다.
 
-현재 EC2 bootstrap은 host 보안·관측·SSM·Core origin proxy와 runtime 입력
-준비까지 구현되어 있다. 실제 Core/Trading/Backtest container systemd unit과
-`backtest-api` 배치, frontend upload/invalidation 자동화는 아직 release blocker다.
-따라서 실제 image digest를 넣더라도 이 항목이 완료되기 전의 `full` plan을
-Deploy Ready 또는 apply 가능 상태로 취급하지 않는다.
+현재 EC2 bootstrap은 host 보안·관측·SSM·Core origin proxy뿐 아니라 immutable
+digest Compose와 systemd 기반 Core/Trading/Backtest 실행, `backtest-api`,
+root-only secret env, version/checksum-pinned runtime artifact materialization까지
+구현한다. 다만 5개 최소권한 DB LOGIN/secret bootstrap, 실제 정책 artifact,
+검증된 image digest, Flyway, frontend upload/invalidation과 full plan 검토가 끝나기
+전에는 Deploy Ready 또는 apply 가능 상태로 취급하지 않는다.
 
 Backtest ASG는 `min=0`, `desired=0`, `max=1`이다. 한 호스트 안에서 Basic 2,
 Custom 1, Competition 1, 전체 4개의 실행 slot을 사용하며 초과 요청은 각 SQS

@@ -36,6 +36,24 @@ resource "aws_iam_role_policy_attachment" "pipeline_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+data "aws_iam_policy_document" "pipeline_execution_secrets" {
+  count = local.enable_service_stack ? 1 : 0
+  statement {
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = [
+      data.aws_secretsmanager_secret.alpaca_api_key[0].arn,
+      data.aws_secretsmanager_secret.alpaca_secret_key[0].arn,
+      data.aws_secretsmanager_secret.runtime_database["pipeline"].arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "pipeline_execution_secrets" {
+  count  = local.enable_service_stack ? 1 : 0
+  role   = aws_iam_role.pipeline_execution[0].id
+  policy = data.aws_iam_policy_document.pipeline_execution_secrets[0].json
+}
+
 resource "aws_iam_role" "pipeline_task" {
   count              = local.enable_service_stack ? 1 : 0
   name               = "${local.name_prefix}-pipeline-task"
@@ -54,10 +72,6 @@ data "aws_iam_policy_document" "pipeline_task" {
   statement {
     actions   = ["ssm:GetParameter", "ssm:GetParametersByPath"]
     resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_path}/*"]
-  }
-  statement {
-    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    resources = [data.aws_secretsmanager_secret.alpaca_api_key[0].arn, data.aws_secretsmanager_secret.alpaca_secret_key[0].arn]
   }
 }
 
@@ -102,14 +116,20 @@ resource "aws_ecs_task_definition" "pipeline" {
     essential   = true
     stopTimeout = 120
     environment = [
-      { name = "AWS_REGION", value = var.aws_region },
+      { name = "PIPELINE_WORKER_ENVIRONMENT", value = var.environment },
+      { name = "PIPELINE_WORKER_MESSAGE_SOURCE", value = "inprocess" },
+      { name = "PIPELINE_WORKER_CATALOG_ROOT", value = "/var/lib/idea2strategy/catalog" },
+      { name = "PIPELINE_WORKER_OBJECT_STORE_ROOT", value = "/var/lib/idea2strategy/objects" },
+      { name = "PIPELINE_WORKER_AWS_REGION", value = var.aws_region },
+      { name = "PIPELINE_WORKER_HEALTH_FILE", value = "/tmp/idea2strategy-ready.json" },
       { name = "MARKET_DATA_BUCKET", value = aws_s3_bucket.market_data.id },
       { name = "PIPELINE_MANIFEST_MODE", value = "content-addressed" },
       { name = "PIPELINE_WORKER_EXIT_AFTER_IDLE_POLLS", value = "3" }
     ]
     secrets = [
       { name = "ALPACA_API_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_api_key[0].arn}:ALPACA_API_KEY::" },
-      { name = "ALPACA_SECRET_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_secret_key[0].arn}:ALPACA_SECRET_KEY::" }
+      { name = "ALPACA_SECRET_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_secret_key[0].arn}:ALPACA_SECRET_KEY::" },
+      { name = "PIPELINE_WORKER_DATABASE_URL", valueFrom = "${data.aws_secretsmanager_secret.runtime_database["pipeline"].arn}:PIPELINE_WORKER_DATABASE_URL::" }
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -118,6 +138,13 @@ resource "aws_ecs_task_definition" "pipeline" {
         awslogs-region        = var.aws_region
         awslogs-stream-prefix = "pipeline"
       }
+    }
+    healthCheck = {
+      command     = ["CMD-SHELL", "test -s /tmp/idea2strategy-ready.json"]
+      interval    = 10
+      timeout     = 5
+      retries     = 3
+      startPeriod = 20
     }
   }])
 }

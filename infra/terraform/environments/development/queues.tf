@@ -65,10 +65,4 @@ resource "aws_ssm_parameter" "backtest_total_concurrency" {
   type  = "String"
   value = "4"
 
-  lifecycle {
-    precondition {
-      condition     = var.backtest_idle_grace_minutes >= 15
-      error_message = "Backtest scale-down requires an idle grace period of at least 15 minutes."
-    }
-  }
 }

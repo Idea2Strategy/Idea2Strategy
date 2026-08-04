@@ -169,6 +169,17 @@ data "aws_iam_policy_document" "trading_workload" {
   count = local.enable_service_stack ? 1 : 0
 
   statement {
+    sid    = "ReadPinnedTradingArtifacts"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:ListBucket"
+    ]
+    resources = [aws_s3_bucket.market_data.arn, "${aws_s3_bucket.market_data.arn}/*"]
+  }
+
+  statement {
     sid    = "ReadDevelopmentParameters"
     effect = "Allow"
     actions = [
@@ -216,36 +227,72 @@ resource "aws_iam_instance_profile" "trading" {
 
 data "aws_iam_policy_document" "rds_secret_access" {
   statement {
-    sid     = "ReadDatabaseCredentials"
-    effect  = "Allow"
-    actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    resources = [
-      aws_db_instance.this.master_user_secret[0].secret_arn,
-      aws_secretsmanager_secret.market_loader.arn
-    ]
+    sid       = "ReadMarketLoaderCredentials"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [aws_secretsmanager_secret.market_loader.arn]
   }
 }
 
-resource "aws_iam_role_policy" "service_rds_secret" {
-  count = local.enable_service_stack ? 1 : 0
-
-  name   = "${local.name_prefix}-service-rds-secret"
-  role   = aws_iam_role.service[0].id
-  policy = data.aws_iam_policy_document.rds_secret_access.json
-}
-
-resource "aws_iam_role_policy" "batch_rds_secret" {
-  name   = "${local.name_prefix}-batch-rds-secret"
+resource "aws_iam_role_policy" "batch_loader_secret" {
+  count  = local.enable_service_stack ? 0 : 1
+  name   = "${local.name_prefix}-batch-loader-secret"
   role   = aws_iam_role.batch.id
   policy = data.aws_iam_policy_document.rds_secret_access.json
 }
 
-resource "aws_iam_role_policy" "trading_rds_secret" {
+data "aws_iam_policy_document" "service_runtime_secrets" {
   count = local.enable_service_stack ? 1 : 0
+  statement {
+    actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [
+      data.aws_secretsmanager_secret.runtime_database["backend"].arn,
+      data.aws_secretsmanager_secret.runtime_database["batch"].arn,
+      data.aws_secretsmanager_secret.runtime_database["backtest"].arn,
+      aws_secretsmanager_secret.core_internal[0].arn,
+      aws_secretsmanager_secret.backtest_internal[0].arn
+    ]
+  }
+}
 
-  name   = "${local.name_prefix}-trading-rds-secret"
+resource "aws_iam_role_policy" "service_runtime_secrets" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-service-runtime-secrets"
+  role   = aws_iam_role.service[0].id
+  policy = data.aws_iam_policy_document.service_runtime_secrets[0].json
+}
+
+data "aws_iam_policy_document" "batch_runtime_secrets" {
+  count = local.enable_service_stack ? 1 : 0
+  statement {
+    actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [
+      data.aws_secretsmanager_secret.runtime_database["backtest"].arn,
+      aws_secretsmanager_secret.backtest_internal[0].arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "batch_runtime_secrets" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-batch-runtime-secrets"
+  role   = aws_iam_role.batch.id
+  policy = data.aws_iam_policy_document.batch_runtime_secrets[0].json
+}
+
+data "aws_iam_policy_document" "trading_database_secret" {
+  count = local.enable_service_stack ? 1 : 0
+  statement {
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [data.aws_secretsmanager_secret.runtime_database["trading"].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "trading_database_secret" {
+  count  = local.enable_service_stack ? 1 : 0
+  name   = "${local.name_prefix}-trading-database-secret"
   role   = aws_iam_role.trading[0].id
-  policy = data.aws_iam_policy_document.rds_secret_access.json
+  policy = data.aws_iam_policy_document.trading_database_secret[0].json
 }
 
 data "aws_iam_policy_document" "service_queue_publish" {
@@ -305,21 +352,6 @@ resource "aws_iam_role_policy" "batch_queue_consume" {
   name   = "${local.name_prefix}-batch-queue-consume"
   role   = aws_iam_role.batch.id
   policy = data.aws_iam_policy_document.batch_queue_consume[0].json
-}
-
-data "aws_iam_policy_document" "backtest_scale_down" {
-  count = local.enable_service_stack ? 1 : 0
-  statement {
-    actions   = ["autoscaling:DescribeAutoScalingGroups", "autoscaling:SetDesiredCapacity"]
-    resources = [aws_autoscaling_group.backtest[0].arn]
-  }
-}
-
-resource "aws_iam_role_policy" "backtest_scale_down" {
-  count  = local.enable_service_stack ? 1 : 0
-  name   = "${local.name_prefix}-backtest-safe-scale-down"
-  role   = aws_iam_role.batch.id
-  policy = data.aws_iam_policy_document.backtest_scale_down[0].json
 }
 
 data "aws_iam_policy_document" "service_origin_tls" {
