@@ -70,7 +70,7 @@ Stop if the account, region, commit, provider lockfile, backend, or protected pr
 The following steps intentionally remain outside this repository-only readiness pass and require explicit authorization, short-lived credentials, and a reviewed change window:
 
 1. Authenticate to the intended AWS account and verify the caller identity and region.
-2. If it does not exist, plan and apply the bootstrap root to create the remote state bucket and the GitHub Actions OIDC deploy role. Record the role ARN as the protected `AWS_DEPLOY_ROLE_ARN` GitHub Environment variable; do not create a long-lived AWS access key for CI.
+2. The state bucket already exists. Do not re-apply the bootstrap root without first recovering its historical state. Plan the isolated `infra/terraform/ci-identity` root against its own remote state to create the GitHub Actions OIDC deploy role. Record the role ARN as the protected `AWS_DEPLOY_ROLE_ARN` GitHub Environment variable; do not create a long-lived AWS access key for CI.
 3. Populate ignored `backend.hcl` and `terraform.tfvars` from the examples; never commit them.
 4. Run `terraform init -backend-config=backend.hcl`, then create a saved plan with `terraform plan -parallelism=1 -out deployment.tfplan`.
 5. Review the complete plan, cost impact, replacements, deletions, IAM changes, public network paths, and database consequences. A non-zero destroy count requires a separate explicit decision.

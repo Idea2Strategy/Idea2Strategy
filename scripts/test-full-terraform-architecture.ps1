@@ -27,7 +27,7 @@ $scheduling = Read-TerraformFile "scheduling.tf"
 $providers = Read-TerraformFile "providers.tf"
 $storage = Read-TerraformFile "storage.tf"
 $userData = Get-Content -LiteralPath (Join-Path $environmentRoot "templates/ec2-user-data.sh.tftpl") -Raw
-$bootstrap = Get-Content -LiteralPath (Join-Path $root "infra/terraform/bootstrap/main.tf") -Raw
+$ciIdentity = Get-Content -LiteralPath (Join-Path $root "infra/terraform/ci-identity/main.tf") -Raw
 $artifactRoot = Join-Path $root "infra/terraform/artifact-foundation"
 $artifactMain = Get-Content -LiteralPath (Join-Path $artifactRoot "main.tf") -Raw
 
@@ -182,7 +182,7 @@ foreach ($required in @(
     'TerraformStateObject',
     'iam:PassRole'
 )) {
-    if (-not $bootstrap.Contains($required)) {
+    if (-not $ciIdentity.Contains($required)) {
         throw "GitHub OIDC deployment boundary is missing: $required"
     }
 }
