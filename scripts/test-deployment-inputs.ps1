@@ -11,6 +11,7 @@ $requiredFiles = @(
     "infra/terraform/bootstrap/terraform.tfvars.example",
     "infra/terraform/environments/development/backend.hcl.example",
     "infra/terraform/environments/development/terraform.tfvars.example",
+    "scripts/test-aws-deployment-prerequisites.ps1",
     "docs/infrastructure/deploy-readiness-runbook.md"
 )
 foreach ($relativePath in $requiredFiles) {

@@ -26,6 +26,21 @@ These checks validate formatting, provider lockfile integrity, Terraform configu
 
 ## Release-candidate inputs
 
+Run the read-only AWS identity and input gate before creating a plan:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-aws-deployment-prerequisites.ps1 -RequireInputs
+```
+
+The command prints only a masked account ID and principal name. It fails when AWS
+CLI authentication, the Seoul region, `backend.hcl`, or `terraform.tfvars` is
+missing. It never prints credentials or the contents of ignored input files.
+
+If a proposed diagram changes the approved EC2 count, Redis operating product,
+durable queue technology, public/private placement, or operator ingress, run a
+fresh governance check and obtain product-authority approval before encoding that
+choice in Terraform. Keep an unapproved review under `proposals/`.
+
 Before requesting an AWS plan, record and review all of the following:
 
 - exact root commit and exact submodule commits;
