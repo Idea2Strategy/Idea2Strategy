@@ -371,6 +371,13 @@ data "aws_iam_policy_document" "batch_queue_consume" {
     resources = values(aws_sqs_queue.backtest_dlq)[*].arn
   }
 
+  statement {
+    sid       = "ScaleDownOnlyThisBacktestGroup"
+    effect    = "Allow"
+    actions   = ["autoscaling:SetDesiredCapacity"]
+    resources = [aws_autoscaling_group.backtest[0].arn]
+  }
+
 
   statement {
     sid       = "ReadAlpacaHistoricalDataCredentials"

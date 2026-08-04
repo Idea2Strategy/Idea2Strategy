@@ -11,6 +11,7 @@ resource "aws_instance" "service" {
 
   user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
     runtime_role                 = "service"
+    backtest_asg_name            = "${local.name_prefix}-backtest"
     aws_region                   = var.aws_region
     parameter_path               = local.parameter_path
     log_group_name               = aws_cloudwatch_log_group.service[0].name
@@ -92,6 +93,7 @@ resource "aws_instance" "trading" {
 
   user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
     runtime_role                 = "trading"
+    backtest_asg_name            = "${local.name_prefix}-backtest"
     aws_region                   = var.aws_region
     parameter_path               = local.parameter_path
     log_group_name               = aws_cloudwatch_log_group.trading[0].name
@@ -180,6 +182,7 @@ resource "aws_launch_template" "backtest" {
 
   user_data = base64encode(templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
     runtime_role                 = "backtest-worker"
+    backtest_asg_name            = "${local.name_prefix}-backtest"
     aws_region                   = var.aws_region
     parameter_path               = local.parameter_path
     log_group_name               = aws_cloudwatch_log_group.compute[0].name

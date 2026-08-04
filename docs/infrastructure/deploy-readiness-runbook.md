@@ -166,10 +166,11 @@ write the matching existing Secrets Manager secret. This prevents application
 instances from receiving the RDS master credential and lets a failed or missing
 bootstrap stop the full plan before EC2 starts.
 
-Backtest automatic scale-down remains disabled. The current canonical schema
-lacks the fenced lease, heartbeat, cancellation, and attempt-lineage columns
-needed to prove that an idle worker can terminate without abandoning or
-duplicating work. The worker role therefore has no `SetDesiredCapacity`
-permission. An operator may return the ASG to desired zero only after all three
-queues, in-flight messages, and durable run state have been reviewed; automatic
-scale-down can be added only with the approved schema/migration and race tests.
+Backtest scale-down is enabled only on the fenced worker release. The instance
+role may call `SetDesiredCapacity(0)` on its exact Backtest ASG and no other
+group. The controller requires two consecutive observations with zero durable
+`QUEUED`/`RUNNING` runs, zero DB-time live claims, and zero visible, in-flight,
+or delayed messages in all three lane queues. Any DB, SQS, or AWS error resets
+the gate and keeps the instance running. A message arriving after the final
+observation remains durable in SQS and the independent queue alarm restores the
+ASG to one; active fenced work never authorizes termination.

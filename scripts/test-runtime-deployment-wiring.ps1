@@ -100,7 +100,10 @@ foreach ($required in @(
     "BACKTEST_COMPETITION_MAX_CONCURRENCY=1",
     "BACKTEST_MAX_TOTAL_CONCURRENCY=4",
     "BACKTEST_MARKET_DATA_BATCH_SIZE=65536",
-    "BACKTEST_JOB_HANDLER=backtest_engine.production:orchestrator_job_handler"
+    "BACKTEST_JOB_HANDLER=backtest_engine.production:orchestrator_job_handler",
+    "BACKTEST_SCALE_DOWN_ENABLED=true",
+    "BACKTEST_ASG_NAME=",
+    "BACKTEST_SCALE_DOWN_POLL_SECONDS=60"
 )) {
     if (-not $userData.Contains($required)) {
         throw "Backtest bounded worker runtime is missing: $required"
@@ -247,8 +250,13 @@ if (-not $pipeline.Contains('PIPELINE_WORKER_DATABASE_URL') -or
     -not $pipeline.Contains('runtime_database["pipeline"]')) {
     throw "Pipeline database URL is not injected from its dedicated runtime secret."
 }
-if ($iam.Contains('master_user_secret') -or $iam.Contains('autoscaling:SetDesiredCapacity')) {
-    throw "Application runtime roles must not read the RDS master secret or self-scale before fenced leases exist."
+if ($iam.Contains('master_user_secret')) {
+    throw "Application runtime roles must not read the RDS master secret."
+}
+foreach ($required in @('autoscaling:SetDesiredCapacity', 'aws_autoscaling_group.backtest[0].arn')) {
+    if (-not $iam.Contains($required)) {
+        throw "Fenced Backtest scale-down IAM is missing: $required"
+    }
 }
 if ($userData -notmatch '(?s)admin-mcp:.*?env_file: \[/etc/idea2strategy/runtime-secret\.env\]' -or
     $userData -notmatch '(?s)backend-batch:.*?env_file: \[/etc/idea2strategy/batch-secret\.env\]') {
