@@ -16,6 +16,10 @@ function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
     if (-not $Text.Contains($Needle)) { throw $Message }
 }
 
+function Assert-NotContains([string]$Text, [string]$Needle, [string]$Message) {
+    if ($Text.Contains($Needle)) { throw $Message }
+}
+
 $database = Read-RequiredFile "infra/terraform/environments/development/database.tf"
 $runtime = Read-RequiredFile "infra/terraform/environments/development/runtime.tf"
 $variables = Read-RequiredFile "infra/terraform/environments/development/variables.tf"
@@ -98,6 +102,7 @@ Assert-Contains $outputs 'database_port            = aws_db_instance.this.port' 
 Assert-Contains $variables 'variable "runtime_database_name"' "The canonical runtime database must be separate from the preserved legacy loader database."
 Assert-Contains $outputs 'database_name            = var.runtime_database_name' "Database bootstrap must target the canonical runtime database."
 Assert-Contains $compute 'database_name                               = var.runtime_database_name' "Every runtime host must target the canonical runtime database."
+Assert-NotContains $bootstrap '-c "SELECT 1 FROM pg_database' "psql variables are not expanded reliably through -c; use standard input."
 
 foreach ($needle in @(
     '[switch]$Execute',
