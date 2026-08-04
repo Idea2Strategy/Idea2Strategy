@@ -103,6 +103,8 @@ Assert-Contains $variables 'variable "runtime_database_name"' "The canonical run
 Assert-Contains $outputs 'database_name            = var.runtime_database_name' "Database bootstrap must target the canonical runtime database."
 Assert-Contains $compute 'database_name                               = var.runtime_database_name' "Every runtime host must target the canonical runtime database."
 Assert-NotContains $bootstrap '-c "SELECT 1 FROM pg_database' "psql variables are not expanded reliably through -c; use standard input."
+Assert-Contains $bootstrap 'DROP OWNED BY $seed_role' "The temporary seed role must relinquish grants before it is dropped."
+Assert-NotContains $bootstrap 'ALTER ROLE %s LOGIN INHERIT NOSUPERUSER' "Runtime login rotation must not require PostgreSQL superuser-only ALTER ROLE clauses on RDS."
 
 foreach ($needle in @(
     '[switch]$Execute',
