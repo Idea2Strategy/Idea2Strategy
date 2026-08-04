@@ -89,6 +89,42 @@ strict security groups and host hardening.
   Orders, fills, ledgers, claims, and outbox records remain authoritative in
   PostgreSQL.
 
+## Deployment-unit correction still requiring approval
+
+The current Terraform plan is an infrastructure envelope, not a complete
+application rollout. Its EC2 bootstrap does not start application containers,
+and the diagram's process grouping cannot be copied onto the selected sizes
+without correction:
+
+- A `t4g.small` has 2 GiB memory. Running `backend-api`, `backend-worker`,
+  `backend-batch`, and `admin-mcp` as four continuous JVMs on it is predictably
+  memory-constrained before normal OS, Docker, Nginx, and CloudWatch Agent
+  overhead. This is an under-provisioned deployment unit, not merely a future
+  traffic-scaling concern.
+- Recommended Core placement is `backend-api` plus the durable outbox relay
+  `backend-worker` continuously, with explicit heap/container limits. Start
+  `backend-batch` only for scheduled jobs and `admin-mcp` only for an authorized
+  operator session. Use `t4g.medium` initially unless a representative
+  container memory/GC test proves the two continuous processes and host agents
+  stay within a safe `t4g.small` envelope.
+- The Backtest worker remains the approved `t4g.medium` ASG `0/0/1` with Basic
+  2, Custom 1, Competition 1, total 4. That decision does not determine where
+  the independently packaged `backtest-api` runs. Putting the API only on the
+  scale-to-zero worker would make it unavailable while the ASG is zero; putting
+  it on Core changes the Core memory and internal routing boundary. The existing
+  protected sources do not settle this placement.
+- A complete rollout therefore still needs reviewed systemd/container units,
+  runtime secret and database/cache/queue wiring, health checks, graceful drain,
+  frontend artifact publication/invalidation, and an explicit `backtest-api`
+  placement decision. Terraform must not be applied as a service rollout before
+  those units and tests exist.
+
+Cost impact of the recommended Core `t4g.medium` starting point is about USD 15
+per 730-hour month above the current `t4g.small` plan, before tax and transfer.
+Keeping `t4g.small` is acceptable only as a measured optimization after the
+real container bundle exists; it is not assumed safe for the original four-JVM
+diagram.
+
 ## Approval and apply gates
 
 1. Review the saved full Terraform plan and current cost report.
