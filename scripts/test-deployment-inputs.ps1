@@ -9,6 +9,8 @@ $requiredFiles = @(
     "compose.back.yml",
     "compose.front.yml",
     "infra/terraform/bootstrap/terraform.tfvars.example",
+    "infra/terraform/artifact-foundation/backend.hcl.example",
+    "infra/terraform/artifact-foundation/terraform.tfvars.example",
     "infra/terraform/environments/development/backend.hcl.example",
     "infra/terraform/environments/development/terraform.tfvars.example",
     "scripts/test-aws-deployment-prerequisites.ps1",

@@ -115,5 +115,5 @@ output "core_elastic_ip" {
 
 output "ecr_repository_urls" {
   description = "ECR repository URLs keyed by deployable component."
-  value       = { for name, repository in aws_ecr_repository.this : name => repository.repository_url }
+  value       = { for name, repository in data.aws_ecr_repository.this : name => repository.repository_url }
 }

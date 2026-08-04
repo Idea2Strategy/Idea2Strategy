@@ -51,13 +51,13 @@ variable "environment" {
 }
 
 variable "deployment_phase" {
-  description = "Development rollout phase. market_data_bootstrap creates only historical-data loading prerequisites; full adds the public service stack."
+  description = "Development rollout phase. market_data_bootstrap preserves historical-data prerequisites; full adds the public service stack after the separate artifact-foundation root is applied."
   type        = string
   default     = "market_data_bootstrap"
 
   validation {
-    condition     = contains(["market_data_bootstrap", "artifact_foundation", "full"], var.deployment_phase)
-    error_message = "deployment_phase must be market_data_bootstrap, artifact_foundation, or full."
+    condition     = contains(["market_data_bootstrap", "full"], var.deployment_phase)
+    error_message = "deployment_phase must be market_data_bootstrap or full."
   }
 }
 

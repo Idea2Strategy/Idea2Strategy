@@ -25,10 +25,11 @@ $security = Read-TerraformFile "security.tf"
 $pipeline = Read-TerraformFile "pipeline.tf"
 $scheduling = Read-TerraformFile "scheduling.tf"
 $providers = Read-TerraformFile "providers.tf"
+$storage = Read-TerraformFile "storage.tf"
 $userData = Get-Content -LiteralPath (Join-Path $environmentRoot "templates/ec2-user-data.sh.tftpl") -Raw
 $bootstrap = Get-Content -LiteralPath (Join-Path $root "infra/terraform/bootstrap/main.tf") -Raw
-$developmentVariables = Get-Content -LiteralPath (Join-Path $environmentRoot "variables.tf") -Raw
-$developmentLocals = Get-Content -LiteralPath (Join-Path $environmentRoot "locals.tf") -Raw
+$artifactRoot = Join-Path $root "infra/terraform/artifact-foundation"
+$artifactMain = Get-Content -LiteralPath (Join-Path $artifactRoot "main.tf") -Raw
 
 foreach ($forbidden in @(
     'resource "aws_nat_gateway"',
@@ -54,13 +55,17 @@ foreach ($required in @(
     }
 }
 foreach ($required in @(
-    '"artifact_foundation"',
-    'enable_artifact_foundation',
-    'local.enable_artifact_foundation ? toset(['
+    'resource "aws_ecr_repository" "runtime"',
+    'image_tag_mutability = "IMMUTABLE"',
+    'scan_on_push = true',
+    'prevent_destroy = true'
 )) {
-    if (-not ($developmentVariables + $developmentLocals).Contains($required)) {
-        throw "Artifact foundation deployment phase is missing: $required"
+    if (-not $artifactMain.Contains($required)) {
+        throw "Isolated artifact foundation boundary is missing: $required"
     }
+}
+if ($storage.Contains('resource "aws_ecr_repository"')) {
+    throw "The Development runtime state must not own ECR repositories; the isolated artifact foundation does."
 }
 if ($compute -notmatch '(?s)resource\s+"aws_launch_template"\s+"backtest".*?credit_specification\s*\{.*?cpu_credits\s*=\s*"standard"') {
     throw "Backtest t4g.medium must use standard CPU credits so saturation is visible without surplus-credit spend."

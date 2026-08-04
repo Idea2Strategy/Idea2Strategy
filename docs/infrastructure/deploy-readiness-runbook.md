@@ -53,7 +53,7 @@ Before requesting an AWS plan, record and review all of the following:
 - exact root commit and exact submodule commits;
 - successful CI URL for the exact root commit;
 - Terraform version `1.15.x` and AWS provider version from both lockfiles;
-- intended `deployment_phase` (`market_data_bootstrap`, `artifact_foundation`, or `full`);
+- intended Development `deployment_phase` (`market_data_bootstrap` or `full`) and, when publishing images, the separate `infra/terraform/artifact-foundation` state;
 - approved AWS account ID, region, and operator identity from `aws sts get-caller-identity`;
 - reviewed `terraform.tfvars` values, with no credentials in the file;
 - reviewed S3 backend bucket, key, region, and lockfile settings in ignored `backend.hcl`;
@@ -76,9 +76,11 @@ The following steps intentionally remain outside this repository-only readiness 
 5. Review the complete plan, cost impact, replacements, deletions, IAM changes, public network paths, and database consequences. A non-zero destroy count requires a separate explicit decision.
 6. Apply only that reviewed plan file. Do not run an unsaved `terraform apply`.
    The pre-approval plan uses deliberately invalid all-zero image digests and is
-   never applyable. Apply only an independently reviewed `artifact_foundation`
-   plan to create ECR repositories, publish ARM64 images, then save and re-review
-   a second `full` plan containing real digests.
+   never applyable. Apply only an independently reviewed plan from the isolated
+   `infra/terraform/artifact-foundation` root to create ECR repositories. That
+   state cannot delete or replace the existing Development compute/database
+   state. Publish ARM64 images, then save and re-review a `full` Development plan
+   containing real digests.
 7. Verify S3 public-access blocks/versioning/encryption, isolated RDS and Valkey
    reachability, RDS deletion protection/backups, EC2 IMDSv2/SSM access,
    CloudFront-prefix-list-only Core ingress, secret-header rejection, no SSH,

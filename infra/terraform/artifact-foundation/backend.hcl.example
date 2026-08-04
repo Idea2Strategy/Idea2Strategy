@@ -1,0 +1,5 @@
+bucket       = "idea2strategy-dev-__AWS_ACCOUNT_ID__-tfstate"
+key          = "idea2strategy/artifact-foundation/terraform.tfstate"
+region       = "ap-northeast-2"
+use_lockfile = true
+encrypt      = true

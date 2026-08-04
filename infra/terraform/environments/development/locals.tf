@@ -1,8 +1,7 @@
 locals {
   name_prefix = "${var.project_name}-${var.environment}"
 
-  enable_artifact_foundation = contains(["artifact_foundation", "full"], var.deployment_phase)
-  enable_service_stack       = var.deployment_phase == "full"
+  enable_service_stack = var.deployment_phase == "full"
 
   common_tags = {
     Project     = var.project_name
@@ -37,7 +36,7 @@ locals {
   result_bucket_name      = "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-backtest-results"
   frontend_bucket_name    = "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-frontend"
 
-  ecr_repositories = local.enable_artifact_foundation ? toset([
+  ecr_repositories = local.enable_service_stack ? toset([
     "admin-mcp",
     "backend-api",
     "backend-batch",

@@ -3,7 +3,10 @@ param(
     [string]$TerraformRoot = "infra/terraform/environments/development",
     [string]$ExpectedRegion = "ap-northeast-2",
     [string]$AwsProfile = "idea2strategy-terraform",
-    [switch]$RequireInputs
+    [switch]$RequireInputs,
+    [switch]$RequireAlpacaSecrets,
+    [string]$AlpacaApiKeySecretName = "idea2strategy-dev/backtest/alpaca",
+    [string]$AlpacaSecretKeySecretName = "idea2strategy-dev/backtest/alpaca-secret"
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,8 +30,12 @@ if ($null -eq $aws) {
 }
 
 $strictErrorPreference = $ErrorActionPreference
+$previousAwsRegion = $env:AWS_REGION
+$previousAwsDefaultRegion = $env:AWS_DEFAULT_REGION
+$env:AWS_REGION = $ExpectedRegion
+$env:AWS_DEFAULT_REGION = $ExpectedRegion
 $ErrorActionPreference = "Continue"
-$callerJson = & $awsExecutable sts get-caller-identity --profile $AwsProfile --output json 2>$null
+$callerJson = & $awsExecutable sts get-caller-identity --profile $AwsProfile --region $ExpectedRegion --output json 2>$null
 $callerExitCode = $LASTEXITCODE
 $ErrorActionPreference = $strictErrorPreference
 if ($callerExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($callerJson)) {
@@ -70,6 +77,45 @@ if ($RequireInputs -and $missingInputs.Count -gt 0) {
     throw "Ignored deployment inputs are missing: $($relativeMissing -join ', ')"
 }
 
+$alpacaSecretsReady = $false
+if ($RequireAlpacaSecrets) {
+    $requiredSecretFields = @{
+        $AlpacaApiKeySecretName = "ALPACA_API_KEY"
+        $AlpacaSecretKeySecretName = "ALPACA_SECRET_KEY"
+    }
+    foreach ($secretName in $requiredSecretFields.Keys) {
+        $ErrorActionPreference = "Continue"
+        $secretJson = & $awsExecutable secretsmanager get-secret-value `
+            --profile $AwsProfile `
+            --region $ExpectedRegion `
+            --secret-id $secretName `
+            --query SecretString `
+            --output text 2>$null
+        $secretExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $strictErrorPreference
+        if ($secretExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($secretJson)) {
+            throw "Required Alpaca secret is unavailable: $secretName"
+        }
+        try {
+            $secretDocument = $secretJson | ConvertFrom-Json
+        } catch {
+            throw "Required Alpaca secret must contain a JSON object: $secretName"
+        }
+        $fieldName = $requiredSecretFields[$secretName]
+        $fieldValue = $secretDocument.PSObject.Properties[$fieldName].Value
+        if ([string]::IsNullOrWhiteSpace([string]$fieldValue)) {
+            throw "Required Alpaca secret field is missing: $secretName/$fieldName"
+        }
+    }
+    $secretJson = $null
+    $secretDocument = $null
+    $fieldValue = $null
+    $alpacaSecretsReady = $true
+}
+
+$env:AWS_REGION = $previousAwsRegion
+$env:AWS_DEFAULT_REGION = $previousAwsDefaultRegion
+
 [pscustomobject]@{
     authenticated          = $true
     account_masked         = $maskedAccount
@@ -78,4 +124,5 @@ if ($RequireInputs -and $missingInputs.Count -gt 0) {
     profile                = $AwsProfile
     terraform_root         = $TerraformRoot
     deployment_inputs_ready = $missingInputs.Count -eq 0
+    alpaca_secrets_ready     = $alpacaSecretsReady
 } | ConvertTo-Json -Compress

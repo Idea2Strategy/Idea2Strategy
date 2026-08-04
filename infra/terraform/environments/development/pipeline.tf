@@ -98,7 +98,7 @@ resource "aws_ecs_task_definition" "pipeline" {
 
   container_definitions = jsonencode([{
     name        = "pipeline-worker"
-    image       = "${aws_ecr_repository.this["pipeline-worker"].repository_url}@${var.container_image_digests["pipeline-worker"]}"
+    image       = "${data.aws_ecr_repository.this["pipeline-worker"].repository_url}@${var.container_image_digests["pipeline-worker"]}"
     essential   = true
     stopTimeout = 120
     environment = [

@@ -100,39 +100,7 @@ resource "aws_s3_bucket_policy" "workload_tls" {
   depends_on = [aws_s3_bucket_public_access_block.workload]
 }
 
-resource "aws_ecr_repository" "this" {
+data "aws_ecr_repository" "this" {
   for_each = local.ecr_repositories
-
-  name                 = "${local.name_prefix}/${each.value}"
-  image_tag_mutability = "IMMUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  encryption_configuration {
-    encryption_type = "AES256"
-  }
-}
-
-resource "aws_ecr_lifecycle_policy" "this" {
-  for_each = local.ecr_repositories
-
-  repository = aws_ecr_repository.this[each.key].name
-  policy = jsonencode({
-    rules = [
-      {
-        rulePriority = 1
-        description  = "Keep the most recent 20 images"
-        selection = {
-          tagStatus   = "any"
-          countType   = "imageCountMoreThan"
-          countNumber = 20
-        }
-        action = {
-          type = "expire"
-        }
-      }
-    ]
-  })
+  name     = "${local.name_prefix}/${each.value}"
 }

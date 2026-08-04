@@ -5,6 +5,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $terraformRoots = @(
     "infra/terraform/bootstrap",
+    "infra/terraform/artifact-foundation",
     "infra/terraform/environments/development"
 )
 

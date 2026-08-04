@@ -38,7 +38,7 @@ resource "aws_ssm_parameter" "runtime_image" {
 
   name  = "${local.parameter_path}/deployment/images/${each.key}"
   type  = "String"
-  value = "${aws_ecr_repository.this[each.key].repository_url}@${each.value}"
+  value = "${data.aws_ecr_repository.this[each.key].repository_url}@${each.value}"
 }
 
 resource "aws_ssm_parameter" "frontend_release" {
