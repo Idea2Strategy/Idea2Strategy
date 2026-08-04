@@ -1,8 +1,8 @@
 # Proposal only: move room evaluation ledger initialization to F
 
-Status: **unapproved, non-canonical proposal**  
-Issue: `Idea2Strategy/Idea2Strategy#181`  
-Prepared against root commit: `28de9b01b4363b333ca2097cdd30263670e72473`  
+Status: **unapproved, non-canonical proposal**
+Issue: `Idea2Strategy/Idea2Strategy#181`
+Prepared against root commit: `28de9b01b4363b333ca2097cdd30263670e72473`
 Protected fingerprint: `sha256:6e015a609756c60fed0332ac57aa31935acf328832e4dd76fae93d72e980900a`
 
 This document is intentionally outside `specs/**` and `contracts/**`. On 2026-08-04,
