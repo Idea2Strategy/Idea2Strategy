@@ -103,6 +103,26 @@ resource "aws_secretsmanager_secret" "market_loader" {
   }
 }
 
+# Terraform owns the durable metadata boundary, but never the credential values.
+# The reviewed one-shot bootstrap writes versions only after Flyway and the
+# corresponding least-privilege LOGIN role have both been verified.
+resource "aws_secretsmanager_secret" "runtime_database" {
+  for_each = var.runtime_database_secret_names
+
+  name                    = each.value
+  description             = "PostgreSQL runtime credentials for the Development ${each.key} workload."
+  recovery_window_in_days = 7
+
+  tags = merge(local.common_tags, {
+    Consumer = each.key
+    Purpose  = "runtime-database"
+  })
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 resource "aws_ssm_parameter" "market_loader_secret_arn" {
   name  = "${local.parameter_path}/database/market-loader-secret-arn"
   type  = "String"

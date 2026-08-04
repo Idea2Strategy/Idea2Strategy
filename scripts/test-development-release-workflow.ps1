@@ -51,6 +51,9 @@ $required = @(
     "OIDC build input is missing",
     "OIDC endpoint must use HTTPS",
     "OIDC redirect URI must use the service origin",
+    "test-aws-deployment-prerequisites.ps1",
+    "-RequireRuntimeDatabaseSecrets",
+    "-RequireAlpacaSecrets",
     "verify-deployed-development.ps1",
     "github.event.inputs.apply_reviewed_plan == 'true'"
 )
@@ -99,6 +102,10 @@ if ($workflow -notmatch "(?s)Build same-origin frontend without AWS credentials.
 
 if ($workflow -notmatch "(?s)operator_oidc_issuer.*?OPERATOR_OIDC_ISSUER.*?operator_oidc_audience.*?OPERATOR_OIDC_AUDIENCE") {
     throw "The frontend OIDC issuer and audience must be cross-checked against the Terraform runtime inputs."
+}
+
+if ($workflow -notmatch "(?s)configure-aws-credentials.*?test-aws-deployment-prerequisites\.ps1.*?-RequireRuntimeDatabaseSecrets.*?Create saved Terraform plan") {
+    throw "The release plan must fail closed on populated runtime database secrets after AWS authentication and before Terraform planning."
 }
 
 if ($workflow -notmatch "(?s)Publish immutable ARM64 images.*?Wait for ECR security scans.*?Publish immutable frontend prefix") {

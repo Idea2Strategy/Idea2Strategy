@@ -43,7 +43,7 @@ data "aws_iam_policy_document" "pipeline_execution_secrets" {
     resources = [
       data.aws_secretsmanager_secret.alpaca_api_key[0].arn,
       data.aws_secretsmanager_secret.alpaca_secret_key[0].arn,
-      data.aws_secretsmanager_secret.runtime_database["pipeline"].arn
+      aws_secretsmanager_secret.runtime_database["pipeline"].arn
     ]
   }
 }
@@ -169,7 +169,7 @@ resource "aws_ecs_task_definition" "pipeline" {
     secrets = [
       { name = "ALPACA_API_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_api_key[0].arn}:ALPACA_API_KEY::" },
       { name = "ALPACA_SECRET_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_secret_key[0].arn}:ALPACA_SECRET_KEY::" },
-      { name = "PIPELINE_WORKER_DATABASE_URL", valueFrom = "${data.aws_secretsmanager_secret.runtime_database["pipeline"].arn}:PIPELINE_WORKER_DATABASE_URL::" }
+      { name = "PIPELINE_WORKER_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.runtime_database["pipeline"].arn}:PIPELINE_WORKER_DATABASE_URL::" }
     ]
     logConfiguration = {
       logDriver = "awslogs"

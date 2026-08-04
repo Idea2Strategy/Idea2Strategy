@@ -97,6 +97,21 @@ resource "aws_vpc_security_group_egress_rule" "batch_all" {
   cidr_ipv4         = "0.0.0.0/0"
 }
 
+resource "aws_security_group" "database_bootstrap" {
+  #checkov:skip=CKV2_AWS_5:The reviewed orchestrator attaches this SG only to its exact ephemeral EC2 ID and terminates that host in finally.
+  name        = "${local.name_prefix}-database-bootstrap"
+  description = "Ephemeral SSM database bootstrap host with no inbound rules"
+  vpc_id      = aws_vpc.this.id
+  tags        = { Name = "${local.name_prefix}-database-bootstrap" }
+}
+
+resource "aws_vpc_security_group_egress_rule" "database_bootstrap_all" {
+  security_group_id = aws_security_group.database_bootstrap.id
+  description       = "Bootstrap egress to AWS APIs, package sources and private PostgreSQL"
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
 resource "aws_security_group" "rds" {
   name        = "${local.name_prefix}-rds-sg"
   description = "Private PostgreSQL from approved application EC2 security groups only"
@@ -118,4 +133,13 @@ resource "aws_vpc_security_group_ingress_rule" "rds_from_runtime" {
   to_port                      = 5432
   ip_protocol                  = "tcp"
   referenced_security_group_id = each.value
+}
+
+resource "aws_vpc_security_group_ingress_rule" "rds_from_database_bootstrap" {
+  security_group_id            = aws_security_group.rds.id
+  description                  = "PostgreSQL from the ephemeral database bootstrap boundary"
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.database_bootstrap.id
 }

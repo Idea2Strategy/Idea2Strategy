@@ -46,6 +46,12 @@ jobs:
       - name: Validate manual Development release safety boundaries
         shell: pwsh
         run: ./scripts/test-development-release-workflow.ps1
+      - name: Validate one-shot Development database bootstrap boundaries
+        shell: pwsh
+        run: ./scripts/test-development-database-bootstrap.ps1
+      - name: Parse the one-shot host bootstrap
+        shell: bash
+        run: bash -n scripts/aws/development-database-bootstrap.sh
 
   schema-and-coordination:
     runs-on: ubuntu-latest

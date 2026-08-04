@@ -22,6 +22,11 @@ resource "aws_iam_role" "batch" {
   assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
 }
 
+resource "aws_iam_role" "database_bootstrap" {
+  name               = "${local.name_prefix}-database-bootstrap-role"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+}
+
 resource "aws_iam_role" "trading" {
   count = local.enable_service_stack ? 1 : 0
 
@@ -49,6 +54,26 @@ resource "aws_iam_role_policy_attachment" "batch_managed" {
 
   role       = aws_iam_role.batch.name
   policy_arn = each.value
+}
+
+resource "aws_iam_role_policy_attachment" "database_bootstrap_ssm" {
+  role       = aws_iam_role.database_bootstrap.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+data "aws_iam_policy_document" "database_bootstrap_artifacts" {
+  statement {
+    sid       = "ReadExactDatabaseBootstrapArtifacts"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:GetObjectVersion"]
+    resources = ["${aws_s3_bucket.market_data.arn}/deployment-bootstrap/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "database_bootstrap_artifacts" {
+  name   = "${local.name_prefix}-database-bootstrap-artifacts"
+  role   = aws_iam_role.database_bootstrap.id
+  policy = data.aws_iam_policy_document.database_bootstrap_artifacts.json
 }
 
 resource "aws_iam_role_policy_attachment" "trading_managed" {
@@ -218,6 +243,11 @@ resource "aws_iam_instance_profile" "batch" {
   role = aws_iam_role.batch.name
 }
 
+resource "aws_iam_instance_profile" "database_bootstrap" {
+  name = "${local.name_prefix}-database-bootstrap-instance-profile"
+  role = aws_iam_role.database_bootstrap.name
+}
+
 resource "aws_iam_instance_profile" "trading" {
   count = local.enable_service_stack ? 1 : 0
 
@@ -246,9 +276,9 @@ data "aws_iam_policy_document" "service_runtime_secrets" {
   statement {
     actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     resources = [
-      data.aws_secretsmanager_secret.runtime_database["backend"].arn,
-      data.aws_secretsmanager_secret.runtime_database["batch"].arn,
-      data.aws_secretsmanager_secret.runtime_database["backtest"].arn,
+      aws_secretsmanager_secret.runtime_database["backend"].arn,
+      aws_secretsmanager_secret.runtime_database["batch"].arn,
+      aws_secretsmanager_secret.runtime_database["backtest"].arn,
       aws_secretsmanager_secret.core_internal[0].arn,
       aws_secretsmanager_secret.backtest_internal[0].arn
     ]
@@ -267,7 +297,7 @@ data "aws_iam_policy_document" "batch_runtime_secrets" {
   statement {
     actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     resources = [
-      data.aws_secretsmanager_secret.runtime_database["backtest"].arn,
+      aws_secretsmanager_secret.runtime_database["backtest"].arn,
       aws_secretsmanager_secret.backtest_internal[0].arn
     ]
   }
@@ -284,7 +314,7 @@ data "aws_iam_policy_document" "trading_database_secret" {
   count = local.enable_service_stack ? 1 : 0
   statement {
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    resources = [data.aws_secretsmanager_secret.runtime_database["trading"].arn]
+    resources = [aws_secretsmanager_secret.runtime_database["trading"].arn]
   }
 }
 

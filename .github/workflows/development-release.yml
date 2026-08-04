@@ -167,6 +167,15 @@ jobs:
           $actual = aws sts get-caller-identity --query Account --output text
           if ($actual -ne '${{ vars.AWS_ACCOUNT_ID }}') { throw 'AWS account mismatch.' }
 
+      - name: Verify required deployment secrets
+        shell: pwsh
+        run: |
+          ./scripts/test-aws-deployment-prerequisites.ps1 `
+            -AwsProfile '' `
+            -ExpectedRegion '${{ env.AWS_REGION }}' `
+            -RequireAlpacaSecrets `
+            -RequireRuntimeDatabaseSecrets
+
       - name: Publish immutable ARM64 images and capture registry digests
         id: images
         shell: pwsh

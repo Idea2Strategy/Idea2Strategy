@@ -67,6 +67,22 @@ output "rds_master_secret_arn" {
   sensitive   = true
 }
 
+output "database_bootstrap" {
+  description = "Credential-free targets for the reviewed ephemeral database bootstrap. Secret values are never Terraform outputs."
+  value = {
+    artifact_bucket          = aws_s3_bucket.market_data.id
+    database_host            = aws_db_instance.this.address
+    database_name            = aws_db_instance.this.db_name
+    instance_profile_name    = aws_iam_instance_profile.database_bootstrap.name
+    role_name                = aws_iam_role.database_bootstrap.name
+    security_group_id        = aws_security_group.database_bootstrap.id
+    subnet_id                = aws_subnet.public["a"].id
+    master_secret_arn        = aws_db_instance.this.master_user_secret[0].secret_arn
+    runtime_database_secrets = { for name, secret in aws_secretsmanager_secret.runtime_database : name => secret.arn }
+  }
+  sensitive = true
+}
+
 output "market_loader_secret_arn" {
   description = "Secrets Manager ARN for the Development market-loader database credentials."
   value       = aws_secretsmanager_secret.market_loader.arn
