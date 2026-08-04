@@ -449,7 +449,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 
 - [x] **F90 — C 주문 후보 실제 연동** `통합`: C의 평가 결과·후보 batch를 중복·역순 전달에서도 정확히 한 번 처리한다.
 - [x] **F91 — B 봇 제어 실제 연동** `통합`: B의 실행·중단 명령과 잠긴 봇 정책을 실제 주문·정산 상태로 연결한다.
-- [ ] **F92 — D 기업행사 실제 연동** `통합`: 승인된 기업행사 버전을 포지션·lot·원장에 정확히 반영한다.
+- [ ] **F92 — D 기업행사 실제 연동** `통합`: 승인된 기업행사 버전을 포지션·lot·원장에 정확히 반영한다. — **F 측 적용 경로는 완성·배선됨**: `CorporateActionApplication`·`SplitAdjustment`·`PostgresCorporateActionStore.apply`(정본 `market_data.corporate_actions`와 대조하고 movement id를 `(actionId, positionLotId, botEventId)`에서 파생하므로 재실행이 두 번 분할하지 않고 수렴)·`CorporateActionService`·bean까지 존재한다. 차단 원인은 trigger가 아니라 **승인 증적을 정본이 보관할 곳이 없다는 것**이다: `ApprovedCorporateAction`은 `approvalId`·`approvedByOperatorId`·`approvedAt`·`evidenceDigest`·`policyVersion`을 요구하는데 `market_data.corporate_actions`에는 승인 컬럼이 하나도 없다. 정본을 읽는 poller는 운영자와 승인 id와 증거 digest를 발명해야 하므로 더 작은 가정으로 닫을 수 없다 — 이는 D15가 만들어야 하는 승인 레코드다. 상세: 루트 #143 코멘트
 - [x] **F93 — E live 성과 실제 연동** `통합`: 원장·포지션·체결 사건이 평가 구간 경계에 맞게 E의 성과 projection으로 전달되는지 검증한다.
 
 ---
