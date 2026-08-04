@@ -286,7 +286,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 
 - [x] **C90 — B 봇 제어 실제 연동** `통합`: B가 발행한 잠긴 봇 snapshot과 실행·중단 명령을 실제로 소비한다.
 - [x] **C91 — D Manifest 실제 연동** `통합`: warm-up 입력과 feature를 실제 데이터 버전으로 고정한다.
-- [x] **C92 — F 주문 후보 handoff 실제 연동** `통합`: 평가 결과와 주문 후보 batch가 중복·역순 전달되어도 F가 정확히 한 번 처리할 수 있게 한다.
+- [x] **C92 — F 주문 후보 handoff 실제 연동** `통합`: 평가 결과와 주문 후보 batch가 중복·역순 전달되어도 F가 정확히 한 번 처리할 수 있게 한다. — 전송 실체 완성: trading-engine PR #123(`15630d4`, RT3 #107). gateway가 Redis Streams에 올린 정규화 사건을 consumer group으로 소비해 평가 루프에 투입한다(그룹명=소비자 신원이라 replica가 한 사건을 나눠 갖고, consumer명=replica 신원이라 죽은 replica가 미확인으로 남긴 사건을 되찾는다). 확인(ack)은 항상 투입 **후**이며, 재전달 안전성은 기대가 아니라 구조다 — batch id가 사건에서 파생되므로 claim ledger가 두 번째 시도를 인지한다. 복호화·평가 실패 항목은 의도적으로 pending 유지(실패를 ack하면 봉이 조용히 사라진다). 잔여: 봇 재기동 후 재전달된 시장 사건은 시장 sequence 인식이 초기화되어 다시 평가된다(사건 자체 신원 기반 중복 제거는 미해결)
 - [x] **C93 — E 평가 구간 실제 연동** `통합`: 방 평가 시작·종료 경계를 따르고 종료 이후 평가가 방 성과 입력으로 이어지지 않게 한다. — backend PR #194(`d495d45`) + trading-engine PR #122(`f5cef35`). 이전에는 시작 경계만 지켜졌고 종료는 B가 stop을 제때 전달하는 동안에만 유지됐다. 그 틈에 내려진 판단은 방 성과가 읽는 공유 정본 원장에 방 소속 거래와 구분 없이 남는다. `competition.room_schedules.evaluation_ends_at`을 RUN 명령의 `executionEligibleUntil`로 실어 runtime이 경계에서 fail-closed로 멈추므로, stop이 늦으면 정산이 늦을 뿐 경계는 늦지 않는다. 종료 시점은 배타적(그 순간의 사건이 창 밖 첫 사건)이고, 일정이 없는 개인 봇은 종료를 싣지 않는다(부재는 소유자의 stop으로만 닫히는 열린 창이며 사고로 무제한이 된 것이 아니다). 종료가 operation key의 일부이므로 일정이 바뀐 방은 다른 명령이 되고, 방 종료 후의 개인 RUN은 방 명령에 수렴하지 않는다(수렴하면 소유자가 실행 중이라 믿는 봇이 방 종료 시점에 멈춘다). 실 PostgreSQL 검증: 종료 순간과 이후 사건이 intent·evaluation_run을 쓰지 않고, 한 봉 이른 같은 봇은 매수한다(경계임을 증명)
 
 ---
