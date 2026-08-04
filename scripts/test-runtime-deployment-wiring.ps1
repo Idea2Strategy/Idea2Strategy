@@ -52,6 +52,16 @@ foreach ($service in @("backend-api", "backend-worker", "backtest-api")) {
         throw "Core runtime does not start required service: $service"
     }
 }
+foreach ($healthBoundary in @(
+    "location = /api/healthz/backend",
+    "proxy_pass http://127.0.0.1:8080/actuator/health",
+    "location = /api/healthz/backtest",
+    "proxy_pass http://127.0.0.1:8082/health"
+)) {
+    if (-not $userData.Contains($healthBoundary)) {
+        throw "Public deployment verification health boundary is missing: $healthBoundary"
+    }
+}
 foreach ($manual in @("backend-batch", "admin-mcp", "profiles: [manual]")) {
     if (-not $userData.Contains($manual)) {
         throw "Core manual runtime boundary is missing: $manual"

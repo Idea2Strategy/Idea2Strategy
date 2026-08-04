@@ -110,6 +110,19 @@ The following steps intentionally remain outside this repository-only readiness 
    `ISSUED` and the Core DNS-01 ACME certificate is trusted from CloudFront.
 10. Attach the exact plan, apply result, smoke-test evidence, and rollback outcome to the approved deployment record.
 
+After apply and frontend promotion, run the read-only environment verifier from
+the same exact checkout. It prints no credentials:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deployed-development.ps1 `
+  -ExpectedAwsAccountId <12-digit-account-id>
+```
+
+It verifies the account/state boundary, HTTPS frontend, Backend and Backtest
+health through CloudFront, ACM-backed distribution status, private/versioned
+frontend S3, SSM-managed Core, private deletion-protected RDS, available Valkey
+Serverless, SQS redrive policies, and required CloudWatch log groups.
+
 No step above should expose credential values in command output, logs, CI artifacts, or issue comments.
 
 ## Runtime secret and state boundary
