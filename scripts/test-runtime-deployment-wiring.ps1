@@ -178,6 +178,29 @@ foreach ($variable in @("backtest_policy_artifacts", "trading_runtime_artifacts"
     }
 }
 
+foreach ($variable in @(
+    "operator_auth_issuer", "operator_auth_jwk_set_uri", "operator_auth_audience",
+    "operator_auth_allowed_acr_values", "operator_auth_allowed_amr_values",
+    "operator_rbac_catalog_version", "operator_rbac_catalog_read_permission_id",
+    "operator_rbac_assignment_read_permission_id"
+)) {
+    if (-not $variables.Contains(('variable "' + $variable + '"'))) {
+        throw "Production operator trust input is missing: $variable"
+    }
+}
+foreach ($required in @(
+    "OPERATOR_AUTH_ENABLED=true", "OPERATOR_AUTH_ISSUER=", "OPERATOR_AUTH_JWK_SET_URI=",
+    "OPERATOR_AUTH_AUDIENCE=", "OPERATOR_AUTH_ALLOWED_ACR_VALUES=",
+    "OPERATOR_AUTH_ALLOWED_AMR_VALUES=", "OPERATOR_AUTH_CURRENT_HMAC_KEY_VERSION=1",
+    "OPERATOR_AUTH_CURRENT_HMAC_KEY", "OPERATOR_RBAC_READ_ENABLED=true",
+    "OPERATOR_RBAC_CATALOG_VERSION=", "OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID=",
+    "OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID="
+)) {
+    if (-not $userData.Contains($required)) {
+        throw "Production operator trust runtime wiring is missing: $required"
+    }
+}
+
 # Corporate-action approvals are a durable Backend -> Pipeline handoff.  The
 # desired-zero Fargate worker must wake from SQS backlog; an in-process source
 # would silently strand an approved decision after deployment.

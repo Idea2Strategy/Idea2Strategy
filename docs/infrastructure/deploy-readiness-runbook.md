@@ -90,6 +90,12 @@ Before requesting an AWS plan, record and review all of the following:
   `instruments.json`, `alpaca-sip-rights.json`, and `warmup/manifest.json`;
 - `enable_backtest_outbox_relay=true` only after the exact Backend consumer
   commit and all three queue routes have passed integration tests;
+- exact dedicated operator OIDC issuer, JWKS URI, single audience, and MFA
+  `acr`/`amr` allow-list, plus the immutable RBAC catalog version and read
+  permission UUIDs installed by the reviewed bootstrap receipt. The provider
+  must issue RS256 access tokens with `auth_time` and one approved MFA claim.
+  Amazon Cognito's default token shape has no `acr`/`amr`, so it is not a
+  drop-in substitute for this contract;
 - DNS record inventory and rollback owner before any registrar delegation change.
 
 Stop if the account, region, commit, provider lockfile, backend, or protected product/contract fingerprint differs from the reviewed candidate.
@@ -124,6 +130,12 @@ The following steps intentionally remain outside this repository-only readiness 
    container health/readiness, three-lane queue processing, scheduled Trading
    stop/drain/start, corporate-action approval Queue/DLQ redrive, desired-zero
    Pipeline 0→1→0 completion, and rollback.
+   Separately bootstrap the approved operator subject mapping/RBAC catalog,
+   record its immutable receipt, configure the exact OIDC inputs, and prove a
+   real MFA token succeeds while a stale, wrong-audience, customer, or
+   non-MFA token fails closed. Terraform generates the subject HMAC key in the
+   Core secret; the IdP token, subject, and bootstrap material never enter
+   Terraform variables or state.
 10. Continue only after the CloudFront viewer ACM certificate is `ISSUED` and the Core DNS-01 ACME certificate is trusted from CloudFront.
 11. Attach the exact plan, apply result, smoke-test evidence, and rollback outcome to the approved deployment record.
 

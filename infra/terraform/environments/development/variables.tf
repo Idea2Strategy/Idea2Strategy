@@ -358,3 +358,81 @@ variable "enable_backtest_outbox_relay" {
   type        = bool
   default     = false
 }
+
+variable "operator_auth_issuer" {
+  description = "Exact HTTPS issuer for the dedicated operator OIDC JWT. Required for a full release; it is not inferred from customer login."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.operator_auth_issuer == "" || can(regex("^https://[^/?#]+(?:/[^?#]*)?$", var.operator_auth_issuer))
+    error_message = "operator_auth_issuer must be empty or an exact HTTPS issuer without query or fragment."
+  }
+}
+
+variable "operator_auth_jwk_set_uri" {
+  description = "Exact HTTPS JWKS URI for the dedicated operator OIDC provider."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.operator_auth_jwk_set_uri == "" || can(regex("^https://[^/?#]+/[^?#]+$", var.operator_auth_jwk_set_uri))
+    error_message = "operator_auth_jwk_set_uri must be empty or an HTTPS JWKS URI without query or fragment."
+  }
+}
+
+variable "operator_auth_audience" {
+  description = "Single exact audience accepted by the Backend operator JWT verifier."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.operator_auth_audience == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", var.operator_auth_audience))
+    error_message = "operator_auth_audience must be a newline-free exact audience token."
+  }
+}
+
+variable "operator_auth_allowed_acr_values" {
+  description = "Exact OIDC acr values that prove recent operator MFA. At least one acr/amr value is required for full deployment."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for value in var.operator_auth_allowed_acr_values : can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", value))])
+    error_message = "operator_auth_allowed_acr_values must contain only bounded claim tokens."
+  }
+}
+
+variable "operator_auth_allowed_amr_values" {
+  description = "Exact OIDC amr values that prove recent operator MFA. At least one acr/amr value is required for full deployment."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for value in var.operator_auth_allowed_amr_values : can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", value))])
+    error_message = "operator_auth_allowed_amr_values must contain only bounded claim tokens."
+  }
+}
+
+variable "operator_rbac_catalog_version" {
+  description = "Immutable operator RBAC catalog version installed by the reviewed bootstrap receipt."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.operator_rbac_catalog_version == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$", var.operator_rbac_catalog_version))
+    error_message = "operator_rbac_catalog_version must be a bounded immutable identifier."
+  }
+}
+
+variable "operator_rbac_catalog_read_permission_id" {
+  description = "UUID of the catalog-read permission in the selected operator RBAC catalog."
+  type        = string
+  default     = ""
+}
+
+variable "operator_rbac_assignment_read_permission_id" {
+  description = "UUID of the assignment-read permission in the selected operator RBAC catalog."
+  type        = string
+  default     = ""
+}

@@ -53,6 +53,22 @@ runtime_database_secret_names = {
 # Set true only for an exact Backend commit whose three-lane Outbox relay tests passed.
 enable_backtest_outbox_relay = false
 
+# Dedicated operator OIDC trust. Use the exact reviewed provider values and an
+# access token that contains one exact aud plus auth_time and an approved MFA
+# acr/amr claim. Amazon Cognito's default token shape does not supply amr/acr;
+# do not substitute a customer login or mark MFA optional.
+operator_auth_issuer             = ""
+operator_auth_jwk_set_uri        = ""
+operator_auth_audience           = ""
+operator_auth_allowed_acr_values = []
+operator_auth_allowed_amr_values = []
+
+# These must match the immutable catalog installed by the reviewed one-shot
+# operator bootstrap receipt. They are identifiers, not secrets.
+operator_rbac_catalog_version                 = ""
+operator_rbac_catalog_read_permission_id      = ""
+operator_rbac_assignment_read_permission_id   = ""
+
 # Full phase also requires checksum- and S3-version-pinned runtime inputs.
 # backtest_policy_artifacts = {
 #   execution-policy = { key = "runtime/backtest/execution-policy.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__" }

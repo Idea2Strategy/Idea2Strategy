@@ -22,6 +22,12 @@ resource "random_password" "identity_session_hmac" {
   special = false
 }
 
+resource "random_password" "operator_subject_hmac" {
+  count   = local.enable_service_stack ? 1 : 0
+  length  = 48
+  special = false
+}
+
 resource "random_password" "backtest_result_ingest" {
   count   = local.enable_service_stack ? 1 : 0
   length  = 48
@@ -51,6 +57,7 @@ resource "aws_secretsmanager_secret_version" "core_internal" {
     IDENTITY_LOOKUP_HMAC_KEY       = random_password.identity_lookup_hmac[0].result
     IDENTITY_VERIFICATION_HMAC_KEY = random_password.identity_verification_hmac[0].result
     IDENTITY_SESSION_HMAC_KEY      = random_password.identity_session_hmac[0].result
+    OPERATOR_AUTH_CURRENT_HMAC_KEY = base64encode(random_password.operator_subject_hmac[0].result)
   })
 }
 
@@ -113,6 +120,19 @@ resource "terraform_data" "runtime_artifact_guard" {
     precondition {
       condition     = var.enable_backtest_outbox_relay
       error_message = "A full release candidate must explicitly enable the verified three-lane Backtest Outbox relay."
+    }
+
+    precondition {
+      condition = (
+        var.operator_auth_issuer != "" &&
+        var.operator_auth_jwk_set_uri != "" &&
+        var.operator_auth_audience != "" &&
+        length(setunion(var.operator_auth_allowed_acr_values, var.operator_auth_allowed_amr_values)) > 0 &&
+        var.operator_rbac_catalog_version != "" &&
+        can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_catalog_read_permission_id)) &&
+        can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_assignment_read_permission_id))
+      )
+      error_message = "Full deployment requires the exact operator OIDC issuer/JWKS/audience, an MFA acr/amr allow-list, and the reviewed RBAC catalog/read permission UUIDs."
     }
   }
 }
