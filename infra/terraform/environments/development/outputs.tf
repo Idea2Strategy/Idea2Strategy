@@ -98,6 +98,11 @@ output "queue_urls" {
   value       = { for key, queue in aws_sqs_queue.backtest : key => queue.url }
 }
 
+output "queue_dlq_urls" {
+  description = "Durable backtest dead-letter queue URLs keyed by lane."
+  value       = { for key, queue in aws_sqs_queue.backtest_dlq : key => queue.url }
+}
+
 output "cache_endpoint" {
   description = "Private TLS-only Valkey Serverless endpoint."
   value       = try(aws_elasticache_serverless_cache.this[0].endpoint[0].address, null)

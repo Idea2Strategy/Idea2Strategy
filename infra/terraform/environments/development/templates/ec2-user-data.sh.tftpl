@@ -4,7 +4,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y ca-certificates certbot curl docker.io docker-compose-v2 jq nginx python3-certbot-dns-route53 unzip
+apt-get install -y awscli ca-certificates certbot curl docker.io docker-compose-v2 jq nginx python3-certbot-dns-route53 unzip
 systemctl enable --now docker
 
 if snap list amazon-ssm-agent >/dev/null 2>&1; then
@@ -78,6 +78,37 @@ AWS_REGION=${aws_region}
 SSM_PARAMETER_PATH=${parameter_path}
 EOF
 chmod 0640 /etc/idea2strategy/runtime.env
+
+%{ if runtime_role == "backtest-worker" ~}
+ssm_value() {
+  local parameter_name="$1"
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if aws ssm get-parameter \
+      --region '${aws_region}' \
+      --name "$parameter_name" \
+      --query 'Parameter.Value' \
+      --output text; then
+      return 0
+    fi
+    sleep $((attempt * 2))
+  done
+  return 1
+}
+
+cat >>/etc/idea2strategy/runtime.env <<EOF
+BACKTEST_BASIC_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/url')
+BACKTEST_BASIC_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/dlq-url')
+BACKTEST_BASIC_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/basic/max-concurrency')
+BACKTEST_CUSTOM_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-custom/url')
+BACKTEST_CUSTOM_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-custom/dlq-url')
+BACKTEST_CUSTOM_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/custom/max-concurrency')
+BACKTEST_COMPETITION_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-competition/url')
+BACKTEST_COMPETITION_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-competition/dlq-url')
+BACKTEST_COMPETITION_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/competition/max-concurrency')
+BACKTEST_MAX_TOTAL_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/max-total-concurrency')
+EOF
+%{ endif ~}
 
 touch /opt/idea2strategy/bootstrap-complete
 

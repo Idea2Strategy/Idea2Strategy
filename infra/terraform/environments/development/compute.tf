@@ -161,6 +161,13 @@ resource "aws_launch_template" "backtest" {
 resource "aws_autoscaling_group" "backtest" {
   count = local.enable_service_stack ? 1 : 0
 
+  depends_on = [
+    aws_ssm_parameter.backtest_queue_url,
+    aws_ssm_parameter.backtest_dlq_url,
+    aws_ssm_parameter.backtest_lane_concurrency,
+    aws_ssm_parameter.backtest_total_concurrency,
+  ]
+
   name                = "${local.name_prefix}-backtest"
   min_size            = 0
   desired_capacity    = 0

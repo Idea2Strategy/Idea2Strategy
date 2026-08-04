@@ -43,6 +43,14 @@ resource "aws_ssm_parameter" "backtest_queue_url" {
   value = aws_sqs_queue.backtest[each.key].url
 }
 
+resource "aws_ssm_parameter" "backtest_dlq_url" {
+  for_each = local.backtest_lanes
+
+  name  = "${local.parameter_path}/queues/backtest-${each.key}/dlq-url"
+  type  = "String"
+  value = aws_sqs_queue.backtest_dlq[each.key].url
+}
+
 resource "aws_ssm_parameter" "backtest_lane_concurrency" {
   for_each = local.backtest_lanes
 

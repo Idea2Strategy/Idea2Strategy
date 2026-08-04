@@ -9,7 +9,7 @@ no AWS resource was created, changed, or deleted.
 
 ## Plan summary
 
-- Create: 157 managed resources
+- Create: 160 managed resources
 - Update in place: 7 managed resources
 - Delete: 7 managed resources
 - Read during apply: 9 data sources
@@ -19,7 +19,9 @@ no AWS resource was created, changed, or deleted.
 - Trading: one scheduled `c7g.xlarge` ARM64 EC2 instance
 - Backtest: `t4g.medium` ARM64 launch template and ASG `0/0/1`; Terraform
   publishes the target four-slot configuration (Basic 2, Custom 1, Competition
-  1), with Standard CPU credits and saturation alarms
+  1), all main/DLQ queue URLs, and the total limit through SSM. Bootstrapping
+  injects those exact runtime variables, with Standard CPU credits and
+  saturation alarms
 - Pipeline: desired-zero ARM64 Fargate Spot task definition
 - Database: private Single-AZ `db.t4g.small` PostgreSQL
 - Cache: private Valkey Serverless
@@ -48,6 +50,13 @@ Consequently, this saved plan must never be applied. The deployment guard proves
 that all inputs are structurally present; it does not claim that artifacts have
 been built or published.
 
+Saved-plan evidence:
+
+- File: `.harness/local/tmp/aws-low-cost-preapproval-final.tfplan`
+- SHA-256: `164100097A2846F4A7071C4309468D99B2CD5EFF3684BDBC81D3352967858235`
+- Assertions: Backtest ASG desired `0`/max `1`, `t4g.medium`, Standard credits,
+  11 Backtest SSM parameters, and 6 Backtest queue/saturation alarms
+
 ## Required next plan
 
 After architecture approval and the unresolved protected-contract work:
@@ -69,8 +78,10 @@ After architecture approval and the unresolved protected-contract work:
   Competition currently emits no backtest work event.
 - Backtest recovery lacks a lease-expiry reclaim boundary and still retains
   large event/result collections in memory.
-- Data Pipeline lacks the production S3/PostgreSQL publication adapter,
-  visibility heartbeat, and durable idempotency ledger.
+- Data Pipeline now heartbeats active and prefetched SQS deliveries and fails
+  closed on renewal/DLQ handoff errors, but still lacks the production
+  S3/PostgreSQL publication adapter, durable idempotency ledger, durable realtime
+  watermark, and built-in checkpoint/cancel support.
 - Current Trading canonical behavior is virtual execution with Alpaca SIP market
   data, not live Alpaca broker order/fill reconciliation.
 - Real deployable image digests and the frontend release artifact do not exist.

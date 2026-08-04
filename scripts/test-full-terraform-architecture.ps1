@@ -53,6 +53,22 @@ foreach ($required in @(
 if ($compute -notmatch '(?s)resource\s+"aws_launch_template"\s+"backtest".*?credit_specification\s*\{.*?cpu_credits\s*=\s*"standard"') {
     throw "Backtest t4g.medium must use standard CPU credits so saturation is visible without surplus-credit spend."
 }
+foreach ($required in @(
+    'BACKTEST_BASIC_QUEUE_URL',
+    'BACKTEST_BASIC_DLQ_URL',
+    'BACKTEST_BASIC_MAX_CONCURRENCY',
+    'BACKTEST_CUSTOM_QUEUE_URL',
+    'BACKTEST_CUSTOM_DLQ_URL',
+    'BACKTEST_CUSTOM_MAX_CONCURRENCY',
+    'BACKTEST_COMPETITION_QUEUE_URL',
+    'BACKTEST_COMPETITION_DLQ_URL',
+    'BACKTEST_COMPETITION_MAX_CONCURRENCY',
+    'BACKTEST_MAX_TOTAL_CONCURRENCY'
+)) {
+    if (-not $userData.Contains($required)) {
+        throw "Backtest runtime environment injection is missing: $required"
+    }
+}
 
 foreach ($required in @(
     'resource "aws_instance" "service"',
@@ -128,6 +144,9 @@ foreach ($required in @('resource "aws_sqs_queue" "backtest"', 'resource "aws_sq
     if (-not $queues.Contains($required)) {
         throw "Durable backtest queue safety is missing: $required"
     }
+}
+if (-not $queues.Contains('resource "aws_ssm_parameter" "backtest_dlq_url"')) {
+    throw "Each Backtest lane DLQ URL must be published for worker runtime injection."
 }
 if ($queues -notmatch 'value\s*=\s*each\.key\s*==\s*"basic"\s*\?\s*"2"\s*:\s*"1"') {
     throw "Backtest lane concurrency must be basic=2, custom=1, competition=1."
