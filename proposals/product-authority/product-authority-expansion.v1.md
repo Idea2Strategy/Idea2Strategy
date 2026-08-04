@@ -3,7 +3,7 @@ schema_version: 1
 id: decision.governance.product-authority-expansion
 kind: decision
 status: applied-by-authority-instruction
-revision: 2
+revision: 3
 refs:
   - docs/superpowers/specs/2026-07-22-product-authority-governance-design.md
   - docs/collaboration-policy.md
@@ -227,3 +227,78 @@ submodule 포인터 검사만 실행한다. `verify-foundation-evidence.mjs`,
 따라서 `verify-foundation-evidence.mjs`의 기대 리터럴 변경(132·137·146행)은
 자동 검증 없이 육안 검토에만 의존한다. governance 검증기를 CI에 연결하는 작업은
 이 권한 변경과 분리된 별도 이슈로 다룬다.
+
+## 7. Revision 3 — `user:Pearone99` 제거와 검증기 CI 연결 (2026-08-04)
+
+`revision: 3`. 권한자 `user:kcrmin`의 지시로 두 가지를 함께 수행했다.
+
+### 7.1 `user:Pearone99` 제거
+
+```yaml
+product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]
+```
+
+이 계정은 나주원의 보조 계정이므로 `minimum: 1`에서 실질 권한자 수를 늘리지
+않았고, 협력자 권한이 `read`여서 PR 승인에도 사용할 수 없었다. 즉 승인 능력은
+없이 권한 표면만 넓히는 항목이었다. 제거 후 등록 항목 4개가 실제 인원 4명과
+1:1로 대응한다.
+
+- 민경철 `user:kcrmin` (admin)
+- 박준유 `user:pjy008008` (admin)
+- 나주원 `user:Juwon-Na` (admin)
+- 손현준 `user:hjcud` (admin)
+
+네 계정 모두 `admin`이라 전원 PR 승인이 가능하다. revision 1 §5와 revision 2
+§6.1의 "나주원이 어느 계정을 상시 사용할지 정해야 한다"는 미결정 항목은 이
+제거로 해소되었고 `docs/collaboration-policy.md` 13절에서 삭제했다.
+
+### 7.2 §6.4 검증 공백 해소
+
+§6.4가 기록한 공백을 새 스크립트 없이 기존 검증기를 CI에 연결해 닫았다.
+`.github/workflows/ci.yml`의 `schema-and-coordination` 잡에 네 단계를 추가했다.
+
+```yaml
+- name: Initialize local harness
+  shell: pwsh
+  run: ./scripts/initialize-local-harness.ps1 -Verify
+- name: Verify collaboration policy and product authorities
+  shell: pwsh
+  run: ./scripts/verify-collaboration-policy.ps1
+- name: Verify governance foundation evidence
+  run: node scripts/verify-foundation-evidence.mjs policy
+- name: Test local harness
+  shell: pwsh
+  run: ./scripts/test-local-harness.ps1
+```
+
+성립 근거:
+
+- `initialize-local-harness.ps1`의 `Initialize-TrackedPolicyIntegrity`(59-82행)가
+  Git 제외 대상인 `owner.yaml`과 `integrity.json`을 체크아웃된 트리에서 생성한다.
+  fresh runner에는 두 파일이 없으므로 생성 조건이 성립하고, 해시는 CI가 체크아웃한
+  정책 파일에서 계산되어 자기 일관적으로 일치한다. 줄바꿈 정규화 차이에 영향받지 않는다.
+- `verify-foundation-evidence.mjs`는 mode 인자를 받으며 권한자 단정은 `policy`
+  모드(`verifyPolicy`)에 있다.
+- `test-local-harness.ps1`은 `git init`과 `check-ignore`만 사용하고 커밋하지
+  않으므로 runner의 git identity 설정이 필요 없다.
+- `ubuntu-latest` runner에는 `pwsh`가 사전 설치되어 있고, 잡은 이미 Node 24를
+  설치한다.
+
+이제 `.harness/governance.yaml`의 권한자 목록이 4개 스크립트의 기대 리터럴이나
+4개 규칙 문서(`AGENTS.md`, SKILL, fallback, `docs/collaboration-policy.md`)와
+갈라지면 CI가 실패한다. revision 1·2에서 발생한 종류의 drift가 자동 검출된다.
+
+### 7.3 변경 파일
+
+`.harness/governance.yaml`, `.github/workflows/ci.yml`, `AGENTS.md`,
+`.agents/skills/use-project-harness/SKILL.md`,
+`.agents/skills/use-project-harness/references/fallback.md`,
+`scripts/initialize-local-harness.ps1`, `scripts/test-local-harness.ps1`,
+`scripts/verify-collaboration-policy.ps1`, `scripts/verify-foundation-evidence.mjs`,
+`docs/collaboration-policy.md`,
+`docs/superpowers/specs/2026-07-22-product-authority-governance-design.md`(34·51행
+포함), 이 문서.
+
+`docs/collaboration-policy.md` 14절의 2026-08-02 이력 행에 남은 `user:Pearone99`
+언급은 당시 사실 기록이므로 수정하지 않았다. revision 1·2 본문도 같은 이유로
+보존했다.

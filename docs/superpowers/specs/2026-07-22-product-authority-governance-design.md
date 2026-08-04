@@ -2,7 +2,7 @@
 
 ## Objective
 
-Idea2Strategy must fail closed when an actor attempts to change canonical product meaning without product-owner authority. The product authorities are the GitHub accounts `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, `user:Pearone99`, and `user:hjcud`. `user:Juwon-Na` and `user:Pearone99` are both accounts of the same person. The known owner email remains ignored local contact metadata, not authentication evidence.
+Idea2Strategy must fail closed when an actor attempts to change canonical product meaning without product-owner authority. The product authorities are the GitHub accounts `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, and `user:hjcud`. The known owner email remains ignored local contact metadata, not authentication evidence.
 
 ## Current gap
 
@@ -12,7 +12,7 @@ The repository already tells agents to run `stackcord governance check`, but `.h
 
 - Selected review provider: GitHub.
 - Canonical review repository: `Idea2Strategy/Idea2Strategy`.
-- Normalized product authorities: `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, `user:Pearone99`, and `user:hjcud`, with equal scope.
+- Normalized product authorities: `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, and `user:hjcud`, with equal scope.
 - Protected semantic kinds: `product`, `policy`, `business`, and `contract`. Every configured authority covers all of them; there is no per-kind or per-area restriction.
 - Required approval count: one.
 - Authority self-approval: allowed for any configured authority.
@@ -31,7 +31,7 @@ The following outcomes allow a canonical write:
 1. governance is enabled;
 2. the provider and repository match the committed policy;
 3. the exact protected fingerprint and head commit are current;
-4. the verified approving subject is a configured product authority (`user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, or `user:Pearone99`);
+4. the verified approving subject is a configured product authority (`user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, or `user:hjcud`);
 5. the result is approved.
 
 If any condition is missing, stale, unknown, or rejected, the agent must not edit the canonical protected source. It may explain the block and prepare an isolated proposal that cannot be represented as approved, integrated, or releasable.
@@ -48,7 +48,7 @@ Implementation code is not authenticated merely by its path. However, code that 
 
 ## Project changes
 
-1. Enable native Stackcord governance with `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, and `user:Pearone99` as the configured authorities.
+1. Enable native Stackcord governance with `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, and `user:hjcud` as the configured authorities.
 2. Strengthen `AGENTS.md` and the repository-local harness skill so an unverified actor stops before canonical mutation instead of editing the protected source in place.
 3. Record the owner email only in ignored local metadata and label it non-authoritative.
 4. Extend the collaboration-policy verifier so it fails when governance is disabled, the provider/repository/authority differs, protected kinds are incomplete, or instructions accept Git display identity.
