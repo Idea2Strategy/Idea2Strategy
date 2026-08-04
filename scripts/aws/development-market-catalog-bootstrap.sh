@@ -137,7 +137,11 @@ run_catalog() {
     --expected-object-count "$expected_object_count" \
     --expected-manifest-count "$expected_manifest_count" \
     "$@" >"$output_path" 2>"$error_log"; then
-    echo 'Market catalog command failed; inspect protected SSM diagnostics.' >&2
+    echo 'Market catalog command failed; sanitized diagnostics follow.' >&2
+    sed -E \
+      -e 's#(postgresql(\+psycopg)?://)[^@[:space:]]+@#\1<redacted>@#g' \
+      -e 's#((password|secret|token|api[_-]?key)[=:])[^[:space:]]+#\1<redacted>#Ig' \
+      "$error_log" | tail -n 20 >&2
     exit 1
   fi
   jq -e 'type == "object"' "$output_path" >/dev/null

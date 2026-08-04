@@ -63,6 +63,8 @@ if ($orchestrator.Contains('Get-TerraformOutput "ecr_repository_urls"')) {
 foreach ($needle in @(
     'set +x',
     'trap cleanup EXIT',
+    'sed -E',
+    'command-error.log',
     'LEGACY_DATABASE_URL',
     'DATABASE_URL',
     '--env-file',
