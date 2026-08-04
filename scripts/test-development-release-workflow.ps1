@@ -11,12 +11,17 @@ $workflow = Get-Content -LiteralPath $workflowPath -Raw
 $required = @(
     "workflow_dispatch:",
     "id-token: write",
+    "github.ref == 'refs/heads/develop'",
+    "environment: development-plan",
     "environment: development",
     "cancel-in-progress: false",
-    "aws-actions/configure-aws-credentials@v4",
+    "aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a",
+    "role-to-assume: `${{ vars.AWS_PLAN_ROLE_ARN }}",
     "role-to-assume: `${{ vars.AWS_DEPLOY_ROLE_ARN }}",
-    "docker/setup-buildx-action@v3",
+    "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
     "--platform linux/arm64",
+    "--tag `$target",
+    "idea2strategy-dev/",
     "terraform plan -parallelism=1 -out=deployment.tfplan",
     "terraform apply -parallelism=1 deployment.tfplan",
     "aws s3api put-object",
@@ -24,9 +29,10 @@ $required = @(
     "Get-FileHash",
     "TF_STATE_BUCKET",
     "TF_VARS_JSON",
-    "aws s3 sync frontend",
+    "must carry independently reviewed public DNS delegation evidence",
+    "aws s3 sync `"`$env:RUNNER_TEMP/frontend`"",
     "_releases/",
-    "create-invalidation",
+    "verify-deployed-development.ps1",
     "github.event.inputs.apply_reviewed_plan == 'true'"
 )
 
@@ -36,7 +42,7 @@ foreach ($token in $required) {
     }
 }
 
-foreach ($forbidden in @("aws-access-key-id", "aws-secret-access-key", "terraform apply -auto-approve", "docker build --platform linux/amd64")) {
+foreach ($forbidden in @("aws-access-key-id", "aws-secret-access-key", "terraform apply -auto-approve", "docker build --platform linux/amd64", "idea2strategy-development", "create-invalidation", "s3 sync `"s3://`$env:FRONTEND_BUCKET/_releases")) {
     if ($workflow.Contains($forbidden)) {
         throw "Development release workflow contains forbidden boundary: $forbidden"
     }
@@ -62,6 +68,10 @@ foreach ($image in $requiredImages) {
 
 if ($workflow -notmatch "(?s)apply-reviewed-plan:.*?needs: prepare-and-plan.*?environment: development") {
     throw "Apply must consume the reviewed plan and cross the Development environment gate."
+}
+
+if ($workflow -notmatch "(?s)build:.*?Build untrusted ARM64 runtime inputs without AWS credentials.*?prepare-and-plan:.*?environment: development-plan.*?configure-aws-credentials") {
+    throw "Untrusted image and frontend builds must complete before the scoped AWS planning credential is issued."
 }
 
 Write-Host "Development release workflow policy checks passed."

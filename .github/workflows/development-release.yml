@@ -27,51 +27,27 @@ env:
   TF_INPUT: "false"
 
 jobs:
-  prepare-and-plan:
-    if: github.event.inputs.release_authorization == 'PREPARE_DEVELOPMENT_RC'
+  build:
+    if: github.ref == 'refs/heads/develop' && github.event.inputs.release_authorization == 'PREPARE_DEVELOPMENT_RC'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    environment: development
+    timeout-minutes: 90
     outputs:
-      plan_key: ${{ steps.archive.outputs.plan_key }}
-      plan_version: ${{ steps.archive.outputs.plan_version }}
-      plan_sha256: ${{ steps.archive.outputs.plan_sha256 }}
-      frontend_key: ${{ steps.archive.outputs.frontend_key }}
-      frontend_version: ${{ steps.archive.outputs.frontend_version }}
-      frontend_sha256: ${{ steps.archive.outputs.frontend_sha256 }}
       release_id: ${{ steps.release.outputs.release_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1
           submodules: recursive
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          platforms: arm64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Verify exact AWS account
-        shell: pwsh
-        run: |
-          $actual = aws sts get-caller-identity --query Account --output text
-          if ($actual -ne '${{ vars.AWS_ACCOUNT_ID }}') { throw 'AWS account mismatch.' }
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Authenticate Docker to ECR
-        shell: bash
-        run: |
-          set -euo pipefail
-          registry="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
-
-      - name: Build and publish immutable ARM64 runtime images
-        id: images
+      - name: Build untrusted ARM64 runtime inputs without AWS credentials
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $registry = '${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com'
           $tag = "rc-${{ github.sha }}-${{ github.run_attempt }}"
           $images = @(
             @{ name='admin-mcp'; context='backend'; file='backend/apps/admin-mcp/Dockerfile' },
@@ -84,27 +60,22 @@ jobs:
             @{ name='pipeline-worker'; context='data-pipeline'; file='data-pipeline/Dockerfile' },
             @{ name='trading-worker'; context='trading-engine'; file='trading-engine/apps/trading-worker/Dockerfile' }
           )
-          $digests = @{}
           foreach ($image in $images) {
-            $target = "$registry/idea2strategy-development/$($image.name):$tag"
-            $metadata = Join-Path $env:RUNNER_TEMP "$($image.name)-metadata.json"
-            docker buildx build --platform linux/arm64 --provenance=true --sbom=true --push --metadata-file $metadata --file $image.file $image.context
+            $target = "local/idea2strategy/$($image.name):$tag"
+            docker buildx build --platform linux/arm64 --load --tag $target --file $image.file $image.context
             if ($LASTEXITCODE -ne 0) { throw "Image build failed: $($image.name)" }
-            $digest = (Get-Content $metadata -Raw | ConvertFrom-Json).'containerimage.digest'
-            if ($digest -notmatch '^sha256:[0-9a-f]{64}$') { throw "Invalid digest for $($image.name)." }
-            $digests[$image.name] = $digest
           }
-          $digests | ConvertTo-Json -Compress | Set-Content -NoNewline "$env:RUNNER_TEMP/image-digests.json"
+          docker save ($images | ForEach-Object { "local/idea2strategy/$($_.name):$tag" }) -o "$env:RUNNER_TEMP/runtime-images.tar"
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.9.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
-      - name: Build same-origin frontend
+      - name: Build same-origin frontend without AWS credentials
         shell: bash
         run: |
           set -euo pipefail
@@ -112,7 +83,7 @@ jobs:
           pnpm install --frozen-lockfile
           VITE_API_BASE_URL='' VITE_ADMIN_MCP_BASE_URL='' VITE_ENABLE_LOCAL_OPERATOR_HARNESS=false pnpm build
 
-      - name: Create immutable frontend archive
+      - name: Create immutable release bundle
         id: release
         shell: pwsh
         run: |
@@ -120,7 +91,83 @@ jobs:
           tar -czf "$env:RUNNER_TEMP/frontend.tgz" -C ui/dist .
           "release_id=$releaseId" >> $env:GITHUB_OUTPUT
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: development-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/runtime-images.tar
+            ${{ runner.temp }}/frontend.tgz
+          retention-days: 1
+          if-no-files-found: error
+
+  prepare-and-plan:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: development-plan
+    outputs:
+      plan_key: ${{ steps.archive.outputs.plan_key }}
+      plan_version: ${{ steps.archive.outputs.plan_version }}
+      plan_sha256: ${{ steps.archive.outputs.plan_sha256 }}
+      release_id: ${{ needs.build.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: development-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify exact AWS account
+        shell: pwsh
+        run: |
+          $actual = aws sts get-caller-identity --query Account --output text
+          if ($actual -ne '${{ vars.AWS_ACCOUNT_ID }}') { throw 'AWS account mismatch.' }
+
+      - name: Publish immutable ARM64 images and capture registry digests
+        id: images
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          docker load --input "$env:RUNNER_TEMP/release/runtime-images.tar"
+          $registry = '${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com'
+          $tag = "rc-${{ github.sha }}-${{ github.run_attempt }}"
+          aws ecr get-login-password | docker login --username AWS --password-stdin $registry
+          $names = @('admin-mcp','backend-api','backend-batch','backend-worker','backtest-api','backtest-worker','market-gateway','pipeline-worker','trading-worker')
+          $digests = @{}
+          foreach ($name in $names) {
+            $source = "local/idea2strategy/${name}:$tag"
+            $target = "$registry/idea2strategy-dev/${name}:$tag"
+            docker tag $source $target
+            docker push $target
+            if ($LASTEXITCODE -ne 0) { throw "Image publish failed: $name" }
+            $digest = aws ecr describe-images --repository-name "idea2strategy-dev/$name" --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text
+            if ($digest -notmatch '^sha256:[0-9a-f]{64}$') { throw "Invalid ECR digest for $name." }
+            $digests[$name] = $digest
+          }
+          $digests | ConvertTo-Json -Compress | Set-Content -NoNewline "$env:RUNNER_TEMP/image-digests.json"
+
+      - name: Publish immutable frontend prefix before planning
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bucket = "idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-frontend"
+          $release = '${{ needs.build.outputs.release_id }}'
+          $existing = aws s3api list-objects-v2 --bucket $bucket --prefix "_releases/$release/" --max-items 1 --query KeyCount --output text
+          if ([int]$existing -ne 0) { throw "Frontend release prefix already exists: $release" }
+          New-Item -ItemType Directory "$env:RUNNER_TEMP/frontend" -Force | Out-Null
+          tar -xzf "$env:RUNNER_TEMP/release/frontend.tgz" -C "$env:RUNNER_TEMP/frontend"
+          aws s3 sync "$env:RUNNER_TEMP/frontend" "s3://$bucket/_releases/$release/" --cache-control 'public,max-age=31536000,immutable' --exclude 'index.html'
+          aws s3 cp "$env:RUNNER_TEMP/frontend/index.html" "s3://$bucket/_releases/$release/index.html" --cache-control 'no-store' --content-type 'text/html'
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false
@@ -132,12 +179,15 @@ jobs:
           if (-not $config -or $config.ContainsKey('password') -or $config.ContainsKey('secret')) {
             throw 'TF_VARS_JSON must contain reviewed non-secret Terraform variables only.'
           }
+          if (-not $config.ContainsKey('dns_delegation_verified') -or $config.dns_delegation_verified -ne $true) {
+            throw 'TF_VARS_JSON must carry independently reviewed public DNS delegation evidence.'
+          }
           $config.aws_profile = ''
           $config.aws_region = '${{ env.AWS_REGION }}'
           $config.expected_aws_account_id = '${{ vars.AWS_ACCOUNT_ID }}'
           $config.deployment_phase = 'full'
           $config.enable_https = $true
-          $config.frontend_release_id = '${{ steps.release.outputs.release_id }}'
+          $config.frontend_release_id = '${{ needs.build.outputs.release_id }}'
           $config.container_image_digests = Get-Content "$env:RUNNER_TEMP/image-digests.json" -Raw | ConvertFrom-Json -AsHashtable
           $config | ConvertTo-Json -Depth 20 | Set-Content -NoNewline infra/terraform/environments/development/release.auto.tfvars.json
           @"
@@ -159,28 +209,23 @@ jobs:
           terraform plan -parallelism=1 -out=deployment.tfplan
           terraform show -no-color deployment.tfplan > deployment.plan.txt
 
-      - name: Archive exact plan and frontend release in protected state storage
+      - name: Archive exact plan in protected state storage
         id: archive
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $prefix = "idea2strategy/development/release-candidates/${{ github.run_id }}/${{ github.run_attempt }}"
           $plan = 'infra/terraform/environments/development/deployment.tfplan'
-          $frontend = "$env:RUNNER_TEMP/frontend.tgz"
           $planHash = (Get-FileHash -Algorithm SHA256 $plan).Hash.ToLowerInvariant()
-          $frontendHash = (Get-FileHash -Algorithm SHA256 $frontend).Hash.ToLowerInvariant()
-          $planPut = aws s3api put-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key "$prefix/deployment.tfplan" --body $plan --server-side-encryption AES256 --output json | ConvertFrom-Json
-          $frontendPut = aws s3api put-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key "$prefix/frontend.tgz" --body $frontend --server-side-encryption AES256 --output json | ConvertFrom-Json
+          $put = aws s3api put-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key "$prefix/deployment.tfplan" --body $plan --server-side-encryption AES256 --output json | ConvertFrom-Json
+          if ([string]::IsNullOrWhiteSpace([string]$put.VersionId)) { throw 'Versioned saved-plan publication failed.' }
           "plan_key=$prefix/deployment.tfplan" >> $env:GITHUB_OUTPUT
-          "plan_version=$($planPut.VersionId)" >> $env:GITHUB_OUTPUT
+          "plan_version=$($put.VersionId)" >> $env:GITHUB_OUTPUT
           "plan_sha256=$planHash" >> $env:GITHUB_OUTPUT
-          "frontend_key=$prefix/frontend.tgz" >> $env:GITHUB_OUTPUT
-          "frontend_version=$($frontendPut.VersionId)" >> $env:GITHUB_OUTPUT
-          "frontend_sha256=$frontendHash" >> $env:GITHUB_OUTPUT
-          "### Development plan awaiting review" >> $env:GITHUB_STEP_SUMMARY
+          "### Development plan awaiting apply approval" >> $env:GITHUB_STEP_SUMMARY
           "* Root commit: `${{ github.sha }}`" >> $env:GITHUB_STEP_SUMMARY
           "* Plan SHA-256: `$planHash`" >> $env:GITHUB_STEP_SUMMARY
-          "* Frontend SHA-256: `$frontendHash`" >> $env:GITHUB_STEP_SUMMARY
+          "* Frontend release: `${{ needs.build.outputs.release_id }}`" >> $env:GITHUB_STEP_SUMMARY
           "* Apply requested: `${{ github.event.inputs.apply_reviewed_plan }}`" >> $env:GITHUB_STEP_SUMMARY
           Get-Content infra/terraform/environments/development/deployment.plan.txt >> $env:GITHUB_STEP_SUMMARY
 
@@ -188,32 +233,28 @@ jobs:
     if: github.event.inputs.apply_reviewed_plan == 'true'
     needs: prepare-and-plan
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     environment: development
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1
           submodules: false
-
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false
 
-      - name: Download and verify exact reviewed artifacts
+      - name: Download and verify exact reviewed plan
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           aws s3api get-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key '${{ needs.prepare-and-plan.outputs.plan_key }}' --version-id '${{ needs.prepare-and-plan.outputs.plan_version }}' deployment.tfplan | Out-Null
-          aws s3api get-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key '${{ needs.prepare-and-plan.outputs.frontend_key }}' --version-id '${{ needs.prepare-and-plan.outputs.frontend_version }}' frontend.tgz | Out-Null
           if ((Get-FileHash -Algorithm SHA256 deployment.tfplan).Hash.ToLowerInvariant() -ne '${{ needs.prepare-and-plan.outputs.plan_sha256 }}') { throw 'Saved plan hash mismatch.' }
-          if ((Get-FileHash -Algorithm SHA256 frontend.tgz).Hash.ToLowerInvariant() -ne '${{ needs.prepare-and-plan.outputs.frontend_sha256 }}') { throw 'Frontend artifact hash mismatch.' }
 
       - name: Apply only the reviewed saved plan
         working-directory: infra/terraform/environments/development
@@ -222,19 +263,9 @@ jobs:
           Move-Item "$env:GITHUB_WORKSPACE/deployment.tfplan" ./deployment.tfplan
           terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="key=idea2strategy/development/terraform.tfstate" -backend-config="region=${{ env.AWS_REGION }}" -backend-config="use_lockfile=true" -backend-config="encrypt=true"
           terraform apply -parallelism=1 deployment.tfplan
-          $bucket = terraform output -raw frontend_bucket
-          $distribution = terraform output -raw cloudfront_distribution_id
-          "FRONTEND_BUCKET=$bucket" >> $env:GITHUB_ENV
-          "CLOUDFRONT_DISTRIBUTION=$distribution" >> $env:GITHUB_ENV
 
-      - name: Publish immutable frontend and atomically promote it
+      - name: Verify deployed Development environment
         shell: pwsh
         run: |
-          New-Item -ItemType Directory frontend -Force | Out-Null
-          tar -xzf frontend.tgz -C frontend
-          $release = '${{ needs.prepare-and-plan.outputs.release_id }}'
-          aws s3 sync frontend "s3://$env:FRONTEND_BUCKET/_releases/$release/" --delete --cache-control 'public,max-age=31536000,immutable' --exclude 'index.html'
-          aws s3 cp frontend/index.html "s3://$env:FRONTEND_BUCKET/_releases/$release/index.html" --cache-control 'no-store' --content-type 'text/html'
-          aws s3 sync "s3://$env:FRONTEND_BUCKET/_releases/$release/" "s3://$env:FRONTEND_BUCKET/" --delete --exclude '_releases/*'
-          aws cloudfront create-invalidation --distribution-id $env:CLOUDFRONT_DISTRIBUTION --paths '/*' | Out-Null
-          "Frontend release promoted: $release" >> $env:GITHUB_STEP_SUMMARY
+          ./scripts/verify-deployed-development.ps1 -AwsProfile '' -AwsRegion '${{ env.AWS_REGION }}' -ExpectedAwsAccountId '${{ vars.AWS_ACCOUNT_ID }}'
+          "Verified immutable frontend release: `${{ needs.prepare-and-plan.outputs.release_id }}`" >> $env:GITHUB_STEP_SUMMARY

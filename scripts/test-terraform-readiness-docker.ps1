@@ -20,13 +20,17 @@ if ($LASTEXITCODE -ne 0) {
     throw "terraform fmt -check failed in Docker."
 }
 
-foreach ($relativePath in @("bootstrap", "environments/development")) {
+foreach ($relativePath in @("bootstrap", "ci-identity", "artifact-foundation", "environments/development")) {
     $workingDirectory = "/workspace/infra/terraform/$relativePath"
-    & docker run --rm -v $mount -w $workingDirectory $image init -backend=false -input=false -lockfile=readonly
+    $safeName = $relativePath.Replace('/', '-').Replace('\', '-')
+    $hostDataDirectory = Join-Path $root ".harness/local/tmp/terraform-docker/$safeName"
+    New-Item -ItemType Directory -Force -Path $hostDataDirectory | Out-Null
+    $containerDataDirectory = "/workspace/.harness/local/tmp/terraform-docker/$safeName"
+    & docker run --rm -e "TF_DATA_DIR=$containerDataDirectory" -e TF_VAR_aws_profile= -v $mount -w $workingDirectory $image init -backend=false -input=false -lockfile=readonly
     if ($LASTEXITCODE -ne 0) {
         throw "terraform init failed in Docker for $relativePath."
     }
-    & docker run --rm -v $mount -w $workingDirectory $image validate
+    & docker run --rm -e "TF_DATA_DIR=$containerDataDirectory" -e TF_VAR_aws_profile= -v $mount -w $workingDirectory $image validate
     if ($LASTEXITCODE -ne 0) {
         throw "terraform validate failed in Docker for $relativePath."
     }

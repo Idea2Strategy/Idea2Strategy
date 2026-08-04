@@ -19,6 +19,7 @@ $all = (Get-ChildItem -LiteralPath $environmentRoot -Filter *.tf | ForEach-Objec
 $network = Read-TerraformFile "network.tf"
 $compute = Read-TerraformFile "compute.tf"
 $frontend = Read-TerraformFile "frontend.tf"
+$edge = Read-TerraformFile "edge.tf"
 $cache = Read-TerraformFile "cache.tf"
 $queues = Read-TerraformFile "queues.tf"
 $security = Read-TerraformFile "security.tf"
@@ -27,7 +28,9 @@ $scheduling = Read-TerraformFile "scheduling.tf"
 $providers = Read-TerraformFile "providers.tf"
 $storage = Read-TerraformFile "storage.tf"
 $userData = Get-Content -LiteralPath (Join-Path $environmentRoot "templates/ec2-user-data.sh.tftpl") -Raw
-$ciIdentity = Get-Content -LiteralPath (Join-Path $root "infra/terraform/ci-identity/main.tf") -Raw
+$ciIdentity = (Get-ChildItem -LiteralPath (Join-Path $root "infra/terraform/ci-identity") -Filter *.tf | ForEach-Object {
+    Get-Content -LiteralPath $_.FullName -Raw
+}) -join "`n"
 $artifactRoot = Join-Path $root "infra/terraform/artifact-foundation"
 $artifactMain = Get-Content -LiteralPath (Join-Path $artifactRoot "main.tf") -Raw
 
@@ -52,6 +55,24 @@ foreach ($required in @(
 )) {
     if (-not $network.Contains($required)) {
         throw "Network architecture is missing: $required"
+    }
+}
+
+foreach ($immutableFrontendBoundary in @(
+    'count = local.enable_dns_foundation ? 1 : 0',
+    'origin_path              = "/_releases/${var.frontend_release_id}"'
+)) {
+    if (-not $frontend.Contains($immutableFrontendBoundary)) {
+        throw "Immutable frontend release boundary is missing: $immutableFrontendBoundary"
+    }
+}
+foreach ($runtimeDependency in @(
+    'aws_instance" "service',
+    'aws_instance" "trading',
+    'aws_launch_template" "backtest'
+)) {
+    if ($compute -notmatch ('(?s)resource "' + [regex]::Escape($runtimeDependency) + '.*?depends_on\s*=\s*\[.*?aws_ssm_parameter\.runtime_image')) {
+        throw "Runtime bootstrap can race its image parameter: $runtimeDependency"
     }
 }
 foreach ($required in @(
@@ -117,6 +138,19 @@ if ($all -match '(?s)variable\s+"service_instance_type"\s*\{.*?default\s*=\s*"t4
 }
 if ($all -notmatch '(?s)variable\s+"monthly_budget_usd"\s*\{.*?default\s*=\s*180') {
     throw "The accepted Development monthly budget must default to USD 180."
+}
+foreach ($dnsBoundary in @(
+    'enable_dns_foundation = contains(["dns_foundation", "full"], var.deployment_phase)',
+    'local.enable_dns_foundation && var.existing_hosted_zone_id == ""',
+    'variable "dns_delegation_verified"',
+    'condition     = var.dns_delegation_verified'
+)) {
+    if (-not ($all.Contains($dnsBoundary) -or $edge.Contains($dnsBoundary))) {
+        throw "Staged Route 53 delegation boundary is missing: $dnsBoundary"
+    }
+}
+if ($all -notmatch 'contains\(\["market_data_bootstrap", "dns_foundation", "full"\], var\.deployment_phase\)') {
+    throw "Development deployment phases must expose a DNS-only foundation before full runtime creation."
 }
 
 foreach ($required in @(
@@ -190,8 +224,12 @@ foreach ($required in @(
     'aws_iam_openid_connect_provider',
     'token.actions.githubusercontent.com:aud',
     'token.actions.githubusercontent.com:sub',
+    'environment:${var.github_plan_environment}',
     'environment:${var.github_environment}',
+    'ReadOnlyAccess',
     'PowerUserAccess',
+    'github_plan_role_arn',
+    'PublishImmutableFrontendRelease',
     'TerraformStateObject',
     'iam:PassRole'
 )) {

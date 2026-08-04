@@ -1,7 +1,8 @@
 locals {
   name_prefix = "${var.project_name}-${var.environment}"
 
-  enable_service_stack = var.deployment_phase == "full"
+  enable_service_stack  = var.deployment_phase == "full"
+  enable_dns_foundation = contains(["dns_foundation", "full"], var.deployment_phase)
 
   common_tags = {
     Project     = var.project_name
@@ -66,7 +67,7 @@ locals {
 
   alarm_action_arns = local.enable_service_stack ? [aws_sns_topic.operations[0].arn] : []
 
-  hosted_zone_id = local.enable_service_stack ? (
+  hosted_zone_id = local.enable_dns_foundation ? (
     var.existing_hosted_zone_id != "" ? var.existing_hosted_zone_id : aws_route53_zone.this[0].zone_id
   ) : null
 }
@@ -82,6 +83,13 @@ check "full_phase_account_guard" {
   assert {
     condition     = !local.enable_service_stack || var.expected_aws_account_id != ""
     error_message = "expected_aws_account_id is required before planning or applying the full phase."
+  }
+}
+
+check "full_phase_dns_delegation" {
+  assert {
+    condition     = !local.enable_service_stack || var.dns_delegation_verified
+    error_message = "The full phase requires independently verified registrar delegation to the reviewed Route 53 zone."
   }
 }
 

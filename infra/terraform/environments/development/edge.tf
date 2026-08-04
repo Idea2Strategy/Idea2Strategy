@@ -1,5 +1,5 @@
 resource "aws_route53_zone" "this" {
-  count = local.enable_service_stack && var.existing_hosted_zone_id == "" ? 1 : 0
+  count = local.enable_dns_foundation && var.existing_hosted_zone_id == "" ? 1 : 0
   name  = var.domain_name
   tags  = { Name = "${local.name_prefix}-public-zone" }
 }

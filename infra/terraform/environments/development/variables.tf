@@ -51,13 +51,13 @@ variable "environment" {
 }
 
 variable "deployment_phase" {
-  description = "Development rollout phase. market_data_bootstrap preserves historical-data prerequisites; full adds the public service stack after the separate artifact-foundation root is applied."
+  description = "Development rollout phase. dns_foundation creates Route 53 before registrar delegation; full adds the public service stack only after delegation is verified."
   type        = string
   default     = "market_data_bootstrap"
 
   validation {
-    condition     = contains(["market_data_bootstrap", "full"], var.deployment_phase)
-    error_message = "deployment_phase must be market_data_bootstrap or full."
+    condition     = contains(["market_data_bootstrap", "dns_foundation", "full"], var.deployment_phase)
+    error_message = "deployment_phase must be market_data_bootstrap, dns_foundation, or full."
   }
 }
 
@@ -168,6 +168,12 @@ variable "existing_hosted_zone_id" {
   description = "Existing Route 53 Hosted Zone ID. Empty creates a new zone without changing registrar delegation."
   type        = string
   default     = ""
+}
+
+variable "dns_delegation_verified" {
+  description = "Explicit operator evidence that the public registrar delegates the apex to the reviewed Route 53 zone. Required for full; never infer it from zone creation alone."
+  type        = bool
+  default     = false
 }
 
 variable "enable_https" {

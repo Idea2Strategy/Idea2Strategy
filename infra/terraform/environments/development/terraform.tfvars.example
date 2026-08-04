@@ -2,7 +2,8 @@ aws_region  = "ap-northeast-2"
 aws_profile = "idea2strategy-terraform"
 expected_aws_account_id = "__AWS_ACCOUNT_ID__"
 
-# Create only the resources needed to load historical market data.
+# Use dns_foundation first, apply only its reviewed plan, copy all DNS records,
+# delegate at Gabia, and verify public NS before changing this to full.
 deployment_phase = "market_data_bootstrap"
 
 service_instance_type  = "t4g.medium"
@@ -16,6 +17,7 @@ backtest_root_volume_gib = 40
 # A new Route 53 Hosted Zone is created while this is empty.
 # Do not change Gabia nameservers until existing DNS records are copied and reviewed.
 existing_hosted_zone_id = ""
+dns_delegation_verified = false
 
 # The public application uses the apex. The separate origin hostname is a
 # technical CloudFront-to-Core endpoint and is not a user-facing environment URL.

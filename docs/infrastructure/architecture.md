@@ -87,9 +87,11 @@ queue/in-flight/DB claim을 확인한 운영자만 desired zero로 되돌린다.
   log/metric/alarm을 강제한다.
 - Trading 시작은 durable reconciliation과 입력 materialization 검증 후에만
   열리고, 종료는 intake close → drain → checkpoint 순서다.
-- Frontend는 `/_releases/<root-sha-run-attempt>/`에 immutable 사본을 보존한 뒤
-  root로 승격한다. 롤백은 검증된 이전 prefix를 재승격하고 CloudFront를
-  invalidation한다.
+- Frontend는 `dns_foundation` 단계에 만든 private/versioned bucket의
+  `/_releases/<root-sha-run-attempt>/`에 새 빌드를 한 번만 올린다. 저장된 full
+  plan이 CloudFront S3 origin path를 그 불변 prefix로 전환하므로 mutable root
+  복사와 invalidation이 없다. 롤백도 검증된 이전 release ID를 지정한 새 saved
+  plan을 검토·적용한다.
 - Terraform은 저장된 plan 파일만 apply하며 plan SHA-256과 S3 VersionId를
   Development 환경 승인 사이에서 검증한다. destroy/replace가 있으면 별도
   승인 없이 진행하지 않는다.

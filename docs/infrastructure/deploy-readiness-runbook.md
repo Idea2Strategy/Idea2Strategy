@@ -53,7 +53,7 @@ Before requesting an AWS plan, record and review all of the following:
 - exact root commit and exact submodule commits;
 - successful CI URL for the exact root commit;
 - Terraform version `1.15.x` and AWS provider version from both lockfiles;
-- intended Development `deployment_phase` (`market_data_bootstrap` or `full`) and, when publishing images, the separate `infra/terraform/artifact-foundation` state;
+- intended Development `deployment_phase` (`market_data_bootstrap`, `dns_foundation`, or `full`) and, when publishing images, the separate `infra/terraform/artifact-foundation` state;
 - approved AWS account ID, region, and operator identity from `aws sts get-caller-identity`;
 - reviewed `terraform.tfvars` values, with no credentials in the file;
 - reviewed S3 backend bucket, key, region, and lockfile settings in ignored `backend.hcl`;
@@ -82,22 +82,23 @@ Stop if the account, region, commit, provider lockfile, backend, or protected pr
 The following steps intentionally remain outside this repository-only readiness pass and require explicit authorization, short-lived credentials, and a reviewed change window:
 
 1. Authenticate to the intended AWS account and verify the caller identity and region.
-2. The state bucket already exists. Do not re-apply the bootstrap root without first recovering its historical state. Plan the isolated `infra/terraform/ci-identity` root against its own remote state to create the GitHub Actions OIDC deploy role. Record the role ARN as the protected `AWS_DEPLOY_ROLE_ARN` GitHub Environment variable; do not create a long-lived AWS access key for CI.
+2. The state bucket already exists. Do not re-apply the bootstrap root without first recovering its historical state. Plan the isolated `infra/terraform/ci-identity` root against its own remote state to create two GitHub Actions OIDC roles. Record the scoped plan/publisher ARN as `AWS_PLAN_ROLE_ARN` in the protected `development-plan` Environment and the privileged exact-plan apply ARN as `AWS_DEPLOY_ROLE_ARN` in the separately protected `development` Environment. Both Environments must allow deployments only from `develop`, require the designated reviewers, prevent self-review, and contain the exact AWS account/state variables. Do not create a long-lived AWS access key for CI.
 3. Populate ignored `backend.hcl` and `terraform.tfvars` from the examples; never commit them.
-4. Run `terraform init -backend-config=backend.hcl`, then create a saved plan with `terraform plan -parallelism=1 -out deployment.tfplan`.
-5. Review the complete plan, cost impact, replacements, deletions, IAM changes, public network paths, and database consequences. A non-zero destroy count requires a separate explicit decision.
-6. Apply only that reviewed plan file. Do not run an unsaved `terraform apply`.
+4. Apply a reviewed `dns_foundation` saved plan first. This creates only the Route 53 zone and the private, encrypted, versioned frontend release bucket in addition to the existing market-data foundation. Copy every existing DNS record, record the Route 53 nameservers, and change the registrar delegation with a tested rollback record. Independently verify public delegation before setting `dns_delegation_verified=true`; a `full` plan is deliberately blocked otherwise.
+5. After delegation, build application and frontend inputs without AWS credentials. The `development-plan` job may then use only the scoped plan/publisher role to publish immutable ECR digests and a new `/_releases/<release-id>/` frontend prefix, run `terraform init -backend-config=backend.hcl`, and create `terraform plan -parallelism=1 -out deployment.tfplan`.
+6. Review the complete plan, cost impact, replacements, deletions, IAM changes, public network paths, immutable frontend release ID, and database consequences. A non-zero destroy count requires a separate explicit decision.
+7. Apply only that reviewed plan file through the separate `development` Environment approval. Do not run an unsaved `terraform apply`.
    The pre-approval plan uses deliberately invalid all-zero image digests and is
    never applyable. Apply only an independently reviewed plan from the isolated
    `infra/terraform/artifact-foundation` root to create ECR repositories. That
    state cannot delete or replace the existing Development compute/database
    state. Publish ARM64 images, then save and re-review a `full` Development plan
    containing real digests.
-7. Verify S3 public-access blocks/versioning/encryption, isolated RDS and Valkey
+8. Verify S3 public-access blocks/versioning/encryption, isolated RDS and Valkey
    reachability, RDS deletion protection/backups, EC2 IMDSv2/SSM access,
    CloudFront-prefix-list-only Core ingress, secret-header rejection, no SSH,
    no NAT/ALB, CloudWatch logs/alarms, and Secrets Manager references.
-8. For the full phase, publish immutable application images, bootstrap the five
+9. For the full phase, bootstrap the five
    database LOGIN roles and Secrets Manager values through the reviewed one-shot
    database procedure, run Flyway once, and set the pinned S3 policy/artifact
    inputs. The EC2 bootstrap then creates root-only mode-0600 env files, verifies
@@ -105,12 +106,13 @@ The following steps intentionally remain outside this repository-only readiness 
    and starts the systemd-owned Core, Backtest, or Trading stack. Verify
    container health/readiness, three-lane queue processing, scheduled Trading
    stop/drain/start, desired-zero Pipeline completion, and rollback.
-9. Copy and verify every existing DNS record before changing registrar
-   nameservers. Continue only after the CloudFront viewer ACM certificate is
-   `ISSUED` and the Core DNS-01 ACME certificate is trusted from CloudFront.
-10. Attach the exact plan, apply result, smoke-test evidence, and rollback outcome to the approved deployment record.
+10. Continue only after the CloudFront viewer ACM certificate is `ISSUED` and the Core DNS-01 ACME certificate is trusted from CloudFront.
+11. Attach the exact plan, apply result, smoke-test evidence, and rollback outcome to the approved deployment record.
 
-After apply and frontend promotion, run the read-only environment verifier from
+After apply, CloudFront atomically serves the immutable frontend prefix named in
+the reviewed plan; no mutable S3-root copy or cache invalidation is used. Rollback
+means selecting the previous immutable release ID, reviewing that Terraform
+plan, and applying only the reviewed saved plan. Run the read-only environment verifier from
 the same exact checkout. It prints no credentials:
 
 ```powershell
@@ -121,7 +123,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deployed-
 It verifies the account/state boundary, HTTPS frontend, Backend and Backtest
 health through CloudFront, ACM-backed distribution status, private/versioned
 frontend S3, SSM-managed Core, private deletion-protected RDS, available Valkey
-Serverless, SQS redrive policies, and required CloudWatch log groups.
+Serverless, SQS redrive policies and managed encryption, and required CloudWatch
+log groups. The release workflow runs the same verifier automatically after the
+saved plan is applied.
 
 No step above should expose credential values in command output, logs, CI artifacts, or issue comments.
 

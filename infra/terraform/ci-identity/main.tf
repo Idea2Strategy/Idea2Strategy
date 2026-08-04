@@ -1,9 +1,124 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  name_prefix       = "${var.project_name}-${var.environment}"
-  state_bucket_name = var.state_bucket_name != "" ? var.state_bucket_name : "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-tfstate"
-  state_bucket_arn  = "arn:aws:s3:::${local.state_bucket_name}"
+  name_prefix         = "${var.project_name}-${var.environment}"
+  state_bucket_name   = var.state_bucket_name != "" ? var.state_bucket_name : "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-tfstate"
+  state_bucket_arn    = "arn:aws:s3:::${local.state_bucket_name}"
+  frontend_bucket_arn = "arn:aws:s3:::${local.name_prefix}-${data.aws_caller_identity.current.account_id}-frontend"
+  ecr_repository_arn  = "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${local.name_prefix}/*"
+}
+
+data "aws_iam_policy_document" "github_plan_assume" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repository}:environment:${var.github_plan_environment}"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_plan" {
+  name                 = "${local.name_prefix}-github-plan"
+  assume_role_policy   = data.aws_iam_policy_document.github_plan_assume.json
+  max_session_duration = 3600
+
+  lifecycle { prevent_destroy = true }
+}
+
+resource "aws_iam_role_policy_attachment" "github_plan_read_only" {
+  role       = aws_iam_role.github_plan.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+data "aws_iam_policy_document" "github_plan_artifacts" {
+  statement {
+    sid       = "ECRAuthorization"
+    effect    = "Allow"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "PublishImmutableRuntimeImages"
+    effect = "Allow"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:CompleteLayerUpload",
+      "ecr:InitiateLayerUpload",
+      "ecr:PutImage",
+      "ecr:UploadLayerPart"
+    ]
+    resources = [local.ecr_repository_arn]
+  }
+
+  statement {
+    sid       = "ReadStateBucket"
+    effect    = "Allow"
+    actions   = ["s3:GetBucketLocation", "s3:ListBucket"]
+    resources = [local.state_bucket_arn]
+  }
+
+  statement {
+    sid    = "ReadStateAndPublishCandidate"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:PutObject"
+    ]
+    resources = [
+      "${local.state_bucket_arn}/idea2strategy/development/terraform.tfstate",
+      "${local.state_bucket_arn}/idea2strategy/development/release-candidates/*"
+    ]
+  }
+
+  statement {
+    sid       = "ManageTerraformLock"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${local.state_bucket_arn}/idea2strategy/development/terraform.tfstate.tflock"]
+  }
+
+  statement {
+    sid       = "PublishImmutableFrontendRelease"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = ["${local.frontend_bucket_arn}/_releases/*"]
+  }
+
+  statement {
+    sid       = "ListImmutableFrontendReleases"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [local.frontend_bucket_arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["_releases/*"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "github_plan_artifacts" {
+  name   = "${local.name_prefix}-plan-artifacts"
+  role   = aws_iam_role.github_plan.id
+  policy = data.aws_iam_policy_document.github_plan_artifacts.json
 }
 
 resource "aws_iam_openid_connect_provider" "github_actions" {

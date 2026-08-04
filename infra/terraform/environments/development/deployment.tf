@@ -24,6 +24,11 @@ resource "terraform_data" "full_release_guard" {
     }
 
     precondition {
+      condition     = var.dns_delegation_verified
+      error_message = "The full phase requires verified public DNS delegation before Core DNS-01 certificate bootstrap."
+    }
+
+    precondition {
       condition = (
         toset(keys(var.container_image_digests)) == local.required_runtime_images &&
         var.frontend_release_id != ""

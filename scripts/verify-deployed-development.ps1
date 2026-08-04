@@ -18,12 +18,16 @@ $terraform = Get-Command terraform -ErrorAction SilentlyContinue
 if ($null -eq $terraform) { throw "Terraform 1.15.x is required." }
 
 function Invoke-AwsJson([string[]]$Arguments) {
-    $result = & $awsExecutable @Arguments --profile $AwsProfile --region $AwsRegion --output json
+    $awsCommonArguments = @('--region', $AwsRegion, '--output', 'json')
+    if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) {
+        $awsCommonArguments += @('--profile', $AwsProfile)
+    }
+    $result = & $awsExecutable @Arguments @awsCommonArguments
     if ($LASTEXITCODE -ne 0) { throw "AWS read-only verification failed." }
     return $result | ConvertFrom-Json
 }
 
-$caller = Invoke-AwsJson @('sts', 'get-caller-identity')
+$caller = Invoke-AwsJson -Arguments @('sts', 'get-caller-identity')
 if ([string]$caller.Account -cne $ExpectedAwsAccountId) { throw "AWS account mismatch." }
 
 $outputs = (& $terraform.Source -chdir=$terraformDirectory output -json) | ConvertFrom-Json
@@ -45,29 +49,29 @@ foreach ($component in @('backend', 'backtest')) {
 }
 
 $distributionId = [string]$outputs.cloudfront_distribution_id.value
-$distribution = Invoke-AwsJson @('cloudfront', 'get-distribution', '--id', $distributionId)
+$distribution = Invoke-AwsJson -Arguments @('cloudfront', 'get-distribution', '--id', $distributionId)
 if ($distribution.Distribution.Status -cne 'Deployed' -or
     [bool]$distribution.Distribution.DistributionConfig.ViewerCertificate.CloudFrontDefaultCertificate) {
     throw "CloudFront is not deployed with the reviewed ACM viewer certificate."
 }
 
 $frontendBucket = [string]$outputs.frontend_bucket.value
-$publicBlock = Invoke-AwsJson @('s3api', 'get-public-access-block', '--bucket', $frontendBucket)
+$publicBlock = Invoke-AwsJson -Arguments @('s3api', 'get-public-access-block', '--bucket', $frontendBucket)
 $block = $publicBlock.PublicAccessBlockConfiguration
 if (-not ($block.BlockPublicAcls -and $block.IgnorePublicAcls -and $block.BlockPublicPolicy -and $block.RestrictPublicBuckets)) {
     throw "Frontend bucket public access block is incomplete."
 }
-$versioning = Invoke-AwsJson @('s3api', 'get-bucket-versioning', '--bucket', $frontendBucket)
+$versioning = Invoke-AwsJson -Arguments @('s3api', 'get-bucket-versioning', '--bucket', $frontendBucket)
 if ($versioning.Status -cne 'Enabled') { throw "Frontend bucket versioning is not enabled." }
 
 $serviceInstanceId = [string]$outputs.service_instance_id.value
-$managed = Invoke-AwsJson @('ssm', 'describe-instance-information', '--filters', "Key=InstanceIds,Values=$serviceInstanceId")
+$managed = Invoke-AwsJson -Arguments @('ssm', 'describe-instance-information', '--filters', "Key=InstanceIds,Values=$serviceInstanceId")
 if (@($managed.InstanceInformationList).Count -ne 1 -or $managed.InstanceInformationList[0].PingStatus -cne 'Online') {
     throw "Core instance is not online in Systems Manager."
 }
 
 $rdsEndpoint = [string]$outputs.rds_endpoint.value
-$databases = Invoke-AwsJson @('rds', 'describe-db-instances')
+$databases = Invoke-AwsJson -Arguments @('rds', 'describe-db-instances')
 $database = @($databases.DBInstances | Where-Object { $_.Endpoint.Address -ceq $rdsEndpoint })
 if ($database.Count -ne 1 -or $database[0].DBInstanceStatus -cne 'available' -or
     [bool]$database[0].PubliclyAccessible -or -not [bool]$database[0].DeletionProtection) {
@@ -75,21 +79,22 @@ if ($database.Count -ne 1 -or $database[0].DBInstanceStatus -cne 'available' -or
 }
 
 $cacheEndpoint = [string]$outputs.cache_endpoint.value
-$caches = Invoke-AwsJson @('elasticache', 'describe-serverless-caches')
+$caches = Invoke-AwsJson -Arguments @('elasticache', 'describe-serverless-caches')
 $cache = @($caches.ServerlessCaches | Where-Object { $_.Endpoint.Address -ceq $cacheEndpoint })
 if ($cache.Count -ne 1 -or $cache[0].Status -cne 'available') { throw "Valkey Serverless is not available." }
 
 foreach ($queueProperty in $outputs.queue_urls.value.PSObject.Properties) {
-    $attributes = Invoke-AwsJson @('sqs', 'get-queue-attributes', '--queue-url', [string]$queueProperty.Value, '--attribute-names', 'QueueArn', 'RedrivePolicy', 'SqsManagedSseEnabled')
+    $attributes = Invoke-AwsJson -Arguments @('sqs', 'get-queue-attributes', '--queue-url', [string]$queueProperty.Value, '--attribute-names', 'QueueArn', 'RedrivePolicy', 'SqsManagedSseEnabled')
     if ([string]::IsNullOrWhiteSpace([string]$attributes.Attributes.QueueArn) -or
-        [string]::IsNullOrWhiteSpace([string]$attributes.Attributes.RedrivePolicy)) {
-        throw "Queue '$($queueProperty.Name)' is missing identity or DLQ redrive policy."
+        [string]::IsNullOrWhiteSpace([string]$attributes.Attributes.RedrivePolicy) -or
+        [string]$attributes.Attributes.SqsManagedSseEnabled -cne 'true') {
+        throw "Queue '$($queueProperty.Name)' is missing identity, DLQ redrive policy, or managed SSE."
     }
 }
 
-$logGroups = Invoke-AwsJson @('logs', 'describe-log-groups', '--log-group-name-prefix', '/idea2strategy/development/')
+$logGroups = Invoke-AwsJson -Arguments @('logs', 'describe-log-groups', '--log-group-name-prefix', '/idea2strategy/dev/')
 $names = @($logGroups.logGroups | ForEach-Object { $_.logGroupName })
-foreach ($requiredLog in @('/idea2strategy/development/core', '/idea2strategy/development/trading', '/idea2strategy/development/compute')) {
+foreach ($requiredLog in @('/idea2strategy/dev/core', '/idea2strategy/dev/trading', '/idea2strategy/dev/backtest')) {
     if ($names -notcontains $requiredLog) { throw "CloudWatch log group is missing: $requiredLog" }
 }
 

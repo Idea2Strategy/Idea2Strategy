@@ -7,12 +7,14 @@
 
 ## 단계별 생성 범위
 
-`deployment_phase`는 두 단계만 허용한다.
+`deployment_phase`는 세 단계만 허용한다.
 
 - `market_data_bootstrap`: VPC, public/private DB subnet, private RDS
   PostgreSQL, private Market Data S3, IAM, SSM, CloudWatch 등 공유 데이터
   기반을 관리한다.
-- `full`: 위 기반에 private Frontend/Results S3, CloudFront, WAF, Route 53,
+- `dns_foundation`: 위 기반에 Route 53 hosted zone과 private/versioned Frontend
+  S3를 먼저 만들며, registrar nameserver 변경이나 서비스 runtime은 만들지 않는다.
+- `full`: 검증된 public DNS 위임 뒤 Results S3, CloudFront, WAF,
   ACM, ECR, 고정 EIP Core `t4g.medium`, 예약 실행 Trading `c7g.xlarge`,
   scale-to-zero Backtest `t4g.medium`, desired-zero ARM64 Fargate Spot Pipeline,
   Valkey Serverless와 durable SQS/DLQ를 추가한다.
@@ -24,7 +26,7 @@ Core 443은 AWS 관리 CloudFront origin-facing prefix list에서만 받는다.
 digest Compose와 systemd 기반 Core/Trading/Backtest 실행, `backtest-api`,
 root-only secret env, version/checksum-pinned runtime artifact materialization까지
 구현한다. 다만 5개 최소권한 DB LOGIN/secret bootstrap, 실제 정책 artifact,
-검증된 image digest, Flyway, frontend upload/invalidation과 full plan 검토가 끝나기
+검증된 image digest, Flyway, immutable frontend prefix upload와 full plan 검토가 끝나기
 전에는 Deploy Ready 또는 apply 가능 상태로 취급하지 않는다.
 
 Backtest ASG는 `min=0`, `desired=0`, `max=1`이다. 한 호스트 안에서 Basic 2,

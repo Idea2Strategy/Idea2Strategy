@@ -26,12 +26,12 @@ output "service_url" {
 
 output "route53_zone_id" {
   description = "Hosted Zone used for ideatostrategy.com."
-  value       = local.enable_service_stack ? local.hosted_zone_id : null
+  value       = local.enable_dns_foundation ? local.hosted_zone_id : null
 }
 
 output "route53_name_servers" {
   description = "Copy and verify all existing DNS records before setting these at Gabia."
-  value       = local.enable_service_stack && var.existing_hosted_zone_id == "" ? aws_route53_zone.this[0].name_servers : []
+  value       = local.enable_dns_foundation && var.existing_hosted_zone_id == "" ? aws_route53_zone.this[0].name_servers : []
 }
 
 output "acm_certificate_status" {
@@ -84,7 +84,7 @@ output "result_bucket" {
 }
 
 output "frontend_bucket" {
-  description = "Private frontend artifact bucket served only through CloudFront OAC."
+  description = "Private versioned frontend artifact bucket. It is created during dns_foundation so an immutable release can be uploaded before the full saved plan."
   value       = try(aws_s3_bucket.frontend[0].id, null)
 }
 

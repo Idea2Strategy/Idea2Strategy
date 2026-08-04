@@ -64,7 +64,8 @@ resource "aws_instance" "service" {
   depends_on = [
     aws_route_table_association.public,
     aws_iam_role_policy_attachment.service_managed,
-    aws_iam_role_policy.service_origin_tls
+    aws_iam_role_policy.service_origin_tls,
+    aws_ssm_parameter.runtime_image
   ]
 }
 
@@ -139,7 +140,11 @@ resource "aws_instance" "trading" {
     Role = "trading"
   }
 
-  depends_on = [aws_route_table_association.public, aws_iam_role_policy_attachment.trading_managed]
+  depends_on = [
+    aws_route_table_association.public,
+    aws_iam_role_policy_attachment.trading_managed,
+    aws_ssm_parameter.runtime_image
+  ]
 }
 
 resource "aws_launch_template" "backtest" {
@@ -207,6 +212,8 @@ resource "aws_launch_template" "backtest" {
       Role = "backtest-worker"
     }
   }
+
+  depends_on = [aws_ssm_parameter.runtime_image]
 }
 
 resource "aws_autoscaling_group" "backtest" {
@@ -217,6 +224,7 @@ resource "aws_autoscaling_group" "backtest" {
     aws_ssm_parameter.backtest_dlq_url,
     aws_ssm_parameter.backtest_lane_concurrency,
     aws_ssm_parameter.backtest_total_concurrency,
+    aws_ssm_parameter.runtime_image,
   ]
 
   name                = "${local.name_prefix}-backtest"

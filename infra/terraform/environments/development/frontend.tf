@@ -10,14 +10,14 @@ provider "aws" {
 }
 
 resource "aws_s3_bucket" "frontend" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_dns_foundation ? 1 : 0
 
   bucket        = local.frontend_bucket_name
   force_destroy = false
 }
 
 resource "aws_s3_bucket_public_access_block" "frontend" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_dns_foundation ? 1 : 0
 
   bucket                  = aws_s3_bucket.frontend[0].id
   block_public_acls       = true
@@ -27,7 +27,7 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
 }
 
 resource "aws_s3_bucket_ownership_controls" "frontend" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_dns_foundation ? 1 : 0
 
   bucket = aws_s3_bucket.frontend[0].id
 
@@ -37,7 +37,7 @@ resource "aws_s3_bucket_ownership_controls" "frontend" {
 }
 
 resource "aws_s3_bucket_versioning" "frontend" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_dns_foundation ? 1 : 0
 
   bucket = aws_s3_bucket.frontend[0].id
 
@@ -47,7 +47,7 @@ resource "aws_s3_bucket_versioning" "frontend" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_dns_foundation ? 1 : 0
 
   bucket = aws_s3_bucket.frontend[0].id
 
@@ -155,6 +155,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     domain_name              = aws_s3_bucket.frontend[0].bucket_regional_domain_name
     origin_id                = "frontend-s3"
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend[0].id
+    origin_path              = "/_releases/${var.frontend_release_id}"
   }
 
   origin {

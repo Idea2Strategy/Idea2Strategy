@@ -39,9 +39,15 @@ variable "github_repository" {
 }
 
 variable "github_environment" {
-  description = "Protected GitHub Actions Environment required in the OIDC subject."
+  description = "Protected GitHub Actions Environment required for applying the exact reviewed plan."
   type        = string
   default     = "development"
+}
+
+variable "github_plan_environment" {
+  description = "Separate protected GitHub Actions Environment used for read-only planning plus scoped artifact publication."
+  type        = string
+  default     = "development-plan"
 }
 
 variable "state_bucket_name" {
