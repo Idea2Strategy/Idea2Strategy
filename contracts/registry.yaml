@@ -155,6 +155,34 @@ contracts:
       - scenario.account.sanction
       - capability.audit.evidence
     fingerprint: sha256:32b2a4918f823b21e76f9b362f1e186b4c78d5bc5f7ed0527fa208f834c74596
+  - id: contract.operations.corporate-action-approval.v1
+    kind: data
+    status: approved
+    revision: 1
+    source: data/corporate-action-approval.v1.md
+    compatibility: additive
+    providers: [workspace.root, workspace.backend]
+    consumers: [workspace.backend, workspace.data-pipeline]
+    product_ids:
+      - role.operator
+      - journey.operator.administer
+      - capability.audit.evidence
+      - policy.legal.block-uncertain
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - role.operator
+      - journey.operator.administer
+      - capability.audit.evidence
+      - policy.legal.block-uncertain
+      - contract.operations.operator-trust.v1
+      - contract.operations.outbox-delivery.v1
+      - quality.failure-safety
+    fingerprint: sha256:9e3564980423cf602823d3221bb1abb8beb096cbabf557c044e8c77f15b44a13
   - id: contract.backtest.execution.v1
     kind: data
     status: approved
