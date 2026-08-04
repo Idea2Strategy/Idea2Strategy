@@ -96,6 +96,17 @@ Before requesting an AWS plan, record and review all of the following:
   must issue RS256 access tokens with `auth_time` and one approved MFA claim.
   Amazon Cognito's default token shape has no `acr`/`amr`, so it is not a
   drop-in substitute for this contract;
+- reviewed public GitHub Actions variables for the production UI:
+  `OPERATOR_OIDC_ISSUER`, `OPERATOR_OIDC_AUTHORIZATION_ENDPOINT`,
+  `OPERATOR_OIDC_TOKEN_ENDPOINT`, optional `OPERATOR_OIDC_END_SESSION_ENDPOINT`,
+  `OPERATOR_OIDC_CLIENT_ID`, `OPERATOR_OIDC_AUDIENCE`,
+  `OPERATOR_OIDC_REDIRECT_URI`, `OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI`,
+  `OPERATOR_OIDC_SCOPES`, and `OPERATOR_OIDC_SIGNING_ALGORITHM`. Register the
+  exact callback and logout URIs with a public Authorization Code + PKCE S256
+  client, disable implicit flow, and allow the UI origin at the token endpoint.
+  These are public build inputs, never a client secret. The release workflow
+  fails closed when one is absent and cross-checks issuer/audience against the
+  Terraform runtime inputs;
 - DNS record inventory and rollback owner before any registrar delegation change.
 
 Stop if the account, region, commit, provider lockfile, backend, or protected product/contract fingerprint differs from the reviewed candidate.

@@ -32,6 +32,19 @@ $required = @(
     "must carry independently reviewed public DNS delegation evidence",
     "aws s3 sync `"`$env:RUNNER_TEMP/frontend`"",
     "_releases/",
+    "VITE_OPERATOR_OIDC_ENABLED: 'true'",
+    "VITE_OPERATOR_OIDC_ISSUER: `${{ vars.OPERATOR_OIDC_ISSUER }}",
+    "VITE_OPERATOR_OIDC_AUTHORIZATION_ENDPOINT: `${{ vars.OPERATOR_OIDC_AUTHORIZATION_ENDPOINT }}",
+    "VITE_OPERATOR_OIDC_TOKEN_ENDPOINT: `${{ vars.OPERATOR_OIDC_TOKEN_ENDPOINT }}",
+    "VITE_OPERATOR_OIDC_CLIENT_ID: `${{ vars.OPERATOR_OIDC_CLIENT_ID }}",
+    "VITE_OPERATOR_OIDC_AUDIENCE: `${{ vars.OPERATOR_OIDC_AUDIENCE }}",
+    "VITE_OPERATOR_OIDC_REDIRECT_URI: `${{ vars.OPERATOR_OIDC_REDIRECT_URI }}",
+    "VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI: `${{ vars.OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI }}",
+    "VITE_OPERATOR_OIDC_SCOPES: `${{ vars.OPERATOR_OIDC_SCOPES }}",
+    "VITE_OPERATOR_OIDC_SIGNING_ALGORITHM: `${{ vars.OPERATOR_OIDC_SIGNING_ALGORITHM }}",
+    "OIDC build input is missing",
+    "OIDC endpoint must use HTTPS",
+    "OIDC redirect URI must use the service origin",
     "verify-deployed-development.ps1",
     "github.event.inputs.apply_reviewed_plan == 'true'"
 )
@@ -72,6 +85,14 @@ if ($workflow -notmatch "(?s)apply-reviewed-plan:.*?needs: prepare-and-plan.*?en
 
 if ($workflow -notmatch "(?s)build:.*?Build untrusted ARM64 runtime inputs without AWS credentials.*?prepare-and-plan:.*?environment: development-plan.*?configure-aws-credentials") {
     throw "Untrusted image and frontend builds must complete before the scoped AWS planning credential is issued."
+}
+
+if ($workflow -notmatch "(?s)Build same-origin frontend without AWS credentials.*?env:.*?VITE_OPERATOR_OIDC_ENABLED: 'true'.*?run:.*?pnpm build") {
+    throw "The production frontend build must fail closed with the reviewed public OIDC inputs before pnpm build."
+}
+
+if ($workflow -notmatch "(?s)operator_oidc_issuer.*?OPERATOR_OIDC_ISSUER.*?operator_oidc_audience.*?OPERATOR_OIDC_AUDIENCE") {
+    throw "The frontend OIDC issuer and audience must be cross-checked against the Terraform runtime inputs."
 }
 
 Write-Host "Development release workflow policy checks passed."

@@ -77,8 +77,44 @@ jobs:
           cache-dependency-path: ui/pnpm-lock.yaml
       - name: Build same-origin frontend without AWS credentials
         shell: bash
+        env:
+          VITE_OPERATOR_OIDC_ENABLED: 'true'
+          VITE_OPERATOR_OIDC_ISSUER: ${{ vars.OPERATOR_OIDC_ISSUER }}
+          VITE_OPERATOR_OIDC_AUTHORIZATION_ENDPOINT: ${{ vars.OPERATOR_OIDC_AUTHORIZATION_ENDPOINT }}
+          VITE_OPERATOR_OIDC_TOKEN_ENDPOINT: ${{ vars.OPERATOR_OIDC_TOKEN_ENDPOINT }}
+          VITE_OPERATOR_OIDC_END_SESSION_ENDPOINT: ${{ vars.OPERATOR_OIDC_END_SESSION_ENDPOINT }}
+          VITE_OPERATOR_OIDC_CLIENT_ID: ${{ vars.OPERATOR_OIDC_CLIENT_ID }}
+          VITE_OPERATOR_OIDC_AUDIENCE: ${{ vars.OPERATOR_OIDC_AUDIENCE }}
+          VITE_OPERATOR_OIDC_REDIRECT_URI: ${{ vars.OPERATOR_OIDC_REDIRECT_URI }}
+          VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI: ${{ vars.OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI }}
+          VITE_OPERATOR_OIDC_SCOPES: ${{ vars.OPERATOR_OIDC_SCOPES }}
+          VITE_OPERATOR_OIDC_SIGNING_ALGORITHM: ${{ vars.OPERATOR_OIDC_SIGNING_ALGORITHM }}
         run: |
           set -euo pipefail
+          required=(
+            VITE_OPERATOR_OIDC_ISSUER VITE_OPERATOR_OIDC_AUTHORIZATION_ENDPOINT
+            VITE_OPERATOR_OIDC_TOKEN_ENDPOINT VITE_OPERATOR_OIDC_CLIENT_ID
+            VITE_OPERATOR_OIDC_AUDIENCE VITE_OPERATOR_OIDC_REDIRECT_URI
+            VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI VITE_OPERATOR_OIDC_SCOPES
+            VITE_OPERATOR_OIDC_SIGNING_ALGORITHM
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then echo "OIDC build input is missing: $name" >&2; exit 1; fi
+          done
+          for endpoint in "$VITE_OPERATOR_OIDC_ISSUER" "$VITE_OPERATOR_OIDC_AUTHORIZATION_ENDPOINT" "$VITE_OPERATOR_OIDC_TOKEN_ENDPOINT"; do
+            if [[ "$endpoint" != https://* ]]; then echo 'OIDC endpoint must use HTTPS' >&2; exit 1; fi
+          done
+          if [[ -n "$VITE_OPERATOR_OIDC_END_SESSION_ENDPOINT" && "$VITE_OPERATOR_OIDC_END_SESSION_ENDPOINT" != https://* ]]; then
+            echo 'OIDC endpoint must use HTTPS' >&2; exit 1
+          fi
+          if [[ "$VITE_OPERATOR_OIDC_REDIRECT_URI" != https://*/operations/callback ]]; then
+            echo 'OIDC redirect URI must use the service origin' >&2; exit 1
+          fi
+          service_origin="${VITE_OPERATOR_OIDC_REDIRECT_URI%/operations/callback}"
+          if [[ "$VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI" != "$service_origin/operations/login" ]]; then
+            echo 'OIDC redirect URI must use the service origin' >&2; exit 1
+          fi
+          if [[ " $VITE_OPERATOR_OIDC_SCOPES " != *' openid '* ]]; then echo 'OIDC scopes must include openid' >&2; exit 1; fi
           cd ui
           pnpm install --frozen-lockfile
           VITE_API_BASE_URL='' VITE_ADMIN_MCP_BASE_URL='' VITE_ENABLE_LOCAL_OPERATOR_HARNESS=false pnpm build
@@ -181,6 +217,10 @@ jobs:
           }
           if (-not $config.ContainsKey('dns_delegation_verified') -or $config.dns_delegation_verified -ne $true) {
             throw 'TF_VARS_JSON must carry independently reviewed public DNS delegation evidence.'
+          }
+          if ([string]$config.operator_oidc_issuer -cne '${{ vars.OPERATOR_OIDC_ISSUER }}' -or
+              [string]$config.operator_oidc_audience -cne '${{ vars.OPERATOR_OIDC_AUDIENCE }}') {
+            throw 'Frontend OIDC issuer/audience must exactly match the Terraform runtime inputs.'
           }
           $config.aws_profile = ''
           $config.aws_region = '${{ env.AWS_REGION }}'
