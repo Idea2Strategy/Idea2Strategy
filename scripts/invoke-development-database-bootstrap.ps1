@@ -217,7 +217,8 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     Write-Utf8NoBomFile $userDataPath $userData
 
     $existing = Invoke-AwsJson @("ec2", "describe-instances", "--filters", "Name=tag:Purpose,Values=idea2strategy-development-database-bootstrap", "Name=instance-state-name,Values=pending,running,stopping,stopped")
-    if (@($existing.Reservations.Instances).Count -ne 0) { throw "Another database bootstrap instance is still present." }
+    $existingInstances = @($existing.Reservations | ForEach-Object { $_.Instances })
+    if ($existingInstances.Count -ne 0) { throw "Another database bootstrap instance is still present." }
 
     $tagSpecification = "ResourceType=instance,Tags=[{Key=Name,Value=idea2strategy-dev-database-bootstrap},{Key=Project,Value=idea2strategy},{Key=Environment,Value=dev},{Key=Purpose,Value=idea2strategy-development-database-bootstrap},{Key=SourceCommit,Value=$head}]"
     $launch = Invoke-AwsJson @(
