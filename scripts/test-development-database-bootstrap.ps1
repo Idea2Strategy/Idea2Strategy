@@ -103,6 +103,7 @@ foreach ($needle in @(
     'DeleteRolePolicy',
     'TerminateInstances',
     'AWS-RunShellScript',
+    'base64 -d | bash',
     'HttpTokens=required',
     'GetSecretValue',
     'PutSecretValue',
