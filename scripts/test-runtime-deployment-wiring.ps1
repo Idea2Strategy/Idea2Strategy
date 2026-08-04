@@ -89,6 +89,8 @@ foreach ($factory in @(
     "backtest_engine.production:sqs_dead_letter_sink",
     "backtest_engine.production:orchestrator_job_handler",
     "backtest_engine.production:postgres_execution_key_store"
+    "backtest_engine.production:backtest_request_handler"
+    "backtest_engine.production:postgres_request_receipt_store"
 )) {
     if (-not $userData.Contains($factory)) {
         throw "Backtest production adapter is not wired: $factory"
@@ -101,12 +103,35 @@ foreach ($required in @(
     "BACKTEST_MAX_TOTAL_CONCURRENCY=4",
     "BACKTEST_MARKET_DATA_BATCH_SIZE=65536",
     "BACKTEST_JOB_HANDLER=backtest_engine.production:orchestrator_job_handler",
+    "BACKTEST_REQUEST_HANDLER=backtest_engine.production:backtest_request_handler",
+    "BACKTEST_REQUEST_RECEIPT_STORE=backtest_engine.production:postgres_request_receipt_store",
+    "BACKTEST_BASIC_REQUEST_QUEUE_URL=",
+    "BACKTEST_BASIC_REQUEST_DLQ_URL=",
+    "BACKTEST_CUSTOM_REQUEST_QUEUE_URL=",
+    "BACKTEST_CUSTOM_REQUEST_DLQ_URL=",
+    "BACKTEST_COMPETITION_REQUEST_QUEUE_URL=",
+    "BACKTEST_COMPETITION_REQUEST_DLQ_URL=",
     "BACKTEST_SCALE_DOWN_ENABLED=true",
     "BACKTEST_ASG_NAME=",
     "BACKTEST_SCALE_DOWN_POLL_SECONDS=60"
 )) {
     if (-not $userData.Contains($required)) {
         throw "Backtest bounded worker runtime is missing: $required"
+    }
+}
+
+foreach ($required in @(
+    'resource "aws_sqs_queue" "backtest_request"',
+    'resource "aws_sqs_queue" "backtest_request_dlq"',
+    'resource "aws_sqs_queue_redrive_allow_policy" "backtest_request_dlq"',
+    '/queues/backtest-basic-request/url',
+    '/queues/backtest-custom-request/url',
+    '/queues/backtest-competition-request/url',
+    'values(aws_sqs_queue.backtest_request)[*].arn',
+    'values(aws_sqs_queue.backtest_request_dlq)[*].arn'
+)) {
+    if (-not ($queues.Contains($required) -or $iam.Contains($required) -or $userData.Contains($required))) {
+        throw "Backtest producer-request trust boundary is missing: $required"
     }
 }
 

@@ -3,7 +3,7 @@ schema_version: 1
 id: contract.backtest.execution.v1
 kind: data
 status: approved
-revision: 2
+revision: 3
 refs:
   - capability.backtest.automatic
   - journey.backtest.review
@@ -42,10 +42,25 @@ work message. Accounting, fee, scoring-template, or room-policy identifiers are
 not substitutes. Missing catalog versions or pinned artifacts fail closed
 before either a Run or an Outbox event is committed.
 
+`runs.configuration_hash` remains the immutable bot launch configuration hash;
+it is not an execution-input digest. `input_bundle_fingerprint` is the
+lane-versioned digest of every immutable execution input carried by that lane's
+approved request contract. Its exact contract version is stored with the pin.
+The worker must compare the queued fingerprint with the stored pin and must not
+derive it from `runs.configuration_hash`.
+
+At acceptance the Backend commits the Run, input bundle, every dataset/feature
+pin, `run_input_pins`, and Outbox event in one transaction. Input-bundle rows
+therefore exist while a run is `QUEUED`, `FAILED`, or `UNAVAILABLE`; result
+publication verifies and reuses them instead of replacing them. Every lane first
+enters a producer-request queue. A validating Backtest intake converts it to a
+distinct execution-lane job queue only after the stored Run and pins match.
+
 ## 2. Idempotency and ordering
 
 The Backend producer generates a stable `runId` before publication and commits
-the Run and lane-specific Outbox event in one PostgreSQL transaction. The
+the Run, its immutable input rows, and lane-specific Outbox event in one
+PostgreSQL transaction. The
 Outbox payload carries that same `runId`, lane, `executionPolicyVersion`,
 producer idempotency key, canonical payload hash, and aggregate sequence. The
 consumer never creates or replaces Run identity.
@@ -117,6 +132,10 @@ positions, or the official trading ledger.
 
 - 2/1/1 lane saturation leaves excess work queued without starvation;
 - same-key retry is stable and conflicting payload reuse fails closed;
+- producer-request and execution queues are distinct for all three lanes;
+- queued input rows and the lane-versioned fingerprint survive worker failure;
+- Competition jobs consume every locked dataset and feature materialization and
+  fail closed on missing, changed, unavailable, or hash-mismatched inputs;
 - duplicate, reversed sequence, crash, visibility renewal failure, and DLQ
   handoff do not duplicate effects;
 - lease expiry permits reclaim and rejects the first worker's late completion;

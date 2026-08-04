@@ -114,6 +114,7 @@ output "queue_urls" {
   description = "Durable runtime queue URLs keyed by workload."
   value = merge(
     { for key, queue in aws_sqs_queue.backtest : "backtest-${key}" => queue.url },
+    { for key, queue in aws_sqs_queue.backtest_request : "backtest-${key}-request" => queue.url },
     local.enable_service_stack ? {
       corporate-action-approval = aws_sqs_queue.corporate_action_approval[0].url
       room-ledger-opened        = aws_sqs_queue.room_ledger_opened[0].url
@@ -126,6 +127,7 @@ output "queue_dlq_urls" {
   description = "Durable runtime dead-letter queue URLs keyed by workload."
   value = merge(
     { for key, queue in aws_sqs_queue.backtest_dlq : "backtest-${key}" => queue.url },
+    { for key, queue in aws_sqs_queue.backtest_request_dlq : "backtest-${key}-request" => queue.url },
     local.enable_service_stack ? {
       corporate-action-approval = aws_sqs_queue.corporate_action_approval_dlq[0].url
       room-ledger-opened        = aws_sqs_queue.room_ledger_opened_dlq[0].url
