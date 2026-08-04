@@ -269,6 +269,14 @@ foreach ($field in @("engine", "host", "port", "dbname", "username", "password",
         throw "AWS prerequisite check does not validate runtime database field: $field"
     }
 }
+foreach ($secretCapture in @('$secretJson = (& $awsExecutable', '$databaseSecretJson = (& $awsExecutable')) {
+    if (-not $prerequisites.Contains($secretCapture)) {
+        throw "AWS prerequisite check must capture multiline SecretString output before parsing: $secretCapture"
+    }
+}
+if (([regex]::Matches($prerequisites, '\) -join "`n"')).Count -lt 2) {
+    throw "AWS prerequisite check must join multiline Alpaca and database SecretString output before ConvertFrom-Json."
+}
 if (-not $pipeline.Contains('PIPELINE_WORKER_DATABASE_URL') -or
     -not $pipeline.Contains('runtime_database["pipeline"]')) {
     throw "Pipeline database URL is not injected from its dedicated runtime secret."

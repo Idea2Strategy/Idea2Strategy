@@ -101,12 +101,12 @@ if ($RequireAlpacaSecrets) {
     }
     foreach ($secretName in $requiredSecretFields.Keys) {
         $ErrorActionPreference = "Continue"
-        $secretJson = & $awsExecutable secretsmanager get-secret-value `
+        $secretJson = (& $awsExecutable secretsmanager get-secret-value `
             @awsProfileArgs `
             --region $ExpectedRegion `
             --secret-id $secretName `
             --query SecretString `
-            --output text 2>$null
+            --output text 2>$null) -join "`n"
         $secretExitCode = $LASTEXITCODE
         $ErrorActionPreference = $strictErrorPreference
         if ($secretExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($secretJson)) {
@@ -140,12 +140,12 @@ if ($RequireRuntimeDatabaseSecrets) {
     foreach ($consumer in $expectedConsumers) {
         $secretName = [string]$RuntimeDatabaseSecretNames[$consumer]
         $ErrorActionPreference = "Continue"
-        $databaseSecretJson = & $awsExecutable secretsmanager get-secret-value `
+        $databaseSecretJson = (& $awsExecutable secretsmanager get-secret-value `
             @awsProfileArgs `
             --region $ExpectedRegion `
             --secret-id $secretName `
             --query SecretString `
-            --output text 2>$null
+            --output text 2>$null) -join "`n"
         $secretExitCode = $LASTEXITCODE
         $ErrorActionPreference = $strictErrorPreference
         if ($secretExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($databaseSecretJson)) {
