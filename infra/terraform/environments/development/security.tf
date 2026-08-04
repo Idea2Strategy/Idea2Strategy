@@ -17,6 +17,30 @@ resource "aws_secretsmanager_secret_version" "cloudfront_origin_header" {
   secret_string = random_password.cloudfront_origin_header[0].result
 }
 
+data "aws_secretsmanager_secret" "alpaca_api_key" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = var.alpaca_api_key_secret_name
+}
+
+data "aws_secretsmanager_secret" "alpaca_secret_key" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = var.alpaca_secret_key_secret_name
+}
+
+resource "aws_ssm_parameter" "alpaca_api_key_secret_arn" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = "${local.parameter_path}/provider/alpaca-api-key-secret-arn"
+  type  = "String"
+  value = data.aws_secretsmanager_secret.alpaca_api_key[0].arn
+}
+
+resource "aws_ssm_parameter" "alpaca_secret_key_secret_arn" {
+  count = local.enable_service_stack ? 1 : 0
+  name  = "${local.parameter_path}/provider/alpaca-secret-key-secret-arn"
+  type  = "String"
+  value = data.aws_secretsmanager_secret.alpaca_secret_key[0].arn
+}
+
 resource "aws_security_group" "service" {
   count       = local.enable_service_stack ? 1 : 0
   name        = "${local.name_prefix}-core"

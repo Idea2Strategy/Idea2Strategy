@@ -178,6 +178,13 @@ data "aws_iam_policy_document" "trading_workload" {
     ]
     resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_path}/*"]
   }
+
+  statement {
+    sid       = "ReadAlpacaDataFeedCredentials"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [data.aws_secretsmanager_secret.alpaca_api_key[0].arn, data.aws_secretsmanager_secret.alpaca_secret_key[0].arn]
+  }
 }
 
 resource "aws_iam_role_policy" "trading_workload" {
@@ -281,6 +288,14 @@ data "aws_iam_policy_document" "batch_queue_consume" {
     effect    = "Allow"
     actions   = ["sqs:SendMessage"]
     resources = values(aws_sqs_queue.backtest_dlq)[*].arn
+  }
+
+
+  statement {
+    sid       = "ReadAlpacaHistoricalDataCredentials"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [data.aws_secretsmanager_secret.alpaca_api_key[0].arn, data.aws_secretsmanager_secret.alpaca_secret_key[0].arn]
   }
 }
 

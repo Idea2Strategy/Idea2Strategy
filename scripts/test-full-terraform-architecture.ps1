@@ -90,10 +90,16 @@ if ($compute -notmatch 'desired_capacity\s*=\s*0' -or
     throw "Backtest must scale from zero to one and every EC2 launch path must enforce IMDS hop limit 1."
 }
 
-foreach ($size in @('t4g.small', 'c7g.xlarge', 't4g.medium')) {
+foreach ($size in @('c7g.xlarge', 't4g.medium')) {
     if ($all -notmatch ('default\s*=\s*"' + [regex]::Escape($size) + '"')) {
         throw "ARM64 sizing boundary is missing: $size"
     }
+}
+if ($all -match '(?s)variable\s+"service_instance_type"\s*\{.*?default\s*=\s*"t4g\.small"') {
+    throw "Core must start on the approved t4g.medium boundary, not t4g.small."
+}
+if ($all -notmatch '(?s)variable\s+"monthly_budget_usd"\s*\{.*?default\s*=\s*180') {
+    throw "The accepted Development monthly budget must default to USD 180."
 }
 
 foreach ($required in @(
@@ -143,6 +149,11 @@ foreach ($lane in @('basic', 'custom', 'competition')) {
 foreach ($required in @('resource "aws_sqs_queue" "backtest"', 'resource "aws_sqs_queue" "backtest_dlq"', 'redrive_policy', 'sqs_managed_sse_enabled')) {
     if (-not $queues.Contains($required)) {
         throw "Durable backtest queue safety is missing: $required"
+    }
+}
+foreach ($required in @('ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'alpaca-api-key-secret-arn', 'alpaca-secret-key-secret-arn')) {
+    if (-not $all.Contains($required)) {
+        throw "Alpaca secret reference boundary is missing: $required"
     }
 }
 if (-not $queues.Contains('resource "aws_ssm_parameter" "backtest_dlq_url"')) {

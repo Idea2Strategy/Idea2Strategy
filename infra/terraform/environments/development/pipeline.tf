@@ -55,6 +55,10 @@ data "aws_iam_policy_document" "pipeline_task" {
     actions   = ["ssm:GetParameter", "ssm:GetParametersByPath"]
     resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_path}/*"]
   }
+  statement {
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [data.aws_secretsmanager_secret.alpaca_api_key[0].arn, data.aws_secretsmanager_secret.alpaca_secret_key[0].arn]
+  }
 }
 
 resource "aws_iam_role_policy" "pipeline_task" {
@@ -102,6 +106,10 @@ resource "aws_ecs_task_definition" "pipeline" {
       { name = "MARKET_DATA_BUCKET", value = aws_s3_bucket.market_data.id },
       { name = "PIPELINE_MANIFEST_MODE", value = "content-addressed" },
       { name = "PIPELINE_WORKER_EXIT_AFTER_IDLE_POLLS", value = "3" }
+    ]
+    secrets = [
+      { name = "ALPACA_API_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_api_key[0].arn}:ALPACA_API_KEY::" },
+      { name = "ALPACA_SECRET_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_secret_key[0].arn}:ALPACA_SECRET_KEY::" }
     ]
     logConfiguration = {
       logDriver = "awslogs"

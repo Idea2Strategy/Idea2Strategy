@@ -155,3 +155,67 @@ contracts:
       - scenario.account.sanction
       - capability.audit.evidence
     fingerprint: sha256:32b2a4918f823b21e76f9b362f1e186b4c78d5bc5f7ed0527fa208f834c74596
+  - id: contract.backtest.execution.v1
+    kind: data
+    status: approved
+    revision: 1
+    source: data/backtest-execution.v1.md
+    compatibility: additive
+    providers: [workspace.root, workspace.backend]
+    consumers: [workspace.backend, workspace.backtest-engine]
+    product_ids:
+      - capability.backtest.automatic
+      - journey.backtest.review
+    scenario_ids: [scenario.strategy.release]
+    data_ids: []
+    ui_ids: [ui.backtest.results]
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - capability.backtest.automatic
+      - journey.backtest.review
+      - scenario.strategy.release
+      - ui.backtest.results
+      - quality.failure-safety
+    fingerprint: sha256:93644da6a5dc7a7ffbf6e8d24ca2145a4cc019e9a3e76d7bdcc8ab9ce697357f
+  - id: contract.market-data.publication.v1
+    kind: data
+    status: approved
+    revision: 1
+    source: data/market-data-publication.v1.md
+    compatibility: additive
+    providers: [workspace.root, workspace.data-pipeline]
+    consumers: [workspace.backtest-engine, workspace.trading-engine]
+    product_ids: []
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - technology.need.market-data
+      - technology.need.object-storage
+      - quality.failure-safety
+    fingerprint: sha256:b6adb283fe109e071a47332c80565ceb85f35d8d6024adea25c74ff071cd6237
+  - id: contract.trading.virtual-execution.v1
+    kind: business
+    status: approved
+    revision: 1
+    source: business/virtual-trading-scope.v1.md
+    compatibility: additive
+    providers: [workspace.root]
+    consumers: [workspace.backend, workspace.trading-engine]
+    product_ids:
+      - policy.user.no-direct-orders
+    scenario_ids: []
+    data_ids: []
+    ui_ids: []
+    migration_ids: []
+    work_ids: []
+    test_ids: []
+    refs:
+      - policy.user.no-direct-orders
+      - quality.failure-safety
+    fingerprint: sha256:926ef12df847760d820c5e4fc95e5de7f2e8a8c3fd572010a93f6f1ce0c523a1

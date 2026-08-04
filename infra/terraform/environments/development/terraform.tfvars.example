@@ -24,6 +24,9 @@ origin_domain_name   = "origin.ideatostrategy.com"
 
 # Set true only after Route 53 delegation completes and the ACM certificate is issued.
 enable_https = false
+monthly_budget_usd = 180
+alpaca_api_key_secret_name    = "idea2strategy-dev/backtest/alpaca"
+alpaca_secret_key_secret_name = "idea2strategy-dev/backtest/alpaca-secret"
 
 rds_instance_class       = "db.t4g.micro"
 rds_max_allocated_storage_gib = 0 # Disable autoscaling while the account is on Free Plan.

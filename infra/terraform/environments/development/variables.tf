@@ -245,7 +245,19 @@ variable "operations_alert_email" {
 variable "monthly_budget_usd" {
   description = "Development monthly cost budget in USD."
   type        = number
-  default     = 150
+  default     = 180
+}
+
+variable "alpaca_api_key_secret_name" {
+  description = "Existing Secrets Manager secret containing the ALPACA_API_KEY JSON field. Terraform reads metadata only."
+  type        = string
+  default     = "idea2strategy-dev/backtest/alpaca"
+}
+
+variable "alpaca_secret_key_secret_name" {
+  description = "Existing Secrets Manager secret containing the ALPACA_SECRET_KEY JSON field. Terraform reads metadata only."
+  type        = string
+  default     = "idea2strategy-dev/backtest/alpaca-secret"
 }
 
 variable "backtest_idle_grace_minutes" {

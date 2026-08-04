@@ -13,7 +13,7 @@
   PostgreSQL, private Market Data S3, IAM, SSM, CloudWatch 등 공유 데이터
   기반을 관리한다.
 - `full`: 위 기반에 private Frontend/Results S3, CloudFront, WAF, Route 53,
-  ACM, ECR, 고정 EIP Core `t4g.small`, 예약 실행 Trading `c7g.xlarge`,
+  ACM, ECR, 고정 EIP Core `t4g.medium`, 예약 실행 Trading `c7g.xlarge`,
   scale-to-zero Backtest `t4g.medium`, desired-zero ARM64 Fargate Spot Pipeline,
   Valkey Serverless와 durable SQS/DLQ를 추가한다.
 

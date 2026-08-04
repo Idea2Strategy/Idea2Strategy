@@ -35,7 +35,7 @@ over-provisioned architecture scenario, not as a like-for-like price revision.
 
 | Component | Planning assumption | Monthly USD |
 | --- | --- | ---: |
-| Core EC2 | `t4g.small`, USD 0.0208/h x 730 h | 15.18 |
+| Core EC2 | `t4g.medium`, approximately USD 0.0416/h x 730 h | 30.37 |
 | Trading EC2 | `c7g.xlarge`, USD 0.1632/h x about 196 h | 31.95 |
 | Backtest EC2 | `t4g.medium`, USD 0.0416/h x 100 h | 4.16 |
 | Pipeline | ARM64 Fargate Spot, event-only | 1-3 |
@@ -46,8 +46,8 @@ over-provisioned architecture scenario, not as a like-for-like price revision.
 | Edge | CloudFront, WAF, Route 53, viewer certificate | 10-15 |
 | Object and artifact storage | S3 and ECR | 2-4 |
 | Operations | CloudWatch, SQS, Secrets Manager, EventBridge | 8-15 |
-| **Expected range** | usage-dependent Development workload | **126-166** |
-| **Normal review target** | budgeted operating band | **135-150** |
+| **Expected range** | usage-dependent Development workload | **141-181** |
+| **Normal review target** | accepted operating band | **150-165** |
 
 The EC2 and RDS hourly rates were queried from the AWS Price List API on
 2026-08-04 for Linux On-Demand/shared tenancy and PostgreSQL Single-AZ in Seoul.
@@ -67,14 +67,15 @@ range rather than a false-precision single number.
   latency alarms make saturation visible before a later sizing decision. Each
   additional 100 host-hours adds about USD 4.16 before storage and logs.
 - Pipeline has no ECS service and uses ARM64 Fargate Spot RunTask invocations.
-- Raising Core to `t4g.medium` adds about USD 15 per month and requires measured
-  memory, CPU-credit, GC, OOM, or latency evidence.
+- Core starts at the approved `t4g.medium` boundary. A later size change requires
+  measured memory, CPU-credit, GC, OOM, or latency evidence.
 - One NAT Gateway would add about USD 43 per month before per-GB processing.
 - One ALB would add about USD 16 per month before LCU and data charges.
 - RDS Multi-AZ approximately doubles database instance cost and adds storage/I/O
   variance; it is intentionally deferred for Development.
-- The Terraform budget default is USD 150. A budget alarm warns; it does not
-  enforce a hard spending limit.
+- The Terraform budget target is USD 180, with alerts at USD 144 (80%) and USD
+  180 (100%). USD 200 is the operational review boundary. A budget alarm warns;
+  it does not enforce a hard spending limit.
 
 A plan with real immutable image digests and a final AWS Pricing Calculator or
 Billing comparison is required before any apply.
