@@ -1,0 +1,67 @@
+\set ON_ERROR_STOP on
+
+DO $$
+DECLARE
+    role_name text;
+BEGIN
+    FOREACH role_name IN ARRAY ARRAY[
+        'idea2strategy_backend',
+        'idea2strategy_batch',
+        'idea2strategy_trading',
+        'idea2strategy_backtest',
+        'idea2strategy_pipeline'
+    ] LOOP
+        IF NOT EXISTS (
+            SELECT 1
+              FROM pg_roles
+             WHERE rolname = role_name
+               AND NOT rolcanlogin
+               AND NOT rolsuper
+               AND NOT rolcreatedb
+               AND NOT rolcreaterole
+               AND NOT rolreplication
+               AND NOT rolbypassrls
+               AND NOT rolinherit
+        ) THEN
+            RAISE EXCEPTION 'runtime group role is missing or insufficiently hardened: %', role_name;
+        END IF;
+    END LOOP;
+END $$;
+
+CREATE ROLE idea2strategy_test_backend LOGIN INHERIT PASSWORD 'runtime-grant-contract-only';
+GRANT idea2strategy_backend TO idea2strategy_test_backend;
+
+SET SESSION AUTHORIZATION idea2strategy_test_backend;
+
+-- Representative positive boundary: Backend owns identity reads.
+SELECT count(*) FROM identity.accounts;
+
+DO $$
+DECLARE
+    observed_state text;
+BEGIN
+    BEGIN
+        DELETE FROM trading.orders WHERE false;
+        RAISE EXCEPTION 'backend unexpectedly received cross-owner trading DML';
+    EXCEPTION
+        WHEN insufficient_privilege THEN
+            GET STACKED DIAGNOSTICS observed_state = RETURNED_SQLSTATE;
+            IF observed_state <> '42501' THEN
+                RAISE EXCEPTION 'cross-owner DML returned %, expected 42501', observed_state;
+            END IF;
+    END;
+
+    BEGIN
+        EXECUTE 'CREATE TABLE identity.runtime_grant_contract_forbidden (id bigint)';
+        RAISE EXCEPTION 'backend unexpectedly received DDL privileges';
+    EXCEPTION
+        WHEN insufficient_privilege THEN
+            GET STACKED DIAGNOSTICS observed_state = RETURNED_SQLSTATE;
+            IF observed_state <> '42501' THEN
+                RAISE EXCEPTION 'runtime DDL returned %, expected 42501', observed_state;
+            END IF;
+    END;
+END $$;
+
+RESET SESSION AUTHORIZATION;
+DROP ROLE idea2strategy_test_backend;

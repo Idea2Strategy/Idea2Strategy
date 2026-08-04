@@ -9,8 +9,9 @@ $manifestPath = Join-Path $bundle 'migration-bundle.manifest'
 $digestPath = Join-Path $bundle 'migration-bundle.sha256'
 $fixture = Join-Path $bundle 'partial_fill_allocation_contract.sql.fixture'
 $readContractFixture = Join-Path $bundle 'trading_read_projection_contract.sql.fixture'
+$runtimeGrantsFixture = Join-Path $bundle 'runtime_grants_contract.sql.fixture'
 
-foreach ($requiredPath in @($metadataPath, $manifestPath, $digestPath, $fixture, $readContractFixture)) {
+foreach ($requiredPath in @($metadataPath, $manifestPath, $digestPath, $fixture, $readContractFixture, $runtimeGrantsFixture)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Pinned Flyway CI artifact is missing: $requiredPath"
     }
@@ -41,6 +42,22 @@ if ($metadata.trading_gitlink -cne $tradingGitlink) {
 $manifestLines = @(Get-Content -LiteralPath $manifestPath)
 if ($manifestLines.Count -lt 2 -or $manifestLines[0] -cne 'idea2strategy-flyway-bundle-v1') {
     throw 'Invalid pinned Flyway bundle manifest.'
+}
+
+$runtimeGrantEntries = @($manifestLines | Where-Object { $_ -match '^R__database_runtime_grants\.sql\t[0-9a-f]{64}$' })
+if ($runtimeGrantEntries.Count -ne 1) {
+    throw 'The pinned Flyway manifest must contain exactly one generated runtime grant migration.'
+}
+$runtimeGrantPath = Join-Path $bundle 'R__database_runtime_grants.sql'
+$runtimeGrantSql = Get-Content -LiteralPath $runtimeGrantPath -Raw
+foreach ($role in @('backend', 'batch', 'trading', 'backtest', 'pipeline')) {
+    $hardenedRole = "ALTER ROLE idea2strategy_$role NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;"
+    if (-not $runtimeGrantSql.Contains($hardenedRole)) {
+        throw "Runtime grant migration is missing the hardened $role group role."
+    }
+}
+if (-not $runtimeGrantSql.Contains('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."accounts" TO idea2strategy_backend;')) {
+    throw 'Runtime grant migration is missing the representative Backend identity ACL.'
 }
 
 function Get-Sha256OfText([string]$Text) {
@@ -232,6 +249,17 @@ try {
         throw 'The trading read projection contract fixture failed.'
     }
 
+    docker cp $runtimeGrantsFixture "${container}:/tmp/runtime_grants_contract.sql"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to copy the runtime grant contract fixture into PostgreSQL.'
+    }
+    docker exec -e "PGPASSWORD=$password" $container `
+        psql -v ON_ERROR_STOP=1 -U $user -d $database `
+        -f /tmp/runtime_grants_contract.sql | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The runtime grant contract fixture failed.'
+    }
+
     [pscustomobject]@{
         status = 'passed'
         application_tables = [int]$tableCount
@@ -239,6 +267,7 @@ try {
         second_run_pending = 0
         partial_fill_allocation_contract = 'passed'
         trading_read_projection_contract = 'passed'
+        runtime_grants_contract = 'passed'
         bundle_sha256 = $recordedDigest
         backend_revision = $backendGitlink
         trading_revision = $tradingGitlink
