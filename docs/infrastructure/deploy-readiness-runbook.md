@@ -189,6 +189,53 @@ write the matching existing Secrets Manager secret. This prevents application
 instances from receiving the RDS master credential and lets a failed or missing
 bootstrap stop the full plan before EC2 starts.
 
+### Reviewed Development database bootstrap
+
+The Development Terraform state owns the five Secrets Manager metadata objects,
+their seven-day recovery windows, and a dedicated SSM instance profile/security
+group. It deliberately owns no runtime database secret version. Apply and review
+those additive resources before running the one-shot procedure; if a same-named
+secret was created outside Terraform, import it instead of replacing or deleting
+it.
+
+From the exact clean root release candidate, first render the credential-free
+execution summary:
+
+```powershell
+./scripts/invoke-development-database-bootstrap.ps1 `
+  -ExpectedAwsAccountId <12-digit-development-account>
+```
+
+After reviewing the exact root SHA, Flyway manifest/archive hashes, target
+account, region, five secret ARNs, and S3 prefix, execute it in the approved
+change window:
+
+```powershell
+./scripts/invoke-development-database-bootstrap.ps1 `
+  -ExpectedAwsAccountId <12-digit-development-account> `
+  -Execute -Confirm
+```
+
+The orchestrator uploads versioned, checksum-bound artifacts, grants the
+dedicated bootstrap role temporary access to read only the RDS master secret and
+write only the five runtime secret versions, and launches one encrypted
+`t3.small` with no inbound rules or SSH key. The x86 instance is intentional:
+the pinned reviewed Flyway image is amd64-only; all application runtimes remain
+ARM64. Systems Manager runs Flyway `migrate` once, then `validate`/`info`, checks
+177 application tables, creates or rotates five hardened LOGIN roles, removes
+all old memberships, grants exactly one matching NOLOGIN group, verifies direct
+connections, and writes the required JSON values. The Pipeline value additionally
+contains a URL-encoded `PIPELINE_WORKER_DATABASE_URL` with `sslmode=require`.
+
+Only a credential-free receipt is returned and archived. A `finally` block
+revokes the transient inline policy before terminating the exact instance ID and
+waiting for termination; its encrypted root volume has
+`DeleteOnTermination=true`. A partial failure is recoverable by rerunning the
+same reviewed command: Flyway remains checksum/idempotency guarded, each LOGIN
+password is rotated, and each secret receives a new `AWSCURRENT` version. Never
+copy SSM stderr, process environments, secret JSON, or the RDS master value into
+CI artifacts or issue comments.
+
 Backtest scale-down is enabled only on the fenced worker release. The instance
 role may call `SetDesiredCapacity(0)` on its exact Backtest ASG and no other
 group. The controller requires two consecutive observations with zero durable

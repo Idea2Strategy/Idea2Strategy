@@ -137,11 +137,6 @@ resource "terraform_data" "runtime_artifact_guard" {
   }
 }
 
-data "aws_secretsmanager_secret" "runtime_database" {
-  for_each = local.enable_service_stack ? var.runtime_database_secret_names : {}
-  name     = each.value
-}
-
 resource "aws_ssm_parameter" "core_internal_secret" {
   count = local.enable_service_stack ? 1 : 0
   name  = "${local.parameter_path}/runtime/core-internal-secret-arn"

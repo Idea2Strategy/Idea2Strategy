@@ -42,8 +42,12 @@ $previousAwsRegion = $env:AWS_REGION
 $previousAwsDefaultRegion = $env:AWS_DEFAULT_REGION
 $env:AWS_REGION = $ExpectedRegion
 $env:AWS_DEFAULT_REGION = $ExpectedRegion
+$awsProfileArgs = @()
+if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) {
+    $awsProfileArgs = @("--profile", $AwsProfile)
+}
 $ErrorActionPreference = "Continue"
-$callerJson = & $awsExecutable sts get-caller-identity --profile $AwsProfile --region $ExpectedRegion --output json 2>$null
+$callerJson = & $awsExecutable sts get-caller-identity @awsProfileArgs --region $ExpectedRegion --output json 2>$null
 $callerExitCode = $LASTEXITCODE
 $ErrorActionPreference = $strictErrorPreference
 if ($callerExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($callerJson)) {
@@ -55,7 +59,11 @@ if ([string]::IsNullOrWhiteSpace([string]$caller.Account) -or [string]::IsNullOr
 }
 
 $ErrorActionPreference = "Continue"
-$configuredRegion = (& $awsExecutable configure get region --profile $AwsProfile 2>$null).Trim()
+$configuredRegion = if ($awsProfileArgs.Count -gt 0) {
+    (& $awsExecutable configure get region @awsProfileArgs 2>$null).Trim()
+} else {
+    $ExpectedRegion
+}
 $regionExitCode = $LASTEXITCODE
 $ErrorActionPreference = $strictErrorPreference
 if ($regionExitCode -ne 0) {
@@ -94,7 +102,7 @@ if ($RequireAlpacaSecrets) {
     foreach ($secretName in $requiredSecretFields.Keys) {
         $ErrorActionPreference = "Continue"
         $secretJson = & $awsExecutable secretsmanager get-secret-value `
-            --profile $AwsProfile `
+            @awsProfileArgs `
             --region $ExpectedRegion `
             --secret-id $secretName `
             --query SecretString `
@@ -133,7 +141,7 @@ if ($RequireRuntimeDatabaseSecrets) {
         $secretName = [string]$RuntimeDatabaseSecretNames[$consumer]
         $ErrorActionPreference = "Continue"
         $databaseSecretJson = & $awsExecutable secretsmanager get-secret-value `
-            --profile $AwsProfile `
+            @awsProfileArgs `
             --region $ExpectedRegion `
             --secret-id $secretName `
             --query SecretString `
