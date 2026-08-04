@@ -3,10 +3,11 @@ schema_version: 1
 id: contract.trading.virtual-execution.v1
 kind: business
 status: approved
-revision: 1
+revision: 2
 refs:
   - policy.user.no-direct-orders
   - quality.failure-safety
+  - contract.operations.outbox-delivery.v1
 ---
 
 # contract.trading.virtual-execution.v1
@@ -44,7 +45,59 @@ outbox receipts, and ledger balance before accepting new evaluation. A mismatch
 blocks the affected bot and emits operational evidence; it is never repaired by
 inventing a broker response or deleting history.
 
-## 4. Failure and shutdown
+## 4. Room evaluation account opening
+
+E requests an F-owned official ledger through
+`ROOM_EVALUATION_ACCOUNT_OPEN_REQUESTED` with schema version
+`room-evaluation-account-open-requested.v1`. The immutable payload contains
+`commandId`, `messageId`, `producerIdempotencyKey`, `roomId`, `participationId`,
+`botId`, `evaluationSegmentId`, `initialCash`, `currency`,
+`feePolicyVersionId`, `buyingPowerPolicyVersionId`, `effectiveAt`, and the
+canonical `payloadHash`. UUID identities use lower-case canonical text.
+`initialCash` is a positive, non-exponent decimal string with at most eight
+fractional digits; `currency` is an upper-case ISO 4217 code. Missing or
+unlocked policy identifiers, unsupported versions, invalid money, and a
+message identity reused with another hash fail closed.
+
+E commits its evaluation segment, a participation transition to
+`PENDING_LEDGER`, and the request outbox row atomically. It does not write
+`bot.bot_events` or any `trading` table and must not expose `EVALUATING` before
+the matching F success fact is consumed.
+
+F handles the request according to
+`contract.operations.outbox-delivery.v1`. In one PostgreSQL transaction it
+claims or completes the content-hash-bound consumer receipt, appends the
+official bot event, opens the bot-wide `CASH` and `CAPITAL` accounts, posts one
+balanced `INITIAL_CAPITAL` transaction, and appends exactly one completion
+outbox fact. Duplicate and concurrent delivery of identical content returns
+the recorded result without another effect. A reused message or producer key
+with different content becomes a permanent, audited conflict and is routed to
+dead-letter handling. Database, lease, and transport failures remain
+retryable under the pinned runtime policy; retries never report success.
+
+Success uses `ROOM_EVALUATION_ACCOUNT_OPENED` with schema version
+`room-evaluation-account-opened.v1` and records the request identities,
+`botEventId`, `ledgerTransactionId`, account IDs, amount, currency, policy IDs,
+and `completedAt`. Permanent domain rejection uses
+`ROOM_EVALUATION_ACCOUNT_OPEN_REJECTED` with schema version
+`room-evaluation-account-open-rejected.v1` and records the same request
+identities, a stable reason code, and `rejectedAt`, without credentials or
+private strategy content. Both facts retain the request payload hash and
+producer idempotency key.
+
+E durably records a matching completion or rejection even when it arrives
+before local request observation. Matching success advances exactly one
+`PENDING_LEDGER` participation to `EVALUATING`; matching rejection advances it
+to a visible failed state. A duplicate fact is a no-op, while mismatched
+identity, amount, currency, policy, or hash is a permanent audited conflict.
+Out-of-order facts are retained and replayed after the request becomes visible;
+they are never discarded or converted into success.
+
+The bot-wide ledger relationship must preserve header-to-entry integrity even
+when `partition_id` is null. Service migrations and the canonical DB model must
+prevent a ledger transaction header from being deleted while entries remain.
+
+## 5. Failure and shutdown
 
 Missing/stale/gapped market data, provider disconnect, rights failure, clock or
 calendar inconsistency, database unavailability, or ledger imbalance fails
@@ -56,7 +109,7 @@ in-flight work drains within a bounded deadline, durable checkpoints and outbox
 state commit, and the process exits. Forced termination remains recoverable by
 the startup reconcile.
 
-## 5. Required verification
+## 6. Required verification
 
 - no production path can construct or send a live broker order;
 - SIP subscription and provider-rights failures keep readiness false;
@@ -64,3 +117,12 @@ the startup reconcile.
 - restart reconcile detects missing fills, ledger imbalance, and stale claims;
 - degraded data blocks affected trading and recovery requires verified coverage;
 - scheduled stop and SIGTERM preserve durable, idempotent recovery evidence.
+- room account opening creates one event, two accounts, one balanced posting,
+  one completed receipt, and one completion outbox fact under duplicate and
+  concurrent delivery;
+- a content conflict is audited and dead-lettered without changing the ledger;
+- crash and rollback at every write boundary leave no partial receipt, event,
+  account, posting, entry, or completion fact;
+- E never exposes `EVALUATING` before matching success and safely replays a
+  completion that arrived before its request observation;
+- bot-wide ledger entries cannot outlive their transaction header.

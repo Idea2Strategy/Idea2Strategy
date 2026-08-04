@@ -202,7 +202,7 @@ contracts:
   - id: contract.trading.virtual-execution.v1
     kind: business
     status: approved
-    revision: 1
+    revision: 2
     source: business/virtual-trading-scope.v1.md
     compatibility: additive
     providers: [workspace.root]
@@ -218,4 +218,5 @@ contracts:
     refs:
       - policy.user.no-direct-orders
       - quality.failure-safety
-    fingerprint: sha256:926ef12df847760d820c5e4fc95e5de7f2e8a8c3fd572010a93f6f1ce0c523a1
+      - contract.operations.outbox-delivery.v1
+    fingerprint: sha256:67b46a1338b37fa89518254de161d9eb0abc5be2194b3426d6d8b4171336af02

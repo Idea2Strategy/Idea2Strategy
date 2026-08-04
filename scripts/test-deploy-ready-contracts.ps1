@@ -26,7 +26,11 @@ Require-Text "contracts/data/market-data-publication.v1.md" @(
     'idempotency', 'PostgreSQL', 'S3'
 )
 Require-Text "contracts/business/virtual-trading-scope.v1.md" @(
-    'Alpaca SIP', 'virtual', 'live broker', 'fails? closed', 'reconcile'
+    'Alpaca SIP', 'virtual', 'live broker', 'fails? closed', 'reconcile',
+    'ROOM_EVALUATION_ACCOUNT_OPEN_REQUESTED', 'room-evaluation-account-opened\.v1',
+    'room-evaluation-account-open-rejected\.v1', 'PENDING_LEDGER',
+    'producerIdempotencyKey', 'payloadHash', 'CASH', 'CAPITAL',
+    'Out-of-order facts', 'bot-wide ledger entries cannot outlive'
 )
 Require-Text "contracts/registry.yaml" @(
     'contract\.backtest\.execution\.v1',
