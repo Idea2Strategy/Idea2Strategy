@@ -269,8 +269,9 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         "chmod 0700 $(ConvertTo-BashLiteral $scriptRemote)",
         "$(ConvertTo-BashLiteral $scriptRemote) --archive $(ConvertTo-BashLiteral $archiveRemote) --archive-sha256 $(ConvertTo-BashLiteral $archiveDigest) --bundle-sha256 $(ConvertTo-BashLiteral $bundleDigest) --database-host $(ConvertTo-BashLiteral ([string]$target.database_host)) --database-name $(ConvertTo-BashLiteral ([string]$target.database_name)) --master-secret-arn $(ConvertTo-BashLiteral ([string]$target.master_secret_arn)) --policy-seed-sql $(ConvertTo-BashLiteral $policySeedRemote) --policy-seed-sha256 $(ConvertTo-BashLiteral $PolicySeedSha256) --region $(ConvertTo-BashLiteral $Region) --root-sha $(ConvertTo-BashLiteral $head) --runtime-secret-arns-base64 $(ConvertTo-BashLiteral $secretArnBase64) --work-directory $(ConvertTo-BashLiteral "$remoteRoot/work")"
     )
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($command -join "`n")))
     $commandParametersPath = Join-Path $temporaryRoot "ssm-command-parameters.json"
-    Write-Utf8NoBomFile $commandParametersPath (@{ commands = $command } | ConvertTo-Json -Depth 5)
+    Write-Utf8NoBomFile $commandParametersPath (@{ commands = @("printf '%s' '$encodedCommand' | base64 -d | bash") } | ConvertTo-Json -Depth 5)
     $sent = Invoke-AwsJson @("ssm", "send-command", "--instance-ids", $instanceId, "--document-name", "AWS-RunShellScript", "--comment", "Idea2Strategy exact database bootstrap $head", "--parameters", "file://$commandParametersPath", "--timeout-seconds", "1800")
     $commandId = [string]$sent.Command.CommandId
     # AWS-RunShellScript emits only a credential-free JSON receipt on stdout.
