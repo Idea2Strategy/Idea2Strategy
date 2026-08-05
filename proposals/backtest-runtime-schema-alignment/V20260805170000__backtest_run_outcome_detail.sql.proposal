@@ -1,0 +1,26 @@
+-- PROPOSAL ONLY: requires a fresh configured product-authority approval before adoption.
+-- Forward-only successor to the backtest-owned V20260802143000 contribution.
+-- The later version keeps the current central V20260805130000 history ordered.
+
+ALTER TABLE "backtest"."runs"
+  ADD COLUMN "result_manifest_id" uuid,
+  ADD COLUMN "retryable" boolean,
+  ADD COLUMN "missing_requirements" jsonb;
+
+ALTER TABLE "backtest"."runs"
+  ADD CONSTRAINT "runs_missing_requirements_is_a_non_empty_string_array"
+  CHECK (
+    "missing_requirements" IS NULL
+    OR (
+      jsonb_typeof("missing_requirements") = 'array'
+      AND jsonb_array_length("missing_requirements") > 0
+      AND NOT jsonb_path_exists("missing_requirements", '$[*] ? (@.type() != "string")')
+    )
+  );
+
+COMMENT ON COLUMN "backtest"."runs"."result_manifest_id" IS
+  'COMPLETED result event resultManifestId; NULL for other statuses.';
+COMMENT ON COLUMN "backtest"."runs"."retryable" IS
+  'FAILED result event retryable decision; NULL when the run has not failed.';
+COMMENT ON COLUMN "backtest"."runs"."missing_requirements" IS
+  'UNAVAILABLE result event missingRequirements; a non-empty ordered string array, NULL for other statuses.';
