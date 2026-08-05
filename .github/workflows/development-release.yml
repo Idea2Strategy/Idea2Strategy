@@ -188,6 +188,15 @@ jobs:
             -RequireAlpacaSecrets `
             -RequireRuntimeDatabaseSecrets
 
+      - name: Verify exact database bootstrap receipt
+        shell: pwsh
+        run: |
+          ./scripts/verify-development-database-bootstrap-receipt.ps1 `
+            -RootSha '${{ github.sha }}' `
+            -ReceiptBucket 'idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-market-data' `
+            -AwsProfile '' `
+            -AwsRegion '${{ env.AWS_REGION }}'
+
       - name: Publish immutable ARM64 images and capture registry digests
         id: images
         shell: pwsh
@@ -324,6 +333,8 @@ jobs:
           terraform init -backend-config=release.backend.hcl
           terraform validate
           terraform plan -parallelism=1 -out=deployment.tfplan
+          terraform show -json deployment.tfplan > deployment.plan.json
+          pwsh ../../../scripts/assert-development-terraform-plan-safe.ps1 -PlanJsonPath deployment.plan.json
           terraform show -no-color deployment.tfplan > deployment.plan.txt
 
       - name: Archive exact plan in protected state storage
@@ -380,6 +391,13 @@ jobs:
           Move-Item "$env:GITHUB_WORKSPACE/deployment.tfplan" ./deployment.tfplan
           terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="key=idea2strategy/development/terraform.tfstate" -backend-config="region=${{ env.AWS_REGION }}" -backend-config="use_lockfile=true" -backend-config="encrypt=true"
           terraform apply -parallelism=1 deployment.tfplan
+
+      - name: Roll out and verify exact Core runtime images
+        shell: pwsh
+        run: |
+          ./scripts/deploy-development-core-runtime.ps1 `
+            -AwsProfile '' `
+            -AwsRegion '${{ env.AWS_REGION }}'
 
       - name: Verify deployed Development environment
         shell: pwsh

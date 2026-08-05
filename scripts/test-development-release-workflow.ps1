@@ -50,8 +50,8 @@ for ($lineIndex = 0; $lineIndex -lt $workflowLines.Count; $lineIndex++) {
     }
     $parsedPowerShellBlocks++
 }
-if ($parsedPowerShellBlocks -ne 12) {
-    throw "Expected to parse exactly 12 inline PowerShell blocks; observed $parsedPowerShellBlocks."
+if ($parsedPowerShellBlocks -ne 14) {
+    throw "Expected to parse exactly 14 inline PowerShell blocks; observed $parsedPowerShellBlocks."
 }
 
 $required = @(
@@ -76,6 +76,8 @@ $required = @(
     "ECR image scan did not complete",
     "ECR image scan rejected",
     "terraform plan -parallelism=1 -out=deployment.tfplan",
+    "terraform show -json deployment.tfplan",
+    "assert-development-terraform-plan-safe.ps1",
     "terraform apply -parallelism=1 deployment.tfplan",
     "aws s3api put-object",
     "--version-id",
@@ -104,6 +106,8 @@ $required = @(
     "OIDC logout redirect parameter is invalid",
     "RBAC permission ID is invalid",
     "test-aws-deployment-prerequisites.ps1",
+    "verify-development-database-bootstrap-receipt.ps1",
+    "deploy-development-core-runtime.ps1",
     "-RequireRuntimeDatabaseSecrets",
     "-RequireAlpacaSecrets",
     "verify-deployed-development.ps1",
@@ -113,6 +117,13 @@ $required = @(
 foreach ($token in $required) {
     if (-not $workflow.Contains($token)) {
         throw "Development release workflow is missing required boundary: $token"
+    }
+}
+
+$deployedVerifier = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'verify-deployed-development.ps1') -Raw
+foreach ($token in @('$env:AWS_PROFILE = $AwsProfile', 'Remove-Item Env:AWS_PROFILE', '$previousAwsProfile')) {
+    if (-not $deployedVerifier.Contains($token)) {
+        throw "The deployed verifier must propagate and restore the selected AWS profile for Terraform: $token"
     }
 }
 
@@ -164,6 +175,18 @@ if ($workflow -notmatch "(?s)configure-aws-credentials.*?test-aws-deployment-pre
     throw "The release plan must fail closed on populated runtime database secrets after AWS authentication and before Terraform planning."
 }
 
+if ($workflow -notmatch "(?s)Verify required deployment secrets.*?Verify exact database bootstrap receipt.*?Create saved Terraform plan") {
+    throw "The release plan must verify the exact root-and-Flyway database bootstrap receipt before planning."
+}
+
+if ($workflow -notmatch "(?s)terraform plan -parallelism=1 -out=deployment\.tfplan.*?terraform show -json deployment\.tfplan.*?assert-development-terraform-plan-safe\.ps1.*?Archive exact plan") {
+    throw "The saved Development plan must reject every delete or replacement before it can be archived or approved."
+}
+
+if ($workflow -notmatch "(?s)terraform apply -parallelism=1 deployment\.tfplan.*?deploy-development-core-runtime\.ps1.*?verify-deployed-development\.ps1") {
+    throw "The exact Core image rollout and rollback guard must run after apply and before deployed verification."
+}
+
 if ($workflow -notmatch "(?s)Publish immutable ARM64 images.*?Wait for ECR security scans.*?Publish immutable frontend prefix") {
     throw "Every published runtime image must pass the ECR scan before frontend publication and planning."
 }
@@ -180,5 +203,76 @@ if ($workflow.Contains('ECR image scan rejected $name:')) {
 if (-not $workflow.Contains('ECR image scan rejected ${name}:')) {
     throw 'The ECR scan rejection message must use parser-safe variable delimiting.'
 }
+
+$planGatePath = Join-Path $PSScriptRoot "assert-development-terraform-plan-safe.ps1"
+$receiptGatePath = Join-Path $PSScriptRoot "verify-development-database-bootstrap-receipt.ps1"
+$coreRolloutPath = Join-Path $PSScriptRoot "deploy-development-core-runtime.ps1"
+foreach ($scriptPath in @($planGatePath, $receiptGatePath, $coreRolloutPath)) {
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw "Release safety script is missing: $scriptPath" }
+    $tokens = $null
+    $parseErrors = $null
+    [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
+    if (@($parseErrors).Count -ne 0) { throw "Release safety script has invalid PowerShell syntax: $scriptPath" }
+}
+
+$temporary = Join-Path ([IO.Path]::GetTempPath()) ("idea2strategy-plan-gate-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $temporary | Out-Null
+try {
+    $safePlan = Join-Path $temporary "safe.json"
+    $deletePlan = Join-Path $temporary "delete.json"
+    $replacementPlan = Join-Path $temporary "replacement.json"
+    '{"resource_changes":[{"address":"aws_ssm_parameter.safe","change":{"actions":["update"]}}]}' | Set-Content -NoNewline $safePlan
+    '{"resource_changes":[{"address":"aws_s3_bucket.data","change":{"actions":["delete"]}}]}' | Set-Content -NoNewline $deletePlan
+    '{"resource_changes":[{"address":"aws_instance.core","change":{"actions":["create","delete"]}}]}' | Set-Content -NoNewline $replacementPlan
+    $safeResult = & $planGatePath -PlanJsonPath $safePlan | ConvertFrom-Json
+    if ($safeResult.status -cne "passed" -or [int]$safeResult.delete_or_replace_count -ne 0) {
+        throw "Safe Terraform plan fixture was rejected."
+    }
+    foreach ($unsafePlan in @($deletePlan, $replacementPlan)) {
+        $rejected = $false
+        try { & $planGatePath -PlanJsonPath $unsafePlan | Out-Null } catch { $rejected = $true }
+        if (-not $rejected) { throw "Delete or replacement Terraform plan fixture was accepted: $unsafePlan" }
+    }
+}
+finally {
+    Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$receiptGate = Get-Content -LiteralPath $receiptGatePath -Raw
+foreach ($requiredReceiptBoundary in @(
+    'deployment-bootstrap/$RootSha/$($bundle.Digest)/receipt.json',
+    'root_sha', 'bundle_sha256', 'migrations', 'secret_versions', 'AWSCURRENT', 'VersionId'
+)) {
+    if (-not $receiptGate.Contains($requiredReceiptBoundary)) {
+        throw "Exact database bootstrap receipt gate is missing: $requiredReceiptBoundary"
+    }
+}
+
+$coreRollout = Get-Content -LiteralPath $coreRolloutPath -Raw
+foreach ($requiredRolloutBoundary in @(
+    '/usr/local/sbin/idea2strategy-runtime-start',
+    '/idea2strategy/dev/deployment/images/$service',
+    "docker inspect --format '{{.Config.Image}}'",
+    'CORE_RUNTIME_ROLLBACK_SUCCEEDED',
+    'CORE_RUNTIME_ROLLED_OUT',
+    '$env:AWS_PROFILE = $AwsProfile',
+    '$previousAwsProfile'
+)) {
+    if (-not $coreRollout.Contains($requiredRolloutBoundary)) {
+        throw "Core exact-image rollout/rollback gate is missing: $requiredRolloutBoundary"
+    }
+}
+
+$bashExecutable = 'C:\Program Files\Git\bin\bash.exe'
+if (-not (Test-Path -LiteralPath $bashExecutable -PathType Leaf)) {
+    $bash = Get-Command bash -ErrorAction SilentlyContinue
+    if ($null -eq $bash) { throw "Bash is required to syntax-check the remote Core rollout program." }
+    $bashExecutable = $bash.Source
+}
+$remoteMatch = [regex]::Match($coreRollout, "(?ms)\`$remoteScript = @'\r?\n(?<script>.*?)\r?\n'@\.Replace")
+if (-not $remoteMatch.Success) { throw "Unable to extract the remote Core rollout program." }
+$remoteEncoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($remoteMatch.Groups['script'].Value))
+& $bashExecutable -c "printf '%s' '$remoteEncoded' | base64 --decode | bash -n"
+if ($LASTEXITCODE -ne 0) { throw "The remote Core rollout program has invalid Bash syntax." }
 
 Write-Host "Development release workflow policy checks passed."

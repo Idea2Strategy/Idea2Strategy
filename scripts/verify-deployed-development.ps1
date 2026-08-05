@@ -30,8 +30,23 @@ function Invoke-AwsJson([string[]]$Arguments) {
 $caller = Invoke-AwsJson -Arguments @('sts', 'get-caller-identity')
 if ([string]$caller.Account -cne $ExpectedAwsAccountId) { throw "AWS account mismatch." }
 
-$outputs = (& $terraform.Source "-chdir=$terraformDirectory" output -json) | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0) { throw "Unable to read the applied Terraform outputs." }
+$previousAwsProfile = [Environment]::GetEnvironmentVariable('AWS_PROFILE', 'Process')
+try {
+    if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) {
+        $env:AWS_PROFILE = $AwsProfile
+    } else {
+        Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
+    }
+    $rawOutputs = & $terraform.Source "-chdir=$terraformDirectory" output -json
+    if ($LASTEXITCODE -ne 0) { throw "Unable to read the applied Terraform outputs." }
+    $outputs = $rawOutputs | ConvertFrom-Json
+} finally {
+    if ($null -eq $previousAwsProfile) {
+        Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
+    } else {
+        $env:AWS_PROFILE = $previousAwsProfile
+    }
+}
 if ([string]$outputs.aws_account_id.value -cne $ExpectedAwsAccountId) { throw "Terraform state account mismatch." }
 
 $serviceUrl = ([string]$outputs.service_url.value).TrimEnd('/')
@@ -87,6 +102,10 @@ declare -A initial_container initial_restarts
 for service in backend-api backend-worker backtest-api; do
   container="$(docker compose --project-name idea2strategy ps -q "$service")"
   test -n "$container"
+  expected_image="$(aws ssm get-parameter --region '__AWS_REGION__' --name "/idea2strategy/dev/deployment/images/$service" --query Parameter.Value --output text)"
+  case "$expected_image" in (*@sha256:*) ;; (*) exit 1 ;; esac
+  configured_image="$(docker inspect --format '{{.Config.Image}}' "$container")"
+  test "$configured_image" = "$expected_image"
   running="$(docker inspect --format '{{.State.Running}}' "$container")"
   status="$(docker inspect --format '{{.State.Status}}' "$container")"
   restarting="$(docker inspect --format '{{.State.Restarting}}' "$container")"
@@ -103,6 +122,9 @@ for service in backend-api backend-worker backtest-api; do
   container="$(docker compose --project-name idea2strategy ps -q "$service")"
   test -n "$container"
   test "$container" = "${initial_container[$service]}"
+  expected_image="$(aws ssm get-parameter --region '__AWS_REGION__' --name "/idea2strategy/dev/deployment/images/$service" --query Parameter.Value --output text)"
+  configured_image="$(docker inspect --format '{{.Config.Image}}' "$container")"
+  test "$configured_image" = "$expected_image"
   running="$(docker inspect --format '{{.State.Running}}' "$container")"
   status="$(docker inspect --format '{{.State.Status}}' "$container")"
   restarting="$(docker inspect --format '{{.State.Restarting}}' "$container")"
@@ -115,6 +137,7 @@ for service in backend-api backend-worker backtest-api; do
 done
 echo CORE_RUNTIME_STABLE
 '@
+$runtimeCheckScript = $runtimeCheckScript.Replace('__AWS_REGION__', $AwsRegion)
 $runtimeCheckScriptBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($runtimeCheckScript))
 $runtimeParameters = @{ commands = @("printf '%s' '$runtimeCheckScriptBase64' | base64 -d | bash") } | ConvertTo-Json -Compress
 $runtimeParametersPath = [IO.Path]::GetTempFileName()
