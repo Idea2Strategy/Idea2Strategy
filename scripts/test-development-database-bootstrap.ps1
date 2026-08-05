@@ -144,6 +144,10 @@ Assert-Contains $orchestrator "printf '%s  %s\n'" "Remote checksum verification 
 if ($orchestrator.Contains("printf '%s  %s\\n'")) {
     throw "A double backslash makes sha256sum treat the newline text as part of the filename."
 }
+Assert-NotContains $orchestrator 'ssm wait command-executed' "The AWS CLI command-executed waiter expires before the 30-minute SSM command timeout."
+Assert-Contains $orchestrator 'ssm get-command-invocation' "The orchestrator must poll the exact SSM invocation until a terminal status."
+Assert-Contains $orchestrator '$commandDeadline' "SSM invocation polling must have an explicit deadline matching the remote timeout."
+Assert-Contains $orchestrator 'Start-Sleep -Seconds 5' "SSM invocation polling must be bounded without a hot loop."
 
 foreach ($consumer in @("backend", "batch", "backtest", "trading", "pipeline")) {
     Assert-Contains $bootstrap "idea2strategy_${consumer}_runtime" "Bootstrap LOGIN role is missing for $consumer."
