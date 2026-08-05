@@ -18,6 +18,8 @@ database_port=''
 master_secret_arn=''
 policy_seed_sql=''
 policy_seed_sha256=''
+scoring_seed_sql=''
+scoring_seed_sha256=''
 region=''
 root_sha=''
 runtime_secret_arns_base64=''
@@ -34,6 +36,8 @@ while (($#)); do
     --master-secret-arn) master_secret_arn="$2"; shift 2 ;;
     --policy-seed-sql) policy_seed_sql="$2"; shift 2 ;;
     --policy-seed-sha256) policy_seed_sha256="$2"; shift 2 ;;
+    --scoring-seed-sql) scoring_seed_sql="$2"; shift 2 ;;
+    --scoring-seed-sha256) scoring_seed_sha256="$2"; shift 2 ;;
     --region) region="$2"; shift 2 ;;
     --root-sha) root_sha="$2"; shift 2 ;;
     --runtime-secret-arns-base64) runtime_secret_arns_base64="$2"; shift 2 ;;
@@ -42,12 +46,13 @@ while (($#)); do
   esac
 done
 
-for required in archive archive_sha256 bundle_sha256 database_host database_name database_port master_secret_arn policy_seed_sql policy_seed_sha256 region root_sha runtime_secret_arns_base64 work_directory; do
+for required in archive archive_sha256 bundle_sha256 database_host database_name database_port master_secret_arn policy_seed_sql policy_seed_sha256 scoring_seed_sql scoring_seed_sha256 region root_sha runtime_secret_arns_base64 work_directory; do
   test -n "${!required}" || { echo "Missing required argument: $required" >&2; exit 64; }
 done
 [[ "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]
 [[ "$bundle_sha256" =~ ^[0-9a-f]{64}$ ]]
 [[ "$policy_seed_sha256" =~ ^[0-9a-f]{64}$ ]]
+[[ "$scoring_seed_sha256" =~ ^[0-9a-f]{64}$ ]]
 [[ "$root_sha" =~ ^[0-9a-f]{40}$ ]]
 [[ "$region" == 'ap-northeast-2' ]]
 [[ "$database_host" =~ ^[A-Za-z0-9.-]+$ ]]
@@ -77,6 +82,8 @@ drop_seed_role() {
 REVOKE CONNECT ON DATABASE "$database_name" FROM $seed_role;
 REVOKE USAGE ON SCHEMA trading, backtest FROM $seed_role;
 REVOKE SELECT, INSERT ON TABLE trading.fee_policy_versions, trading.buying_power_buffer_policy_versions, backtest.execution_policy_versions FROM $seed_role;
+REVOKE USAGE ON SCHEMA competition FROM $seed_role;
+REVOKE SELECT, INSERT ON TABLE competition.scoring_template_versions FROM $seed_role;
 DROP ROLE $seed_role;
 SQL
   fi
@@ -98,6 +105,7 @@ trap cleanup EXIT
 
 printf '%s  %s\n' "$archive_sha256" "$archive" | sha256sum --check --status
 printf '%s  %s\n' "$policy_seed_sha256" "$policy_seed_sql" | sha256sum --check --status
+printf '%s  %s\n' "$scoring_seed_sha256" "$scoring_seed_sql" | sha256sum --check --status
 if grep -Eq "^[[:space:]]*\\\\" "$policy_seed_sql" ||
    grep -Eiq '(^|[^A-Za-z_])(alter|create|drop|grant|revoke|copy|do|call|truncate|delete|update|merge|begin|commit|rollback|set[[:space:]]+role|reset[[:space:]]+role)([^A-Za-z_]|$)' "$policy_seed_sql"; then
   echo 'Policy seed SQL contains a forbidden command or psql metacommand.' >&2
@@ -107,6 +115,20 @@ mapfile -t policy_seed_targets < <(grep -Poi '\binsert\s+into\s+\K(?:(?:"?[a-z_]
 test "${#policy_seed_targets[@]}" -ge 3
 for required_target in trading.fee_policy_versions trading.buying_power_buffer_policy_versions backtest.execution_policy_versions; do
   printf '%s\n' "${policy_seed_targets[@]}" | grep -Fxq "$required_target"
+done
+
+if grep -Eq "^[[:space:]]*\\\\" "$scoring_seed_sql" ||
+   grep -Eiq '(^|[^A-Za-z_])(alter|create|drop|grant|revoke|copy|do|call|truncate|delete|update|merge|begin|commit|rollback|set[[:space:]]+role|reset[[:space:]]+role)([^A-Za-z_]|$)' "$scoring_seed_sql"; then
+  echo 'Scoring seed SQL contains a forbidden command or psql metacommand.' >&2
+  exit 65
+fi
+mapfile -t scoring_seed_targets < <(grep -Poi '\binsert\s+into\s+\K(?:(?:"?[a-z_]+"?)\.)?"?[a-z_]+"?' "$scoring_seed_sql" | tr -d '"' | tr '[:upper:]' '[:lower:]')
+test "${#scoring_seed_targets[@]}" -ge 4
+for target in "${scoring_seed_targets[@]}"; do
+  [[ "$target" == 'competition.scoring_template_versions' ]] || {
+    echo "Scoring seed SQL targets a forbidden table: $target" >&2
+    exit 65
+  }
 done
 for target in "${policy_seed_targets[@]}"; do
   case "$target" in
@@ -205,8 +227,11 @@ CREATE ROLE $seed_role LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLI
 GRANT CONNECT ON DATABASE "$database_name" TO $seed_role;
 GRANT USAGE ON SCHEMA trading, backtest TO $seed_role;
 GRANT SELECT, INSERT ON TABLE trading.fee_policy_versions, trading.buying_power_buffer_policy_versions, backtest.execution_policy_versions TO $seed_role;
+GRANT USAGE ON SCHEMA competition TO $seed_role;
+GRANT SELECT, INSERT ON TABLE competition.scoring_template_versions TO $seed_role;
 SQL
 PGUSER="$seed_role" PGPASSWORD="$seed_password" psql -X -q -v ON_ERROR_STOP=1 --single-transaction -f "$policy_seed_sql" >/dev/null
+PGUSER="$seed_role" PGPASSWORD="$seed_password" psql -X -q -v ON_ERROR_STOP=1 --single-transaction -f "$scoring_seed_sql" >/dev/null
 drop_seed_role
 seed_password=''
 
@@ -218,6 +243,9 @@ policy_versions="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
 jq -e '.fee | length >= 1' <<<"$policy_versions" >/dev/null
 jq -e '.buffer | length >= 1' <<<"$policy_versions" >/dev/null
 jq -e '.execution | length >= 1' <<<"$policy_versions" >/dev/null
+scoring_versions="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
+  "SELECT COALESCE(json_agg(json_build_object('id',id,'template_code',template_code,'version',version,'rules_hash',rules_hash) ORDER BY template_code,version),'[]'::json) FROM competition.scoring_template_versions WHERE retired_at IS NULL AND rules_hash IN ('3c81fb2f387fa790e126e1aa40b18d389c44bcf9f7ef2cefdd6911fd2e1eec71','dedc3baef45654bf4f760755d53fcd8d3fdd9d0be24d87e1027c266fa27fe96d','ecf3788076330d98aa00f466d06b5c5eb6652eebc1b15e9fe0056f48ce2f9f59','6d8e9a1c6c2a37a6ed397fdbfdedb417b53d537faa7ad972b3fdf7ff61afc3d9');")"
+jq -e 'length == 4' <<<"$scoring_versions" >/dev/null
 
 for consumer in "${CONSUMERS[@]}"; do
   passwords["$consumer"]="$(openssl rand -hex 32)"
@@ -299,6 +327,7 @@ jq -cn \
   --arg root_sha "$root_sha" \
   --arg bundle_sha256 "$bundle_sha256" \
   --arg policy_seed_sha256 "$policy_seed_sha256" \
+  --arg scoring_seed_sha256 "$scoring_seed_sha256" \
   --arg flyway_image "$FLYWAY_IMAGE" \
   --arg aws_cli_image "$AWS_CLI_IMAGE" \
   --argjson migrations "$EXPECTED_MIGRATION_COUNT" \
@@ -306,5 +335,6 @@ jq -cn \
   --argjson login_roles 5 \
   --argjson policy_row_counts "$policy_row_counts" \
   --argjson policy_versions "$policy_versions" \
+  --argjson scoring_versions "$scoring_versions" \
   --argjson secret_versions "$versions" \
-  '{status:$status,root_sha:$root_sha,bundle_sha256:$bundle_sha256,policy_seed_sha256:$policy_seed_sha256,flyway_image:$flyway_image,aws_cli_image:$aws_cli_image,migrations:$migrations,tables:$tables,login_roles:$login_roles,policy_row_counts:$policy_row_counts,policy_versions:$policy_versions,secret_versions:$secret_versions}'
+  '{status:$status,root_sha:$root_sha,bundle_sha256:$bundle_sha256,policy_seed_sha256:$policy_seed_sha256,scoring_seed_sha256:$scoring_seed_sha256,flyway_image:$flyway_image,aws_cli_image:$aws_cli_image,migrations:$migrations,tables:$tables,login_roles:$login_roles,policy_row_counts:$policy_row_counts,policy_versions:$policy_versions,scoring_versions:$scoring_versions,secret_versions:$secret_versions}'

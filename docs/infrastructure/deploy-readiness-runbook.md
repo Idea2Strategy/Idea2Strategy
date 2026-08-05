@@ -263,7 +263,9 @@ execution summary:
 ./scripts/invoke-development-database-bootstrap.ps1 `
   -ExpectedAwsAccountId <12-digit-development-account> `
   -PolicySeedSqlPath <approved-policy-seed.sql> `
-  -PolicySeedSha256 <reviewed-lowercase-sha256>
+  -PolicySeedSha256 <reviewed-lowercase-sha256> `
+  -ScoringSeedSqlPath <approved-scoring-template-seed.sql> `
+  -ScoringSeedSha256 <reviewed-lowercase-sha256>
 ```
 
 After reviewing the exact root SHA, Flyway manifest/archive hashes, target
@@ -275,6 +277,8 @@ change window:
   -ExpectedAwsAccountId <12-digit-development-account> `
   -PolicySeedSqlPath <approved-policy-seed.sql> `
   -PolicySeedSha256 <reviewed-lowercase-sha256> `
+  -ScoringSeedSqlPath <approved-scoring-template-seed.sql> `
+  -ScoringSeedSha256 <reviewed-lowercase-sha256> `
   -Execute -Confirm
 ```
 
@@ -291,8 +295,13 @@ seed artifact. The seed is mandatory and may insert only into
 `backtest.execution_policy_versions`; it runs as a temporary LOGIN role with
 SELECT/INSERT access to only those tables. Forbidden DDL/DCL, transaction,
 psql-metacommand, or other-table targets fail closed. Bootstrap verifies at
-least one currently effective row in each policy family and records the seed
-SHA, row counts, and non-secret policy version/hash identifiers in the receipt.
+least one currently effective row in each policy family. A second independently
+approved SHA-pinned scoring seed may target only
+`competition.scoring_template_versions`; it is applied in its own transaction,
+fails on an immutable identity/content collision, and must produce exactly four
+expected active catalog identities. Until its exact proposal commit is approved,
+do not supply it to an executable bootstrap invocation. The receipt records both
+seed SHAs, row counts, and non-secret policy/scoring version/hash identifiers.
 It then creates or rotates five hardened LOGIN roles, removes
 all old memberships, grants exactly one matching NOLOGIN group, verifies direct
 connections, and writes the required JSON values. The Pipeline value additionally
