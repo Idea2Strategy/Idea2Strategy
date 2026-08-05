@@ -57,6 +57,158 @@ does not yet make those rows a cross-service storage contract.
 2. A missing feature instant is a deterministic data gap under the existing
    skip/fail policy; it never falls back to calculating the feature from bars.
 
+## Recommended decision D: collision-safe feed identity
+
+`market_data.dataset_manifests` is unique by feed, instrument, data layer,
+resolution, period start, and revision. It does not include a feature-definition
+ID. A single generic feature feed would therefore make two feature definitions
+for the same instrument and period collide even though their values are
+different. Reusing an Alpaca `BAR`/`BARS` feed would also mislabel an internal
+derived result as provider market data.
+
+Use one deterministic feed identity per immutable feature definition and output
+schema version. The provider computes the feed ID with the existing project UUID
+namespace as:
+
+```text
+deterministic_uuid(
+  "feature-output-feed",
+  feature_definition.definition_hash,
+  feature_definition.calculator_version,
+  feature_definition.resolution,
+  "feature-series.parquet.v1"
+)
+```
+
+The first authority-owned seed should register these exact recommended values:
+
+The internal provider ID is
+`deterministic_uuid("provider", "IDEA2STRATEGY_INTERNAL")`; it is not an
+Alpaca-owned identity.
+
+| Record | Field | Proposed value |
+| --- | --- | --- |
+| internal provider | `code` | `IDEA2STRATEGY_INTERNAL` |
+| internal provider | `display_name` | `Idea2Strategy Derived Data` |
+| internal provider | `rights_version` | `internal-derived-v1` |
+| internal provider | `status` | `ACTIVE` |
+| RSI feed | `code` | `FEATURE_RSI_14_1M_RSI_1_0_0` |
+| RSI feed | `data_kind` | `FEATURE_SERIES` |
+| RSI feed | `resolution` | `1m` |
+| RSI feed | `timezone_name` | `UTC` |
+| RSI feed | `feed_version` | `rsi-1.0.0+feature-series.parquet.v1` |
+
+The RSI seed is bound to feature-definition ID
+`0f1b0000-0000-4000-8000-000000000001` and definition hash
+`sha256:1a7c3e5b9d2f4068a1c3e5b7d9f20416283a5c7e9b1d3f50627496a8c0e2b4d6`.
+The seed migration must pin the deterministic provider and feed UUID literals,
+recompute them in a test, insert idempotently, and fail on any pre-existing row
+whose immutable fields differ. It must not silently update drift.
+
+This per-definition rule is deliberately narrower than adding a new mapping
+table. If product authority later wants a shared multi-feature dataset, the
+protected model must first add feature identity to the manifest and its
+uniqueness rules; a shared feed cannot be introduced only in provider code.
+
+## Recommended decision E: trusted production input
+
+The production command must not trust a caller-supplied `output_feed_id`, output
+manifest ID, revision, source hash, source row count, or inline bar values.
+Identifiers in a queue message are requests, not storage attestations.
+
+1. Resolve the feature definition by its approved definition hash and derive the
+   feed identity by decision D. Reject a missing, retired, wrong-kind,
+   wrong-resolution, or drifted feed.
+2. Accept source dataset-object IDs, then load their manifests and
+   `storage.objects` receipts from PostgreSQL. Require AVAILABLE state, matching
+   instrument and resolution, complete period coverage, and exact lineage-ready
+   identities.
+3. Open each source object by its exact `provider_version_id`, verify S3 metadata
+   SHA-256, service checksum, size, encryption state, schema, ordering, period,
+   row count, and instrument before decoding bars. Never read the latest key
+   without a VersionId and never calculate from inline bars.
+4. Derive the input-set hash only from those verified canonical receipts. For
+   RSI_14, require an AVAILABLE 1m source and at least fifteen ordered completed
+   1m bars. A 30m SIP catalog is not a valid substitute merely because the
+   current adapter can deserialize it.
+5. Derive the output manifest ID from the materialization identity and
+   `feature-series.parquet.v1`; do not let the producer choose an unrelated UUID.
+
+Malformed identity requests are rejected before S3 or PostgreSQL writes.
+Transient reads remain retryable. An attestation mismatch is a permanent,
+auditable data-integrity failure and never falls back to caller values.
+
+## Recommended decision F: pipeline-run lifecycle and retry
+
+The worker owns the `market_data.pipeline_runs` lifecycle for this command.
+Manual SQL is not an operational prerequisite.
+
+1. Derive a stable run ID and idempotency key from
+   `MATERIALIZE_FEATURE_OUTPUT` plus the command ID, and persist a RUNNING row
+   with an input hash before any materialization row can reference it.
+2. Reusing a command ID with the same input reconciles the same run. A prior
+   SUCCEEDED result returns the already verified output without uploading or
+   inserting again. Reusing it with a different input fails closed.
+3. Success sets the pipeline run to SUCCEEDED with `output_hash` equal to the
+   materialization result hash and a completion time, after the exact S3 version,
+   storage object, dataset object, lineage, AVAILABLE manifest, and SUCCEEDED
+   materialization agree.
+4. Failure stores a stable failure code. If this attempt created an S3 version
+   but relational publication fails, cleanup deletes that exact VersionId only.
+   It must not delete a pre-existing reconciled version or a newer version.
+5. Queue acknowledgement occurs only after durable success or successful
+   reconciliation. Retry exhaustion parks the original message without
+   manufacturing an AVAILABLE output.
+
+## Required provider tests after approval
+
+| Boundary | Required failing and passing evidence |
+| --- | --- |
+| feed seed | deterministic UUID, idempotent replay, immutable drift refusal, and no mutation of Alpaca bar feeds |
+| feed collision | two definitions for one instrument and period publish to distinct feeds; a generic shared feed is rejected |
+| command trust | arbitrary output feed/manifest/revision and inline bars cannot redirect or forge publication |
+| source attestation | missing, unavailable, wrong-resolution, wrong-instrument, wrong-version, checksum, schema, ordering, period, and row-count mismatches fail closed |
+| RSI_14 | exactly fifteen real 1m bars produce one warm result; 30m bars and fewer than fifteen 1m bars are rejected |
+| pipeline run | create, same-input replay, changed-input conflict, success completion, stable failure, and retry exhaustion |
+| publication | PostgreSQL 16 transaction races, one immutable object and manifest, complete manifest/object lineage, and no duplicate rows |
+| S3 | LocalStack version pinning, read-after-write verification, exact-version cleanup, pre-existing object reconciliation, and concurrent writer race |
+| consumer | missing/extra/duplicate pin, wrong feed/schema/version/hash, look-ahead, and unavailable output remain fail closed |
+
+The first production one-shot smoke is permitted only after these checks pass on
+the exact provider and consumer commits. It must use an actual AVAILABLE 1m
+source, an on-demand one-off worker, one otherwise-empty command queue, and
+assert the CloudWatch success record, zero source/DLQ backlog, pipeline-run
+completion, relational lineage, and exact S3 VersionId. Smoke success cannot
+approve missing product meaning.
+
+## Authority-owned adoption order
+
+As observed on 2026-08-06, `stackcord governance check --json` reports
+`unknown` because fresh exact-commit provider evidence is unavailable. This
+proposal therefore remains isolated. A merge or implementation PR does not by
+itself turn these recommendations into protected product meaning.
+
+1. `user:kcrmin` (or another configured product authority verified by a fresh
+   provider observation) reviews the exact proposal commit and decides the feed
+   identity, trusted-input, run-lifecycle, and failure semantics above.
+2. The authority-owned change represents accepted meaning in protected
+   contracts and, only if the shared-feed alternative is chosen, protected
+   DBML. Re-run governance against that exact commit and fingerprint.
+3. Add the idempotent provider/feed seed and its drift tests through central
+   Flyway. No manual production database insert is an accepted bootstrap path.
+4. Implement the pipeline command in order: run lifecycle, canonical source
+   resolution, exact-version decode, deterministic output identity, atomic
+   publication, cleanup, and retry tests.
+5. Implement backend complete-pin production, then backtest exact-version
+   consumption and fail-closed completeness tests.
+6. Integrate provider, consumer, migrations, deployment configuration, and root
+   submodule pointers in dependency order; then run the one-shot smoke and full
+   release verification.
+
+Until steps 1 and 2 complete, provider code may be reviewed only as a draft and
+must not be described as approved, release-ready, or safe for production
+feature-output publication.
+
 ## Provider work after approval
 
 Data pipeline:
