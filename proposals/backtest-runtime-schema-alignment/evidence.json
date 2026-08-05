@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "status": "isolated-proposal-not-approved",
+  "observedAt": "2026-08-05",
+  "root": {
+    "repository": "Idea2Strategy/Idea2Strategy",
+    "commit": "4232f3be6c0fc529c3dc2037c702799339308699",
+    "protectedFingerprint": "sha256:6e015a609756c60fed0332ac57aa31935acf328832e4dd76fae93d72e980900a",
+    "governanceStatus": "unknown",
+    "schemaDbmlSha256": "4ee8a3d80b26b8ea4773b4b864e5f0503f325e61f13abcd4494b1cfc342f75e3",
+    "runInputPinsMigration": {
+      "path": "db/flyway-ci-bundle/V20260805130000__backtest_run_input_pins.sql",
+      "sha256": "0311a2767e99ead8910afa5f5b5f578e6ca1e0fd7a41f1c321888a61eac0a022"
+    },
+    "runtimeGrantsSha256": "04a5ec1558cbf199e942463b321dd95e866a4e6d847dce1ea849645603ab266f"
+  },
+  "backtest": {
+    "repository": "Idea2Strategy/Idea2Strategy-backtest-engine",
+    "mergedDevelopCommit": "b8cedcedcb00c3876a1e815fe3bdc4b1fa556046",
+    "previousConsumerCommit": "155316694bad94c094ccd04ef04d33d7c702a533",
+    "outcomeContribution": {
+      "path": "db/migration-contributions/migrations/V20260802143000__backtest_run_outcome_detail.sql",
+      "gitBlob": "ba62042c14d0f59340adf9b0dde9f5234db4dbe1"
+    },
+    "normalizedTablesMappingGitBlob": "826ae26975562bde62591fb9580f0f4cc18e8bed",
+    "normalizedRepositoryGitBlob": "5db1562ea0e75fb0b197aab7b6c6b12865186a5c"
+  },
+  "liveMissingColumns": [
+    "backtest.run_input_pins.dataset_manifest_id",
+    "backtest.run_input_pins.dataset_hash",
+    "backtest.run_input_pins.feature_materialization_version",
+    "backtest.runs.result_manifest_id",
+    "backtest.runs.retryable",
+    "backtest.runs.missing_requirements"
+  ],
+  "adoptedColumnCandidates": [
+    "backtest.runs.result_manifest_id",
+    "backtest.runs.retryable",
+    "backtest.runs.missing_requirements"
+  ],
+  "retiredConsumerColumns": [
+    "backtest.run_input_pins.dataset_manifest_id",
+    "backtest.run_input_pins.dataset_hash",
+    "backtest.run_input_pins.feature_materialization_version"
+  ]
+}
