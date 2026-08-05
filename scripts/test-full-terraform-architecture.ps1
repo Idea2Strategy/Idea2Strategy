@@ -185,6 +185,7 @@ if ($database -notmatch '(?s)name\s*=\s*"rds\.force_ssl".*?apply_method\s*=\s*"p
     throw "The static rds.force_ssl parameter must use pending-reboot so an applied configuration converges without perpetual drift."
 }
 foreach ($required in @(
+    'AWS_DEFAULT_REGION=${aws_region}',
     'BACKTEST_BASIC_QUEUE_URL',
     'BACKTEST_BASIC_DLQ_URL',
     'BACKTEST_BASIC_MAX_CONCURRENCY',
@@ -229,6 +230,9 @@ if ($compute -notmatch 'desired_capacity\s*=\s*0' -or
     $compute -notmatch 'max_size\s*=\s*1' -or
     ($compute | Select-String -Pattern 'http_put_response_hop_limit\s*=\s*2' -AllMatches).Matches.Count -ne 3) {
     throw "Backtest must scale from zero to one and each Docker EC2 launch path must use IMDSv2 with container-compatible hop limit 2."
+}
+if ($compute -notmatch '(?s)resource\s+"aws_autoscaling_policy"\s+"backtest_start".*?adjustment_type\s*=\s*"ExactCapacity".*?scaling_adjustment\s*=\s*1.*?cooldown\s*=\s*0') {
+    throw "Backtest queue wake-up must bypass scaling cooldown so an alarm can restore desired capacity immediately after idle scale-down."
 }
 if ($compute -notmatch '(?s)resource\s+"aws_launch_template"\s+"backtest"\s*\{\s*#checkov:skip=CKV_AWS_341:IMDSv2 tokens remain required; hop limit 2 is required for the non-root Docker worker to reach instance-profile credentials through the container network namespace\.') {
     throw "The backtest launch template must document the narrow CKV_AWS_341 exception for container-compatible instance-role access."

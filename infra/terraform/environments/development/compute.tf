@@ -405,7 +405,9 @@ resource "aws_autoscaling_policy" "backtest_start" {
   autoscaling_group_name = aws_autoscaling_group.backtest[0].name
   adjustment_type        = "ExactCapacity"
   scaling_adjustment     = 1
-  cooldown               = 300
+  # The worker scales itself to zero after an idle window. A queue alarm can
+  # arrive during that scale-in cooldown, so wake-up must not be suppressed.
+  cooldown = 0
 }
 
 resource "aws_cloudwatch_metric_alarm" "backtest_queue_start" {

@@ -108,6 +108,7 @@ ssm_value() {
 
 %{ if runtime_role == "backtest-worker" ~}
 cat >>/etc/idea2strategy/runtime.env <<EOF
+AWS_DEFAULT_REGION=${aws_region}
 BACKTEST_BASIC_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/url')
 BACKTEST_BASIC_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/dlq-url')
 BACKTEST_BASIC_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/basic/max-concurrency')
