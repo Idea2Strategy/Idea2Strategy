@@ -63,17 +63,15 @@ resource "aws_lambda_function" "operator_pre_token" {
   #checkov:skip=CKV_AWS_272:The immutable source hash and reviewed Terraform package pin this small first-party transformer; a separate Lambda code-signing profile is outside the Development trust boundary.
   count = var.enable_cognito_operator_identity ? 1 : 0
 
-  function_name                  = "${local.name_prefix}-operator-pre-token"
-  role                           = aws_iam_role.operator_pre_token[0].arn
-  handler                        = "index.handler"
-  runtime                        = "nodejs22.x"
-  architectures                  = ["arm64"]
-  filename                       = data.archive_file.operator_pre_token[0].output_path
-  source_code_hash               = data.archive_file.operator_pre_token[0].output_base64sha256
-  memory_size                    = 128
-  timeout                        = 3
-  reserved_concurrent_executions = 5
-
+  function_name    = "${local.name_prefix}-operator-pre-token"
+  role             = aws_iam_role.operator_pre_token[0].arn
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  architectures    = ["arm64"]
+  filename         = data.archive_file.operator_pre_token[0].output_path
+  source_code_hash = data.archive_file.operator_pre_token[0].output_base64sha256
+  memory_size      = 128
+  timeout          = 3
   tracing_config {
     mode = "Active"
   }
