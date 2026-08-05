@@ -80,4 +80,3 @@ The approval must explicitly accept:
 - COMPLETED/FAILED/UNAVAILABLE round trips retaining the corresponding outcome
   detail;
 - generated runtime grants and ownership verification.
-

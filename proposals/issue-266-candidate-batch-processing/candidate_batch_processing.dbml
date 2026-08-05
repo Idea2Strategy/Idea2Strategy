@@ -20,4 +20,3 @@ Table trading.candidate_batch_processing {
 
   Note: 'F90 exactly-once candidate handoff receipt. batch_id is the immutable claim identity; claim_token and lease_expires_at fence abandoned PROCESSING claims before retry.'
 }
-
