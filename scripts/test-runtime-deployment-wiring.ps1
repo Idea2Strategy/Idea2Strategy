@@ -215,7 +215,14 @@ foreach ($variable in @(
     "operator_auth_allowed_acr_values", "operator_auth_allowed_amr_values",
     "operator_rbac_catalog_version", "operator_rbac_catalog_read_permission_id",
     "operator_rbac_assignment_read_permission_id", "operator_rbac_grant_permission_id",
-    "operator_rbac_revoke_permission_id"
+    "operator_rbac_revoke_permission_id",
+    "operator_case_queue_permission_id", "operator_case_detail_permission_id",
+    "operator_case_assign_permission_id", "operator_case_reassign_permission_id",
+    "operator_case_unassign_permission_id", "operator_case_start_review_permission_id",
+    "operator_case_request_information_permission_id", "operator_case_resolve_permission_id",
+    "operator_case_reject_permission_id", "operator_case_apply_sanction_permission_id",
+    "operator_case_release_sanction_permission_id", "operator_sanction_apply_permission_id",
+    "operator_sanction_lift_permission_id"
 )) {
     if (-not $variables.Contains(('variable "' + $variable + '"'))) {
         throw "Production operator trust input is missing: $variable"
@@ -230,7 +237,20 @@ foreach ($required in @(
     "OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID=",
     "IDEA2STRATEGY_OPERATOR_RBAC_GUARD_CATALOG_VERSION=",
     "IDEA2STRATEGY_OPERATOR_RBAC_GUARD_GRANT_PERMISSION_ID=",
-    "IDEA2STRATEGY_OPERATOR_RBAC_GUARD_REVOKE_PERMISSION_ID="
+    "IDEA2STRATEGY_OPERATOR_RBAC_GUARD_REVOKE_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_QUEUE_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_DETAIL_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_ASSIGN_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_REASSIGN_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_UNASSIGN_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_START_REVIEW_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_REQUEST_INFORMATION_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_RESOLVE_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_REJECT_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_APPLY_SANCTION_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_CASE_GUARD_RELEASE_SANCTION_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_SANCTION_GUARD_APPLY_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_SANCTION_GUARD_LIFT_PERMISSION_ID="
 )) {
     if (-not $userData.Contains($required)) {
         throw "Production operator trust runtime wiring is missing: $required"
@@ -245,9 +265,18 @@ foreach ($required in @(
     }
 }
 foreach ($required in @(
+    'append_env_value "$batch_secret_env" IDEA2STRATEGY_BATCH_DEADLINE_ENABLED true',
+    "EMAIL_DELIVERY_ENABLED", "EMAIL_DELIVERY_PROVIDER", "EMAIL_DELIVERY_FROM_ADDRESS",
+    "EMAIL_DELIVERY_AWS_REGION", "EMAIL_DELIVERY_BASE_URL"
+)) {
+    if (-not $userData.Contains($required)) {
+        throw "Deadline batch production input is missing: $required"
+    }
+}
+foreach ($required in @(
     'var.operator_rbac_grant_permission_id',
     'var.operator_rbac_revoke_permission_id',
-    'reviewed RBAC read/grant/revoke permission UUIDs'
+    'reviewed RBAC read/mutation/case/sanction permission UUIDs'
 )) {
     if (-not $runtime.Contains($required)) {
         throw "Operator mutation guard release precondition is missing: $required"

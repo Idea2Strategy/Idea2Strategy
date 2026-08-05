@@ -9,6 +9,10 @@ function Read-Terraform([string]$Name) {
     Get-Content -LiteralPath (Join-Path $environmentRoot $Name) -Raw
 }
 
+function Contains-NormalizedWhitespace([string]$Text, [string]$Required) {
+    return (($Text -replace '\s+', ' ').Contains(($Required -replace '\s+', ' ')))
+}
+
 $all = (Get-ChildItem -LiteralPath $environmentRoot -Filter *.tf | ForEach-Object {
     Get-Content -LiteralPath $_.FullName -Raw
 }) -join "`n"
@@ -43,8 +47,10 @@ foreach ($required in @(
     'OPERATOR_AUTH_ENABLED=${enable_operator_auth}',
     'OPERATOR_RBAC_READ_ENABLED=${enable_operator_auth}'
 )) {
-    if (-not ($variables.Contains($required) -or $compute.Contains($required) -or
-        $runtime.Contains($required) -or $userData.Contains($required))) {
+    if (-not ((Contains-NormalizedWhitespace $variables $required) -or
+        (Contains-NormalizedWhitespace $compute $required) -or
+        (Contains-NormalizedWhitespace $runtime $required) -or
+        (Contains-NormalizedWhitespace $userData $required))) {
         throw "Fail-closed optional operator plane wiring is missing: $required"
     }
 }
@@ -79,7 +85,8 @@ foreach ($required in @(
     'origin_header_secret_arn                    = try(aws_secretsmanager_secret.cloudfront_origin_header[0].arn, "")',
     'runtime_role == "service" && configure_public_origin'
 )) {
-    if (-not ($compute.Contains($required) -or $userData.Contains($required))) {
+    if (-not ((Contains-NormalizedWhitespace $compute $required) -or
+        (Contains-NormalizedWhitespace $userData $required))) {
         throw "Pre-delegation Core bootstrap boundary is missing: $required"
     }
 }

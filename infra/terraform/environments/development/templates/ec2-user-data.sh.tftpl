@@ -317,6 +317,19 @@ OPERATOR_RBAC_ASSIGNMENT_READ_MFA_REQUIRED=true
 IDEA2STRATEGY_OPERATOR_RBAC_GUARD_CATALOG_VERSION=${operator_rbac_catalog_version}
 IDEA2STRATEGY_OPERATOR_RBAC_GUARD_GRANT_PERMISSION_ID=${operator_rbac_grant_permission_id}
 IDEA2STRATEGY_OPERATOR_RBAC_GUARD_REVOKE_PERMISSION_ID=${operator_rbac_revoke_permission_id}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_QUEUE_PERMISSION_ID=${operator_case_permissions.queue}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_DETAIL_PERMISSION_ID=${operator_case_permissions.detail}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_ASSIGN_PERMISSION_ID=${operator_case_permissions.assign}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_REASSIGN_PERMISSION_ID=${operator_case_permissions.reassign}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_UNASSIGN_PERMISSION_ID=${operator_case_permissions.unassign}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_START_REVIEW_PERMISSION_ID=${operator_case_permissions.start_review}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_REQUEST_INFORMATION_PERMISSION_ID=${operator_case_permissions.request_information}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_RESOLVE_PERMISSION_ID=${operator_case_permissions.resolve}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_REJECT_PERMISSION_ID=${operator_case_permissions.reject}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_APPLY_SANCTION_PERMISSION_ID=${operator_case_permissions.apply_sanction}
+IDEA2STRATEGY_OPERATOR_CASE_GUARD_RELEASE_SANCTION_PERMISSION_ID=${operator_case_permissions.release_sanction}
+IDEA2STRATEGY_OPERATOR_SANCTION_GUARD_APPLY_PERMISSION_ID=${operator_sanction_permissions.apply}
+IDEA2STRATEGY_OPERATOR_SANCTION_GUARD_LIFT_PERMISSION_ID=${operator_sanction_permissions.lift}
 EOF
 backtest_secret_env=/etc/idea2strategy/backtest-secret.env
 : >"$backtest_secret_env"
@@ -336,6 +349,12 @@ append_env_value "$batch_secret_env" SPRING_DATASOURCE_URL 'jdbc:postgresql://${
 append_json_field "$batch_secret_env" SPRING_DATASOURCE_USERNAME "$batch_db_secret" username
 append_json_field "$batch_secret_env" SPRING_DATASOURCE_PASSWORD "$batch_db_secret" password
 append_env_value "$batch_secret_env" SPRING_FLYWAY_ENABLED false
+append_env_value "$batch_secret_env" EMAIL_DELIVERY_ENABLED "$(ssm_value '${parameter_path}/email/enabled')"
+append_env_value "$batch_secret_env" EMAIL_DELIVERY_PROVIDER "$(ssm_value '${parameter_path}/email/provider')"
+append_env_value "$batch_secret_env" EMAIL_DELIVERY_FROM_ADDRESS "$(ssm_value '${parameter_path}/email/from-address')"
+append_env_value "$batch_secret_env" EMAIL_DELIVERY_AWS_REGION "$(ssm_value '${parameter_path}/email/aws-region')"
+append_env_value "$batch_secret_env" EMAIL_DELIVERY_BASE_URL "$(ssm_value '${parameter_path}/email/base-url')"
+append_env_value "$batch_secret_env" IDEA2STRATEGY_BATCH_DEADLINE_ENABLED true
 chmod 0600 "$batch_secret_env"
 unset batch_db_secret
 %{ endif ~}

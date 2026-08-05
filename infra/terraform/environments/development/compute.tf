@@ -53,6 +53,23 @@ resource "aws_instance" "service" {
     operator_rbac_assignment_read_permission_id = var.operator_rbac_assignment_read_permission_id
     operator_rbac_grant_permission_id           = var.operator_rbac_grant_permission_id
     operator_rbac_revoke_permission_id          = var.operator_rbac_revoke_permission_id
+    operator_case_permissions = {
+      queue               = var.operator_case_queue_permission_id
+      detail              = var.operator_case_detail_permission_id
+      assign              = var.operator_case_assign_permission_id
+      reassign            = var.operator_case_reassign_permission_id
+      unassign            = var.operator_case_unassign_permission_id
+      start_review        = var.operator_case_start_review_permission_id
+      request_information = var.operator_case_request_information_permission_id
+      resolve             = var.operator_case_resolve_permission_id
+      reject              = var.operator_case_reject_permission_id
+      apply_sanction      = var.operator_case_apply_sanction_permission_id
+      release_sanction    = var.operator_case_release_sanction_permission_id
+    }
+    operator_sanction_permissions = {
+      apply = var.operator_sanction_apply_permission_id
+      lift  = var.operator_sanction_lift_permission_id
+    }
   }))
   user_data_replace_on_change = true
 
@@ -155,6 +172,23 @@ resource "aws_instance" "trading" {
     operator_rbac_assignment_read_permission_id = var.operator_rbac_assignment_read_permission_id
     operator_rbac_grant_permission_id           = var.operator_rbac_grant_permission_id
     operator_rbac_revoke_permission_id          = var.operator_rbac_revoke_permission_id
+    operator_case_permissions = {
+      queue               = var.operator_case_queue_permission_id
+      detail              = var.operator_case_detail_permission_id
+      assign              = var.operator_case_assign_permission_id
+      reassign            = var.operator_case_reassign_permission_id
+      unassign            = var.operator_case_unassign_permission_id
+      start_review        = var.operator_case_start_review_permission_id
+      request_information = var.operator_case_request_information_permission_id
+      resolve             = var.operator_case_resolve_permission_id
+      reject              = var.operator_case_reject_permission_id
+      apply_sanction      = var.operator_case_apply_sanction_permission_id
+      release_sanction    = var.operator_case_release_sanction_permission_id
+    }
+    operator_sanction_permissions = {
+      apply = var.operator_sanction_apply_permission_id
+      lift  = var.operator_sanction_lift_permission_id
+    }
   }))
   user_data_replace_on_change = true
 
@@ -263,6 +297,23 @@ resource "aws_launch_template" "backtest" {
     operator_rbac_assignment_read_permission_id = var.operator_rbac_assignment_read_permission_id
     operator_rbac_grant_permission_id           = var.operator_rbac_grant_permission_id
     operator_rbac_revoke_permission_id          = var.operator_rbac_revoke_permission_id
+    operator_case_permissions = {
+      queue               = var.operator_case_queue_permission_id
+      detail              = var.operator_case_detail_permission_id
+      assign              = var.operator_case_assign_permission_id
+      reassign            = var.operator_case_reassign_permission_id
+      unassign            = var.operator_case_unassign_permission_id
+      start_review        = var.operator_case_start_review_permission_id
+      request_information = var.operator_case_request_information_permission_id
+      resolve             = var.operator_case_resolve_permission_id
+      reject              = var.operator_case_reject_permission_id
+      apply_sanction      = var.operator_case_apply_sanction_permission_id
+      release_sanction    = var.operator_case_release_sanction_permission_id
+    }
+    operator_sanction_permissions = {
+      apply = var.operator_sanction_apply_permission_id
+      lift  = var.operator_sanction_lift_permission_id
+    }
   }))
 
   tag_specifications {

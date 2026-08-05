@@ -136,10 +136,25 @@ resource "terraform_data" "runtime_artifact_guard" {
           can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_catalog_read_permission_id)) &&
           can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_assignment_read_permission_id)) &&
           can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_grant_permission_id)) &&
-          can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_revoke_permission_id))
+          can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_revoke_permission_id)) &&
+          alltrue([for permission_id in [
+            var.operator_case_queue_permission_id,
+            var.operator_case_detail_permission_id,
+            var.operator_case_assign_permission_id,
+            var.operator_case_reassign_permission_id,
+            var.operator_case_unassign_permission_id,
+            var.operator_case_start_review_permission_id,
+            var.operator_case_request_information_permission_id,
+            var.operator_case_resolve_permission_id,
+            var.operator_case_reject_permission_id,
+            var.operator_case_apply_sanction_permission_id,
+            var.operator_case_release_sanction_permission_id,
+            var.operator_sanction_apply_permission_id,
+            var.operator_sanction_lift_permission_id,
+          ] : can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", permission_id))])
         )
       )
-      error_message = "Enabling operator authentication requires the exact OIDC issuer/JWKS/audience, a reviewed MFA assurance claim allow-list, and the reviewed RBAC read/grant/revoke permission UUIDs."
+      error_message = "Enabling operator authentication requires exact OIDC trust, reviewed MFA assurance, and reviewed RBAC read/mutation/case/sanction permission UUIDs."
     }
   }
 }
