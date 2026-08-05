@@ -31,7 +31,7 @@ services:
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5173"]
       interval: 5s
-      timeout: 3s
+      timeout: 10s
       retries: 30
       start_period: 20s
     restart: unless-stopped
