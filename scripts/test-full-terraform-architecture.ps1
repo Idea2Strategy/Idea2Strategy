@@ -367,6 +367,10 @@ foreach ($required in @(
     'PowerUserAccess',
     'github_plan_role_arn',
     'PublishImmutableFrontendRelease',
+    'ReadDeploymentPrerequisiteSecrets',
+    'secretsmanager:GetSecretValue',
+    '${local.name_prefix}/backtest/alpaca-secret',
+    '${local.name_prefix}/database/pipeline-runtime',
     'TerraformStateObject',
     'iam:PassRole'
 )) {

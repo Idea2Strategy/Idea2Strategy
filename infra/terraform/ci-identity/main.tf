@@ -8,6 +8,19 @@ locals {
   state_bucket_arn               = "arn:aws:s3:::${local.state_bucket_name}"
   frontend_bucket_arn            = "arn:aws:s3:::${local.name_prefix}-${data.aws_caller_identity.current.account_id}-frontend"
   ecr_repository_arn             = "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${local.name_prefix}/*"
+  deployment_prerequisite_secret_names = [
+    "${local.name_prefix}/backtest/alpaca",
+    "${local.name_prefix}/backtest/alpaca-secret",
+    "${local.name_prefix}/database/backend-runtime",
+    "${local.name_prefix}/database/batch-runtime",
+    "${local.name_prefix}/database/backtest-runtime",
+    "${local.name_prefix}/database/trading-runtime",
+    "${local.name_prefix}/database/pipeline-runtime"
+  ]
+  deployment_prerequisite_secret_arns = [
+    for secret_name in local.deployment_prerequisite_secret_names :
+    "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${secret_name}-*"
+  ]
 }
 
 data "aws_iam_policy_document" "github_plan_assume" {
@@ -48,6 +61,13 @@ resource "aws_iam_role_policy_attachment" "github_plan_read_only" {
 }
 
 data "aws_iam_policy_document" "github_plan_artifacts" {
+  statement {
+    sid       = "ReadDeploymentPrerequisiteSecrets"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = local.deployment_prerequisite_secret_arns
+  }
+
   statement {
     sid       = "ECRAuthorization"
     effect    = "Allow"
