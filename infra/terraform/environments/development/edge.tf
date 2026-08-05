@@ -9,6 +9,7 @@ resource "aws_route53_zone" "this" {
 }
 
 resource "aws_route53_record" "legacy_www" {
+  #checkov:skip=CKV2_AWS_23:This migration-safety record intentionally preserves the registrar-era external IPv4 target until a separately reviewed CloudFront cutover.
   count   = local.enable_dns_foundation ? 1 : 0
   zone_id = local.hosted_zone_id
   name    = "www.${var.domain_name}"
