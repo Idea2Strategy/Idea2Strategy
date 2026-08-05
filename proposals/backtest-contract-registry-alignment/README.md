@@ -46,4 +46,3 @@ root CI with a stale registry entry.
 3. Run `stackcord context audit --json`; it must report zero stale and zero
    unknown entries.
 4. Run the root schema/coordination and full CI suites.
-
