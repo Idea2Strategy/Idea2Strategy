@@ -47,6 +47,121 @@ bound to that deployment:
 No customer identity, Cognito group, email address, enrollment timestamp,
 historical database timestamp, or frontend state grants operator authority.
 
+## Security delta and accepted risk
+
+This extension is deliberately narrower than treating Cognito as a generic
+source of MFA claims, but it is still a security-model change. The namespaced
+claim does not prove which TOTP challenge was completed for an individual token.
+It proves that the dedicated pool issued a token in a configuration where every
+human sign-in must complete the pool-wide TOTP challenge before token issuance.
+The Backend therefore trusts the conjunction of the signed issuer, exact client
+audience, the immutable claim transformer, pool-wide `MfaConfiguration=ON`, and
+recent signed `auth_time`. None of those inputs is sufficient by itself.
+
+The minimum accepted residual risks are:
+
+- a privileged Cognito or Lambda configuration change could create
+  configuration drift while the transformer continues to emit the namespaced
+  value; Terraform drift review and alerts on `UpdateUserPool`,
+  `UpdateUserPoolClient`, `UpdateFunctionCode`, `UpdateFunctionConfiguration`,
+  and Lambda permission changes are therefore release and operating controls;
+- TOTP is phishable and is weaker than a phishing-resistant hardware factor;
+  this proposal accepts that limitation for the small Development operator
+  population but does not authorize SMS, email OTP, passwordless first factors,
+  remembered-device bypass, federation, or reuse of a customer pool;
+- an administrator can create, disable, reset, or recover an operator account;
+  those actions require the existing AWS administrative boundary and CloudTrail
+  evidence, and they never create an application RBAC mapping or assignment;
+- a compromised browser can steal a short-lived bearer token; the UI must use
+  Authorization Code + PKCE S256, must not persist access or refresh tokens in
+  local storage, and the Backend still limits acceptance by token age, active
+  subject mapping, current assignment, and current catalog on every request;
+- refresh exchanges do not repeat a TOTP challenge. They remain acceptable only
+  because refresh does not advance signed `auth_time`; once the ten-minute MFA
+  freshness window expires, high-risk requests fail until interactive MFA is
+  completed again.
+
+Any additional app client, identity provider, MFA method, passwordless flow,
+device remembering, trigger source, claim value, issuer, or audience is outside
+this proposal and requires a new protected decision. A detected drift or an
+inability to prove these invariants fails closed; availability is not recovered
+by weakening authentication.
+
+## Required verification before protected adoption
+
+Approval and deployment evidence must cover all of the following on exact
+commits and a reviewed saved Terraform plan:
+
+1. Static and plan checks prove a dedicated Essentials pool, MFA `ON`, TOTP as
+   the sole configured second factor, admin-only user creation, no remembered
+   devices or federation, one public client without a secret, code flow only,
+   exact callback/logout URLs, five-minute access/ID tokens, and bounded refresh
+   lifetime.
+2. Transformer unit tests prove V2 human authentication, invitation password
+   change, and refresh behavior; exact current client `aud`; the sole namespaced
+   claim/value; preservation of unrelated response data; and fail-closed
+   handling of unknown event versions, missing clients, unsupported triggers,
+   and attempts to substitute reserved `acr`/`amr` claims.
+3. Backend tests accept only the exact issuer, JWKS key, RS256 algorithm, single
+   audience, claim name/value, active subject mapping, active RBAC state, and
+   recent `auth_time`. Missing, stale, future, malformed, duplicated, wrong-key,
+   wrong-client, wrong-issuer, inactive-mapping, and revoked-assignment cases
+   deny without identity enumeration.
+4. A real managed-login Authorization Code + PKCE S256 flow with an
+   administrator-invited operator proves temporary-password completion, TOTP
+   enrollment, TOTP challenge, token issuance, `/api/v1/operations/me`, and one
+   MFA-protected permission. No token may authorize an operator route before
+   TOTP completion and application mapping/RBAC bootstrap.
+5. Refresh is exercised both before and after the MFA freshness window. The
+   refresh after the MFA freshness window must retain the original
+   `auth_time` and be denied for MFA-protected work until a new interactive TOTP
+   authentication occurs.
+6. Revoking the refresh token, disabling the Cognito user, disabling the mapped
+   operator, revoking the assignment, retiring the catalog, and introducing a
+   safe test of issuer/JWKS unavailability each deny on the documented next
+   request or bounded-cache boundary.
+7. CloudTrail/CloudWatch evidence and alarms cover pool/client/Lambda drift,
+   pre-token invocation errors, repeated authentication failures, and Backend
+   issuer/audience/assurance denials without logging tokens or raw subjects.
+8. The rollback drill below is executed before the feature is called releasable.
+
+Synthetic JWTs and Lambda unit tests are necessary negative evidence, but they
+do not replace the real managed-login and Backend end-to-end proof.
+
+## Staged rollout and rollback
+
+Before protected approval, `enable_cognito_operator_identity=false` and any
+deployment using this provider keeps `enable_operator_auth=false`; operator
+routes remain unavailable. After the exact rule is approved and the protected
+contract and Backend verifier are integrated, rollout is ordered as follows:
+
+1. review a saved Terraform plan, create the dedicated pool/client/Lambda with
+   operator authentication still disabled, and verify all configuration and
+   monitoring invariants without creating an operator user;
+2. create and map the first operator only through the separately reviewed
+   one-shot bootstrap procedure, then complete the real browser and negative
+   verification above;
+3. enable operator authentication in a second reviewed saved plan and verify
+   edge, Backend, RBAC, audit correlation, token revocation, and freshness on the
+   exact deployed commits.
+
+For an assurance, token-validation, or provider incident, the first rollback is
+to apply a reviewed plan with `enable_operator_auth=false`. This makes every
+operator and `admin-mcp` route unavailable and must never fall back to customer
+sessions, IAM credentials, or header trust. Then revoke the affected app-client
+refresh tokens or disable affected Cognito users, preserve CloudTrail,
+CloudWatch, application audit, bootstrap receipts, and mapping evidence, and
+repair the provider/Backend policy before re-enabling the route.
+
+Do not delete the pool, Lambda, mapping, assignment, or audit data as an
+emergency rollback. The pool has deletion protection, and after versioned
+subject mapping or bootstrap evidence exists the approved data-lifecycle rule
+requires forward-fix. Destruction is a later separately reviewed cleanup only
+after mappings are migrated or made unusable and retention/legal-hold duties are
+satisfied. Rollback success means authentication is closed, refresh capability
+is revoked where necessary, evidence is preserved, and no weaker operator path
+exists.
+
 ## Exact approval point
 
 Before merging the Backend custom-claim verifier, enabling

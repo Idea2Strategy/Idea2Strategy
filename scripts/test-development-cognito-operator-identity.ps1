@@ -8,6 +8,7 @@ $identity = Get-Content -LiteralPath (Join-Path $environmentRoot "operator-ident
 $variables = Get-Content -LiteralPath (Join-Path $environmentRoot "variables.tf") -Raw
 $outputs = Get-Content -LiteralPath (Join-Path $environmentRoot "outputs.tf") -Raw
 $lambda = Get-Content -LiteralPath (Join-Path $environmentRoot "lambda/operator-pre-token/index.mjs") -Raw
+$proposal = Get-Content -LiteralPath (Join-Path $root "proposals/cognito-operator-oidc/README.md") -Raw
 
 foreach ($required in @(
     'variable "enable_cognito_operator_identity"',
@@ -104,6 +105,24 @@ foreach ($required in @(
 )) {
     if (-not $outputs.Contains($required)) {
         throw "Cognito operator deployment output is missing: $required"
+    }
+}
+
+foreach ($required in @(
+    '## Security delta and accepted risk',
+    'does not prove which TOTP challenge was completed',
+    'configuration drift',
+    '## Required verification before protected adoption',
+    'real managed-login Authorization Code + PKCE S256 flow',
+    'refresh after the MFA freshness window',
+    '## Staged rollout and rollback',
+    'enable_operator_auth=false',
+    'never fall back to customer',
+    'IAM credentials, or header trust',
+    'forward-fix'
+)) {
+    if (-not $proposal.Contains($required)) {
+        throw "Cognito assurance proposal is missing an approval boundary: $required"
     }
 }
 
