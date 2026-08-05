@@ -36,13 +36,18 @@ foreach ($required in @(
     'resource "aws_route53_record" "ses_dkim"',
     'resource "aws_iam_role_policy" "service_email_delivery"',
     'ses:SendEmail',
-    'ses:SendRawEmail',
+    'ses:GetSuppressedDestination',
     'ses:FromAddress',
+    'aws:RequestedRegion',
     'aws_ses_domain_identity.transactional[0].arn'
 )) {
     if (-not $email.Contains($required)) {
         throw "Development SES infrastructure is missing: $required"
     }
+}
+
+if ($email.Contains('ses:SendRawEmail')) {
+    throw "Core IAM must not grant unused raw-email delivery."
 }
 
 if ($email -match '(?i)access[_-]?key|secret[_-]?access[_-]?key|smtp[_-]?password') {

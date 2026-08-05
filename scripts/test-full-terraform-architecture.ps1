@@ -144,7 +144,7 @@ if ($all -notmatch '(?s)variable\s+"monthly_budget_usd"\s*\{.*?default\s*=\s*180
     throw "The accepted Development monthly budget must default to USD 180."
 }
 foreach ($dnsBoundary in @(
-    'enable_dns_foundation = contains(["dns_foundation", "full"], var.deployment_phase)',
+    'enable_dns_foundation = contains(["dns_foundation", "host_ready", "full"], var.deployment_phase)',
     'local.enable_dns_foundation && var.existing_hosted_zone_id == ""',
     'variable "dns_delegation_verified"',
     'condition     = var.dns_delegation_verified'
@@ -153,8 +153,8 @@ foreach ($dnsBoundary in @(
         throw "Staged Route 53 delegation boundary is missing: $dnsBoundary"
     }
 }
-if ($all -notmatch 'contains\(\["market_data_bootstrap", "dns_foundation", "full"\], var\.deployment_phase\)') {
-    throw "Development deployment phases must expose a DNS-only foundation before full runtime creation."
+if ($all -notmatch 'contains\(\["market_data_bootstrap", "dns_foundation", "host_ready", "full"\], var\.deployment_phase\)') {
+    throw "Development deployment phases must expose DNS-only and pre-DNS host-ready stages before the public runtime."
 }
 
 foreach ($required in @(

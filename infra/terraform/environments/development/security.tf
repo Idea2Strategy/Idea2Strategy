@@ -1,18 +1,18 @@
 resource "random_password" "cloudfront_origin_header" {
-  count   = local.enable_service_stack ? 1 : 0
+  count   = local.enable_public_edge ? 1 : 0
   length  = 48
   special = false
 }
 
 resource "aws_secretsmanager_secret" "cloudfront_origin_header" {
-  count                   = local.enable_service_stack ? 1 : 0
+  count                   = local.enable_public_edge ? 1 : 0
   name                    = "${local.name_prefix}/edge/origin-header"
   recovery_window_in_days = 7
   lifecycle { prevent_destroy = true }
 }
 
 resource "aws_secretsmanager_secret_version" "cloudfront_origin_header" {
-  count         = local.enable_service_stack ? 1 : 0
+  count         = local.enable_public_edge ? 1 : 0
   secret_id     = aws_secretsmanager_secret.cloudfront_origin_header[0].id
   secret_string = random_password.cloudfront_origin_header[0].result
 }
@@ -50,7 +50,7 @@ resource "aws_security_group" "service" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "service_from_cloudfront" {
-  count             = local.enable_service_stack ? 1 : 0
+  count             = local.enable_public_edge ? 1 : 0
   security_group_id = aws_security_group.service[0].id
   description       = "HTTPS origin traffic from CloudFront only"
   from_port         = var.service_target_port

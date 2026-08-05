@@ -1,0 +1,94 @@
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+$environmentRoot = Join-Path $root "infra/terraform/environments/development"
+
+function Read-Terraform([string]$Name) {
+    Get-Content -LiteralPath (Join-Path $environmentRoot $Name) -Raw
+}
+
+$all = (Get-ChildItem -LiteralPath $environmentRoot -Filter *.tf | ForEach-Object {
+    Get-Content -LiteralPath $_.FullName -Raw
+}) -join "`n"
+$locals = Read-Terraform "locals.tf"
+$variables = Read-Terraform "variables.tf"
+$deployment = Read-Terraform "deployment.tf"
+$compute = Read-Terraform "compute.tf"
+$security = Read-Terraform "security.tf"
+$iam = Read-Terraform "iam.tf"
+$frontend = Read-Terraform "frontend.tf"
+$edge = Read-Terraform "edge.tf"
+$email = Read-Terraform "email.tf"
+$userData = Get-Content -LiteralPath (Join-Path $environmentRoot "templates/ec2-user-data.sh.tftpl") -Raw
+$runbook = Get-Content -LiteralPath (Join-Path $root "docs/infrastructure/deploy-readiness-runbook.md") -Raw
+
+foreach ($required in @(
+    'contains(["market_data_bootstrap", "dns_foundation", "host_ready", "full"], var.deployment_phase)',
+    'enable_service_stack  = contains(["host_ready", "full"], var.deployment_phase)',
+    'enable_public_edge    = var.deployment_phase == "full"',
+    '!local.enable_public_edge || var.dns_delegation_verified'
+)) {
+    if (-not $all.Contains($required)) {
+        throw "Host-ready phase boundary is missing: $required"
+    }
+}
+
+foreach ($runtimeResource in @(
+    'resource "aws_instance" "service"',
+    'resource "aws_instance" "trading"',
+    'resource "aws_autoscaling_group" "backtest"',
+    'resource "aws_elasticache_serverless_cache" "this"',
+    'resource "aws_sqs_queue" "backtest"'
+)) {
+    if (-not $all.Contains($runtimeResource)) {
+        throw "Host-ready runtime resource is missing: $runtimeResource"
+    }
+}
+
+foreach ($publicEdgeBoundary in @(
+    @($frontend, 'resource "aws_cloudfront_distribution" "frontend"'),
+    @($frontend, 'resource "aws_acm_certificate" "frontend"'),
+    @($frontend, 'resource "aws_route53_record" "cloudfront_origin"'),
+    @($edge, 'resource "aws_route53_record" "service"'),
+    @($security, 'resource "random_password" "cloudfront_origin_header"')
+)) {
+    $pattern = '(?s)' + [regex]::Escape($publicEdgeBoundary[1]) + '.*?\b(?:count|for_each)\s*=\s*local\.enable_public_edge'
+    if ($publicEdgeBoundary[0] -notmatch $pattern) {
+        throw "Public edge resource is not isolated from host_ready: $($publicEdgeBoundary[1])"
+    }
+}
+
+foreach ($required in @(
+    'configure_public_origin                     = local.enable_public_edge',
+    'origin_header_secret_arn                    = try(aws_secretsmanager_secret.cloudfront_origin_header[0].arn, "")',
+    'runtime_role == "service" && configure_public_origin'
+)) {
+    if (-not ($compute.Contains($required) -or $userData.Contains($required))) {
+        throw "Pre-delegation Core bootstrap boundary is missing: $required"
+    }
+}
+
+if ($email -notmatch 'enabled\s*=\s*local\.enable_public_edge\s*\?\s*"true"\s*:\s*"false"') {
+    throw "Transactional email must remain disabled until the public DNS/SES cutover is verified."
+}
+
+$batchPolicy = [regex]::Match($iam, '(?s)resource\s+"aws_iam_role_policy"\s+"batch_loader_secret"\s*\{.*?\n\}').Value
+if ($batchPolicy -eq "" -or $batchPolicy -match '\bcount\s*=' -or
+    $batchPolicy -notmatch 'policy\s*=\s*data\.aws_iam_policy_document\.rds_secret_access\.json') {
+    throw "host_ready must narrow the existing Batch inline policy in place instead of destroying it."
+}
+
+foreach ($required in @(
+    'deployment_phase=host_ready',
+    'AWS-StartPortForwardingSession',
+    '127.0.0.1:8080/actuator/health',
+    'CloudFront, ACM, or public DNS'
+)) {
+    if (-not $runbook.Contains($required)) {
+        throw "Host-ready verification runbook is missing: $required"
+    }
+}
+
+Write-Output "Pre-DNS host-ready phase checks passed."

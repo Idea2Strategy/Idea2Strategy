@@ -79,7 +79,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
 }
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_public_edge ? 1 : 0
 
   name                              = "${local.name_prefix}-frontend-oac"
   description                       = "SigV4 access from CloudFront to the private frontend bucket"
@@ -97,7 +97,7 @@ data "aws_cloudfront_response_headers_policy" "security" {
 }
 
 resource "aws_cloudfront_function" "spa_rewrite" {
-  count   = local.enable_service_stack ? 1 : 0
+  count   = local.enable_public_edge ? 1 : 0
   name    = "${local.name_prefix}-spa-rewrite"
   runtime = "cloudfront-js-2.0"
   comment = "Rewrite only frontend navigation routes to index.html without masking API errors"
@@ -121,7 +121,7 @@ resource "aws_cloudfront_function" "spa_rewrite" {
 }
 
 resource "aws_acm_certificate" "frontend" {
-  count    = local.enable_service_stack && var.enable_https ? 1 : 0
+  count    = local.enable_public_edge ? 1 : 0
   provider = aws.us_east_1
 
   domain_name       = var.frontend_domain_name
@@ -134,7 +134,7 @@ resource "aws_acm_certificate" "frontend" {
 }
 
 resource "aws_route53_record" "frontend_certificate_validation" {
-  for_each = local.enable_service_stack && var.enable_https ? {
+  for_each = local.enable_public_edge ? {
     for option in aws_acm_certificate.frontend[0].domain_validation_options :
     option.domain_name => {
       name   = option.resource_record_name
@@ -156,7 +156,7 @@ resource "aws_route53_record" "frontend_certificate_validation" {
 }
 
 resource "aws_acm_certificate_validation" "frontend" {
-  count    = local.enable_service_stack && var.enable_https ? 1 : 0
+  count    = local.enable_public_edge ? 1 : 0
   provider = aws.us_east_1
 
   certificate_arn         = aws_acm_certificate.frontend[0].arn
@@ -168,7 +168,7 @@ resource "aws_acm_certificate_validation" "frontend" {
 }
 
 resource "aws_route53_record" "cloudfront_origin" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_public_edge ? 1 : 0
 
   zone_id = local.hosted_zone_id
   name    = var.origin_domain_name
@@ -182,7 +182,7 @@ resource "aws_route53_record" "cloudfront_origin" {
 }
 
 resource "aws_cloudfront_distribution" "frontend" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_public_edge ? 1 : 0
 
   enabled             = true
   is_ipv6_enabled     = true
@@ -285,7 +285,7 @@ resource "aws_cloudfront_distribution" "frontend" {
 }
 
 resource "aws_s3_bucket_policy" "frontend_cloudfront" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_public_edge ? 1 : 0
 
   bucket = aws_s3_bucket.frontend[0].id
   policy = jsonencode({

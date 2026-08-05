@@ -105,6 +105,7 @@ resource "aws_security_group" "pipeline" {
 resource "aws_vpc_security_group_egress_rule" "pipeline_all" {
   count             = local.enable_service_stack ? 1 : 0
   security_group_id = aws_security_group.pipeline[0].id
+  description       = "Pipeline egress to AWS APIs, Alpaca and private PostgreSQL"
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
 }

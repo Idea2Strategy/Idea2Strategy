@@ -23,7 +23,7 @@ resource "aws_route53_record" "legacy_www" {
 }
 
 resource "aws_route53_record" "service" {
-  count   = local.enable_service_stack && var.enable_https ? 1 : 0
+  count   = local.enable_public_edge ? 1 : 0
   zone_id = local.hosted_zone_id
   name    = var.frontend_domain_name
   type    = "A"

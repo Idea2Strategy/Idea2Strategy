@@ -2,8 +2,9 @@ aws_region  = "ap-northeast-2"
 aws_profile = "idea2strategy-terraform"
 expected_aws_account_id = "__AWS_ACCOUNT_ID__"
 
-# Use dns_foundation first, apply only its reviewed plan, copy all DNS records,
-# delegate at Gabia, and verify public NS before changing this to full.
+# Use dns_foundation first and copy all DNS records without delegating. After
+# immutable runtime inputs are ready, use host_ready for SSM-only verification.
+# Set full only after the later Gabia delegation is independently verified.
 deployment_phase = "market_data_bootstrap"
 
 service_instance_type  = "t4g.medium"
@@ -37,8 +38,9 @@ rds_max_allocated_storage_gib = 0 # Disable autoscaling while the account is on 
 rds_backup_retention_days     = 1 # Raise to 7 after switching to Paid Plan.
 rds_deletion_protection       = true
 
-# Full-phase release inputs. Replace every digest with the exact ECR digest
-# produced by the reviewed CI build; Terraform rejects mutable tags.
+# host_ready/full release inputs. Replace every digest with the exact ECR digest
+# produced by the reviewed CI build; Terraform rejects mutable tags. The
+# frontend_release_id is required only for the full public-edge cutover.
 frontend_release_id = ""
 container_image_digests = {}
 
