@@ -3,7 +3,7 @@
 This runbook materializes the existing Development market catalog into the
 canonical runtime database without rewriting the legacy database or any S3
 object. The provider implementation is pinned by the root gitlink to
-`41ea8bc1e5939aa9841100d2b06c5e9b34e0494e`, and the operator must supply the
+`ac3cecf5fcd1918d6902fbbaa38ce347af56c23b`, and the operator must supply the
 immutable ARM64 `pipeline-worker` ECR digest produced from that release candidate.
 
 The orchestrator launches one temporary `t4g.small` host with no inbound rules,

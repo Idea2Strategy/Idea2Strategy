@@ -99,12 +99,18 @@ foreach ($required in @(
     'BACKTEST_BASIC_QUEUE_URL',
     'BACKTEST_BASIC_DLQ_URL',
     'BACKTEST_BASIC_MAX_CONCURRENCY',
+    'BACKTEST_BASIC_REQUEST_QUEUE_URL',
+    'BACKTEST_BASIC_REQUEST_DLQ_URL',
     'BACKTEST_CUSTOM_QUEUE_URL',
     'BACKTEST_CUSTOM_DLQ_URL',
     'BACKTEST_CUSTOM_MAX_CONCURRENCY',
     'BACKTEST_COMPETITION_QUEUE_URL',
     'BACKTEST_COMPETITION_DLQ_URL',
     'BACKTEST_COMPETITION_MAX_CONCURRENCY',
+    'BACKTEST_CUSTOM_REQUEST_QUEUE_URL',
+    'BACKTEST_CUSTOM_REQUEST_DLQ_URL',
+    'BACKTEST_COMPETITION_REQUEST_QUEUE_URL',
+    'BACKTEST_COMPETITION_REQUEST_DLQ_URL',
     'BACKTEST_MAX_TOTAL_CONCURRENCY'
 )) {
     if (-not $userData.Contains($required)) {
@@ -217,6 +223,11 @@ foreach ($lane in @('basic', 'custom', 'competition')) {
 foreach ($required in @('resource "aws_sqs_queue" "backtest"', 'resource "aws_sqs_queue" "backtest_dlq"', 'redrive_policy', 'sqs_managed_sse_enabled')) {
     if (-not $queues.Contains($required)) {
         throw "Durable backtest queue safety is missing: $required"
+    }
+}
+foreach ($required in @('resource "aws_sqs_queue" "backtest_request"', 'resource "aws_sqs_queue" "backtest_request_dlq"', 'resource "aws_sqs_queue_redrive_allow_policy" "backtest_request_dlq"')) {
+    if (-not $queues.Contains($required)) {
+        throw "Backtest request intake queue safety is missing: $required"
     }
 }
 foreach ($required in @('ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'alpaca-api-key-secret-arn', 'alpaca-secret-key-secret-arn')) {

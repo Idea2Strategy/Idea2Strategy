@@ -74,10 +74,10 @@ $actualManifestDigest = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA2
 if ($actualManifestDigest -cne $bundleDigest) { throw "Flyway manifest digest mismatch." }
 
 $manifestLines = @(Get-Content -LiteralPath $manifestPath)
-if ($manifestLines.Count -ne 43 -or $manifestLines[0] -cne "idea2strategy-flyway-bundle-v1") {
-    throw "Expected the exact 42-migration Flyway bundle."
+if ($manifestLines.Count -ne 45 -or $manifestLines[0] -cne "idea2strategy-flyway-bundle-v1") {
+    throw "Expected the exact 44-migration Flyway bundle."
 }
-foreach ($line in $manifestLines[1..42]) {
+foreach ($line in $manifestLines[1..44]) {
     if ($line -notmatch '^([VR][A-Za-z0-9_.-]+\.sql)\t([0-9a-f]{64})$') { throw "Invalid Flyway manifest entry." }
     $migrationPath = Join-Path $bundleRoot $Matches[1]
     if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) { throw "Flyway migration is missing." }
@@ -281,7 +281,7 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     if ($invocation.Status -ne "Success") { throw "Database bootstrap SSM command failed with status '$($invocation.Status)'." }
     $receipt = [string]$invocation.StandardOutputContent | ConvertFrom-Json
     if ($receipt.status -ne "passed" -or $receipt.root_sha -cne $head -or $receipt.bundle_sha256 -cne $bundleDigest -or
-        $receipt.policy_seed_sha256 -cne $PolicySeedSha256 -or [int]$receipt.tables -ne 177 -or
+        $receipt.policy_seed_sha256 -cne $PolicySeedSha256 -or [int]$receipt.tables -ne 178 -or
         [int]$receipt.policy_row_counts.fee -lt 1 -or [int]$receipt.policy_row_counts.buffer -lt 1 -or
         [int]$receipt.policy_row_counts.execution -lt 1) {
         throw "Database bootstrap receipt did not match the exact release candidate."

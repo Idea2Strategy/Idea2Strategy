@@ -257,6 +257,8 @@ resource "aws_autoscaling_group" "backtest" {
   depends_on = [
     aws_ssm_parameter.backtest_queue_url,
     aws_ssm_parameter.backtest_dlq_url,
+    aws_ssm_parameter.backtest_request_queue_url,
+    aws_ssm_parameter.backtest_request_dlq_url,
     aws_ssm_parameter.backtest_lane_concurrency,
     aws_ssm_parameter.backtest_total_concurrency,
     aws_ssm_parameter.runtime_image,

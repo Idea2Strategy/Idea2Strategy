@@ -6,12 +6,15 @@ const contract = readFileSync(new URL('../contracts/data/backtest-execution.v1.m
 const schema = readFileSync(new URL('../db/schema.dbml', import.meta.url), 'utf8');
 
 test('approved contract binds producer identity, policy, and atomic competition linkage', () => {
-  assert.match(contract, /revision: 2/);
+  assert.match(contract, /revision: 3/);
   assert.match(contract, /stable `runId`/);
   assert.match(contract, /`executionPolicyVersion`/);
   assert.match(contract, /`\(participationId, evaluationPeriodId, runId\)`/);
   assert.match(contract, /zero rows is a stale-owner failure/);
   assert.match(contract, /`LEASE_EXPIRED`/);
+  assert.match(contract, /`runs\.configuration_hash` remains the immutable bot launch configuration hash/);
+  assert.match(contract, /`input_bundle_fingerprint` is the\s+lane-versioned digest/);
+  assert.match(contract, /Run, input bundle, every dataset\/feature\s+pin, `run_input_pins`, and Outbox event in one transaction/);
 });
 
 test('canonical DBML exposes fenced attempts and durable cancellation', () => {
@@ -24,6 +27,8 @@ test('canonical DBML exposes fenced attempts and durable cancellation', () => {
   assert.match(schema, /Ref: backtest\.run_attempts\.previous_attempt_id > backtest\.run_attempts\.id/);
   assert.match(schema, /Table backtest\.execution_policy_versions \{[\s\S]*policy_artifact_hash[\s\S]*policy_document[\s\S]*locked_at/);
   assert.match(schema, /Ref: backtest\.runs\.execution_policy_version > backtest\.execution_policy_versions\.version/);
+  assert.match(schema, /Table backtest\.run_input_pins \{[\s\S]*input_bundle_fingerprint varchar\(128\) \[not null\][\s\S]*input_contract_version varchar\(80\) \[not null\][\s\S]*compiled_plan_checksum varchar\(128\) \[not null\][\s\S]*strategy_snapshot_hash varchar\(128\) \[not null\]/);
+  assert.match(schema, /Ref: backtest\.run_input_pins\.input_bundle_id > backtest\.input_bundles\.id/);
 });
 
 test('canonical DBML preserves content hashes while exempting zero-object manifests', () => {

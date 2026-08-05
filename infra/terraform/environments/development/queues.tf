@@ -8,6 +8,59 @@ resource "aws_sqs_queue" "backtest_dlq" {
   tags = { Lane = each.key, Role = "dead-letter" }
 }
 
+resource "aws_sqs_queue" "backtest_request_dlq" {
+  for_each = local.backtest_request_lanes
+
+  name                      = "${local.name_prefix}-backtest-${each.key}-request-dlq"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+
+  tags = { Lane = each.key, Role = "request-dead-letter" }
+}
+
+resource "aws_sqs_queue" "backtest_request" {
+  for_each = local.backtest_request_lanes
+
+  name                       = "${local.name_prefix}-backtest-${each.key}-request"
+  visibility_timeout_seconds = var.queue_visibility_timeout_seconds
+  message_retention_seconds  = 345600
+  receive_wait_time_seconds  = 20
+  sqs_managed_sse_enabled    = true
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.backtest_request_dlq[each.key].arn
+    maxReceiveCount     = var.queue_max_receive_count
+  })
+
+  tags = { Lane = each.key, Role = "request-intake" }
+}
+
+resource "aws_sqs_queue_redrive_allow_policy" "backtest_request_dlq" {
+  for_each = local.backtest_request_lanes
+
+  queue_url = aws_sqs_queue.backtest_request_dlq[each.key].id
+  redrive_allow_policy = jsonencode({
+    redrivePermission = "byQueue"
+    sourceQueueArns   = [aws_sqs_queue.backtest_request[each.key].arn]
+  })
+}
+
+resource "aws_ssm_parameter" "backtest_request_queue_url" {
+  for_each = local.backtest_request_lanes
+
+  name  = "${local.parameter_path}/queues/backtest-${each.key}-request/url"
+  type  = "String"
+  value = aws_sqs_queue.backtest_request[each.key].url
+}
+
+resource "aws_ssm_parameter" "backtest_request_dlq_url" {
+  for_each = local.backtest_request_lanes
+
+  name  = "${local.parameter_path}/queues/backtest-${each.key}-request/dlq-url"
+  type  = "String"
+  value = aws_sqs_queue.backtest_request_dlq[each.key].url
+}
+
 resource "aws_sqs_queue" "backtest" {
   for_each = local.backtest_lanes
 

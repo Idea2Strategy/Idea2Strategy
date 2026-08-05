@@ -31,7 +31,7 @@ foreach ($needle in @(
     '[string]$PipelineImageDigest',
     '[string]$ReviewedDryRunSourceDigest',
     '[string]$ReviewedDryRunReceiptVersionId',
-    '41ea8bc1e5939aa9841100d2b06c5e9b34e0494e',
+    'ac3cecf5fcd1918d6902fbbaa38ce347af56c23b',
     'ExpectedObjectCount = 768',
     'ExpectedManifestCount = 96',
     'architecture,Values=arm64',
@@ -39,13 +39,14 @@ foreach ($needle in @(
     'terraform output -json',
     'market_loader_secret_arn',
     'runtime_database_secrets.pipeline',
-    'ecr_repository_urls',
+    'describe-repositories',
     'GetSecretValue',
     'ecr:GetAuthorizationToken',
     's3:GetObjectVersion',
     'PutRolePolicy',
     'DeleteRolePolicy',
     'AWS-RunShellScript',
+    'Sanitized bootstrap diagnostics:',
     'HttpTokens=required',
     'sha256sum --check',
     'market-catalog-bootstrap/',
@@ -56,9 +57,15 @@ foreach ($needle in @(
     Assert-Contains $orchestrator $needle "Market catalog orchestrator safety boundary is missing: $needle"
 }
 
+if ($orchestrator.Contains('Get-TerraformOutput "ecr_repository_urls"')) {
+    throw "Artifact-foundation ECR must be discovered from the authenticated AWS account, not the runtime Terraform state."
+}
+
 foreach ($needle in @(
     'set +x',
     'trap cleanup EXIT',
+    'sed -E',
+    'command-error.log',
     'LEGACY_DATABASE_URL',
     'DATABASE_URL',
     '--env-file',
@@ -105,7 +112,7 @@ foreach ($needle in @(
 
 [pscustomobject]@{
     status = "passed"
-    pipeline_source_commit = "41ea8bc1e5939aa9841100d2b06c5e9b34e0494e"
+    pipeline_source_commit = "ac3cecf5fcd1918d6902fbbaa38ce347af56c23b"
     expected_objects = 768
     expected_manifests = 96
     secret_values_in_argv = $false

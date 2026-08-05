@@ -62,7 +62,8 @@ locals {
     "trading-worker"
   ])
 
-  backtest_lanes = local.enable_service_stack ? toset(["basic", "custom", "competition"]) : toset([])
+  backtest_lanes         = local.enable_service_stack ? toset(["basic", "custom", "competition"]) : toset([])
+  backtest_request_lanes = local.backtest_lanes
 
   parameter_path = "/${var.project_name}/${var.environment}"
 

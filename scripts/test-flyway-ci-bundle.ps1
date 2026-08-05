@@ -32,11 +32,16 @@ function Get-GitlinkRevision([string]$Path) {
 
 $backendGitlink = Get-GitlinkRevision 'backend'
 $tradingGitlink = Get-GitlinkRevision 'trading-engine'
+$dataPipelineGitlink = Get-GitlinkRevision 'data-pipeline'
+$refreshHint = 'Run scripts/refresh-flyway-ci-bundle.ps1 in the change that moves the gitlink and commit the refreshed db/flyway-ci-bundle with it.'
 if ($metadata.backend_gitlink -cne $backendGitlink) {
-    throw "Pinned bundle backend revision does not match the root gitlink: $($metadata.backend_gitlink) != $backendGitlink"
+    throw "Pinned bundle backend revision does not match the root gitlink: $($metadata.backend_gitlink) != $backendGitlink. $refreshHint"
 }
 if ($metadata.trading_gitlink -cne $tradingGitlink) {
-    throw "Pinned bundle trading revision does not match the root gitlink: $($metadata.trading_gitlink) != $tradingGitlink"
+    throw "Pinned bundle trading revision does not match the root gitlink: $($metadata.trading_gitlink) != $tradingGitlink. $refreshHint"
+}
+if ($metadata.data_pipeline_gitlink -cne $dataPipelineGitlink) {
+    throw "Pinned bundle data pipeline revision does not match the root gitlink: $($metadata.data_pipeline_gitlink) != $dataPipelineGitlink. $refreshHint"
 }
 
 $manifestLines = @(Get-Content -LiteralPath $manifestPath)
@@ -47,6 +52,10 @@ if ($manifestLines.Count -lt 2 -or $manifestLines[0] -cne 'idea2strategy-flyway-
 $runtimeGrantEntries = @($manifestLines | Where-Object { $_ -match '^R__database_runtime_grants\.sql\t[0-9a-f]{64}$' })
 if ($runtimeGrantEntries.Count -ne 1) {
     throw 'The pinned Flyway manifest must contain exactly one generated runtime grant migration.'
+}
+$pipelineUpgradeEntries = @($manifestLines | Where-Object { $_ -match '^V20260805010000__pipeline_upgrade_legacy_market_schema\.sql\t[0-9a-f]{64}$' })
+if ($pipelineUpgradeEntries.Count -ne 1) {
+    throw 'The pinned Flyway manifest must contain the legacy market schema upgrade from the pinned data pipeline.'
 }
 $runtimeGrantPath = Join-Path $bundle 'R__database_runtime_grants.sql'
 $runtimeGrantSql = Get-Content -LiteralPath $runtimeGrantPath -Raw
@@ -229,8 +238,8 @@ try {
     $tableCount = (docker exec -e "PGPASSWORD=$password" $container `
         psql -U $user -d $database -Atc `
         "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ($schemaList) AND table_type = 'BASE TABLE';").Trim()
-    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '177') {
-        throw "Expected 177 application tables after Flyway; found '$tableCount'."
+    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '178') {
+        throw "Expected 178 application tables after Flyway; found '$tableCount'."
     }
 
     docker cp $fixture "${container}:/tmp/partial_fill_allocation_contract.sql"

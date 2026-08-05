@@ -18,7 +18,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$pipelineSourceCommit = "41ea8bc1e5939aa9841100d2b06c5e9b34e0494e"
+$pipelineSourceCommit = "ac3cecf5fcd1918d6902fbbaa38ce347af56c23b"
 $inlinePolicyName = "idea2strategy-development-market-catalog-bootstrap-transient"
 $purposeTag = "idea2strategy-development-market-catalog-bootstrap"
 $awsCliImage = "amazon/aws-cli@sha256:310813a7eae8fd88da1cc9c37970e3500b0ff3984479e1012f0a6fd44e453f63"
@@ -93,8 +93,6 @@ $script:terraformPath = Join-Path $root $TerraformRoot
 $target = Get-TerraformOutput "database_bootstrap"
 $marketLoaderSecretArn = [string](Get-TerraformOutput "market_loader_secret_arn")
 $marketDataBucket = [string](Get-TerraformOutput "market_data_bucket")
-$repositoryUrls = Get-TerraformOutput "ecr_repository_urls"
-$pipelineRepository = [string]$repositoryUrls."pipeline-worker"
 $pipelineSecretArn = [string]$target.runtime_database_secrets.pipeline
 
 $caller = Invoke-AwsJson @("sts", "get-caller-identity")
@@ -102,6 +100,15 @@ if ([string]::IsNullOrWhiteSpace($ExpectedAwsAccountId) -or $ExpectedAwsAccountI
     throw "ExpectedAwsAccountId must be the reviewed 12-digit Development account."
 }
 if ([string]$caller.Account -cne $ExpectedAwsAccountId) { throw "AWS account mismatch." }
+
+# ECR is owned by the isolated artifact-foundation state, not the Development
+# runtime state. Discover the one fixed repository from the already verified
+# account instead of coupling this one-shot operation to another Terraform state.
+$repositoryName = "idea2strategy-dev/pipeline-worker"
+$repository = Invoke-AwsJson @("ecr", "describe-repositories", "--repository-names", $repositoryName)
+if (@($repository.repositories).Count -ne 1) { throw "The pipeline-worker ECR repository was not found." }
+$pipelineRepository = [string]$repository.repositories[0].repositoryUri
+$repositoryArn = [string]$repository.repositories[0].repositoryArn
 
 foreach ($secretArn in @($marketLoaderSecretArn, $pipelineSecretArn)) {
     if ($secretArn -notmatch '^arn:aws:secretsmanager:') { throw "Terraform returned a malformed database secret ARN." }
@@ -111,9 +118,9 @@ foreach ($secretArn in @($marketLoaderSecretArn, $pipelineSecretArn)) {
 }
 if ($marketDataBucket -notmatch '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') { throw "Terraform returned a malformed market-data bucket." }
 if ($pipelineRepository -notmatch '^\d{12}\.dkr\.ecr\.ap-northeast-2\.amazonaws\.com/(.+)$') {
-    throw "Terraform returned a malformed pipeline-worker ECR repository URL."
+    throw "AWS returned a malformed pipeline-worker ECR repository URL."
 }
-$repositoryName = $Matches[1]
+if ($Matches[1] -cne $repositoryName) { throw "AWS returned an unexpected pipeline-worker ECR repository." }
 $pipelineImage = "$pipelineRepository@$PipelineImageDigest"
 
 if (-not $pipelineRepository.StartsWith("$ExpectedAwsAccountId.dkr.ecr.")) { throw "ECR repository belongs to a different AWS account." }
@@ -199,7 +206,6 @@ try {
     $scriptUpload = Invoke-AwsJson @("s3api", "put-object", "--bucket", $marketDataBucket, "--key", $hostScriptKey, "--body", $hostScriptPath)
     if ([string]::IsNullOrWhiteSpace([string]$scriptUpload.VersionId)) { throw "Host script must be stored as a versioned S3 object." }
 
-    $repositoryArn = "arn:aws:ecr:${Region}:${ExpectedAwsAccountId}:repository/$repositoryName"
     $policyDocument = [ordered]@{
         Version = "2012-10-17"
         Statement = @(
@@ -304,7 +310,19 @@ touch /var/lib/idea2strategy-market-catalog-bootstrap-ready
     $sent = Invoke-AwsJson @("ssm", "send-command", "--instance-ids", $instanceId, "--document-name", "AWS-RunShellScript", "--comment", "Idea2Strategy exact market catalog $Phase $head", "--parameters", "file://$parametersPath", "--timeout-seconds", "3600")
     $commandId = [string]$sent.Command.CommandId
     & $script:aws ssm wait command-executed --command-id $commandId --instance-id $instanceId --profile $AwsProfile --region $Region
-    if ($LASTEXITCODE -ne 0) { throw "Market catalog SSM command did not succeed; inspect protected SSM diagnostics." }
+    if ($LASTEXITCODE -ne 0) {
+        try {
+            $failedInvocation = Invoke-AwsJson @("ssm", "get-command-invocation", "--command-id", $commandId, "--instance-id", $instanceId)
+            $diagnostics = ([string]$failedInvocation.StandardErrorContent).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($diagnostics)) {
+                Write-Warning "Sanitized bootstrap diagnostics:`n$diagnostics"
+            }
+        }
+        catch {
+            Write-Warning "The failed SSM invocation diagnostics could not be retrieved before cleanup."
+        }
+        throw "Market catalog SSM command did not succeed."
+    }
     $invocation = Invoke-AwsJson @("ssm", "get-command-invocation", "--command-id", $commandId, "--instance-id", $instanceId)
     if ($invocation.Status -ne "Success") { throw "Market catalog SSM command failed with status '$($invocation.Status)'." }
     $receipt = [string]$invocation.StandardOutputContent | ConvertFrom-Json

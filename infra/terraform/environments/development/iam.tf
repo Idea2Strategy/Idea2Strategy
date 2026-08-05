@@ -317,7 +317,7 @@ data "aws_iam_policy_document" "service_queue_publish" {
     effect  = "Allow"
     actions = ["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"]
     resources = concat(
-      values(aws_sqs_queue.backtest)[*].arn,
+      values(aws_sqs_queue.backtest_request)[*].arn,
       [
         aws_sqs_queue.corporate_action_approval[0].arn,
         aws_sqs_queue.room_ledger_opened[0].arn,
@@ -375,14 +375,21 @@ data "aws_iam_policy_document" "batch_queue_consume" {
       "sqs:GetQueueAttributes",
       "sqs:GetQueueUrl"
     ]
-    resources = values(aws_sqs_queue.backtest)[*].arn
+    resources = concat(
+      values(aws_sqs_queue.backtest)[*].arn,
+      values(aws_sqs_queue.backtest_request)[*].arn
+    )
   }
 
   statement {
-    sid       = "PublishPoisonMessages"
-    effect    = "Allow"
-    actions   = ["sqs:SendMessage"]
-    resources = values(aws_sqs_queue.backtest_dlq)[*].arn
+    sid     = "PublishPoisonMessages"
+    effect  = "Allow"
+    actions = ["sqs:SendMessage"]
+    resources = concat(
+      values(aws_sqs_queue.backtest_dlq)[*].arn,
+      values(aws_sqs_queue.backtest_request_dlq)[*].arn,
+      values(aws_sqs_queue.backtest)[*].arn
+    )
   }
 
   statement {

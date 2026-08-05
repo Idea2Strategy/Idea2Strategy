@@ -100,12 +100,18 @@ cat >>/etc/idea2strategy/runtime.env <<EOF
 BACKTEST_BASIC_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/url')
 BACKTEST_BASIC_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/dlq-url')
 BACKTEST_BASIC_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/basic/max-concurrency')
+BACKTEST_BASIC_REQUEST_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic-request/url')
+BACKTEST_BASIC_REQUEST_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-basic-request/dlq-url')
 BACKTEST_CUSTOM_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-custom/url')
 BACKTEST_CUSTOM_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-custom/dlq-url')
 BACKTEST_CUSTOM_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/custom/max-concurrency')
 BACKTEST_COMPETITION_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-competition/url')
 BACKTEST_COMPETITION_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-competition/dlq-url')
 BACKTEST_COMPETITION_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/competition/max-concurrency')
+BACKTEST_CUSTOM_REQUEST_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-custom-request/url')
+BACKTEST_CUSTOM_REQUEST_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-custom-request/dlq-url')
+BACKTEST_COMPETITION_REQUEST_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-competition-request/url')
+BACKTEST_COMPETITION_REQUEST_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-competition-request/dlq-url')
 BACKTEST_MAX_TOTAL_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/max-total-concurrency')
 EOF
 %{ endif ~}
@@ -329,9 +335,9 @@ admin_mcp_image="$(image_value admin-mcp)"
 backtest_api_image="$(image_value backtest-api)"
 
 cat >>"$runtime_secret_env" <<EOF
-BACKTEST_BASIC_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/url')
-BACKTEST_CUSTOM_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-custom/url')
-BACKTEST_COMPETITION_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-competition/url')
+BACKTEST_BASIC_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic-request/url')
+BACKTEST_CUSTOM_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-custom-request/url')
+BACKTEST_COMPETITION_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-competition-request/url')
 CORPORATE_ACTION_APPROVAL_QUEUE_URL=$(ssm_value '${parameter_path}/queues/corporate-action-approval/url')
 ROOM_LEDGER_OPENED_QUEUE_URL=$(ssm_value '${parameter_path}/queues/room-ledger-opened/url')
 ROOM_LEDGER_REJECTED_QUEUE_URL=$(ssm_value '${parameter_path}/queues/room-ledger-open-rejected/url')
@@ -433,6 +439,8 @@ instance_id="$(curl --fail --silent --show-error -X PUT -H 'X-aws-ec2-metadata-t
 cat >>"$runtime_secret_env" <<EOF
 BACKTEST_JOB_HANDLER=backtest_engine.production:orchestrator_job_handler
 BACKTEST_EXECUTION_KEY_STORE=backtest_engine.production:postgres_execution_key_store
+BACKTEST_REQUEST_HANDLER=backtest_engine.production:backtest_request_handler
+BACKTEST_REQUEST_RECEIPT_STORE=backtest_engine.production:postgres_request_receipt_store
 BACKTEST_WORKER_ID=$instance_id
 BACKTEST_BASIC_MAX_CONCURRENCY=2
 BACKTEST_CUSTOM_MAX_CONCURRENCY=1

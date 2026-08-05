@@ -3674,6 +3674,19 @@ Table backtest.input_bundles {
   }
 }
 
+Table backtest.run_input_pins {
+  run_id uuid [pk]
+  input_bundle_id uuid [not null, unique]
+  input_bundle_fingerprint varchar(128) [not null]
+  input_contract_version varchar(80) [not null]
+  compiled_plan_checksum varchar(128) [not null]
+  strategy_snapshot_hash varchar(128) [not null]
+  execution_policy_version varchar(80) [not null]
+  pinned_at timestamptz [not null]
+
+  Note: 'Write-once acceptance evidence. The fingerprint binds the complete lane-versioned execution input and is distinct from the bot launch configuration_hash. The Backend inserts this row, its input bundle, and all dataset/feature pins atomically with the Run and Outbox event; workers only verify and reuse it.'
+}
+
 Table backtest.monthly_judgment_summaries {
   id uuid [pk, default: `gen_random_uuid()`]
   run_id uuid [not null]
@@ -5191,6 +5204,9 @@ Ref: backtest.runs.fee_policy_id > trading.fee_policy_versions.id
 Ref: backtest.run_attempts.run_id > backtest.runs.id
 Ref: backtest.run_attempts.previous_attempt_id > backtest.run_attempts.id
 Ref: backtest.input_bundles.run_id > backtest.runs.id
+Ref: backtest.run_input_pins.run_id > backtest.runs.id
+Ref: backtest.run_input_pins.input_bundle_id > backtest.input_bundles.id
+Ref: backtest.run_input_pins.execution_policy_version > backtest.execution_policy_versions.version
 Ref: backtest.input_datasets.input_bundle_id > backtest.input_bundles.id
 Ref: backtest.input_datasets.dataset_manifest_id > market_data.dataset_manifests.id
 Ref: backtest.input_feature_materializations.input_bundle_id > backtest.input_bundles.id

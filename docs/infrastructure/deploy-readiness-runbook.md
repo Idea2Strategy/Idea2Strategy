@@ -284,7 +284,7 @@ write only the five runtime secret versions, and launches one encrypted
 `t3.small` with no inbound rules or SSH key. The x86 instance is intentional:
 the pinned reviewed Flyway image is amd64-only; all application runtimes remain
 ARM64. Systems Manager runs Flyway `migrate` once, then `validate`/`info`, checks
-177 application tables, and applies the separately approved, SHA-pinned policy
+178 application tables, and applies the separately approved, SHA-pinned policy
 seed artifact. The seed is mandatory and may insert only into
 `trading.fee_policy_versions`,
 `trading.buying_power_buffer_policy_versions`, and
