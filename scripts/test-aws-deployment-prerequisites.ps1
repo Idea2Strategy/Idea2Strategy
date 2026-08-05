@@ -21,6 +21,16 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $terraformPath = Join-Path $root $TerraformRoot
 
+function Get-RelativeDisplayPath([string]$BasePath, [string]$Path) {
+    $resolvedBase = [IO.Path]::GetFullPath($BasePath).TrimEnd([char[]]@('\', '/'))
+    $resolvedPath = [IO.Path]::GetFullPath($Path)
+    $prefix = $resolvedBase + [IO.Path]::DirectorySeparatorChar
+    if ($resolvedPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        return $resolvedPath.Substring($prefix.Length)
+    }
+    return $resolvedPath
+}
+
 if (-not (Test-Path -LiteralPath $terraformPath -PathType Container)) {
     throw "Terraform root does not exist: $TerraformRoot"
 }
@@ -89,7 +99,7 @@ $inputPaths = @(
 )
 $missingInputs = @($inputPaths | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
 if ($RequireInputs -and $missingInputs.Count -gt 0) {
-    $relativeMissing = $missingInputs | ForEach-Object { [IO.Path]::GetRelativePath($root, $_) }
+    $relativeMissing = $missingInputs | ForEach-Object { Get-RelativeDisplayPath $root $_ }
     throw "Ignored deployment inputs are missing: $($relativeMissing -join ', ')"
 }
 
