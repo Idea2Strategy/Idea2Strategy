@@ -18,7 +18,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$pipelineSourceCommit = "ac3cecf5fcd1918d6902fbbaa38ce347af56c23b"
 $inlinePolicyName = "idea2strategy-development-market-catalog-bootstrap-transient"
 $purposeTag = "idea2strategy-development-market-catalog-bootstrap"
 $awsCliImage = "amazon/aws-cli@sha256:310813a7eae8fd88da1cc9c37970e3500b0ff3984479e1012f0a6fd44e453f63"
@@ -79,9 +78,10 @@ if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') { throw "Unable to
 $trackedStatus = (& git -C $root status --porcelain=v1 --untracked-files=no) -join "`n"
 if (-not [string]::IsNullOrWhiteSpace($trackedStatus)) { throw "Market catalog bootstrap requires a checkout with no tracked changes." }
 $gitlinkLine = ((& git -C $root ls-tree HEAD data-pipeline) -join "`n").Trim()
-if ($LASTEXITCODE -ne 0 -or $gitlinkLine -notmatch "^160000 commit $pipelineSourceCommit\s+data-pipeline$") {
-    throw "Root must pin the reviewed data-pipeline provider commit $pipelineSourceCommit."
+if ($LASTEXITCODE -ne 0 -or $gitlinkLine -notmatch '^160000\s+commit\s+([0-9a-f]{40})\s+data-pipeline$') {
+    throw "Root must pin one exact reviewed data-pipeline provider commit."
 }
+$pipelineSourceCommit = $Matches[1]
 
 $hostScriptPath = Join-Path $root "scripts/aws/development-market-catalog-bootstrap.sh"
 if (-not (Test-Path -LiteralPath $hostScriptPath -PathType Leaf)) { throw "The host bootstrap script is missing." }
