@@ -509,3 +509,15 @@ variable "operator_rbac_assignment_read_permission_id" {
   type        = string
   default     = ""
 }
+
+variable "operator_rbac_grant_permission_id" {
+  description = "UUID of the grant-command permission in the selected operator RBAC catalog."
+  type        = string
+  default     = ""
+}
+
+variable "operator_rbac_revoke_permission_id" {
+  description = "UUID of the revoke-command permission in the selected operator RBAC catalog."
+  type        = string
+  default     = ""
+}

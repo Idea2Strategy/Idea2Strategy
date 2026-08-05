@@ -214,7 +214,8 @@ foreach ($variable in @(
     "enable_operator_auth", "operator_auth_issuer", "operator_auth_jwk_set_uri", "operator_auth_audience",
     "operator_auth_allowed_acr_values", "operator_auth_allowed_amr_values",
     "operator_rbac_catalog_version", "operator_rbac_catalog_read_permission_id",
-    "operator_rbac_assignment_read_permission_id"
+    "operator_rbac_assignment_read_permission_id", "operator_rbac_grant_permission_id",
+    "operator_rbac_revoke_permission_id"
 )) {
     if (-not $variables.Contains(('variable "' + $variable + '"'))) {
         throw "Production operator trust input is missing: $variable"
@@ -226,10 +227,30 @@ foreach ($required in @(
     "OPERATOR_AUTH_ALLOWED_AMR_VALUES=", "OPERATOR_AUTH_CURRENT_HMAC_KEY_VERSION=1",
     "OPERATOR_AUTH_CURRENT_HMAC_KEY", 'OPERATOR_RBAC_READ_ENABLED=${enable_operator_auth}',
     "OPERATOR_RBAC_CATALOG_VERSION=", "OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID=",
-    "OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID="
+    "OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_RBAC_GUARD_CATALOG_VERSION=",
+    "IDEA2STRATEGY_OPERATOR_RBAC_GUARD_GRANT_PERMISSION_ID=",
+    "IDEA2STRATEGY_OPERATOR_RBAC_GUARD_REVOKE_PERMISSION_ID="
 )) {
     if (-not $userData.Contains($required)) {
         throw "Production operator trust runtime wiring is missing: $required"
+    }
+}
+foreach ($required in @(
+    'operator_rbac_grant_permission_id           = var.operator_rbac_grant_permission_id',
+    'operator_rbac_revoke_permission_id          = var.operator_rbac_revoke_permission_id'
+)) {
+    if (-not $compute.Contains($required)) {
+        throw "Operator mutation guard template input is missing: $required"
+    }
+}
+foreach ($required in @(
+    'var.operator_rbac_grant_permission_id',
+    'var.operator_rbac_revoke_permission_id',
+    'reviewed RBAC read/grant/revoke permission UUIDs'
+)) {
+    if (-not $runtime.Contains($required)) {
+        throw "Operator mutation guard release precondition is missing: $required"
     }
 }
 

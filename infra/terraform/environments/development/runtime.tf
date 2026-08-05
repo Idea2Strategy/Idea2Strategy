@@ -134,10 +134,12 @@ resource "terraform_data" "runtime_artifact_guard" {
           ) &&
           var.operator_rbac_catalog_version != "" &&
           can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_catalog_read_permission_id)) &&
-          can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_assignment_read_permission_id))
+          can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_assignment_read_permission_id)) &&
+          can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_grant_permission_id)) &&
+          can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_revoke_permission_id))
         )
       )
-      error_message = "Enabling operator authentication requires the exact OIDC issuer/JWKS/audience, a reviewed MFA assurance claim allow-list, and the reviewed RBAC catalog/read permission UUIDs."
+      error_message = "Enabling operator authentication requires the exact OIDC issuer/JWKS/audience, a reviewed MFA assurance claim allow-list, and the reviewed RBAC read/grant/revoke permission UUIDs."
     }
   }
 }

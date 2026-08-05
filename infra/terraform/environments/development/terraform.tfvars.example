@@ -77,6 +77,8 @@ operator_auth_allowed_mfa_claim_values   = []
 operator_rbac_catalog_version                 = ""
 operator_rbac_catalog_read_permission_id      = ""
 operator_rbac_assignment_read_permission_id   = ""
+operator_rbac_grant_permission_id             = ""
+operator_rbac_revoke_permission_id            = ""
 
 # Full phase also requires checksum- and S3-version-pinned runtime inputs.
 # backtest_policy_artifacts = {

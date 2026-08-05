@@ -51,6 +51,8 @@ resource "aws_instance" "service" {
     operator_rbac_catalog_version               = var.operator_rbac_catalog_version
     operator_rbac_catalog_read_permission_id    = var.operator_rbac_catalog_read_permission_id
     operator_rbac_assignment_read_permission_id = var.operator_rbac_assignment_read_permission_id
+    operator_rbac_grant_permission_id           = var.operator_rbac_grant_permission_id
+    operator_rbac_revoke_permission_id          = var.operator_rbac_revoke_permission_id
   }))
   user_data_replace_on_change = true
 
@@ -151,6 +153,8 @@ resource "aws_instance" "trading" {
     operator_rbac_catalog_version               = var.operator_rbac_catalog_version
     operator_rbac_catalog_read_permission_id    = var.operator_rbac_catalog_read_permission_id
     operator_rbac_assignment_read_permission_id = var.operator_rbac_assignment_read_permission_id
+    operator_rbac_grant_permission_id           = var.operator_rbac_grant_permission_id
+    operator_rbac_revoke_permission_id          = var.operator_rbac_revoke_permission_id
   }))
   user_data_replace_on_change = true
 
@@ -257,6 +261,8 @@ resource "aws_launch_template" "backtest" {
     operator_rbac_catalog_version               = var.operator_rbac_catalog_version
     operator_rbac_catalog_read_permission_id    = var.operator_rbac_catalog_read_permission_id
     operator_rbac_assignment_read_permission_id = var.operator_rbac_assignment_read_permission_id
+    operator_rbac_grant_permission_id           = var.operator_rbac_grant_permission_id
+    operator_rbac_revoke_permission_id          = var.operator_rbac_revoke_permission_id
   }))
 
   tag_specifications {
