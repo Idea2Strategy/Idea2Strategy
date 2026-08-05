@@ -96,6 +96,9 @@ foreach ($awsCliBoundary in @(
         throw "Pinned AWS CLI v2 ARM64 bootstrap is missing: $awsCliBoundary"
     }
 }
+if (-not $userData.Contains('install -d -m 0755 /var/lib/idea2strategy')) {
+    throw "Runtime artifact materialization requires its /var/lib/idea2strategy parent before mktemp creates atomic staging directories."
+}
 foreach ($required in @(
     'resource "aws_ecr_repository" "runtime"',
     'image_tag_mutability = "IMMUTABLE"',

@@ -29,6 +29,7 @@ rm -f /tmp/amazon-cloudwatch-agent.deb
 
 install -d -m 0755 /opt/idea2strategy
 install -d -m 0750 /etc/idea2strategy
+install -d -m 0755 /var/lib/idea2strategy
 
 cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'
 {
