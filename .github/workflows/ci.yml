@@ -46,6 +46,9 @@ jobs:
       - name: Validate manual Development release safety boundaries
         shell: pwsh
         run: ./scripts/test-development-release-workflow.ps1
+      - name: Validate Development transactional email infrastructure
+        shell: pwsh
+        run: ./scripts/test-development-email-delivery-infrastructure.ps1
       - name: Validate one-shot Development database bootstrap boundaries
         shell: pwsh
         run: ./scripts/test-development-database-bootstrap.ps1

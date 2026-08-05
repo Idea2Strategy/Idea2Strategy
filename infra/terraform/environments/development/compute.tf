@@ -72,8 +72,10 @@ resource "aws_instance" "service" {
 
   depends_on = [
     aws_route_table_association.public,
+    aws_iam_role_policy.service_email_delivery,
     aws_iam_role_policy_attachment.service_managed,
     aws_iam_role_policy.service_origin_tls,
+    aws_ssm_parameter.email_runtime,
     aws_ssm_parameter.runtime_image
   ]
 }

@@ -17,6 +17,8 @@ backtest_root_volume_gib = 40
 # A new Route 53 Hosted Zone is created while this is empty.
 # Do not change Gabia nameservers until existing DNS records are copied and reviewed.
 existing_hosted_zone_id = ""
+legacy_www_ipv4_address = "121.254.178.253"
+transactional_email_from_address = "no-reply@ideatostrategy.com"
 dns_delegation_verified = false
 
 # The public application uses the apex. The separate origin hostname is a

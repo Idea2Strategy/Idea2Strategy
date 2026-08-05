@@ -14,6 +14,10 @@ resource "aws_s3_bucket" "frontend" {
 
   bucket        = local.frontend_bucket_name
   force_destroy = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "frontend" {
@@ -24,6 +28,10 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_ownership_controls" "frontend" {
@@ -34,6 +42,10 @@ resource "aws_s3_bucket_ownership_controls" "frontend" {
   rule {
     object_ownership = "BucketOwnerEnforced"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "frontend" {
@@ -43,6 +55,10 @@ resource "aws_s3_bucket_versioning" "frontend" {
 
   versioning_configuration {
     status = "Enabled"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -56,6 +72,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
       sse_algorithm = "AES256"
     }
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
@@ -66,6 +86,10 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "aws_cloudfront_response_headers_policy" "security" {
@@ -90,6 +114,10 @@ resource "aws_cloudfront_function" "spa_rewrite" {
       return request;
     }
   JAVASCRIPT
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_acm_certificate" "frontend" {
@@ -101,6 +129,7 @@ resource "aws_acm_certificate" "frontend" {
 
   lifecycle {
     create_before_destroy = true
+    prevent_destroy       = true
   }
 }
 
@@ -120,6 +149,10 @@ resource "aws_route53_record" "frontend_certificate_validation" {
   type            = each.value.type
   ttl             = 60
   records         = [each.value.record]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_acm_certificate_validation" "frontend" {
@@ -128,6 +161,10 @@ resource "aws_acm_certificate_validation" "frontend" {
 
   certificate_arn         = aws_acm_certificate.frontend[0].arn
   validation_record_fqdns = [for record in aws_route53_record.frontend_certificate_validation : record.fqdn]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_route53_record" "cloudfront_origin" {
@@ -138,6 +175,10 @@ resource "aws_route53_record" "cloudfront_origin" {
   type    = "A"
   ttl     = 60
   records = [aws_eip.service[0].public_ip]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_cloudfront_distribution" "frontend" {
@@ -237,6 +278,10 @@ resource "aws_cloudfront_distribution" "frontend" {
     aws_s3_bucket_ownership_controls.frontend,
     aws_s3_bucket_server_side_encryption_configuration.frontend
   ]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_policy" "frontend_cloudfront" {
@@ -279,4 +324,8 @@ resource "aws_s3_bucket_policy" "frontend_cloudfront" {
   })
 
   depends_on = [aws_s3_bucket_public_access_block.frontend]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
