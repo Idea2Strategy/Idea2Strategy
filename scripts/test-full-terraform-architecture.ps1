@@ -43,6 +43,9 @@ if (($deployedVerifier | Select-String -Pattern 'Invoke-WebRequest[^\r\n]+-UseBa
 if (-not $deployedVerifier.Contains('& $terraform.Source "-chdir=$terraformDirectory" output -json')) {
     throw "The deployed verifier must pass Terraform's chdir option as one expanded native argument."
 }
+if (-not $deployedVerifier.Contains('CORE_RUNTIME_STABLE')) {
+    throw "Deployed verification must inspect Core container health and restart stability through SSM."
+}
 
 foreach ($forbidden in @(
     'resource "aws_nat_gateway"',
@@ -386,6 +389,42 @@ foreach ($required in @(
 )) {
     if (-not $all.Contains($required)) {
         throw "Backtest t4g.medium saturation monitoring is missing: $required"
+    }
+}
+foreach ($runtimeRegionBoundary in @(
+    'append_env_value "$runtime_secret_env" AWS_DEFAULT_REGION ''${aws_region}''',
+    'append_env_value "$backtest_secret_env" AWS_DEFAULT_REGION ''${aws_region}''',
+    'append_env_value "$batch_secret_env" AWS_DEFAULT_REGION ''${aws_region}'''
+)) {
+    if (-not $userData.Contains($runtimeRegionBoundary)) {
+        throw "Every Core runtime that can call an AWS SDK must receive AWS_DEFAULT_REGION: $runtimeRegionBoundary"
+    }
+}
+foreach ($pipelineBoundary in @(
+    '{ name = "AWS_DEFAULT_REGION", value = var.aws_region }',
+    '"s3:GetObjectVersion"',
+    '"s3:DeleteObjectVersion"',
+    'name = "PIPELINE_WORKER_FEATURE_OUTPUT"'
+)) {
+    if (-not $pipeline.Contains($pipelineBoundary)) {
+        throw "Pipeline production feature output wiring is incomplete: $pipelineBoundary"
+    }
+}
+if ($all -notmatch '(?s)data\s+"aws_iam_policy_document"\s+"service_queue_publish".*?aws_sqs_queue\.backtest\["basic"\]\.arn.*?aws_sqs_queue\.backtest_dlq\["basic"\]\.arn') {
+    throw "Core backtest-api must be allowed to publish accepted Basic jobs and poison intake only to the Basic execution queue and its DLQ."
+}
+foreach ($observerBoundary in @(
+    'RuntimeObserverHeartbeat',
+    'RuntimeUnhealthyContainerCount',
+    'RuntimeRestartDelta',
+    'idea2strategy-runtime-health.timer',
+    'resource "aws_cloudwatch_metric_alarm" "runtime_container_unhealthy"',
+    'resource "aws_cloudwatch_metric_alarm" "core_runtime_heartbeat_missing"',
+    'resource "aws_cloudwatch_metric_alarm" "core_status_check_failed"',
+    'resource "aws_cloudwatch_metric_alarm" "pipeline_dead_letter_visible"'
+)) {
+    if (-not ($all.Contains($observerBoundary) -or $userData.Contains($observerBoundary))) {
+        throw "Runtime crash-loop observability is incomplete: $observerBoundary"
     }
 }
 

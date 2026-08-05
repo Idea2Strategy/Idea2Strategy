@@ -76,7 +76,14 @@ resource "aws_iam_role" "pipeline_task" {
 data "aws_iam_policy_document" "pipeline_task" {
   count = local.enable_service_stack ? 1 : 0
   statement {
-    actions = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListBucket"]
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:PutObject",
+      "s3:DeleteObjectVersion",
+      "s3:AbortMultipartUpload",
+      "s3:ListBucket"
+    ]
     resources = [
       aws_s3_bucket.market_data.arn,
       "${aws_s3_bucket.market_data.arn}/*"
@@ -194,6 +201,7 @@ resource "aws_ecs_task_definition" "pipeline" {
       { name = "PIPELINE_WORKER_CATALOG_ROOT", value = "/var/lib/idea2strategy/pipeline/catalog-artifacts" },
       { name = "PIPELINE_WORKER_OBJECT_STORE_ROOT", value = "/var/lib/idea2strategy/pipeline/local-objects" },
       { name = "PIPELINE_WORKER_AWS_REGION", value = var.aws_region },
+      { name = "AWS_DEFAULT_REGION", value = var.aws_region },
       { name = "PIPELINE_WORKER_HEALTH_FILE", value = "/tmp/idea2strategy-ready.json" },
       { name = "PIPELINE_WORKER_HEALTH_HOST", value = "0.0.0.0" },
       { name = "PIPELINE_WORKER_HEALTH_PORT", value = "8080" },
@@ -206,6 +214,14 @@ resource "aws_ecs_task_definition" "pipeline" {
           object_bucket          = aws_s3_bucket.market_data.id
           object_prefix          = "market-data"
           staging_root           = "/var/lib/idea2strategy/pipeline/corporate-actions"
+        })
+      },
+      {
+        name = "PIPELINE_WORKER_FEATURE_OUTPUT"
+        value = jsonencode({
+          object_bucket = aws_s3_bucket.market_data.id
+          object_prefix = "feature-output"
+          staging_root  = "/var/lib/idea2strategy/pipeline/feature-output"
         })
       },
       { name = "MARKET_DATA_BUCKET", value = aws_s3_bucket.market_data.id },

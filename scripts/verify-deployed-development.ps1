@@ -70,6 +70,57 @@ if (@($managed.InstanceInformationList).Count -ne 1 -or $managed.InstanceInforma
     throw "Core instance is not online in Systems Manager."
 }
 
+$runtimeCheckScript = @'
+set -eu
+cd /opt/idea2strategy
+restart_total=0
+for service in backend-api backend-worker backtest-api; do
+  container="$(docker compose --project-name idea2strategy ps -q "$service")"
+  test -n "$container"
+  test "$(docker inspect --format '{{.State.Running}}' "$container")" = true
+  test "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy
+  restart_total=$((restart_total + $(docker inspect --format '{{.RestartCount}}' "$container")))
+done
+sleep 20
+stable_total=0
+for service in backend-api backend-worker backtest-api; do
+  container="$(docker compose --project-name idea2strategy ps -q "$service")"
+  test -n "$container"
+  test "$(docker inspect --format '{{.State.Running}}' "$container")" = true
+  test "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy
+  stable_total=$((stable_total + $(docker inspect --format '{{.RestartCount}}' "$container")))
+done
+test "$stable_total" -eq "$restart_total"
+echo CORE_RUNTIME_STABLE
+'@
+$runtimeParameters = @{ commands = @($runtimeCheckScript) } | ConvertTo-Json -Compress
+$runtimeCommand = Invoke-AwsJson -Arguments @(
+    'ssm', 'send-command',
+    '--instance-ids', $serviceInstanceId,
+    '--document-name', 'AWS-RunShellScript',
+    '--parameters', $runtimeParameters
+)
+$runtimeCommandId = [string]$runtimeCommand.Command.CommandId
+$runtimeInvocation = $null
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    Start-Sleep -Seconds 2
+    try {
+        $runtimeInvocation = Invoke-AwsJson -Arguments @(
+            'ssm', 'get-command-invocation',
+            '--command-id', $runtimeCommandId,
+            '--instance-id', $serviceInstanceId
+        )
+    }
+    catch {
+        continue
+    }
+    if ([string]$runtimeInvocation.Status -in @('Success', 'Failed', 'Cancelled', 'TimedOut')) { break }
+}
+if ($null -eq $runtimeInvocation -or [string]$runtimeInvocation.Status -cne 'Success' -or
+    -not ([string]$runtimeInvocation.StandardOutputContent).Contains('CORE_RUNTIME_STABLE')) {
+    throw "Core containers are unhealthy or restarted during the stability window."
+}
+
 $rdsEndpoint = [string]$outputs.rds_endpoint.value
 $databases = Invoke-AwsJson -Arguments @('rds', 'describe-db-instances')
 $database = @($databases.DBInstances | Where-Object { $_.Endpoint.Address -ceq $rdsEndpoint })
@@ -109,6 +160,7 @@ foreach ($requiredLog in @('/idea2strategy/dev/core', '/idea2strategy/dev/tradin
     cloudfront_https = 'passed'
     frontend_s3 = 'passed'
     ssm = 'passed'
+    core_runtime = 'passed'
     rds = 'passed'
     valkey = 'passed'
     queues = 'passed'
