@@ -424,6 +424,11 @@ foreach ($observerBoundary in @(
     'RuntimeObserverHeartbeat',
     'RuntimeUnhealthyContainerCount',
     'RuntimeRestartDelta',
+    'container_is_runtime_ready()',
+    'if ! container_is_runtime_ready "$running" "$status" "$restarting" "$health"; then',
+    'declare -A previous_container previous_restarts',
+    'runtime_restart_delta()',
+    'service_restart_delta="$(runtime_restart_delta "$container" "$restarts" "$previous_id" "$previous_count")"',
     'idea2strategy-runtime-health.timer',
     'resource "aws_cloudwatch_metric_alarm" "runtime_container_unhealthy"',
     'resource "aws_cloudwatch_metric_alarm" "core_runtime_heartbeat_missing"',
@@ -433,6 +438,107 @@ foreach ($observerBoundary in @(
     if (-not ($all.Contains($observerBoundary) -or $userData.Contains($observerBoundary))) {
         throw "Runtime crash-loop observability is incomplete: $observerBoundary"
     }
+}
+
+if (-not $deployedVerifier.Contains('container_is_runtime_ready()') -or
+    -not $deployedVerifier.Contains('if ! container_is_runtime_ready "$running" "$status" "$restarting" "$health"; then') -or
+    -not $deployedVerifier.Contains('declare -A initial_container initial_restarts') -or
+    -not $deployedVerifier.Contains('test "$container" = "${initial_container[$service]}"') -or
+    -not $deployedVerifier.Contains('test "$restarts" -eq "${initial_restarts[$service]}"')) {
+    throw "The deployed verifier must accept a running worker without a Docker healthcheck while still enforcing declared healthchecks."
+}
+if ($deployedVerifier.Contains("docker inspect --format '{{.State.Health.Status}}'")) {
+    throw "The deployed verifier must not dereference a missing Docker Health object."
+}
+
+$bashExecutable = $null
+$gitBash = 'C:\Program Files\Git\bin\bash.exe'
+if (Test-Path -LiteralPath $gitBash -PathType Leaf) {
+    $bashExecutable = $gitBash
+} else {
+    $bashCommand = Get-Command bash -ErrorAction SilentlyContinue
+    if ($null -ne $bashCommand) { $bashExecutable = $bashCommand.Source }
+}
+if ([string]::IsNullOrWhiteSpace($bashExecutable)) {
+    throw "Bash is required to exercise the runtime health classification used on EC2."
+}
+
+function Invoke-BashProbe([string]$Script, [switch]$SyntaxOnly) {
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script))
+    $mode = if ($SyntaxOnly) { '-n' } else { '' }
+    & $bashExecutable -c "printf '%s' '$encoded' | base64 --decode | bash $mode"
+    return $LASTEXITCODE
+}
+
+$observerScriptMatch = [regex]::Match(
+    $userData,
+    "(?ms)cat >/usr/local/sbin/idea2strategy-runtime-health <<'SCRIPT'\r?\n(?<script>.*?)\r?\nSCRIPT"
+)
+if (-not $observerScriptMatch.Success) {
+    throw "Unable to extract the EC2 runtime observer for Bash syntax validation."
+}
+$observerScript = $observerScriptMatch.Groups['script'].Value `
+    -replace '(?m)^%\{.*?\}\r?\n', '' `
+    -replace '\$\$\{', '${'
+
+$verifierScriptMatch = [regex]::Match(
+    $deployedVerifier,
+    "(?ms)\`$runtimeCheckScript = @'\r?\n(?<script>.*?)\r?\n'@"
+)
+if (-not $verifierScriptMatch.Success) {
+    throw "Unable to extract the deployed runtime verifier for Bash syntax validation."
+}
+
+foreach ($script in @($observerScript, $verifierScriptMatch.Groups['script'].Value)) {
+    $probeExitCode = Invoke-BashProbe -Script $script -SyntaxOnly
+    if ($probeExitCode -ne 0) {
+        throw "Runtime health Bash syntax validation failed with exit code $probeExitCode."
+    }
+}
+
+foreach ($source in @($userData, $deployedVerifier)) {
+    $matches = [regex]::Matches($source, '(?ms)^container_is_runtime_ready\(\) \{.*?^\}')
+    if ($matches.Count -ne 1) {
+        throw "Expected exactly one runtime health classification function in each runtime script."
+    }
+    $probe = $matches[0].Value + @'
+
+set -eu
+container_is_runtime_ready true running false missing
+container_is_runtime_ready true running false healthy
+if container_is_runtime_ready true running false starting; then exit 11; fi
+if container_is_runtime_ready true running false unhealthy; then exit 12; fi
+if container_is_runtime_ready false exited false missing; then exit 13; fi
+if container_is_runtime_ready true restarting true missing; then exit 14; fi
+if container_is_runtime_ready true running true missing; then exit 15; fi
+'@
+    $probeExitCode = Invoke-BashProbe -Script $probe
+    if ($probeExitCode -ne 0) {
+        throw "Runtime health classification truth table failed with exit code $probeExitCode."
+    }
+}
+
+$restartDeltaMatches = [regex]::Matches($userData, '(?ms)^runtime_restart_delta\(\) \{.*?^\}')
+if ($restartDeltaMatches.Count -ne 1) {
+    throw "Expected exactly one per-service restart delta function in the EC2 observer."
+}
+$restartProbe = ($restartDeltaMatches[0].Value -replace '\$\$\{', '${') + @'
+
+set -eu
+test "$(runtime_restart_delta current 0 '' 0)" -eq 0
+test "$(runtime_restart_delta current 0 missing 0)" -eq 0
+test "$(runtime_restart_delta same 3 same 1)" -eq 2
+test "$(runtime_restart_delta same 1 same 4)" -eq 1
+test "$(runtime_restart_delta replacement 0 old 5)" -eq 1
+test "$(runtime_restart_delta replacement 2 old 5)" -eq 3
+'@
+$probeExitCode = Invoke-BashProbe -Script $restartProbe
+if ($probeExitCode -ne 0) {
+    throw "Per-service restart delta truth table failed with exit code $probeExitCode."
+}
+
+if ($deployedVerifier.Contains('test "$stable_total" -eq "$restart_total"')) {
+    throw "The deployed verifier must compare container identity and restart counts per service, not only an aggregate total."
 }
 
 foreach ($required in @(

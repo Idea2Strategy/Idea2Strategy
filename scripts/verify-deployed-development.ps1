@@ -73,24 +73,46 @@ if (@($managed.InstanceInformationList).Count -ne 1 -or $managed.InstanceInforma
 $runtimeCheckScript = @'
 set -eu
 cd /opt/idea2strategy
-restart_total=0
+container_is_runtime_ready() {
+  local running="$1"
+  local status="$2"
+  local restarting="$3"
+  local health="$4"
+  test "$running" = true || return 1
+  test "$status" = running || return 1
+  test "$restarting" = false || return 1
+  test "$health" = missing || test "$health" = healthy
+}
+declare -A initial_container initial_restarts
 for service in backend-api backend-worker backtest-api; do
   container="$(docker compose --project-name idea2strategy ps -q "$service")"
   test -n "$container"
-  test "$(docker inspect --format '{{.State.Running}}' "$container")" = true
-  test "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy
-  restart_total=$((restart_total + $(docker inspect --format '{{.RestartCount}}' "$container")))
+  running="$(docker inspect --format '{{.State.Running}}' "$container")"
+  status="$(docker inspect --format '{{.State.Status}}' "$container")"
+  restarting="$(docker inspect --format '{{.State.Restarting}}' "$container")"
+  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container")"
+  if ! container_is_runtime_ready "$running" "$status" "$restarting" "$health"; then
+    exit 1
+  fi
+  restarts="$(docker inspect --format '{{.RestartCount}}' "$container")"
+  initial_container["$service"]="$container"
+  initial_restarts["$service"]="$restarts"
 done
 sleep 20
-stable_total=0
 for service in backend-api backend-worker backtest-api; do
   container="$(docker compose --project-name idea2strategy ps -q "$service")"
   test -n "$container"
-  test "$(docker inspect --format '{{.State.Running}}' "$container")" = true
-  test "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy
-  stable_total=$((stable_total + $(docker inspect --format '{{.RestartCount}}' "$container")))
+  test "$container" = "${initial_container[$service]}"
+  running="$(docker inspect --format '{{.State.Running}}' "$container")"
+  status="$(docker inspect --format '{{.State.Status}}' "$container")"
+  restarting="$(docker inspect --format '{{.State.Restarting}}' "$container")"
+  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container")"
+  if ! container_is_runtime_ready "$running" "$status" "$restarting" "$health"; then
+    exit 1
+  fi
+  restarts="$(docker inspect --format '{{.RestartCount}}' "$container")"
+  test "$restarts" -eq "${initial_restarts[$service]}"
 done
-test "$stable_total" -eq "$restart_total"
 echo CORE_RUNTIME_STABLE
 '@
 $runtimeParameters = @{ commands = @($runtimeCheckScript) } | ConvertTo-Json -Compress

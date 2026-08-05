@@ -731,36 +731,77 @@ expected_services=(
 %{ endif ~}
 )
 
+container_is_runtime_ready() {
+  local running="$1"
+  local status="$2"
+  local restarting="$3"
+  local health="$4"
+  test "$running" = true || return 1
+  test "$status" = running || return 1
+  test "$restarting" = false || return 1
+  test "$health" = missing || test "$health" = healthy
+}
+
+runtime_restart_delta() {
+  local current_id="$1"
+  local current_count="$2"
+  local previous_id="$${3:-}"
+  local previous_count="$${4:-0}"
+  if test -z "$previous_id" || test "$previous_id" = missing; then
+    printf '0\n'
+  elif test "$current_id" = "$previous_id"; then
+    if test "$current_count" -ge "$previous_count"; then
+      printf '%s\n' "$((current_count - previous_count))"
+    else
+      printf '%s\n' "$current_count"
+    fi
+  else
+    printf '%s\n' "$((1 + current_count))"
+  fi
+}
+
 unhealthy=0
 restart_total=0
+restart_delta=0
+state_file=/var/lib/idea2strategy/runtime-restart-state
+state_tmp="$${state_file}.tmp"
+declare -A previous_container previous_restarts
+if test -s "$state_file"; then
+  while IFS='|' read -r previous_service previous_id previous_count; do
+    test -n "$previous_service" || continue
+    case "$previous_count" in (*[!0-9]*|'') previous_count=0 ;; esac
+    previous_container["$previous_service"]="$previous_id"
+    previous_restarts["$previous_service"]="$previous_count"
+  done <"$state_file"
+fi
+: >"$state_tmp"
+
 for service in "$${expected_services[@]}"; do
   container="$(docker compose --project-directory /opt/idea2strategy --project-name idea2strategy ps -q "$service" 2>/dev/null || true)"
   if test -z "$container"; then
     unhealthy=$((unhealthy + 1))
+    printf '%s|missing|0\n' "$service" >>"$state_tmp"
     continue
   fi
   running="$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || true)"
+  status="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || true)"
+  restarting="$(docker inspect --format '{{.State.Restarting}}' "$container" 2>/dev/null || true)"
   health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container" 2>/dev/null || true)"
   restarts="$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || printf 0)"
   case "$restarts" in (*[!0-9]*|'') restarts=0 ;; esac
   restart_total=$((restart_total + restarts))
-  if test "$running" != true || test "$health" != healthy; then
+  if test -n "$${previous_container[$service]+x}"; then
+    previous_id="$${previous_container[$service]}"
+    previous_count="$${previous_restarts[$service]}"
+    service_restart_delta="$(runtime_restart_delta "$container" "$restarts" "$previous_id" "$previous_count")"
+    restart_delta=$((restart_delta + service_restart_delta))
+  fi
+  printf '%s|%s|%s\n' "$service" "$container" "$restarts" >>"$state_tmp"
+  if ! container_is_runtime_ready "$running" "$status" "$restarting" "$health"; then
     unhealthy=$((unhealthy + 1))
   fi
 done
-
-state_file=/var/lib/idea2strategy/runtime-restart-total
-restart_delta=0
-if test -s "$state_file"; then
-  previous="$(cat "$state_file")"
-  case "$previous" in (*[!0-9]*|'') previous=0 ;; esac
-  if test "$restart_total" -ge "$previous"; then
-    restart_delta=$((restart_total - previous))
-  else
-    restart_delta=$restart_total
-  fi
-fi
-printf '%s\n' "$restart_total" >"$state_file"
+mv -f "$state_tmp" "$state_file"
 
 emit_metric() {
   (printf '%s:%s|g\n' "$1" "$2" >/dev/udp/127.0.0.1/8125) 2>/dev/null || true
