@@ -46,6 +46,20 @@ if (-not $deployedVerifier.Contains('& $terraform.Source "-chdir=$terraformDirec
 if (-not $deployedVerifier.Contains('CORE_RUNTIME_STABLE')) {
     throw "Deployed verification must inspect Core container health and restart stability through SSM."
 }
+foreach ($portableSsmBoundary in @(
+    '$runtimeCheckScriptBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($runtimeCheckScript))',
+    'base64 -d | bash',
+    '[IO.File]::WriteAllText($runtimeParametersPath, $runtimeParameters, [Text.UTF8Encoding]::new($false))',
+    'file://$runtimeParametersPath',
+    'Remove-Item -LiteralPath $runtimeParametersPath -Force -ErrorAction SilentlyContinue'
+)) {
+    if (-not $deployedVerifier.Contains($portableSsmBoundary)) {
+        throw "Deployed verification must pass multiline SSM parameters through a UTF-8 JSON file and clean it up on every host: $portableSsmBoundary"
+    }
+}
+if ($deployedVerifier.Contains("'--parameters', `$runtimeParameters")) {
+    throw "Deployed verification must not pass multiline SSM JSON inline because Windows PowerShell 5 splits it into AWS CLI options."
+}
 
 foreach ($forbidden in @(
     'resource "aws_nat_gateway"',

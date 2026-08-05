@@ -115,13 +115,21 @@ for service in backend-api backend-worker backtest-api; do
 done
 echo CORE_RUNTIME_STABLE
 '@
-$runtimeParameters = @{ commands = @($runtimeCheckScript) } | ConvertTo-Json -Compress
-$runtimeCommand = Invoke-AwsJson -Arguments @(
-    'ssm', 'send-command',
-    '--instance-ids', $serviceInstanceId,
-    '--document-name', 'AWS-RunShellScript',
-    '--parameters', $runtimeParameters
-)
+$runtimeCheckScriptBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($runtimeCheckScript))
+$runtimeParameters = @{ commands = @("printf '%s' '$runtimeCheckScriptBase64' | base64 -d | bash") } | ConvertTo-Json -Compress
+$runtimeParametersPath = [IO.Path]::GetTempFileName()
+try {
+    [IO.File]::WriteAllText($runtimeParametersPath, $runtimeParameters, [Text.UTF8Encoding]::new($false))
+    $runtimeCommand = Invoke-AwsJson -Arguments @(
+        'ssm', 'send-command',
+        '--instance-ids', $serviceInstanceId,
+        '--document-name', 'AWS-RunShellScript',
+        '--parameters', "file://$runtimeParametersPath"
+    )
+}
+finally {
+    Remove-Item -LiteralPath $runtimeParametersPath -Force -ErrorAction SilentlyContinue
+}
 $runtimeCommandId = [string]$runtimeCommand.Command.CommandId
 $runtimeInvocation = $null
 for ($attempt = 0; $attempt -lt 30; $attempt++) {
