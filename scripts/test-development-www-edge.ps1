@@ -29,11 +29,16 @@ foreach ($required in @(
 
 foreach ($required in @(
     'subject_alternative_names = [local.www_domain_name]',
-    'aliases             = var.enable_https ? [var.frontend_domain_name, local.www_domain_name] : []'
+    'aliases             = var.enable_https ? [var.frontend_domain_name, local.www_domain_name] : []',
+    'cache_policy_id            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"'
 )) {
     if (-not (Contains-NormalizedWhitespace $frontend $required)) {
         throw "The CloudFront/ACM www binding is missing: $required"
     }
+}
+
+if ($frontend.Contains('413f1600-996d-4c66-baf4-05b711d5fe6c')) {
+    throw "CloudFront dynamic paths must use the real AWS-managed CachingDisabled policy ID."
 }
 
 if ($edge -match 'resource\s+"aws_route53_record"\s+"www_service"') {
