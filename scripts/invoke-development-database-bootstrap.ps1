@@ -317,7 +317,7 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     $receipt = [string]$invocation.StandardOutputContent | ConvertFrom-Json
     if ($receipt.status -ne "passed" -or $receipt.root_sha -cne $head -or $receipt.bundle_sha256 -cne $bundleDigest -or
         $receipt.policy_seed_sha256 -cne $PolicySeedSha256 -or $receipt.scoring_seed_sha256 -cne $ScoringSeedSha256 -or
-        @($receipt.scoring_versions).Count -ne 4 -or [int]$receipt.tables -ne 178 -or
+        @($receipt.scoring_versions).Count -ne 4 -or [int]$receipt.tables -ne 179 -or
         [int]$receipt.policy_row_counts.fee -lt 1 -or [int]$receipt.policy_row_counts.buffer -lt 1 -or
         [int]$receipt.policy_row_counts.execution -lt 1) {
         throw "Database bootstrap receipt did not match the exact release candidate."

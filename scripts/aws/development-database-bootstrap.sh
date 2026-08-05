@@ -5,8 +5,8 @@ umask 077
 
 readonly FLYWAY_IMAGE='redgate/flyway@sha256:52cdd559dc8ae38a17b56615e3c7137d9b01470271112525b40373de470bb005'
 readonly AWS_CLI_IMAGE='amazon/aws-cli@sha256:310813a7eae8fd88da1cc9c37970e3500b0ff3984479e1012f0a6fd44e453f63'
-readonly EXPECTED_TABLE_COUNT='178'
-readonly EXPECTED_MIGRATION_COUNT='44'
+readonly EXPECTED_TABLE_COUNT='179'
+readonly EXPECTED_MIGRATION_COUNT='45'
 readonly CONSUMERS=(backend batch backtest trading pipeline)
 
 archive=''
