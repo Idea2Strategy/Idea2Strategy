@@ -33,14 +33,15 @@ function Get-GitlinkRevision([string]$Path) {
 $backendGitlink = Get-GitlinkRevision 'backend'
 $tradingGitlink = Get-GitlinkRevision 'trading-engine'
 $dataPipelineGitlink = Get-GitlinkRevision 'data-pipeline'
+$refreshHint = 'Run scripts/refresh-flyway-ci-bundle.ps1 in the change that moves the gitlink and commit the refreshed db/flyway-ci-bundle with it.'
 if ($metadata.backend_gitlink -cne $backendGitlink) {
-    throw "Pinned bundle backend revision does not match the root gitlink: $($metadata.backend_gitlink) != $backendGitlink"
+    throw "Pinned bundle backend revision does not match the root gitlink: $($metadata.backend_gitlink) != $backendGitlink. $refreshHint"
 }
 if ($metadata.trading_gitlink -cne $tradingGitlink) {
-    throw "Pinned bundle trading revision does not match the root gitlink: $($metadata.trading_gitlink) != $tradingGitlink"
+    throw "Pinned bundle trading revision does not match the root gitlink: $($metadata.trading_gitlink) != $tradingGitlink. $refreshHint"
 }
 if ($metadata.data_pipeline_gitlink -cne $dataPipelineGitlink) {
-    throw "Pinned bundle data pipeline revision does not match the root gitlink: $($metadata.data_pipeline_gitlink) != $dataPipelineGitlink"
+    throw "Pinned bundle data pipeline revision does not match the root gitlink: $($metadata.data_pipeline_gitlink) != $dataPipelineGitlink. $refreshHint"
 }
 
 $manifestLines = @(Get-Content -LiteralPath $manifestPath)
