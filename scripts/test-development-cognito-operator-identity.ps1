@@ -23,6 +23,9 @@ foreach ($required in @(
     'allowed_oauth_flows_user_pool_client = true',
     'supported_identity_providers         = ["COGNITO"]',
     'resource "aws_cognito_user_pool_domain" "operator"',
+    'managed_login_version = 2',
+    'resource "aws_cognito_managed_login_branding" "operator"',
+    'use_cognito_provided_values = true',
     'lambda_version = "V2_0"',
     'resource "aws_lambda_permission" "operator_pre_token"'
 )) {

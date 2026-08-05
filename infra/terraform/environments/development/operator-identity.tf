@@ -160,6 +160,17 @@ resource "aws_cognito_user_pool_client" "operator" {
 resource "aws_cognito_user_pool_domain" "operator" {
   count = var.enable_cognito_operator_identity ? 1 : 0
 
-  domain       = "${var.project_name}-${var.environment}-operators-${random_id.operator_domain[0].hex}"
-  user_pool_id = aws_cognito_user_pool.operator[0].id
+  domain                = "${var.project_name}-${var.environment}-operators-${random_id.operator_domain[0].hex}"
+  user_pool_id          = aws_cognito_user_pool.operator[0].id
+  managed_login_version = 2
+}
+
+resource "aws_cognito_managed_login_branding" "operator" {
+  count = var.enable_cognito_operator_identity ? 1 : 0
+
+  client_id                   = aws_cognito_user_pool_client.operator[0].id
+  user_pool_id                = aws_cognito_user_pool.operator[0].id
+  use_cognito_provided_values = true
+
+  depends_on = [aws_cognito_user_pool_domain.operator]
 }
