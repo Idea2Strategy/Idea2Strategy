@@ -59,13 +59,26 @@ data "aws_iam_policy_document" "service_email_delivery" {
   statement {
     sid       = "SendTransactionalEmailFromVerifiedIdentity"
     effect    = "Allow"
-    actions   = ["ses:SendEmail", "ses:SendRawEmail"]
+    actions   = ["ses:SendEmail"]
     resources = [aws_ses_domain_identity.transactional[0].arn]
 
     condition {
       test     = "StringEquals"
       variable = "ses:FromAddress"
       values   = [var.transactional_email_from_address]
+    }
+  }
+
+  statement {
+    sid       = "ReadDevelopmentSuppressionStatus"
+    effect    = "Allow"
+    actions   = ["ses:GetSuppressedDestination"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
     }
   }
 }
