@@ -32,8 +32,20 @@ function New-RandomSecret {
     return [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "A").Replace("/", "B")
 }
 
+# backend-api registers its customer identity surface only when all four
+# identity.crypto keys are present (fail-closed, root #266), so both a fresh
+# bootstrap and an existing .env.docker created before the keys were added
+# must end up carrying generated values.
+$identityCryptoKeys = @(
+    "IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY",
+    "IDENTITY_CRYPTO_LOOKUP_HMAC_KEY",
+    "IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY",
+    "IDENTITY_CRYPTO_SESSION_HMAC_KEY"
+)
+
 function Initialize-EnvironmentFile {
     if (Test-Path -LiteralPath $environmentFile) {
+        Add-MissingIdentityCryptoKeys
         return
     }
 
@@ -44,9 +56,33 @@ function Initialize-EnvironmentFile {
     $content = Get-Content -LiteralPath $environmentTemplate -Raw
     $content = $content.Replace("__GENERATE_POSTGRES_PASSWORD__", (New-RandomSecret))
     $content = $content.Replace("__GENERATE_MINIO_PASSWORD__", (New-RandomSecret))
+    foreach ($keyName in $identityCryptoKeys) {
+        $placeholder = "__GENERATE_" + $keyName.Replace("IDENTITY_CRYPTO_", "IDENTITY_") + "__"
+        $content = $content.Replace($placeholder, (New-RandomSecret))
+    }
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
     Write-Host "Created local-only environment file: .env.docker" -ForegroundColor Green
+}
+
+function Add-MissingIdentityCryptoKeys {
+    $content = Get-Content -LiteralPath $environmentFile -Raw
+    $appended = @()
+    foreach ($keyName in $identityCryptoKeys) {
+        if ($content -notmatch "(?im)^$keyName\s*=\s*\S+") {
+            $appended += "$keyName=$(New-RandomSecret)"
+        }
+    }
+    if ($appended.Count -eq 0) {
+        return
+    }
+    if (-not $content.EndsWith("`n")) {
+        $content += "`n"
+    }
+    $content += ($appended -join "`n") + "`n"
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
+    Write-Host "Added generated identity crypto keys to .env.docker" -ForegroundColor Green
 }
 
 function Get-EnvironmentValue {
