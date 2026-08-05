@@ -114,6 +114,101 @@ foreach ($serviceName in @("backend-batch", "backend-worker", "market-gateway", 
     }
 }
 
+$backtestApiEnvironment = $config.services."backtest-api".environment
+foreach ($required in @(
+    "BACKTEST_API_HOST",
+    "BACKTEST_API_PORT",
+    "BACKTEST_AUTHENTICATOR",
+    "BACKTEST_COMPILED_PLAN_SOURCE",
+    "BACKTEST_DATABASE_URL",
+    "BACKTEST_DATASET_MANIFEST_SOURCE",
+    "BACKTEST_DEAD_LETTER_SINK",
+    "BACKTEST_EXECUTION_POLICY_CATALOG",
+    "BACKTEST_OBJECT_STORE",
+    "BACKTEST_OWNER_DIRECTORY",
+    "BACKTEST_QUEUE_URL",
+    "BACKTEST_API_DLQ_URL",
+    "BACKTEST_SESSION_HMAC_KEY_BASE64",
+    "BACKTEST_RESULT_INGEST_TOKEN",
+    "BACKTEST_RESULT_PRINCIPAL_ID",
+    "BACKTEST_EXECUTION_POLICY_FILE",
+    "BACKTEST_RESULTS_BUCKET",
+    "AWS_ENDPOINT_URL_S3",
+    "AWS_ENDPOINT_URL_SQS"
+)) {
+    if (-not $backtestApiEnvironment.PSObject.Properties.Name.Contains($required) -or
+        [string]::IsNullOrWhiteSpace([string]$backtestApiEnvironment.$required)) {
+        throw "backtest-api is missing required local runtime wiring: $required"
+    }
+}
+
+$backtestWorkerEnvironment = $config.services."backtest-worker".environment
+foreach ($required in @(
+    "BACKTEST_JOB_HANDLER",
+    "BACKTEST_EXECUTION_KEY_STORE",
+    "BACKTEST_REQUEST_HANDLER",
+    "BACKTEST_REQUEST_RECEIPT_STORE",
+    "BACKTEST_WORKER_ID",
+    "BACKTEST_BASIC_QUEUE_URL",
+    "BACKTEST_BASIC_DLQ_URL",
+    "BACKTEST_CUSTOM_QUEUE_URL",
+    "BACKTEST_CUSTOM_DLQ_URL",
+    "BACKTEST_COMPETITION_QUEUE_URL",
+    "BACKTEST_COMPETITION_DLQ_URL",
+    "BACKTEST_BASIC_REQUEST_QUEUE_URL",
+    "BACKTEST_BASIC_REQUEST_DLQ_URL",
+    "BACKTEST_CUSTOM_REQUEST_QUEUE_URL",
+    "BACKTEST_CUSTOM_REQUEST_DLQ_URL",
+    "BACKTEST_COMPETITION_REQUEST_QUEUE_URL",
+    "BACKTEST_COMPETITION_REQUEST_DLQ_URL",
+    "BACKTEST_RESULTS_BUCKET",
+    "BACKTEST_MARKET_DATA_BUCKET",
+    "BACKTEST_API_BASE_URL",
+    "BACKTEST_EXECUTION_POLICY_FILE",
+    "BACKTEST_RUNTIME_POLICY_FILE",
+    "AWS_ENDPOINT_URL_S3",
+    "AWS_ENDPOINT_URL_SQS"
+)) {
+    if (-not $backtestWorkerEnvironment.PSObject.Properties.Name.Contains($required) -or
+        [string]::IsNullOrWhiteSpace([string]$backtestWorkerEnvironment.$required)) {
+        throw "backtest-worker is missing required local runtime wiring: $required"
+    }
+}
+
+$backendRelayRoutes = [string]$config.services."backend-worker".environment.SPRING_APPLICATION_JSON
+foreach ($route in @(
+    '"OFFICIAL_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/backtest-basic-request"',
+    '"CUSTOM_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/backtest-custom-request"',
+    '"COMPETITION_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/backtest-competition-request"'
+)) {
+    if (-not $backendRelayRoutes.Contains($route)) {
+        throw "backend-worker does not route a backtest producer envelope to its request boundary: $route"
+    }
+}
+
+foreach ($serviceName in @("backtest-api", "backtest-worker")) {
+    $policyMount = @($config.services.$serviceName.volumes) |
+        Where-Object { $_.target -eq "/runtime-policy" } |
+        Select-Object -First 1
+    if ($null -eq $policyMount -or -not $policyMount.read_only) {
+        throw "$serviceName must mount the version-pinned local policy artifacts read-only at /runtime-policy."
+    }
+}
+
+$localstackInit = Get-Content -LiteralPath (Join-Path $root "infra/docker/localstack/ready.d/10-create-queues.sh") -Raw
+foreach ($queueName in @(
+    "backtest-basic",
+    "backtest-custom",
+    "backtest-competition",
+    "backtest-basic-request",
+    "backtest-custom-request",
+    "backtest-competition-request"
+)) {
+    if (-not $localstackInit.Contains("create_queue `"$queueName`"")) {
+        throw "LocalStack does not create the required backtest queue boundary: $queueName"
+    }
+}
+
 $initialMigrationPath = Join-Path $root "backend/db-migration/src/main/resources/db/migration/V1__initial_schema.sql"
 $initialMigration = Get-Content -LiteralPath $initialMigrationPath -Raw
 $createTableCount = ([regex]::Matches($initialMigration, "(?im)^CREATE TABLE ")).Count

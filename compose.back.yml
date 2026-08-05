@@ -35,6 +35,24 @@ x-python-environment: &python-environment
   S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
   S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
 
+x-backtest-environment: &backtest-environment
+  <<: *python-environment
+  BACKTEST_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  BACKTEST_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
+  BACKTEST_RESULTS_PREFIX: backtest-results
+  BACKTEST_EXECUTION_POLICY_FILE: /runtime-policy/execution-policy.json
+  BACKTEST_RESULT_INGEST_TOKEN: ${BACKTEST_RESULT_INGEST_TOKEN}
+  # The backend decodes this same standard-Base64 key. dev.ps1 generates an
+  # unpadded 32-byte value, so the single trailing '=' restores its wire form.
+  BACKTEST_SESSION_HMAC_KEY_BASE64: ${IDENTITY_CRYPTO_SESSION_HMAC_KEY}=
+  BACKTEST_RESULT_PRINCIPAL_ID: 00000000-0000-4000-8000-000000000266
+  AWS_ENDPOINT_URL_S3: http://minio:9000
+  AWS_ENDPOINT_URL_SQS: http://localstack:4566
+  # LocalStack accepts arbitrary credentials; using MinIO's credentials lets
+  # the same process reach both emulators without any real AWS credential.
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+
 services:
   postgres:
     container_name: idea2strategy-postgres
@@ -233,7 +251,9 @@ services:
       # would bind as four nested keys instead of one event type.
       SPRING_APPLICATION_JSON: >-
         {"idea2strategy":{"outbox-relay":{"enabled":true,"queues":
-        {"OFFICIAL_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/official-backtest-requests"}}}}
+        {"OFFICIAL_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/backtest-basic-request",
+        "CUSTOM_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/backtest-custom-request",
+        "COMPETITION_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/backtest-competition-request"}}}}
     depends_on:
       flyway: {condition: service_completed_successfully}
       localstack: {condition: service_healthy}
@@ -276,7 +296,21 @@ services:
     profiles: [apps]
     build:
       context: ./backtest-engine
-    environment: *python-environment
+    environment:
+      <<: *backtest-environment
+      BACKTEST_API_HOST: 0.0.0.0
+      BACKTEST_API_PORT: "8082"
+      BACKTEST_AUTHENTICATOR: backtest_engine.production:api_authenticator
+      BACKTEST_OBJECT_STORE: backtest_engine.production:s3_object_store
+      BACKTEST_OWNER_DIRECTORY: backtest_engine.production:postgres_owner_directory
+      BACKTEST_COMPILED_PLAN_SOURCE: backtest_engine.production:postgres_compiled_plan_source
+      BACKTEST_DATASET_MANIFEST_SOURCE: backtest_engine.production:postgres_dataset_manifest_source
+      BACKTEST_EXECUTION_POLICY_CATALOG: backtest_engine.production:execution_policy_catalog
+      BACKTEST_DEAD_LETTER_SINK: backtest_engine.production:sqs_dead_letter_sink
+      BACKTEST_QUEUE_URL: http://localstack:4566/000000000000/backtest-basic
+      BACKTEST_API_DLQ_URL: http://localstack:4566/000000000000/backtest-basic-dlq
+    volumes:
+      - ./proposals/development-runtime-policy/artifacts:/runtime-policy:ro
     ports:
       - "127.0.0.1:${BACKTEST_PORT:-18082}:8082"
     depends_on:
@@ -291,9 +325,40 @@ services:
     build:
       context: ./backtest-engine
     command: ["backtest-worker"]
-    environment: *python-environment
+    environment:
+      <<: *backtest-environment
+      BACKTEST_JOB_HANDLER: backtest_engine.production:orchestrator_job_handler
+      BACKTEST_EXECUTION_KEY_STORE: backtest_engine.production:postgres_execution_key_store
+      BACKTEST_REQUEST_HANDLER: backtest_engine.production:backtest_request_handler
+      BACKTEST_REQUEST_RECEIPT_STORE: backtest_engine.production:postgres_request_receipt_store
+      BACKTEST_WORKER_ID: local-backtest-worker
+      BACKTEST_WORKER_CORRELATION_ID: local-compose
+      BACKTEST_BASIC_QUEUE_URL: http://localstack:4566/000000000000/backtest-basic
+      BACKTEST_BASIC_DLQ_URL: http://localstack:4566/000000000000/backtest-basic-dlq
+      BACKTEST_BASIC_MAX_CONCURRENCY: "2"
+      BACKTEST_CUSTOM_QUEUE_URL: http://localstack:4566/000000000000/backtest-custom
+      BACKTEST_CUSTOM_DLQ_URL: http://localstack:4566/000000000000/backtest-custom-dlq
+      BACKTEST_CUSTOM_MAX_CONCURRENCY: "1"
+      BACKTEST_COMPETITION_QUEUE_URL: http://localstack:4566/000000000000/backtest-competition
+      BACKTEST_COMPETITION_DLQ_URL: http://localstack:4566/000000000000/backtest-competition-dlq
+      BACKTEST_COMPETITION_MAX_CONCURRENCY: "1"
+      BACKTEST_MAX_TOTAL_CONCURRENCY: "4"
+      BACKTEST_BASIC_REQUEST_QUEUE_URL: http://localstack:4566/000000000000/backtest-basic-request
+      BACKTEST_BASIC_REQUEST_DLQ_URL: http://localstack:4566/000000000000/backtest-basic-request-dlq
+      BACKTEST_CUSTOM_REQUEST_QUEUE_URL: http://localstack:4566/000000000000/backtest-custom-request
+      BACKTEST_CUSTOM_REQUEST_DLQ_URL: http://localstack:4566/000000000000/backtest-custom-request-dlq
+      BACKTEST_COMPETITION_REQUEST_QUEUE_URL: http://localstack:4566/000000000000/backtest-competition-request
+      BACKTEST_COMPETITION_REQUEST_DLQ_URL: http://localstack:4566/000000000000/backtest-competition-request-dlq
+      BACKTEST_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
+      BACKTEST_MARKET_DATA_CACHE: /tmp/idea2strategy-market-data
+      BACKTEST_MARKET_DATA_BATCH_SIZE: "65536"
+      BACKTEST_API_BASE_URL: http://backtest-api:8082
+      BACKTEST_RUNTIME_POLICY_FILE: /runtime-policy/runtime-policy.json
+    volumes:
+      - ./proposals/development-runtime-policy/artifacts:/runtime-policy:ro
     depends_on:
       flyway: {condition: service_completed_successfully}
+      backtest-api: {condition: service_started}
       minio-init: {condition: service_completed_successfully}
       localstack: {condition: service_healthy}
     networks: [development]

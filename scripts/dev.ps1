@@ -42,10 +42,12 @@ $identityCryptoKeys = @(
     "IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY",
     "IDENTITY_CRYPTO_SESSION_HMAC_KEY"
 )
+$backtestLocalSecrets = @("BACKTEST_RESULT_INGEST_TOKEN")
 
 function Initialize-EnvironmentFile {
     if (Test-Path -LiteralPath $environmentFile) {
         Add-MissingIdentityCryptoKeys
+        Add-MissingBacktestSecrets
         return
     }
 
@@ -59,6 +61,9 @@ function Initialize-EnvironmentFile {
     foreach ($keyName in $identityCryptoKeys) {
         $placeholder = "__GENERATE_" + $keyName.Replace("IDENTITY_CRYPTO_", "IDENTITY_") + "__"
         $content = $content.Replace($placeholder, (New-RandomSecret))
+    }
+    foreach ($keyName in $backtestLocalSecrets) {
+        $content = $content.Replace("__GENERATE_$keyName__", (New-RandomSecret))
     }
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
@@ -83,6 +88,26 @@ function Add-MissingIdentityCryptoKeys {
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
     Write-Host "Added generated identity crypto keys to .env.docker" -ForegroundColor Green
+}
+
+function Add-MissingBacktestSecrets {
+    $content = Get-Content -LiteralPath $environmentFile -Raw
+    $appended = @()
+    foreach ($keyName in $backtestLocalSecrets) {
+        if ($content -notmatch "(?im)^$keyName\s*=\s*\S+") {
+            $appended += "$keyName=$(New-RandomSecret)"
+        }
+    }
+    if ($appended.Count -eq 0) {
+        return
+    }
+    if (-not $content.EndsWith("`n")) {
+        $content += "`n"
+    }
+    $content += ($appended -join "`n") + "`n"
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
+    Write-Host "Added generated backtest local secrets to .env.docker" -ForegroundColor Green
 }
 
 function Get-EnvironmentValue {
