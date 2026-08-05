@@ -125,6 +125,10 @@ if (($userData | Select-String -Pattern 'find "\$temporary" -type d -exec chmod 
     ($userData | Select-String -Pattern 'find "\$temporary" -type f -exec chmod 0444' -AllMatches).Matches.Count -ne 2) {
     throw "Backtest and Trading materialization must publish traversable directories and immutable world-readable non-secret artifacts."
 }
+if (-not $userData.Contains('materialized_destination="/runtime/$runtime"') -or
+    -not $userData.Contains('printf ''artifact.%s.local-path=%s/%s\n'' "$index" "$materialized_destination" "$relative_path"')) {
+    throw "Trading receipts must bind artifact paths as seen inside the container, not host-only /var/lib paths."
+}
 foreach ($required in @(
     'resource "aws_ecr_repository" "runtime"',
     'image_tag_mutability = "IMMUTABLE"',

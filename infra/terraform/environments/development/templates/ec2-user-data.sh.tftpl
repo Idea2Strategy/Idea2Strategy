@@ -193,10 +193,13 @@ materialize_backtest_policies() {
 }
 
 materialize_trading_artifacts() {
-  local manifest runtime destination temporary artifact_name artifact_id object_key version_id expected_sha relative_path target receipt count
+  local manifest runtime destination%{ if runtime_role == "trading" } materialized_destination%{ endif } temporary artifact_name artifact_id object_key version_id expected_sha relative_path target receipt count
   manifest="$(printf '%s' '${trading_artifact_manifest}' | base64 --decode)"
   for runtime in market-gateway trading-worker; do
     destination="/var/lib/idea2strategy/$runtime"
+%{ if runtime_role == "trading" ~}
+    materialized_destination="/runtime/$runtime"
+%{ endif ~}
     temporary="$(mktemp -d "/var/lib/idea2strategy/$runtime.XXXXXX")"
     receipt="$temporary/materialization.properties"
     count="$(jq --arg runtime "$runtime" '[to_entries[] | select(.value.runtime == $runtime)] | length' <<<"$manifest")"
@@ -223,7 +226,11 @@ materialize_trading_artifacts() {
         printf 'artifact.%s.source-key=%s\n' "$index" "$object_key"
         printf 'artifact.%s.source-version-id=%s\n' "$index" "$version_id"
         printf 'artifact.%s.sha256=%s\n' "$index" "$expected_sha"
+%{ if runtime_role == "trading" ~}
+        printf 'artifact.%s.local-path=%s/%s\n' "$index" "$materialized_destination" "$relative_path"
+%{ else ~}
         printf 'artifact.%s.local-path=%s\n' "$index" "$destination/$relative_path"
+%{ endif ~}
       } >>"$receipt"
       index=$((index + 1))
     done < <(jq -r --arg runtime "$runtime" 'to_entries[] | select(.value.runtime == $runtime) | .key' <<<"$manifest")
