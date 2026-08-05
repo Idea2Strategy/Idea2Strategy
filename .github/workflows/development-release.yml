@@ -90,6 +90,8 @@ jobs:
           VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER: ${{ vars.OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER }}
           VITE_OPERATOR_OIDC_SCOPES: ${{ vars.OPERATOR_OIDC_SCOPES }}
           VITE_OPERATOR_OIDC_SIGNING_ALGORITHM: ${{ vars.OPERATOR_OIDC_SIGNING_ALGORITHM }}
+          VITE_OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID: ${{ vars.OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID }}
+          VITE_OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID: ${{ vars.OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID }}
         run: |
           set -euo pipefail
           required=(
@@ -98,6 +100,8 @@ jobs:
             VITE_OPERATOR_OIDC_AUDIENCE VITE_OPERATOR_OIDC_REDIRECT_URI
             VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI VITE_OPERATOR_OIDC_SCOPES
             VITE_OPERATOR_OIDC_SIGNING_ALGORITHM VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER
+            VITE_OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID
+            VITE_OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID
           )
           for name in "${required[@]}"; do
             if [[ -z "${!name}" ]]; then echo "OIDC build input is missing: $name" >&2; exit 1; fi
@@ -119,6 +123,10 @@ jobs:
             echo 'OIDC logout redirect parameter is invalid' >&2; exit 1
           fi
           if [[ " $VITE_OPERATOR_OIDC_SCOPES " != *' openid '* ]]; then echo 'OIDC scopes must include openid' >&2; exit 1; fi
+          uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          for permission_id in "$VITE_OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID" "$VITE_OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID"; do
+            if [[ ! "$permission_id" =~ $uuid ]]; then echo 'RBAC permission ID is invalid' >&2; exit 1; fi
+          done
           cd ui
           pnpm install --frozen-lockfile
           VITE_API_BASE_URL='' VITE_ADMIN_MCP_BASE_URL='' VITE_ENABLE_LOCAL_OPERATOR_HARNESS=false pnpm build
@@ -305,6 +313,10 @@ jobs:
           if ([string]$config.operator_auth_issuer -cne '${{ vars.OPERATOR_OIDC_ISSUER }}' -or
               [string]$config.operator_auth_audience -cne '${{ vars.OPERATOR_OIDC_AUDIENCE }}') {
             throw 'Frontend OIDC issuer/audience must exactly match the Terraform runtime inputs.'
+          }
+          if ([string]$config.operator_rbac_catalog_read_permission_id -cne '${{ vars.OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID }}' -or
+              [string]$config.operator_rbac_assignment_read_permission_id -cne '${{ vars.OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID }}') {
+            throw 'Frontend RBAC permission IDs must exactly match the Terraform runtime inputs.'
           }
           $config.aws_profile = ''
           $config.aws_region = '${{ env.AWS_REGION }}'
