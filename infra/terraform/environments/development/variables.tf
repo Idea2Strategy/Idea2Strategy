@@ -521,3 +521,56 @@ variable "operator_rbac_revoke_permission_id" {
   type        = string
   default     = ""
 }
+
+variable "operator_case_queue_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_case_detail_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_case_assign_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_case_reassign_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_case_unassign_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_case_start_review_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_case_request_information_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_case_resolve_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_case_reject_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_case_apply_sanction_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_case_release_sanction_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_sanction_apply_permission_id" {
+  type    = string
+  default = ""
+}
+variable "operator_sanction_lift_permission_id" {
+  type    = string
+  default = ""
+}
