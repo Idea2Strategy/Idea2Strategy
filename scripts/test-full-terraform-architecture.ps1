@@ -76,6 +76,14 @@ foreach ($runtimeDependency in @(
         throw "Runtime bootstrap can race its image parameter: $runtimeDependency"
     }
 }
+if (($compute | Select-String -Pattern 'user_data_base64\s*=\s*base64gzip\(' -AllMatches).Matches.Count -ne 2 -or
+    ($compute | Select-String -Pattern 'user_data\s*=\s*base64gzip\(' -AllMatches).Matches.Count -ne 1) {
+    throw "Every EC2 bootstrap path must gzip user data before base64 encoding so the decoded payload stays within the 16,384-byte EC2 API limit."
+}
+if ($compute -match 'user_data\s*=\s*templatefile\(' -or
+    $compute -match 'user_data\s*=\s*base64encode\(templatefile\(') {
+    throw "Uncompressed EC2 bootstrap user data is forbidden."
+}
 foreach ($required in @(
     'resource "aws_ecr_repository" "runtime"',
     'image_tag_mutability = "IMMUTABLE"',

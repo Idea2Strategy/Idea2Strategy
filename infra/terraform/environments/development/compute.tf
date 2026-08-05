@@ -10,7 +10,7 @@ resource "aws_instance" "service" {
   source_dest_check           = true
   ebs_optimized               = true
 
-  user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
+  user_data_base64 = base64gzip(templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
     runtime_role                                = "service"
     backtest_asg_name                           = "${local.name_prefix}-backtest"
     aws_region                                  = var.aws_region
@@ -49,7 +49,7 @@ resource "aws_instance" "service" {
     operator_rbac_catalog_version               = var.operator_rbac_catalog_version
     operator_rbac_catalog_read_permission_id    = var.operator_rbac_catalog_read_permission_id
     operator_rbac_assignment_read_permission_id = var.operator_rbac_assignment_read_permission_id
-  })
+  }))
   user_data_replace_on_change = true
 
   metadata_options {
@@ -108,7 +108,7 @@ resource "aws_instance" "trading" {
   source_dest_check           = true
   ebs_optimized               = true
 
-  user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
+  user_data_base64 = base64gzip(templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
     runtime_role                                = "trading"
     backtest_asg_name                           = "${local.name_prefix}-backtest"
     aws_region                                  = var.aws_region
@@ -147,7 +147,7 @@ resource "aws_instance" "trading" {
     operator_rbac_catalog_version               = var.operator_rbac_catalog_version
     operator_rbac_catalog_read_permission_id    = var.operator_rbac_catalog_read_permission_id
     operator_rbac_assignment_read_permission_id = var.operator_rbac_assignment_read_permission_id
-  })
+  }))
   user_data_replace_on_change = true
 
   metadata_options {
@@ -211,7 +211,7 @@ resource "aws_launch_template" "backtest" {
     }
   }
 
-  user_data = base64encode(templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
+  user_data = base64gzip(templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
     runtime_role                                = "backtest-worker"
     backtest_asg_name                           = "${local.name_prefix}-backtest"
     aws_region                                  = var.aws_region
