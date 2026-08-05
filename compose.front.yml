@@ -13,8 +13,14 @@ services:
       # ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY and the container restart-loops
       # after every lockfile change (root #266).
       CI: "true"
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:18080}
-      VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-ws://localhost:18080}
+      # Same-origin by default: backend-api sends no CORS headers, so a browser
+      # pointed at a cross-origin VITE_API_BASE_URL cannot complete any API call
+      # (root #266). The vite dev server proxies /api and /actuator to
+      # backend-api over the compose network instead - the same posture the
+      # real-API browser E2E uses in CI.
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+      VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-}
+      VITE_REAL_API_TARGET: ${VITE_REAL_API_TARGET:-http://backend-api:8080}
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-15173}:5173"
     volumes:
