@@ -183,7 +183,7 @@ resource "aws_instance" "trading" {
   ]
 }
 
-#checkov:skip=CKV_AWS_341:IMDSv2 tokens remain required; hop limit 2 is required for the non-root Docker worker to reach instance-profile credentials through the container network namespace.
+# checkov:skip=CKV_AWS_341:IMDSv2 tokens remain required; hop limit 2 is required for the non-root Docker worker to reach instance-profile credentials through the container network namespace.
 resource "aws_launch_template" "backtest" {
   count = local.enable_service_stack ? 1 : 0
 
