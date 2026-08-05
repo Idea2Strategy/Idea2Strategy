@@ -7,6 +7,8 @@ param(
     [string]$InstanceType = "t3.small",
     [string]$PolicySeedSqlPath = "",
     [string]$PolicySeedSha256 = "",
+    [string]$ScoringSeedSqlPath = "",
+    [string]$ScoringSeedSha256 = "",
     [switch]$Execute
 )
 
@@ -55,6 +57,13 @@ if ($PolicySeedSha256 -notmatch '^[0-9a-f]{64}$') { throw "PolicySeedSha256 must
 $resolvedPolicySeedPath = (Resolve-Path -LiteralPath $PolicySeedSqlPath).Path
 $actualPolicySeedSha256 = (Get-FileHash -LiteralPath $resolvedPolicySeedPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actualPolicySeedSha256 -cne $PolicySeedSha256) { throw "Approved policy seed SQL SHA-256 mismatch." }
+if ([string]::IsNullOrWhiteSpace($ScoringSeedSqlPath) -or -not (Test-Path -LiteralPath $ScoringSeedSqlPath -PathType Leaf)) {
+    throw "ScoringSeedSqlPath must identify the separately approved scoring template seed SQL artifact."
+}
+if ($ScoringSeedSha256 -notmatch '^[0-9a-f]{64}$') { throw "ScoringSeedSha256 must be the reviewed lowercase SHA-256." }
+$resolvedScoringSeedPath = (Resolve-Path -LiteralPath $ScoringSeedSqlPath).Path
+$actualScoringSeedSha256 = (Get-FileHash -LiteralPath $resolvedScoringSeedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualScoringSeedSha256 -cne $ScoringSeedSha256) { throw "Approved scoring seed SQL SHA-256 mismatch." }
 
 $head = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') { throw "Unable to identify the exact root commit." }
@@ -141,6 +150,7 @@ $artifactPrefix = "deployment-bootstrap/$head/$bundleDigest"
 $archiveKey = "$artifactPrefix/flyway-ci-bundle.tar.gz"
 $hostScriptKey = "$artifactPrefix/development-database-bootstrap.sh"
 $policySeedKey = "$artifactPrefix/policy-seed-$PolicySeedSha256.sql"
+$scoringSeedKey = "$artifactPrefix/scoring-template-seed-$ScoringSeedSha256.sql"
 $receiptKey = "$artifactPrefix/receipt.json"
 $safePlan = [ordered]@{
     status = if ($Execute) { "ready-to-execute" } else { "validated-dry-run" }
@@ -149,6 +159,7 @@ $safePlan = [ordered]@{
     archive_sha256 = $archiveDigest
     host_script_sha256 = $hostScriptDigest
     policy_seed_sha256 = $PolicySeedSha256
+    scoring_seed_sha256 = $ScoringSeedSha256
     region = $Region
     instance_type = $InstanceType
     ami_id = $bootstrapAmiId
@@ -172,9 +183,11 @@ try {
     $archiveUpload = Invoke-AwsJson @("s3api", "put-object", "--bucket", [string]$target.artifact_bucket, "--key", $archiveKey, "--body", $archivePath)
     $scriptUpload = Invoke-AwsJson @("s3api", "put-object", "--bucket", [string]$target.artifact_bucket, "--key", $hostScriptKey, "--body", $hostScriptPath)
     $policySeedUpload = Invoke-AwsJson @("s3api", "put-object", "--bucket", [string]$target.artifact_bucket, "--key", $policySeedKey, "--body", $resolvedPolicySeedPath)
+    $scoringSeedUpload = Invoke-AwsJson @("s3api", "put-object", "--bucket", [string]$target.artifact_bucket, "--key", $scoringSeedKey, "--body", $resolvedScoringSeedPath)
     if ([string]::IsNullOrWhiteSpace([string]$archiveUpload.VersionId) -or
         [string]::IsNullOrWhiteSpace([string]$scriptUpload.VersionId) -or
-        [string]::IsNullOrWhiteSpace([string]$policySeedUpload.VersionId)) {
+        [string]::IsNullOrWhiteSpace([string]$policySeedUpload.VersionId) -or
+        [string]::IsNullOrWhiteSpace([string]$scoringSeedUpload.VersionId)) {
         throw "Bootstrap artifacts must be stored in a versioned S3 bucket."
     }
 
@@ -261,6 +274,7 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     $archiveRemote = "$remoteRoot/flyway-ci-bundle.tar.gz"
     $scriptRemote = "$remoteRoot/development-database-bootstrap.sh"
     $policySeedRemote = "$remoteRoot/policy-seed.sql"
+    $scoringSeedRemote = "$remoteRoot/scoring-template-seed.sql"
     $command = @(
         "set -Eeuo pipefail; set +x",
         "while [ ! -f /var/lib/idea2strategy-database-bootstrap-ready ]; do sleep 5; done",
@@ -268,9 +282,10 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         "docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $archiveKey) --version-id $(ConvertTo-BashLiteral ([string]$archiveUpload.VersionId)) $(ConvertTo-BashLiteral $archiveRemote) >/dev/null",
         "docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $hostScriptKey) --version-id $(ConvertTo-BashLiteral ([string]$scriptUpload.VersionId)) $(ConvertTo-BashLiteral $scriptRemote) >/dev/null",
         "docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $policySeedKey) --version-id $(ConvertTo-BashLiteral ([string]$policySeedUpload.VersionId)) $(ConvertTo-BashLiteral $policySeedRemote) >/dev/null",
+        "docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $scoringSeedKey) --version-id $(ConvertTo-BashLiteral ([string]$scoringSeedUpload.VersionId)) $(ConvertTo-BashLiteral $scoringSeedRemote) >/dev/null",
         "printf '%s  %s\n' $(ConvertTo-BashLiteral $hostScriptDigest) $(ConvertTo-BashLiteral $scriptRemote) | sha256sum --check --status",
         "chmod 0700 $(ConvertTo-BashLiteral $scriptRemote)",
-        "$(ConvertTo-BashLiteral $scriptRemote) --archive $(ConvertTo-BashLiteral $archiveRemote) --archive-sha256 $(ConvertTo-BashLiteral $archiveDigest) --bundle-sha256 $(ConvertTo-BashLiteral $bundleDigest) --database-host $(ConvertTo-BashLiteral ([string]$target.database_host)) --database-name $(ConvertTo-BashLiteral ([string]$target.database_name)) --database-port $(ConvertTo-BashLiteral ([string]$target.database_port)) --master-secret-arn $(ConvertTo-BashLiteral ([string]$target.master_secret_arn)) --policy-seed-sql $(ConvertTo-BashLiteral $policySeedRemote) --policy-seed-sha256 $(ConvertTo-BashLiteral $PolicySeedSha256) --region $(ConvertTo-BashLiteral $Region) --root-sha $(ConvertTo-BashLiteral $head) --runtime-secret-arns-base64 $(ConvertTo-BashLiteral $secretArnBase64) --work-directory $(ConvertTo-BashLiteral "$remoteRoot/work")"
+        "$(ConvertTo-BashLiteral $scriptRemote) --archive $(ConvertTo-BashLiteral $archiveRemote) --archive-sha256 $(ConvertTo-BashLiteral $archiveDigest) --bundle-sha256 $(ConvertTo-BashLiteral $bundleDigest) --database-host $(ConvertTo-BashLiteral ([string]$target.database_host)) --database-name $(ConvertTo-BashLiteral ([string]$target.database_name)) --database-port $(ConvertTo-BashLiteral ([string]$target.database_port)) --master-secret-arn $(ConvertTo-BashLiteral ([string]$target.master_secret_arn)) --policy-seed-sql $(ConvertTo-BashLiteral $policySeedRemote) --policy-seed-sha256 $(ConvertTo-BashLiteral $PolicySeedSha256) --scoring-seed-sql $(ConvertTo-BashLiteral $scoringSeedRemote) --scoring-seed-sha256 $(ConvertTo-BashLiteral $ScoringSeedSha256) --region $(ConvertTo-BashLiteral $Region) --root-sha $(ConvertTo-BashLiteral $head) --runtime-secret-arns-base64 $(ConvertTo-BashLiteral $secretArnBase64) --work-directory $(ConvertTo-BashLiteral "$remoteRoot/work")"
     )
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($command -join "`n")))
     $commandParametersPath = Join-Path $temporaryRoot "ssm-command-parameters.json"
@@ -301,7 +316,8 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     if ($invocation.Status -ne "Success") { throw "Database bootstrap SSM command failed with status '$($invocation.Status)'." }
     $receipt = [string]$invocation.StandardOutputContent | ConvertFrom-Json
     if ($receipt.status -ne "passed" -or $receipt.root_sha -cne $head -or $receipt.bundle_sha256 -cne $bundleDigest -or
-        $receipt.policy_seed_sha256 -cne $PolicySeedSha256 -or [int]$receipt.tables -ne 178 -or
+        $receipt.policy_seed_sha256 -cne $PolicySeedSha256 -or $receipt.scoring_seed_sha256 -cne $ScoringSeedSha256 -or
+        @($receipt.scoring_versions).Count -ne 4 -or [int]$receipt.tables -ne 178 -or
         [int]$receipt.policy_row_counts.fee -lt 1 -or [int]$receipt.policy_row_counts.buffer -lt 1 -or
         [int]$receipt.policy_row_counts.execution -lt 1) {
         throw "Database bootstrap receipt did not match the exact release candidate."
@@ -315,6 +331,7 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         root_sha = $head
         bundle_sha256 = $bundleDigest
         policy_seed_sha256 = $PolicySeedSha256
+        scoring_seed_sha256 = $ScoringSeedSha256
         instance_id = $instanceId
         command_id = $commandId
         receipt_key = $receiptKey
