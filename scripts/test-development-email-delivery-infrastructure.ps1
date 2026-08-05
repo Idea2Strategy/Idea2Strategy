@@ -56,7 +56,7 @@ if ($email -match '(?i)access[_-]?key|secret[_-]?access[_-]?key|smtp[_-]?passwor
 
 foreach ($required in @(
     'resource "aws_route53_record" "legacy_www"',
-    'www.${var.domain_name}',
+    'local.www_domain_name',
     'var.legacy_www_ipv4_address'
 )) {
     if (-not $edge.Contains($required)) {
