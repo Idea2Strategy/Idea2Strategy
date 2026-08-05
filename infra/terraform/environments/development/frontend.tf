@@ -124,8 +124,9 @@ resource "aws_acm_certificate" "frontend" {
   count    = local.enable_public_edge ? 1 : 0
   provider = aws.us_east_1
 
-  domain_name       = var.frontend_domain_name
-  validation_method = "DNS"
+  domain_name               = var.frontend_domain_name
+  subject_alternative_names = [local.www_domain_name]
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true
@@ -189,7 +190,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   comment             = "${local.name_prefix} frontend and application edge"
   default_root_object = "index.html"
   price_class         = "PriceClass_200"
-  aliases             = var.enable_https ? [var.frontend_domain_name] : []
+  aliases             = var.enable_https ? [var.frontend_domain_name, local.www_domain_name] : []
   web_acl_id          = var.enable_waf ? aws_wafv2_web_acl.frontend[0].arn : null
 
   origin {
