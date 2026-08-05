@@ -21,7 +21,7 @@ resource "aws_route53_record" "ses_verification" {
 }
 
 resource "aws_ses_domain_identity_verification" "transactional" {
-  count  = local.enable_service_stack ? 1 : 0
+  count  = local.enable_public_edge ? 1 : 0
   domain = aws_ses_domain_identity.transactional[0].domain
 
   lifecycle {
@@ -80,7 +80,7 @@ resource "aws_iam_role_policy" "service_email_delivery" {
 
 resource "aws_ssm_parameter" "email_runtime" {
   for_each = local.enable_service_stack ? {
-    enabled      = "true"
+    enabled      = local.enable_public_edge ? "true" : "false"
     provider     = "ses"
     from-address = var.transactional_email_from_address
     aws-region   = var.aws_region

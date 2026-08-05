@@ -15,7 +15,7 @@ data "aws_availability_zones" "available" {
 }
 
 data "aws_ec2_managed_prefix_list" "cloudfront_origin" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_public_edge ? 1 : 0
 
   name = "com.amazonaws.global.cloudfront.origin-facing"
 }

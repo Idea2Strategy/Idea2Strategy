@@ -11,7 +11,7 @@ variable "aws_profile" {
 }
 
 variable "expected_aws_account_id" {
-  description = "Exact AWS account allowed for this Development stack. Required for the full phase."
+  description = "Exact AWS account allowed for this Development stack. Required for host_ready and full."
   type        = string
   default     = ""
 
@@ -51,13 +51,13 @@ variable "environment" {
 }
 
 variable "deployment_phase" {
-  description = "Development rollout phase. dns_foundation creates Route 53 before registrar delegation; full adds the public service stack only after delegation is verified."
+  description = "Development rollout phase. host_ready creates the private-by-ingress runtime for SSM verification; full adds the public edge only after DNS delegation."
   type        = string
   default     = "market_data_bootstrap"
 
   validation {
-    condition     = contains(["market_data_bootstrap", "dns_foundation", "full"], var.deployment_phase)
-    error_message = "deployment_phase must be market_data_bootstrap, dns_foundation, or full."
+    condition     = contains(["market_data_bootstrap", "dns_foundation", "host_ready", "full"], var.deployment_phase)
+    error_message = "deployment_phase must be market_data_bootstrap, dns_foundation, host_ready, or full."
   }
 }
 
@@ -301,7 +301,7 @@ variable "pipeline_schedule_expression" {
 }
 
 variable "container_image_digests" {
-  description = "Immutable sha256 digests keyed by every deployable runtime image. Required for the full phase."
+  description = "Immutable sha256 digests keyed by every deployable runtime image. Required for host_ready and full."
   type        = map(string)
   default     = {}
 
@@ -362,7 +362,7 @@ variable "trading_runtime_artifacts" {
 }
 
 variable "runtime_database_secret_names" {
-  description = "Existing Secrets Manager JSON credentials for least-privilege LOGIN roles. Exact keys backend, batch, backtest, trading, and pipeline are mandatory for the full phase; Terraform reads metadata only."
+  description = "Existing Secrets Manager JSON credentials for least-privilege LOGIN roles. Exact keys backend, batch, backtest, trading, and pipeline are mandatory for host_ready and full; Terraform reads metadata only."
   type        = map(string)
   default = {
     backend  = "idea2strategy-dev/database/backend-runtime"

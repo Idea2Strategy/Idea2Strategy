@@ -1,5 +1,5 @@
 resource "aws_wafv2_web_acl" "frontend" {
-  count    = local.enable_service_stack && var.enable_waf ? 1 : 0
+  count    = local.enable_public_edge && var.enable_waf ? 1 : 0
   provider = aws.us_east_1
 
   name        = "${local.name_prefix}-edge"
@@ -82,14 +82,14 @@ resource "aws_wafv2_web_acl" "frontend" {
 }
 
 resource "aws_cloudwatch_log_group" "waf" {
-  count             = local.enable_service_stack && var.enable_waf ? 1 : 0
+  count             = local.enable_public_edge && var.enable_waf ? 1 : 0
   provider          = aws.us_east_1
   name              = "aws-waf-logs-${local.name_prefix}"
   retention_in_days = var.cloudwatch_log_retention_days
 }
 
 resource "aws_wafv2_web_acl_logging_configuration" "frontend" {
-  count                   = local.enable_service_stack && var.enable_waf ? 1 : 0
+  count                   = local.enable_public_edge && var.enable_waf ? 1 : 0
   provider                = aws.us_east_1
   resource_arn            = aws_wafv2_web_acl.frontend[0].arn
   log_destination_configs = [aws_cloudwatch_log_group.waf[0].arn]
