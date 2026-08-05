@@ -9,6 +9,51 @@ if (-not (Test-Path -LiteralPath $workflowPath)) {
 $workflow = Get-Content -LiteralPath $workflowPath -Raw
 $ciIdentity = Get-Content -LiteralPath (Join-Path $PSScriptRoot "../infra/terraform/ci-identity/main.tf") -Raw
 
+# Parse every inline PowerShell program, not only selected string boundaries.
+# GitHub expressions are substituted before parsing because the runner expands
+# them before pwsh receives the generated script.
+$workflowLines = [regex]::Split($workflow, "`r?`n")
+$parsedPowerShellBlocks = 0
+for ($lineIndex = 0; $lineIndex -lt $workflowLines.Count; $lineIndex++) {
+    if ($workflowLines[$lineIndex] -notmatch '^(\s*)shell:\s*pwsh\s*$') { continue }
+    $shellIndent = $Matches[1].Length
+    $runIndex = $lineIndex + 1
+    while ($runIndex -lt $workflowLines.Count -and
+        $workflowLines[$runIndex] -notmatch '^(\s*)run:\s*\|\s*$') {
+        if ($workflowLines[$runIndex] -match '^(\s*)-\s+') { break }
+        $runIndex++
+    }
+    if ($runIndex -ge $workflowLines.Count -or $workflowLines[$runIndex] -notmatch '^(\s*)run:\s*\|\s*$') {
+        throw "PowerShell workflow step at line $($lineIndex + 1) has no literal run block."
+    }
+    $runIndent = $Matches[1].Length
+    if ($runIndent -ne $shellIndent) {
+        throw "PowerShell shell/run indentation differs at line $($lineIndex + 1)."
+    }
+    $codeLines = [Collections.Generic.List[string]]::new()
+    for ($codeIndex = $runIndex + 1; $codeIndex -lt $workflowLines.Count; $codeIndex++) {
+        $line = $workflowLines[$codeIndex]
+        if (-not [string]::IsNullOrWhiteSpace($line)) {
+            $leading = $line.Length - $line.TrimStart().Length
+            if ($leading -le $runIndent) { break }
+        }
+        $contentOffset = [Math]::Min($runIndent + 2, $line.Length)
+        $codeLines.Add($line.Substring($contentOffset))
+    }
+    $code = ($codeLines -join "`n") -replace '\$\{\{.*?\}\}', 'GITHUB_EXPRESSION'
+    $tokens = $null
+    $parseErrors = $null
+    [Management.Automation.Language.Parser]::ParseInput($code, [ref]$tokens, [ref]$parseErrors) | Out-Null
+    if (@($parseErrors).Count -ne 0) {
+        $messages = @($parseErrors | ForEach-Object { $_.Message }) -join '; '
+        throw "Inline PowerShell syntax is invalid near workflow line $($lineIndex + 1): $messages"
+    }
+    $parsedPowerShellBlocks++
+}
+if ($parsedPowerShellBlocks -ne 12) {
+    throw "Expected to parse exactly 12 inline PowerShell blocks; observed $parsedPowerShellBlocks."
+}
+
 $required = @(
     "workflow_dispatch:",
     "id-token: write",
@@ -24,8 +69,10 @@ $required = @(
     "--tag `$target",
     "idea2strategy-dev/",
     "aws ecr describe-image-scan-findings",
-    "aws ecr batch-get-image",
-    "aws ecr start-image-scan",
+    "docker image inspect",
+    "linux/arm64",
+    "AWS_RETRY_MODE: adaptive",
+    "AWS_MAX_ATTEMPTS: '10'",
     "ECR image scan did not complete",
     "ECR image scan rejected",
     "terraform plan -parallelism=1 -out=deployment.tfplan",
@@ -69,7 +116,7 @@ foreach ($token in $required) {
     }
 }
 
-foreach ($forbidden in @("aws-access-key-id", "aws-secret-access-key", "terraform apply -auto-approve", "docker build --platform linux/amd64", "idea2strategy-development", "create-invalidation", "s3 sync `"s3://`$env:FRONTEND_BUCKET/_releases")) {
+foreach ($forbidden in @("aws-access-key-id", "aws-secret-access-key", "terraform apply -auto-approve", "docker build --platform linux/amd64", "application/vnd.oci.image.index.v1+json", "aws ecr start-image-scan", "idea2strategy-development", "create-invalidation", "s3 sync `"s3://`$env:FRONTEND_BUCKET/_releases")) {
     if ($workflow.Contains($forbidden)) {
         throw "Development release workflow contains forbidden boundary: $forbidden"
     }
@@ -120,6 +167,9 @@ if ($workflow -notmatch "(?s)configure-aws-credentials.*?test-aws-deployment-pre
 if ($workflow -notmatch "(?s)Publish immutable ARM64 images.*?Wait for ECR security scans.*?Publish immutable frontend prefix") {
     throw "Every published runtime image must pass the ECR scan before frontend publication and planning."
 }
+if ($workflow -notmatch "(?s)Wait for ECR security scans.*?AWS_RETRY_MODE: adaptive.*?AWS_MAX_ATTEMPTS: '10'.*?describe-image-scan-findings") {
+    throw "ECR scan reads must use bounded adaptive AWS retries."
+}
 
 if ($workflow -notmatch "(?s)findingSeverityCounts.*?CRITICAL.*?HIGH") {
     throw "The release scan gate must reject Critical and High findings."
@@ -129,10 +179,6 @@ if ($workflow.Contains('ECR image scan rejected $name:')) {
 }
 if (-not $workflow.Contains('ECR image scan rejected ${name}:')) {
     throw 'The ECR scan rejection message must use parser-safe variable delimiting.'
-}
-
-if (-not $ciIdentity.Contains('"ecr:StartImageScan"')) {
-    throw "The scoped plan role must be allowed to start scans for its exact ECR repositories."
 }
 
 Write-Host "Development release workflow policy checks passed."
