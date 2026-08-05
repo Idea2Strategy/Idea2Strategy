@@ -555,6 +555,16 @@ if ($deployedVerifier.Contains('test "$stable_total" -eq "$restart_total"')) {
     throw "The deployed verifier must compare container identity and restart counts per service, not only an aggregate total."
 }
 
+foreach ($digestBoundary in @(
+    '/idea2strategy/dev/deployment/images/$service',
+    "docker inspect --format '{{.Config.Image}}'",
+    'test "$configured_image" = "$expected_image"'
+)) {
+    if (-not $deployedVerifier.Contains($digestBoundary)) {
+        throw "The deployed verifier must bind each Core container to its applied immutable digest: $digestBoundary"
+    }
+}
+
 foreach ($required in @(
     'resource "aws_scheduler_schedule" "trading_start"',
     'resource "aws_scheduler_schedule" "trading_stop"',

@@ -185,7 +185,14 @@ The following steps intentionally remain outside this repository-only readiness 
 3. Populate ignored `backend.hcl` and `terraform.tfvars` from the examples; never commit them.
 4. Apply a reviewed `dns_foundation` saved plan first. This creates only the Route 53 zone and the private, encrypted, versioned frontend release bucket in addition to the existing market-data foundation. Copy every existing DNS record and record the Route 53 nameservers, but do not change the registrar delegation yet.
 5. Bootstrap the five database LOGIN roles and Secrets Manager values through the reviewed one-shot database procedure, run Flyway once, and prepare the pinned S3 policy/artifact inputs. Build application inputs without AWS credentials. The `development-plan` job may then use only the scoped plan/publisher role to publish immutable ECR digests, run `terraform init -backend-config=backend.hcl`, and save a `host_ready` plan with `terraform plan -parallelism=1 -out deployment.tfplan`.
+   The release job requires the versioned receipt at the exact
+   `deployment-bootstrap/<root-sha>/<flyway-bundle-sha>/receipt.json` key. It
+   also requires all five receipt-bound database secret versions to remain
+   `AWSCURRENT`; a receipt from an older root or Flyway bundle is not accepted.
 6. Review the complete `host_ready` plan, cost impact, replacements, deletions, IAM changes, immutable artifacts, and database consequences. It must contain no CloudFront, ACM, public DNS cutover, replacement, or destroy action.
+   The release workflow converts the saved plan to JSON and rejects every
+   action containing `delete`, including create-before-destroy replacement,
+   before the plan can be archived for approval.
 7. Apply only that reviewed `host_ready` plan file through the separate `development` Environment approval. Do not run an unsaved `terraform apply`.
    The pre-approval plan uses deliberately invalid all-zero image digests and is
    never applyable. Apply only an independently reviewed plan from the isolated
@@ -218,6 +225,14 @@ the reviewed plan; no mutable S3-root copy or cache invalidation is used. Rollba
 means selecting the previous immutable release ID, reviewing that Terraform
 plan, and applying only the reviewed saved plan. Run the read-only environment verifier from
 the same exact checkout. It prints no credentials:
+
+For the always-on Core host, changing the SSM image parameters alone is not a
+deployment. The release workflow invokes the systemd-owned runtime start program
+through SSM after apply, proves that Backend API, Backend Worker, and Backtest API
+each run the exact applied repository digest, and observes a stable health
+window. If rollout or digest verification fails, the host restores the previous
+digest-pinned Compose file before the release job fails. The final verifier
+independently repeats the exact SSM-parameter-to-container-image comparison.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deployed-development.ps1 `
