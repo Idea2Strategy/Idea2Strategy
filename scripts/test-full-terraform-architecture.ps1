@@ -190,7 +190,7 @@ if ($compute -notmatch 'desired_capacity\s*=\s*0' -or
     ($compute | Select-String -Pattern 'http_put_response_hop_limit\s*=\s*2' -AllMatches).Matches.Count -ne 3) {
     throw "Backtest must scale from zero to one and each Docker EC2 launch path must use IMDSv2 with container-compatible hop limit 2."
 }
-if ($compute -notmatch '# checkov:skip=CKV_AWS_341:IMDSv2 tokens remain required; hop limit 2 is required for the non-root Docker worker to reach instance-profile credentials through the container network namespace\.') {
+if ($compute -notmatch '(?s)resource\s+"aws_launch_template"\s+"backtest"\s*\{\s*#checkov:skip=CKV_AWS_341:IMDSv2 tokens remain required; hop limit 2 is required for the non-root Docker worker to reach instance-profile credentials through the container network namespace\.') {
     throw "The backtest launch template must document the narrow CKV_AWS_341 exception for container-compatible instance-role access."
 }
 

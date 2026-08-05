@@ -27,7 +27,12 @@ foreach ($required in @(
     'resource "aws_cognito_managed_login_branding" "operator"',
     'use_cognito_provided_values = true',
     'lambda_version = "V2_0"',
-    'resource "aws_lambda_permission" "operator_pre_token"'
+    'resource "aws_lambda_permission" "operator_pre_token"',
+    'reserved_concurrent_executions = 5',
+    'mode = "Active"',
+    '#checkov:skip=CKV_AWS_117:Cognito invokes this synchronous pre-token transformer through the AWS control plane; VPC attachment adds cold-start and network dependencies without protecting data access.',
+    '#checkov:skip=CKV_AWS_116:Cognito pre-token generation is synchronous and fail-closed; Cognito receives invocation errors directly, so an asynchronous Lambda DLQ is not applicable.',
+    '#checkov:skip=CKV_AWS_272:The immutable source hash and reviewed Terraform package pin this small first-party transformer; a separate Lambda code-signing profile is outside the Development trust boundary.'
 )) {
     if (-not ($variables.Contains($required) -or $identity.Contains($required))) {
         throw "Cognito operator identity boundary is missing: $required"
