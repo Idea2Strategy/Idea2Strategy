@@ -58,17 +58,25 @@ resource "aws_iam_role_policy" "operator_pre_token_logs" {
 }
 
 resource "aws_lambda_function" "operator_pre_token" {
+  #checkov:skip=CKV_AWS_117:Cognito invokes this synchronous pre-token transformer through the AWS control plane; VPC attachment adds cold-start and network dependencies without protecting data access.
+  #checkov:skip=CKV_AWS_116:Cognito pre-token generation is synchronous and fail-closed; Cognito receives invocation errors directly, so an asynchronous Lambda DLQ is not applicable.
+  #checkov:skip=CKV_AWS_272:The immutable source hash and reviewed Terraform package pin this small first-party transformer; a separate Lambda code-signing profile is outside the Development trust boundary.
   count = var.enable_cognito_operator_identity ? 1 : 0
 
-  function_name    = "${local.name_prefix}-operator-pre-token"
-  role             = aws_iam_role.operator_pre_token[0].arn
-  handler          = "index.handler"
-  runtime          = "nodejs22.x"
-  architectures    = ["arm64"]
-  filename         = data.archive_file.operator_pre_token[0].output_path
-  source_code_hash = data.archive_file.operator_pre_token[0].output_base64sha256
-  memory_size      = 128
-  timeout          = 3
+  function_name                  = "${local.name_prefix}-operator-pre-token"
+  role                           = aws_iam_role.operator_pre_token[0].arn
+  handler                        = "index.handler"
+  runtime                        = "nodejs22.x"
+  architectures                  = ["arm64"]
+  filename                       = data.archive_file.operator_pre_token[0].output_path
+  source_code_hash               = data.archive_file.operator_pre_token[0].output_base64sha256
+  memory_size                    = 128
+  timeout                        = 3
+  reserved_concurrent_executions = 5
+
+  tracing_config {
+    mode = "Active"
+  }
 
   depends_on = [
     aws_cloudwatch_log_group.operator_pre_token,

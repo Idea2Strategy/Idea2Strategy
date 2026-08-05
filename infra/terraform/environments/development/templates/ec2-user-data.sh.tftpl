@@ -4,7 +4,17 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y awscli ca-certificates certbot curl docker.io docker-compose-v2 jq nginx python3-certbot-dns-route53 unzip
+apt-get install -y ca-certificates certbot curl docker.io docker-compose-v2 jq nginx python3-certbot-dns-route53 unzip
+
+curl --fail --silent --show-error \
+  --output /tmp/awscliv2.zip \
+  https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.36.15.zip
+rm -rf /tmp/aws
+unzip -q /tmp/awscliv2.zip -d /tmp
+/tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
+rm -rf /tmp/aws /tmp/awscliv2.zip
+aws --version
+
 systemctl enable --now docker
 
 if snap list amazon-ssm-agent >/dev/null 2>&1; then
@@ -19,6 +29,7 @@ rm -f /tmp/amazon-cloudwatch-agent.deb
 
 install -d -m 0755 /opt/idea2strategy
 install -d -m 0750 /etc/idea2strategy
+install -d -m 0755 /var/lib/idea2strategy
 
 cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'
 {
@@ -174,17 +185,21 @@ materialize_backtest_policies() {
   done < <(jq -r 'keys[]' <<<"$manifest")
   test -s "$temporary/execution-policy.json"
   test -s "$temporary/runtime-policy.json"
-  chmod -R go-w "$temporary"
+  find "$temporary" -type d -exec chmod 0755 {} +
+  find "$temporary" -type f -exec chmod 0444 {} +
   rm -rf "$destination.previous"
   if test -d "$destination"; then mv "$destination" "$destination.previous"; fi
   mv "$temporary" "$destination"
 }
 
 materialize_trading_artifacts() {
-  local manifest runtime destination temporary artifact_name artifact_id object_key version_id expected_sha relative_path target receipt count
+  local manifest runtime destination%{ if runtime_role == "trading" } materialized_destination%{ endif } temporary artifact_name artifact_id object_key version_id expected_sha relative_path target receipt count
   manifest="$(printf '%s' '${trading_artifact_manifest}' | base64 --decode)"
   for runtime in market-gateway trading-worker; do
     destination="/var/lib/idea2strategy/$runtime"
+%{ if runtime_role == "trading" ~}
+    materialized_destination="/runtime/$runtime"
+%{ endif ~}
     temporary="$(mktemp -d "/var/lib/idea2strategy/$runtime.XXXXXX")"
     receipt="$temporary/materialization.properties"
     count="$(jq --arg runtime "$runtime" '[to_entries[] | select(.value.runtime == $runtime)] | length' <<<"$manifest")"
@@ -211,11 +226,16 @@ materialize_trading_artifacts() {
         printf 'artifact.%s.source-key=%s\n' "$index" "$object_key"
         printf 'artifact.%s.source-version-id=%s\n' "$index" "$version_id"
         printf 'artifact.%s.sha256=%s\n' "$index" "$expected_sha"
+%{ if runtime_role == "trading" ~}
+        printf 'artifact.%s.local-path=%s/%s\n' "$index" "$materialized_destination" "$relative_path"
+%{ else ~}
         printf 'artifact.%s.local-path=%s\n' "$index" "$destination/$relative_path"
+%{ endif ~}
       } >>"$receipt"
       index=$((index + 1))
     done < <(jq -r --arg runtime "$runtime" 'to_entries[] | select(.value.runtime == $runtime) | .key' <<<"$manifest")
-    chmod -R go-w "$temporary"
+    find "$temporary" -type d -exec chmod 0755 {} +
+    find "$temporary" -type f -exec chmod 0444 {} +
     rm -rf "$destination.previous"
     if test -d "$destination"; then mv "$destination" "$destination.previous"; fi
     mv "$temporary" "$destination"
@@ -377,7 +397,7 @@ services:
     cap_drop: [ALL]
     logging: &awslogs
       driver: awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backend-api}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backend-api}
   backend-worker:
     image: $backend_worker_image
     restart: unless-stopped
@@ -388,7 +408,7 @@ services:
     cap_drop: [ALL]
     logging:
       <<: *awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backend-worker}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backend-worker}
   backtest-api:
     image: $backtest_api_image
     restart: unless-stopped
@@ -407,7 +427,7 @@ services:
       start_period: 30s
     logging:
       <<: *awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backtest-api}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backtest-api}
   backend-batch:
     image: $backend_batch_image
     profiles: [manual]
@@ -418,7 +438,7 @@ services:
     cap_drop: [ALL]
     logging:
       <<: *awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backend-batch}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backend-batch}
   admin-mcp:
     image: $admin_mcp_image
     profiles: [manual]
@@ -430,7 +450,7 @@ services:
     cap_drop: [ALL]
     logging:
       <<: *awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: admin-mcp}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: admin-mcp}
 EOF
 %{ endif ~}
 
@@ -479,7 +499,7 @@ services:
     mem_limit: 3200m
     logging:
       driver: awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backtest-worker}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backtest-worker}
 EOF
 %{ endif ~}
 
@@ -531,7 +551,7 @@ services:
     stop_grace_period: 45s
     logging:
       driver: awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: market-gateway}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: market-gateway}
   trading-worker:
     image: $trading_worker_image
     restart: unless-stopped
@@ -548,7 +568,7 @@ services:
     stop_grace_period: 45s
     logging:
       driver: awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: trading-worker}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: trading-worker}
 EOF
 %{ endif ~}
 

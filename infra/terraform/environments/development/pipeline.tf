@@ -8,6 +8,19 @@ resource "aws_ecs_cluster" "pipeline" {
   }
 }
 
+resource "aws_ecs_cluster_capacity_providers" "pipeline" {
+  count        = local.enable_service_stack ? 1 : 0
+  cluster_name = aws_ecs_cluster.pipeline[0].name
+
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+
+  default_capacity_provider_strategy {
+    capacity_provider = "FARGATE_SPOT"
+    weight            = 1
+    base              = 0
+  }
+}
+
 resource "aws_cloudwatch_log_group" "pipeline" {
   count             = local.enable_service_stack ? 1 : 0
   name              = "/${var.project_name}/${var.environment}/pipeline"
@@ -129,12 +142,49 @@ resource "aws_ecs_task_definition" "pipeline" {
     name = "pipeline-state"
   }
 
+  volume {
+    name = "pipeline-tmp"
+  }
+
   container_definitions = jsonencode([{
+    name                   = "pipeline-volume-init"
+    image                  = "${data.aws_ecr_repository.this["pipeline-worker"].repository_url}@${var.container_image_digests["pipeline-worker"]}"
+    essential              = false
+    user                   = "0:0"
+    readonlyRootFilesystem = true
+    entryPoint             = ["/bin/sh", "-c"]
+    command                = ["chown -R 10001:10001 /var/lib/idea2strategy/pipeline /tmp"]
+    mountPoints = [
+      {
+        sourceVolume  = "pipeline-state"
+        containerPath = "/var/lib/idea2strategy/pipeline"
+        readOnly      = false
+      },
+      {
+        sourceVolume  = "pipeline-tmp"
+        containerPath = "/tmp"
+        readOnly      = false
+      }
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.pipeline[0].name
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = "pipeline-init"
+      }
+    }
+    }, {
     name                   = "pipeline-worker"
     image                  = "${data.aws_ecr_repository.this["pipeline-worker"].repository_url}@${var.container_image_digests["pipeline-worker"]}"
     essential              = true
+    user                   = "10001:10001"
     stopTimeout            = 120
     readonlyRootFilesystem = true
+    dependsOn = [{
+      containerName = "pipeline-volume-init"
+      condition     = "SUCCESS"
+    }]
     environment = [
       { name = "PIPELINE_WORKER_ENVIRONMENT", value = var.environment },
       { name = "PIPELINE_WORKER_MESSAGE_SOURCE", value = "sqs" },
@@ -162,11 +212,18 @@ resource "aws_ecs_task_definition" "pipeline" {
       { name = "PIPELINE_MANIFEST_MODE", value = "content-addressed" },
       { name = "PIPELINE_WORKER_EXIT_AFTER_IDLE_POLLS", value = "6" }
     ]
-    mountPoints = [{
-      sourceVolume  = "pipeline-state"
-      containerPath = "/var/lib/idea2strategy/pipeline"
-      readOnly      = false
-    }]
+    mountPoints = [
+      {
+        sourceVolume  = "pipeline-state"
+        containerPath = "/var/lib/idea2strategy/pipeline"
+        readOnly      = false
+      },
+      {
+        sourceVolume  = "pipeline-tmp"
+        containerPath = "/tmp"
+        readOnly      = false
+      }
+    ]
     secrets = [
       { name = "ALPACA_API_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_api_key[0].arn}:ALPACA_API_KEY::" },
       { name = "ALPACA_SECRET_KEY", valueFrom = "${data.aws_secretsmanager_secret.alpaca_secret_key[0].arn}:ALPACA_SECRET_KEY::" },
