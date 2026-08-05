@@ -102,8 +102,10 @@ function Normalize-BundleForCrossPlatformUse([string]$BundlePath) {
 $root = Get-FullPath (Split-Path -Parent $PSScriptRoot)
 $backendRoot = Join-Path $root 'backend'
 $tradingRoot = Join-Path $root 'trading-engine'
+$dataPipelineRoot = Join-Path $root 'data-pipeline'
 $centralMigration = Join-Path $backendRoot 'db-migration/src/main/resources/db/migration'
 $tradingContribution = Join-Path $tradingRoot 'db/migration-contributions'
+$dataPipelineContribution = Join-Path $dataPipelineRoot 'db/migration-contributions'
 $localRoot = Join-Path $root '.harness/local'
 $temporaryRoot = Join-Path $localRoot 'tmp'
 $bundle = Join-Path $temporaryRoot 'flyway-bundle'
@@ -115,11 +117,15 @@ if ((Get-FullPath $bundle) -cne $expectedBundle) {
 
 Assert-RegularDirectory $backendRoot 'Backend submodule'
 Assert-RegularDirectory $tradingRoot 'Trading submodule'
+Assert-RegularDirectory $dataPipelineRoot 'Data Pipeline submodule'
 Assert-RegularDirectory $centralMigration 'Central migration'
 Assert-RegularDirectory $tradingContribution 'Trading migration contribution'
+Assert-RegularDirectory $dataPipelineContribution 'Data Pipeline migration contribution'
 Assert-PinnedSubmodule $root 'backend' $backendRoot
 Assert-PinnedSubmodule $root 'trading-engine' $tradingRoot
+Assert-PinnedSubmodule $root 'data-pipeline' $dataPipelineRoot
 Assert-CleanContribution $tradingRoot 'db/migration-contributions'
+Assert-CleanContribution $dataPipelineRoot 'db/migration-contributions'
 
 foreach ($directory in @($localRoot, $temporaryRoot)) {
     if (-not (Test-Path -LiteralPath $directory)) {
@@ -147,7 +153,7 @@ if ($null -ne $java) {
     if (-not (Test-Path -LiteralPath $gradleWrapper -PathType Leaf)) {
         throw "Backend Gradle wrapper is missing: $gradleWrapper"
     }
-    $applicationArgs = @($centralMigration, $bundle, $tradingContribution) |
+    $applicationArgs = @($centralMigration, $bundle, $tradingContribution, $dataPipelineContribution) |
         ForEach-Object { Quote-ApplicationArgument $_ }
     Push-Location $backendRoot
     try {
@@ -171,7 +177,7 @@ if ($null -ne $java) {
         'eclipse-temurin:21-jdk',
         'java', '-classpath', 'gradle/wrapper/gradle-wrapper.jar',
         'org.gradle.wrapper.GradleWrapperMain', '--no-daemon', ':db-migration:run',
-        '--args=/workspace/backend/db-migration/src/main/resources/db/migration /workspace/.harness/local/tmp/flyway-bundle /workspace/trading-engine/db/migration-contributions'
+        '--args=/workspace/backend/db-migration/src/main/resources/db/migration /workspace/.harness/local/tmp/flyway-bundle /workspace/trading-engine/db/migration-contributions /workspace/data-pipeline/db/migration-contributions'
     )
     & docker @dockerArguments
     if ($LASTEXITCODE -ne 0) {
@@ -189,8 +195,10 @@ foreach ($required in @('V1__initial_schema.sql', 'migration-bundle.manifest', '
 
 $backendRevision = (& git -C $backendRoot rev-parse HEAD).Trim()
 $tradingRevision = (& git -C $tradingRoot rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $backendRevision -notmatch '^[0-9a-f]{40}$' -or $tradingRevision -notmatch '^[0-9a-f]{40}$') {
-    throw 'Unable to identify exact backend and trading submodule revisions.'
+$dataPipelineRevision = (& git -C $dataPipelineRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $backendRevision -notmatch '^[0-9a-f]{40}$' -or
+    $tradingRevision -notmatch '^[0-9a-f]{40}$' -or $dataPipelineRevision -notmatch '^[0-9a-f]{40}$') {
+    throw 'Unable to identify exact backend, trading, and data pipeline submodule revisions.'
 }
 
 [pscustomobject]@{
@@ -199,4 +207,5 @@ if ($LASTEXITCODE -ne 0 -or $backendRevision -notmatch '^[0-9a-f]{40}$' -or $tra
     sha256 = (Get-Content -LiteralPath (Join-Path $bundle 'migration-bundle.sha256') -Raw).Trim()
     backend_revision = $backendRevision
     trading_revision = $tradingRevision
+    data_pipeline_revision = $dataPipelineRevision
 } | ConvertTo-Json -Compress
