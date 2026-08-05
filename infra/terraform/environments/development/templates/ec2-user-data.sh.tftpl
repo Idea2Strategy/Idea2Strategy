@@ -276,7 +276,7 @@ append_env_value "$runtime_secret_env" EMAIL_DELIVERY_FROM_ADDRESS "$(ssm_value 
 append_env_value "$runtime_secret_env" EMAIL_DELIVERY_AWS_REGION "$(ssm_value '${parameter_path}/email/aws-region')"
 append_env_value "$runtime_secret_env" EMAIL_DELIVERY_BASE_URL "$(ssm_value '${parameter_path}/email/base-url')"
 cat >>"$runtime_secret_env" <<EOF
-OPERATOR_AUTH_ENABLED=true
+OPERATOR_AUTH_ENABLED=${enable_operator_auth}
 OPERATOR_AUTH_ISSUER=${operator_auth_issuer}
 OPERATOR_AUTH_JWK_SET_URI=${operator_auth_jwk_set_uri}
 OPERATOR_AUTH_AUDIENCE=${operator_auth_audience}
@@ -286,7 +286,7 @@ OPERATOR_AUTH_CLOCK_SKEW=PT30S
 OPERATOR_AUTH_ALLOWED_ACR_VALUES=${operator_auth_allowed_acr_values}
 OPERATOR_AUTH_ALLOWED_AMR_VALUES=${operator_auth_allowed_amr_values}
 OPERATOR_AUTH_CURRENT_HMAC_KEY_VERSION=1
-OPERATOR_RBAC_READ_ENABLED=true
+OPERATOR_RBAC_READ_ENABLED=${enable_operator_auth}
 OPERATOR_RBAC_CATALOG_VERSION=${operator_rbac_catalog_version}
 OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID=${operator_rbac_catalog_read_permission_id}
 OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID=${operator_rbac_assignment_read_permission_id}
