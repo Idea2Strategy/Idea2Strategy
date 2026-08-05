@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "status": "isolated-proposal-not-approved",
+  "rootCommit": "21437cb2e940679b800645a6adae33943fd0dee3",
+  "governanceStatus": "unknown",
+  "protectedFingerprint": "sha256:6e015a609756c60fed0332ac57aa31935acf328832e4dd76fae93d72e980900a",
+  "backend": {
+    "commit": "bef4de6969d3ad83d147bf55c479fecd4116b76d",
+    "blobs": {
+      "OperatorRbacConfiguration.java": "6655521930e19e25c41ce11a5a35b4661c92d8ba",
+      "AccountSanctionConfiguration.java": "74da09f31065422bce5dfd7cbef5599c755609e6",
+      "OperatorCaseConfiguration.java": "d79659ec325e82df64ee8317d29a7c05c08b398d",
+      "OperatorCaseCommand.java": "06f56e148e0fb070123fd23c62795e20988c3f1a",
+      "OperatorRoomPermissions.java": "845f754feceae088dbaedd82b292f927a593a02c",
+      "V20260802230000__backend_operator_room_permissions.sql": "f930925f294da4afdf304eb004a5491a19599ecf",
+      "OperatorBootstrapManifest.java": "c93bca83314d60beff264defdf10346a5f7172c0",
+      "OperatorBootstrapService.java": "99ec8e6def81b7f784191f7b22ad0723b98a6659",
+      "VersionedOperatorSubjectHmac.java": "5a8c146f2107db43aad2e4bfc22192d44305ce3a"
+    }
+  },
+  "ui": {
+    "commit": "ac0469a14d2a4d929368e42dbb768802073f0c8c",
+    "issue": 110,
+    "blobs": {
+      "App.tsx": "f5bf35233cced82524b22fc5f226a3fe22c9a080",
+      "accountOperations.ts": "e537a10b8bf15f4979a500b11d0c95e966c3f96a",
+      "CaseApiPanels.tsx": "66d2652fa363b1d60c0793ffbb62b955068162bc",
+      "OperatorRbacViews.tsx": "f77c3da67c2fea5b7a1d519bb219efbf711fca34"
+    }
+  }
+}
