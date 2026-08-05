@@ -1,11 +1,13 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  name_prefix         = "${var.project_name}-${var.environment}"
-  state_bucket_name   = var.state_bucket_name != "" ? var.state_bucket_name : "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-tfstate"
-  state_bucket_arn    = "arn:aws:s3:::${local.state_bucket_name}"
-  frontend_bucket_arn = "arn:aws:s3:::${local.name_prefix}-${data.aws_caller_identity.current.account_id}-frontend"
-  ecr_repository_arn  = "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${local.name_prefix}/*"
+  name_prefix                    = "${var.project_name}-${var.environment}"
+  github_repository_parts        = split("/", var.github_repository)
+  github_oidc_repository_subject = "${local.github_repository_parts[0]}@${var.github_repository_owner_id}/${local.github_repository_parts[1]}@${var.github_repository_id}"
+  state_bucket_name              = var.state_bucket_name != "" ? var.state_bucket_name : "${local.name_prefix}-${data.aws_caller_identity.current.account_id}-tfstate"
+  state_bucket_arn               = "arn:aws:s3:::${local.state_bucket_name}"
+  frontend_bucket_arn            = "arn:aws:s3:::${local.name_prefix}-${data.aws_caller_identity.current.account_id}-frontend"
+  ecr_repository_arn             = "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${local.name_prefix}/*"
 }
 
 data "aws_iam_policy_document" "github_plan_assume" {
@@ -27,7 +29,7 @@ data "aws_iam_policy_document" "github_plan_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:${var.github_plan_environment}"]
+      values   = ["repo:${local.github_oidc_repository_subject}:environment:${var.github_plan_environment}"]
     }
   }
 }
@@ -146,7 +148,7 @@ data "aws_iam_policy_document" "github_deploy_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:${var.github_environment}"]
+      values   = ["repo:${local.github_oidc_repository_subject}:environment:${var.github_environment}"]
     }
   }
 }
