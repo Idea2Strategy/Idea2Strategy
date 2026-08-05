@@ -110,7 +110,7 @@ resource "terraform_data" "runtime_artifact_guard" {
         try(var.trading_runtime_artifacts["instrument-mapping"].runtime, "") == "market-gateway" &&
         try(var.trading_runtime_artifacts["instrument-mapping"].local_path, "") == "instruments.json" &&
         try(var.trading_runtime_artifacts["provider-rights"].runtime, "") == "market-gateway" &&
-        try(var.trading_runtime_artifacts["provider-rights"].local_path, "") == "alpaca-sip-rights.json" &&
+        try(var.trading_runtime_artifacts["provider-rights"].local_path, "") == "alpaca-${var.trading_market_data_feed}-rights.json" &&
         try(var.trading_runtime_artifacts["warmup-manifest"].runtime, "") == "trading-worker" &&
         try(var.trading_runtime_artifacts["warmup-manifest"].local_path, "") == "warmup/manifest.json"
       )

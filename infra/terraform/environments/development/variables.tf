@@ -112,6 +112,17 @@ variable "trading_instance_type" {
   default     = "c7g.xlarge"
 }
 
+variable "trading_market_data_feed" {
+  description = "Explicit Alpaca real-time feed for the Development trading runtime. IEX is a lower-coverage fallback and requires matching reviewed rights evidence."
+  type        = string
+  default     = "sip"
+
+  validation {
+    condition     = contains(["sip", "iex"], var.trading_market_data_feed)
+    error_message = "trading_market_data_feed must be sip or iex."
+  }
+}
+
 variable "backtest_instance_type" {
   description = "Scale-to-zero ARM64 backtest worker size."
   type        = string

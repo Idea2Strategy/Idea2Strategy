@@ -494,9 +494,10 @@ cat >>"$runtime_secret_env" <<EOF
 MARKET_GATEWAY_REDIS_URI=rediss://${cache_endpoint}:6379
 MARKET_GATEWAY_REDIS_KEY_PREFIX=i2s
 MARKET_GATEWAY_INSTRUMENT_MAPPING_PATH=/runtime/market-gateway/instruments.json
-MARKET_GATEWAY_RIGHTS_EVIDENCE_PATH=/runtime/market-gateway/alpaca-sip-rights.json
+MARKET_GATEWAY_ALPACA_FEED=${trading_market_data_feed}
+MARKET_GATEWAY_RIGHTS_EVIDENCE_PATH=/runtime/market-gateway/${trading_provider_rights_local_path}
 MARKET_GATEWAY_MATERIALIZATION_RECEIPT_PATH=/runtime/market-gateway/materialization.properties
-MARKET_GATEWAY_ALPACA_ENDPOINT=wss://stream.data.alpaca.markets/v2/sip
+MARKET_GATEWAY_ALPACA_ENDPOINT=${trading_market_data_endpoint}
 I2S_READINESS_FILE=/tmp/idea2strategy-ready
 TRADING_MARKET_EVENTS_REDIS_URI=rediss://${cache_endpoint}:6379
 TRADING_MARKET_EVENTS_REDIS_KEY_PREFIX=i2s
