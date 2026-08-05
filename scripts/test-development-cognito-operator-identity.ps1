@@ -88,7 +88,8 @@ foreach ($required in @(
     'end_session_endpoint',
     'client_id',
     'audience',
-    'jwk_set_uri'
+    'jwk_set_uri',
+    'logout_redirect_parameter'
 )) {
     if (-not $outputs.Contains($required)) {
         throw "Cognito operator deployment output is missing: $required"

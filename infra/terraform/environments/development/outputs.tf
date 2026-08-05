@@ -165,12 +165,13 @@ output "ecr_repository_urls" {
 output "cognito_operator_oidc" {
   description = "Public build/runtime inputs for the dedicated Cognito operator Authorization Code + PKCE client."
   value = var.enable_cognito_operator_identity ? {
-    issuer                 = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.operator[0].id}"
-    authorization_endpoint = "https://${aws_cognito_user_pool_domain.operator[0].domain}.auth.${var.aws_region}.amazoncognito.com/oauth2/authorize"
-    token_endpoint         = "https://${aws_cognito_user_pool_domain.operator[0].domain}.auth.${var.aws_region}.amazoncognito.com/oauth2/token"
-    end_session_endpoint   = "https://${aws_cognito_user_pool_domain.operator[0].domain}.auth.${var.aws_region}.amazoncognito.com/logout"
-    client_id              = aws_cognito_user_pool_client.operator[0].id
-    audience               = aws_cognito_user_pool_client.operator[0].id
-    jwk_set_uri            = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.operator[0].id}/.well-known/jwks.json"
+    issuer                    = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.operator[0].id}"
+    authorization_endpoint    = "https://${aws_cognito_user_pool_domain.operator[0].domain}.auth.${var.aws_region}.amazoncognito.com/oauth2/authorize"
+    token_endpoint            = "https://${aws_cognito_user_pool_domain.operator[0].domain}.auth.${var.aws_region}.amazoncognito.com/oauth2/token"
+    end_session_endpoint      = "https://${aws_cognito_user_pool_domain.operator[0].domain}.auth.${var.aws_region}.amazoncognito.com/logout"
+    client_id                 = aws_cognito_user_pool_client.operator[0].id
+    audience                  = aws_cognito_user_pool_client.operator[0].id
+    jwk_set_uri               = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.operator[0].id}/.well-known/jwks.json"
+    logout_redirect_parameter = "logout_uri"
   } : null
 }
