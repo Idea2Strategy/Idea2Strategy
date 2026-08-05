@@ -207,6 +207,22 @@ foreach ($required in @(
         throw "Backtest runtime environment injection is missing: $required"
     }
 }
+foreach ($tradingSecretBoundary in @(
+    'refresh_runtime_secrets() {',
+    'grep -Ev ''^(AWS_DEFAULT_REGION|SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|ALPACA_API_KEY|ALPACA_API_SECRET)=''',
+    'append_env_value "$refreshed_runtime_env" AWS_DEFAULT_REGION ''${aws_region}''',
+    'append_json_field "$refreshed_runtime_env" ALPACA_API_SECRET "$alpaca_secret_key_secret" ALPACA_SECRET_KEY',
+    'secret_json ''${trading_database_secret_arn}''',
+    'secret_json ''${alpaca_api_key_secret_arn}''',
+    'secret_json ''${alpaca_secret_key_secret_arn}'''
+)) {
+    if (-not $userData.Contains($tradingSecretBoundary)) {
+        throw "Trading startup must refresh its stopped-instance credentials from Secrets Manager: $tradingSecretBoundary"
+    }
+}
+if ($userData.IndexOf('refresh_runtime_secrets') -gt $userData.IndexOf('refresh_runtime_images')) {
+    throw "Trading secrets must be refreshed before immutable images and containers are started."
+}
 
 foreach ($required in @(
     'resource "aws_instance" "service"',

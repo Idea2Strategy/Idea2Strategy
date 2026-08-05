@@ -607,6 +607,54 @@ set -euo pipefail
 umask 077
 cd /opt/idea2strategy
 
+%{ if runtime_role == "trading" ~}
+runtime_secret_json() {
+  local secret_id=$1 attempt document
+  for attempt in 1 2 3 4 5; do
+    if document="$(aws secretsmanager get-secret-value \
+      --region '${aws_region}' \
+      --secret-id "$secret_id" \
+      --query SecretString \
+      --output text)"; then
+      printf '%s' "$document"
+      return 0
+    fi
+    sleep $((attempt * 2))
+  done
+  return 1
+}
+
+append_env_value() {
+  local destination=$1 name=$2 value=$3
+  printf '%s' "$value" | jq -Rrs --arg name "$name" '$name + "=" + (. | @json)' >>"$destination"
+}
+
+append_json_field() {
+  local destination=$1 name=$2 document=$3 field=$4 value
+  value="$(jq -er --arg field "$field" '.[$field] | select(type == "string" and length > 0)' <<<"$document")"
+  append_env_value "$destination" "$name" "$value"
+}
+
+refresh_runtime_secrets() {
+  local database_secret alpaca_key_secret alpaca_secret_key_secret refreshed_runtime_env
+  database_secret="$(runtime_secret_json '${trading_database_secret_arn}')"
+  alpaca_key_secret="$(runtime_secret_json '${alpaca_api_key_secret_arn}')"
+  alpaca_secret_key_secret="$(runtime_secret_json '${alpaca_secret_key_secret_arn}')"
+  refreshed_runtime_env="$(mktemp /etc/idea2strategy/.runtime-secret.env.XXXXXX)"
+  trap 'rm -f "$refreshed_runtime_env"' EXIT
+  grep -Ev '^(AWS_DEFAULT_REGION|SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|ALPACA_API_KEY|ALPACA_API_SECRET)=' \
+    /etc/idea2strategy/runtime-secret.env >"$refreshed_runtime_env"
+  append_env_value "$refreshed_runtime_env" AWS_DEFAULT_REGION '${aws_region}'
+  append_json_field "$refreshed_runtime_env" SPRING_DATASOURCE_USERNAME "$database_secret" username
+  append_json_field "$refreshed_runtime_env" SPRING_DATASOURCE_PASSWORD "$database_secret" password
+  append_json_field "$refreshed_runtime_env" ALPACA_API_KEY "$alpaca_key_secret" ALPACA_API_KEY
+  append_json_field "$refreshed_runtime_env" ALPACA_API_SECRET "$alpaca_secret_key_secret" ALPACA_SECRET_KEY
+  chmod 0600 "$refreshed_runtime_env"
+  mv -f "$refreshed_runtime_env" /etc/idea2strategy/runtime-secret.env
+  trap - EXIT
+}
+
+%{ endif ~}
 refresh_runtime_images() {
   local refreshed_compose current_image repository runtime_name replacement
   refreshed_compose="$(mktemp /opt/idea2strategy/.compose.yaml.XXXXXX)"
@@ -631,6 +679,9 @@ refresh_runtime_images() {
   trap - EXIT
 }
 
+%{ if runtime_role == "trading" ~}
+refresh_runtime_secrets
+%{ endif ~}
 refresh_runtime_images
 mapfile -t runtime_images < <(docker compose --project-name idea2strategy config --images)
 for image in "$${runtime_images[@]}"; do
