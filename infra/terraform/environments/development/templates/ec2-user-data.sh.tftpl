@@ -46,6 +46,12 @@ cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'
             "log_group_name": "${log_group_name}",
             "log_stream_name": "{instance_id}/cloud-init",
             "timezone": "UTC"
+          },
+          {
+            "file_path": "/var/log/idea2strategy-runtime-health.log",
+            "log_group_name": "${log_group_name}",
+            "log_stream_name": "{instance_id}/runtime-health",
+            "timezone": "UTC"
           }
         ]
       }
@@ -53,6 +59,7 @@ cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'
   },
   "metrics": {
     "namespace": "Idea2Strategy/Development",
+    "aggregation_dimensions": [["AutoScalingGroupName"], ["InstanceId"]],
     "append_dimensions": {
       "InstanceId": "$${aws:InstanceId}",
       "AutoScalingGroupName": "$${aws:AutoScalingGroupName}"
@@ -70,6 +77,11 @@ cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'
       "swap": {
         "measurement": ["swap_used_percent"],
         "metrics_collection_interval": 60
+      },
+      "statsd": {
+        "service_address": ":8125",
+        "metrics_collection_interval": 60,
+        "metrics_aggregation_interval": 60
       }
     }
   }
@@ -108,6 +120,7 @@ ssm_value() {
 
 %{ if runtime_role == "backtest-worker" ~}
 cat >>/etc/idea2strategy/runtime.env <<EOF
+AWS_DEFAULT_REGION=${aws_region}
 BACKTEST_BASIC_QUEUE_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/url')
 BACKTEST_BASIC_DLQ_URL=$(ssm_value '${parameter_path}/queues/backtest-basic/dlq-url')
 BACKTEST_BASIC_MAX_CONCURRENCY=$(ssm_value '${parameter_path}/backtest/lanes/basic/max-concurrency')
@@ -274,6 +287,7 @@ print("postgresql+psycopg://%s:%s@${database_host}:5432/${database_name}?sslmode
 runtime_secret_env=/etc/idea2strategy/runtime-secret.env
 : >"$runtime_secret_env"
 append_env_value "$runtime_secret_env" AWS_REGION '${aws_region}'
+append_env_value "$runtime_secret_env" AWS_DEFAULT_REGION '${aws_region}'
 append_env_value "$runtime_secret_env" SPRING_DATASOURCE_URL 'jdbc:postgresql://${database_host}:5432/${database_name}?sslmode=require'
 append_env_value "$runtime_secret_env" SPRING_DATASOURCE_USERNAME "$db_username"
 append_env_value "$runtime_secret_env" SPRING_DATASOURCE_PASSWORD "$db_password"
@@ -334,6 +348,7 @@ EOF
 backtest_secret_env=/etc/idea2strategy/backtest-secret.env
 : >"$backtest_secret_env"
 append_env_value "$backtest_secret_env" AWS_REGION '${aws_region}'
+append_env_value "$backtest_secret_env" AWS_DEFAULT_REGION '${aws_region}'
 append_env_value "$backtest_secret_env" BACKTEST_DATABASE_URL "$backtest_database_url"
 append_json_field "$backtest_secret_env" BACKTEST_SESSION_HMAC_KEY_BASE64 "$backtest_internal_secret" BACKTEST_SESSION_HMAC_KEY_BASE64
 append_json_field "$backtest_secret_env" BACKTEST_RESULT_INGEST_TOKEN "$backtest_internal_secret" BACKTEST_RESULT_INGEST_TOKEN
@@ -345,6 +360,7 @@ chmod 0600 "$runtime_secret_env"
 batch_secret_env=/etc/idea2strategy/batch-secret.env
 : >"$batch_secret_env"
 append_env_value "$batch_secret_env" AWS_REGION '${aws_region}'
+append_env_value "$batch_secret_env" AWS_DEFAULT_REGION '${aws_region}'
 append_env_value "$batch_secret_env" SPRING_DATASOURCE_URL 'jdbc:postgresql://${database_host}:5432/${database_name}?sslmode=require'
 append_json_field "$batch_secret_env" SPRING_DATASOURCE_USERNAME "$batch_db_secret" username
 append_json_field "$batch_secret_env" SPRING_DATASOURCE_PASSWORD "$batch_db_secret" password
@@ -417,6 +433,12 @@ services:
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/actuator/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 180s
     logging: &awslogs
       driver: awslogs
       options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backend-api}
@@ -444,9 +466,9 @@ services:
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"]
       interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 30s
+      timeout: 10s
+      retries: 6
+      start_period: 120s
     logging:
       <<: *awslogs
       options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backtest-api}
@@ -599,13 +621,91 @@ cat >/usr/local/sbin/idea2strategy-runtime-start <<'SCRIPT'
 set -euo pipefail
 umask 077
 cd /opt/idea2strategy
-while IFS= read -r image; do
+
+%{ if runtime_role == "trading" ~}
+runtime_secret_json() {
+  local secret_id=$1 attempt document
+  for attempt in 1 2 3 4 5; do
+    if document="$(aws secretsmanager get-secret-value \
+      --region '${aws_region}' \
+      --secret-id "$secret_id" \
+      --query SecretString \
+      --output text)"; then
+      printf '%s' "$document"
+      return 0
+    fi
+    sleep $((attempt * 2))
+  done
+  return 1
+}
+
+append_env_value() {
+  local destination=$1 name=$2 value=$3
+  printf '%s' "$value" | jq -Rrs --arg name "$name" '$name + "=" + (. | @json)' >>"$destination"
+}
+
+append_json_field() {
+  local destination=$1 name=$2 document=$3 field=$4 value
+  value="$(jq -er --arg field "$field" '.[$field] | select(type == "string" and length > 0)' <<<"$document")"
+  append_env_value "$destination" "$name" "$value"
+}
+
+refresh_runtime_secrets() {
+  local database_secret alpaca_key_secret alpaca_secret_key_secret refreshed_runtime_env
+  database_secret="$(runtime_secret_json '${trading_database_secret_arn}')"
+  alpaca_key_secret="$(runtime_secret_json '${alpaca_api_key_secret_arn}')"
+  alpaca_secret_key_secret="$(runtime_secret_json '${alpaca_secret_key_secret_arn}')"
+  refreshed_runtime_env="$(mktemp /etc/idea2strategy/.runtime-secret.env.XXXXXX)"
+  trap 'rm -f "$refreshed_runtime_env"' EXIT
+  grep -Ev '^(AWS_DEFAULT_REGION|SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|ALPACA_API_KEY|ALPACA_API_SECRET)=' \
+    /etc/idea2strategy/runtime-secret.env >"$refreshed_runtime_env"
+  append_env_value "$refreshed_runtime_env" AWS_DEFAULT_REGION '${aws_region}'
+  append_json_field "$refreshed_runtime_env" SPRING_DATASOURCE_USERNAME "$database_secret" username
+  append_json_field "$refreshed_runtime_env" SPRING_DATASOURCE_PASSWORD "$database_secret" password
+  append_json_field "$refreshed_runtime_env" ALPACA_API_KEY "$alpaca_key_secret" ALPACA_API_KEY
+  append_json_field "$refreshed_runtime_env" ALPACA_API_SECRET "$alpaca_secret_key_secret" ALPACA_SECRET_KEY
+  chmod 0600 "$refreshed_runtime_env"
+  mv -f "$refreshed_runtime_env" /etc/idea2strategy/runtime-secret.env
+  trap - EXIT
+}
+
+%{ endif ~}
+refresh_runtime_images() {
+  local refreshed_compose current_image repository runtime_name replacement
+  refreshed_compose="$(mktemp /opt/idea2strategy/.compose.yaml.XXXXXX)"
+  trap 'rm -f "$refreshed_compose"' EXIT
+  install -m 0600 compose.yaml "$refreshed_compose"
+  while IFS= read -r current_image; do
+    repository="$(printf '%s' "$current_image" | cut -d@ -f1)"
+    runtime_name="$(basename "$repository")"
+    replacement="$(aws ssm get-parameter \
+      --region '${aws_region}' \
+      --name '${parameter_path}/deployment/images/'"$runtime_name" \
+      --query Parameter.Value \
+      --output text)"
+    case "$replacement" in
+      "$repository"@sha256:*) ;;
+      *) echo "SSM returned a mismatched or mutable runtime image for $runtime_name" >&2; exit 1 ;;
+    esac
+    sed -i "s|$current_image|$replacement|g" "$refreshed_compose"
+  done < <(docker compose --project-name idea2strategy config --images)
+  docker compose --file "$refreshed_compose" config --quiet
+  mv -f "$refreshed_compose" compose.yaml
+  trap - EXIT
+}
+
+%{ if runtime_role == "trading" ~}
+refresh_runtime_secrets
+%{ endif ~}
+refresh_runtime_images
+mapfile -t runtime_images < <(docker compose --project-name idea2strategy config --images)
+for image in "$${runtime_images[@]}"; do
   case "$image" in
     *@sha256:*) ;;
     *) echo "Mutable or malformed runtime image reference: $image" >&2; exit 1 ;;
   esac
-done < <(docker compose --project-name idea2strategy config --images)
-registry="$(docker compose --project-name idea2strategy config --images | head -n1 | cut -d/ -f1)"
+done
+registry="$${runtime_images[0]%%/*}"
 test -n "$registry"
 aws ecr get-login-password --region '${aws_region}' | docker login --username AWS --password-stdin "$registry"
 docker compose --project-name idea2strategy config --quiet
@@ -613,6 +713,92 @@ docker compose --project-name idea2strategy pull
 docker compose --project-name idea2strategy up --detach --remove-orphans --wait
 SCRIPT
 chmod 0700 /usr/local/sbin/idea2strategy-runtime-start
+
+cat >/usr/local/sbin/idea2strategy-runtime-health <<'SCRIPT'
+#!/usr/bin/env bash
+set -u
+umask 077
+
+expected_services=(
+%{ if runtime_role == "service" ~}
+  backend-api backend-worker backtest-api
+%{ endif ~}
+%{ if runtime_role == "backtest-worker" ~}
+  backtest-worker
+%{ endif ~}
+%{ if runtime_role == "trading" ~}
+  market-gateway trading-worker
+%{ endif ~}
+)
+
+unhealthy=0
+restart_total=0
+for service in "$${expected_services[@]}"; do
+  container="$(docker compose --project-directory /opt/idea2strategy --project-name idea2strategy ps -q "$service" 2>/dev/null || true)"
+  if test -z "$container"; then
+    unhealthy=$((unhealthy + 1))
+    continue
+  fi
+  running="$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || true)"
+  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container" 2>/dev/null || true)"
+  restarts="$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || printf 0)"
+  case "$restarts" in (*[!0-9]*|'') restarts=0 ;; esac
+  restart_total=$((restart_total + restarts))
+  if test "$running" != true || test "$health" != healthy; then
+    unhealthy=$((unhealthy + 1))
+  fi
+done
+
+state_file=/var/lib/idea2strategy/runtime-restart-total
+restart_delta=0
+if test -s "$state_file"; then
+  previous="$(cat "$state_file")"
+  case "$previous" in (*[!0-9]*|'') previous=0 ;; esac
+  if test "$restart_total" -ge "$previous"; then
+    restart_delta=$((restart_total - previous))
+  else
+    restart_delta=$restart_total
+  fi
+fi
+printf '%s\n' "$restart_total" >"$state_file"
+
+emit_metric() {
+  (printf '%s:%s|g\n' "$1" "$2" >/dev/udp/127.0.0.1/8125) 2>/dev/null || true
+}
+emit_metric RuntimeObserverHeartbeat 1
+emit_metric RuntimeUnhealthyContainerCount "$unhealthy"
+emit_metric RuntimeRestartDelta "$restart_delta"
+printf '%s role=%s heartbeat=1 unhealthy=%s restart_delta=%s restart_total=%s\n' \
+  "$(date --utc +%FT%TZ)" '${runtime_role}' "$unhealthy" "$restart_delta" "$restart_total" \
+  >>/var/log/idea2strategy-runtime-health.log
+SCRIPT
+chmod 0700 /usr/local/sbin/idea2strategy-runtime-health
+install -m 0640 /dev/null /var/log/idea2strategy-runtime-health.log
+
+cat >/etc/systemd/system/idea2strategy-runtime-health.service <<'UNIT'
+[Unit]
+Description=Observe Idea2Strategy container health and restart deltas
+Requires=docker.service
+After=docker.service amazon-cloudwatch-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/idea2strategy-runtime-health
+UNIT
+
+cat >/etc/systemd/system/idea2strategy-runtime-health.timer <<'UNIT'
+[Unit]
+Description=Observe Idea2Strategy runtime every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
 
 cat >/etc/systemd/system/idea2strategy-runtime.service <<'UNIT'
 [Unit]
@@ -635,6 +821,7 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable idea2strategy-runtime.service
+systemctl enable --now idea2strategy-runtime-health.timer
 %{ if runtime_role != "trading" ~}
 systemctl start idea2strategy-runtime.service
 %{ endif ~}

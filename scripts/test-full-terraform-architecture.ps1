@@ -35,6 +35,17 @@ $ciIdentity = (Get-ChildItem -LiteralPath (Join-Path $root "infra/terraform/ci-i
 }) -join "`n"
 $artifactRoot = Join-Path $root "infra/terraform/artifact-foundation"
 $artifactMain = Get-Content -LiteralPath (Join-Path $artifactRoot "main.tf") -Raw
+$deployedVerifier = Get-Content -LiteralPath (Join-Path $root "scripts/verify-deployed-development.ps1") -Raw
+if (($deployedVerifier | Select-String -Pattern 'Invoke-WebRequest[^\r\n]+-UseBasicParsing' -AllMatches).Matches.Count -ne 2) {
+    throw "Deployed verification must support Windows PowerShell 5 without the retired Internet Explorer parser."
+}
+
+if (-not $deployedVerifier.Contains('& $terraform.Source "-chdir=$terraformDirectory" output -json')) {
+    throw "The deployed verifier must pass Terraform's chdir option as one expanded native argument."
+}
+if (-not $deployedVerifier.Contains('CORE_RUNTIME_STABLE')) {
+    throw "Deployed verification must inspect Core container health and restart stability through SSM."
+}
 
 foreach ($forbidden in @(
     'resource "aws_nat_gateway"',
@@ -85,6 +96,34 @@ foreach ($runtimeDependency in @(
 )) {
     if ($compute -notmatch ('(?s)resource "' + [regex]::Escape($runtimeDependency) + '.*?depends_on\s*=\s*\[.*?aws_ssm_parameter\.runtime_image')) {
         throw "Runtime bootstrap can race its image parameter: $runtimeDependency"
+    }
+}
+foreach ($runtimeRefreshBoundary in @(
+    'runtime_name="$(basename "$repository")"',
+    '--name ''${parameter_path}/deployment/images/''"$runtime_name"',
+    'docker compose --file "$refreshed_compose" config --quiet',
+    'mv -f "$refreshed_compose" compose.yaml',
+    'refresh_runtime_images'
+)) {
+    if (-not $userData.Contains($runtimeRefreshBoundary)) {
+        throw "Runtime restart cannot refresh an immutable image pointer: $runtimeRefreshBoundary"
+    }
+}
+if (-not $userData.Contains('mapfile -t runtime_images < <(docker compose --project-name idea2strategy config --images)') -or
+    -not $userData.Contains('registry="$${runtime_images[0]%%/*}"')) {
+    throw "Runtime startup must capture immutable images without a pipefail-sensitive head pipeline."
+}
+if ($userData.Contains('config --images | head -n1')) {
+    throw "Runtime startup can fail with SIGPIPE when pipefail observes docker compose writing into head."
+}
+foreach ($coreHealthBoundary in @(
+    'test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/actuator/health"]',
+    'start_period: 180s',
+    'timeout: 10s',
+    'retries: 6'
+)) {
+    if (-not $userData.Contains($coreHealthBoundary)) {
+        throw "Core health checks are too aggressive for the confirmed t4g.medium runtime: $coreHealthBoundary"
     }
 }
 if (($compute | Select-String -Pattern 'user_data_base64\s*=\s*base64gzip\(' -AllMatches).Matches.Count -ne 2 -or
@@ -149,6 +188,7 @@ if ($database -notmatch '(?s)name\s*=\s*"rds\.force_ssl".*?apply_method\s*=\s*"p
     throw "The static rds.force_ssl parameter must use pending-reboot so an applied configuration converges without perpetual drift."
 }
 foreach ($required in @(
+    'AWS_DEFAULT_REGION=${aws_region}',
     'BACKTEST_BASIC_QUEUE_URL',
     'BACKTEST_BASIC_DLQ_URL',
     'BACKTEST_BASIC_MAX_CONCURRENCY',
@@ -170,6 +210,22 @@ foreach ($required in @(
         throw "Backtest runtime environment injection is missing: $required"
     }
 }
+foreach ($tradingSecretBoundary in @(
+    'refresh_runtime_secrets() {',
+    'grep -Ev ''^(AWS_DEFAULT_REGION|SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|ALPACA_API_KEY|ALPACA_API_SECRET)=''',
+    'append_env_value "$refreshed_runtime_env" AWS_DEFAULT_REGION ''${aws_region}''',
+    'append_json_field "$refreshed_runtime_env" ALPACA_API_SECRET "$alpaca_secret_key_secret" ALPACA_SECRET_KEY',
+    'secret_json ''${trading_database_secret_arn}''',
+    'secret_json ''${alpaca_api_key_secret_arn}''',
+    'secret_json ''${alpaca_secret_key_secret_arn}'''
+)) {
+    if (-not $userData.Contains($tradingSecretBoundary)) {
+        throw "Trading startup must refresh its stopped-instance credentials from Secrets Manager: $tradingSecretBoundary"
+    }
+}
+if ($userData.IndexOf('refresh_runtime_secrets') -gt $userData.IndexOf('refresh_runtime_images')) {
+    throw "Trading secrets must be refreshed before immutable images and containers are started."
+}
 
 foreach ($required in @(
     'resource "aws_instance" "service"',
@@ -185,10 +241,17 @@ foreach ($required in @(
         throw "Compute architecture is missing: $required"
     }
 }
+
+if ($compute -notmatch '(?s)resource "aws_instance" "trading".*?lifecycle\s*\{.*?ignore_changes\s*=\s*\[\s*associate_public_ip_address\s*\]') {
+    throw "Scheduled Trading instances must ignore the stopped-instance public-IP observation to avoid replacement drift."
+}
 if ($compute -notmatch 'desired_capacity\s*=\s*0' -or
     $compute -notmatch 'max_size\s*=\s*1' -or
     ($compute | Select-String -Pattern 'http_put_response_hop_limit\s*=\s*2' -AllMatches).Matches.Count -ne 3) {
     throw "Backtest must scale from zero to one and each Docker EC2 launch path must use IMDSv2 with container-compatible hop limit 2."
+}
+if ($compute -notmatch '(?s)resource\s+"aws_autoscaling_policy"\s+"backtest_start".*?adjustment_type\s*=\s*"ExactCapacity".*?scaling_adjustment\s*=\s*1.*?cooldown\s*=\s*0') {
+    throw "Backtest queue wake-up must bypass scaling cooldown so an alarm can restore desired capacity immediately after idle scale-down."
 }
 if ($compute -notmatch '(?s)resource\s+"aws_launch_template"\s+"backtest"\s*\{\s*#checkov:skip=CKV_AWS_341:IMDSv2 tokens remain required; hop limit 2 is required for the non-root Docker worker to reach instance-profile credentials through the container network namespace\.') {
     throw "The backtest launch template must document the narrow CKV_AWS_341 exception for container-compatible instance-role access."
@@ -326,6 +389,42 @@ foreach ($required in @(
 )) {
     if (-not $all.Contains($required)) {
         throw "Backtest t4g.medium saturation monitoring is missing: $required"
+    }
+}
+foreach ($runtimeRegionBoundary in @(
+    'append_env_value "$runtime_secret_env" AWS_DEFAULT_REGION ''${aws_region}''',
+    'append_env_value "$backtest_secret_env" AWS_DEFAULT_REGION ''${aws_region}''',
+    'append_env_value "$batch_secret_env" AWS_DEFAULT_REGION ''${aws_region}'''
+)) {
+    if (-not $userData.Contains($runtimeRegionBoundary)) {
+        throw "Every Core runtime that can call an AWS SDK must receive AWS_DEFAULT_REGION: $runtimeRegionBoundary"
+    }
+}
+foreach ($pipelineBoundary in @(
+    '{ name = "AWS_DEFAULT_REGION", value = var.aws_region }',
+    '"s3:GetObjectVersion"',
+    '"s3:DeleteObjectVersion"',
+    'name = "PIPELINE_WORKER_FEATURE_OUTPUT"'
+)) {
+    if (-not $pipeline.Contains($pipelineBoundary)) {
+        throw "Pipeline production feature output wiring is incomplete: $pipelineBoundary"
+    }
+}
+if ($all -notmatch '(?s)data\s+"aws_iam_policy_document"\s+"service_queue_publish".*?aws_sqs_queue\.backtest\["basic"\]\.arn.*?aws_sqs_queue\.backtest_dlq\["basic"\]\.arn') {
+    throw "Core backtest-api must be allowed to publish accepted Basic jobs and poison intake only to the Basic execution queue and its DLQ."
+}
+foreach ($observerBoundary in @(
+    'RuntimeObserverHeartbeat',
+    'RuntimeUnhealthyContainerCount',
+    'RuntimeRestartDelta',
+    'idea2strategy-runtime-health.timer',
+    'resource "aws_cloudwatch_metric_alarm" "runtime_container_unhealthy"',
+    'resource "aws_cloudwatch_metric_alarm" "core_runtime_heartbeat_missing"',
+    'resource "aws_cloudwatch_metric_alarm" "core_status_check_failed"',
+    'resource "aws_cloudwatch_metric_alarm" "pipeline_dead_letter_visible"'
+)) {
+    if (-not ($all.Contains($observerBoundary) -or $userData.Contains($observerBoundary))) {
+        throw "Runtime crash-loop observability is incomplete: $observerBoundary"
     }
 }
 

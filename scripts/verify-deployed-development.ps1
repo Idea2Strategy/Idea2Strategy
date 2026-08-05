@@ -30,19 +30,19 @@ function Invoke-AwsJson([string[]]$Arguments) {
 $caller = Invoke-AwsJson -Arguments @('sts', 'get-caller-identity')
 if ([string]$caller.Account -cne $ExpectedAwsAccountId) { throw "AWS account mismatch." }
 
-$outputs = (& $terraform.Source -chdir=$terraformDirectory output -json) | ConvertFrom-Json
+$outputs = (& $terraform.Source "-chdir=$terraformDirectory" output -json) | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw "Unable to read the applied Terraform outputs." }
 if ([string]$outputs.aws_account_id.value -cne $ExpectedAwsAccountId) { throw "Terraform state account mismatch." }
 
 $serviceUrl = ([string]$outputs.service_url.value).TrimEnd('/')
 if ($serviceUrl -notmatch '^https://') { throw "Applied service URL is not HTTPS." }
 
-$frontend = Invoke-WebRequest -Uri "$serviceUrl/" -Method Get -TimeoutSec 30 -MaximumRedirection 3
+$frontend = Invoke-WebRequest -Uri "$serviceUrl/" -Method Get -TimeoutSec 30 -MaximumRedirection 3 -UseBasicParsing
 if ($frontend.StatusCode -ne 200 -or [string]::IsNullOrWhiteSpace($frontend.Content)) {
     throw "Frontend did not return a non-empty HTTP 200 response."
 }
 foreach ($component in @('backend', 'backtest')) {
-    $health = Invoke-WebRequest -Uri "$serviceUrl/api/healthz/$component" -Method Get -TimeoutSec 30
+    $health = Invoke-WebRequest -Uri "$serviceUrl/api/healthz/$component" -Method Get -TimeoutSec 30 -UseBasicParsing
     if ($health.StatusCode -ne 200 -or [string]::IsNullOrWhiteSpace($health.Content)) {
         throw "$component health check failed."
     }
@@ -68,6 +68,57 @@ $serviceInstanceId = [string]$outputs.service_instance_id.value
 $managed = Invoke-AwsJson -Arguments @('ssm', 'describe-instance-information', '--filters', "Key=InstanceIds,Values=$serviceInstanceId")
 if (@($managed.InstanceInformationList).Count -ne 1 -or $managed.InstanceInformationList[0].PingStatus -cne 'Online') {
     throw "Core instance is not online in Systems Manager."
+}
+
+$runtimeCheckScript = @'
+set -eu
+cd /opt/idea2strategy
+restart_total=0
+for service in backend-api backend-worker backtest-api; do
+  container="$(docker compose --project-name idea2strategy ps -q "$service")"
+  test -n "$container"
+  test "$(docker inspect --format '{{.State.Running}}' "$container")" = true
+  test "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy
+  restart_total=$((restart_total + $(docker inspect --format '{{.RestartCount}}' "$container")))
+done
+sleep 20
+stable_total=0
+for service in backend-api backend-worker backtest-api; do
+  container="$(docker compose --project-name idea2strategy ps -q "$service")"
+  test -n "$container"
+  test "$(docker inspect --format '{{.State.Running}}' "$container")" = true
+  test "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy
+  stable_total=$((stable_total + $(docker inspect --format '{{.RestartCount}}' "$container")))
+done
+test "$stable_total" -eq "$restart_total"
+echo CORE_RUNTIME_STABLE
+'@
+$runtimeParameters = @{ commands = @($runtimeCheckScript) } | ConvertTo-Json -Compress
+$runtimeCommand = Invoke-AwsJson -Arguments @(
+    'ssm', 'send-command',
+    '--instance-ids', $serviceInstanceId,
+    '--document-name', 'AWS-RunShellScript',
+    '--parameters', $runtimeParameters
+)
+$runtimeCommandId = [string]$runtimeCommand.Command.CommandId
+$runtimeInvocation = $null
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    Start-Sleep -Seconds 2
+    try {
+        $runtimeInvocation = Invoke-AwsJson -Arguments @(
+            'ssm', 'get-command-invocation',
+            '--command-id', $runtimeCommandId,
+            '--instance-id', $serviceInstanceId
+        )
+    }
+    catch {
+        continue
+    }
+    if ([string]$runtimeInvocation.Status -in @('Success', 'Failed', 'Cancelled', 'TimedOut')) { break }
+}
+if ($null -eq $runtimeInvocation -or [string]$runtimeInvocation.Status -cne 'Success' -or
+    -not ([string]$runtimeInvocation.StandardOutputContent).Contains('CORE_RUNTIME_STABLE')) {
+    throw "Core containers are unhealthy or restarted during the stability window."
 }
 
 $rdsEndpoint = [string]$outputs.rds_endpoint.value
@@ -109,6 +160,7 @@ foreach ($requiredLog in @('/idea2strategy/dev/core', '/idea2strategy/dev/tradin
     cloudfront_https = 'passed'
     frontend_s3 = 'passed'
     ssm = 'passed'
+    core_runtime = 'passed'
     rds = 'passed'
     valkey = 'passed'
     queues = 'passed'

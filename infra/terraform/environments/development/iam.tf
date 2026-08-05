@@ -319,6 +319,8 @@ data "aws_iam_policy_document" "service_queue_publish" {
     resources = concat(
       values(aws_sqs_queue.backtest_request)[*].arn,
       [
+        aws_sqs_queue.backtest["basic"].arn,
+        aws_sqs_queue.backtest_dlq["basic"].arn,
         aws_sqs_queue.corporate_action_approval[0].arn,
         aws_sqs_queue.room_ledger_opened[0].arn,
         aws_sqs_queue.room_ledger_open_rejected[0].arn

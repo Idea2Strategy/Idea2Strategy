@@ -63,6 +63,82 @@ resource "aws_cloudwatch_metric_alarm" "runtime_memory_high" {
   dimensions          = { InstanceId = each.value }
 }
 
+resource "aws_cloudwatch_metric_alarm" "runtime_container_unhealthy" {
+  for_each = local.enable_service_stack ? {
+    core     = { InstanceId = aws_instance.service[0].id }
+    trading  = { InstanceId = aws_instance.trading[0].id }
+    backtest = { AutoScalingGroupName = aws_autoscaling_group.backtest[0].name }
+  } : {}
+
+  alarm_name          = "${local.name_prefix}-${each.key}-container-unhealthy"
+  alarm_description   = "${each.key} has a missing, stopped, starting beyond bootstrap, or unhealthy required container"
+  namespace           = "Idea2Strategy/Development"
+  metric_name         = "RuntimeUnhealthyContainerCount"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 2
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_action_arns
+  dimensions          = each.value
+}
+
+resource "aws_cloudwatch_metric_alarm" "runtime_container_restart" {
+  for_each = local.enable_service_stack ? {
+    core     = { InstanceId = aws_instance.service[0].id }
+    trading  = { InstanceId = aws_instance.trading[0].id }
+    backtest = { AutoScalingGroupName = aws_autoscaling_group.backtest[0].name }
+  } : {}
+
+  alarm_name          = "${local.name_prefix}-${each.key}-container-restart"
+  alarm_description   = "${each.key} restarted one or more required containers during the last observation interval"
+  namespace           = "Idea2Strategy/Development"
+  metric_name         = "RuntimeRestartDelta"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_action_arns
+  dimensions          = each.value
+}
+
+resource "aws_cloudwatch_metric_alarm" "core_runtime_heartbeat_missing" {
+  count = local.enable_service_stack ? 1 : 0
+
+  alarm_name          = "${local.name_prefix}-core-runtime-heartbeat-missing"
+  alarm_description   = "The always-on Core host stopped reporting its container observer heartbeat"
+  namespace           = "Idea2Strategy/Development"
+  metric_name         = "RuntimeObserverHeartbeat"
+  statistic           = "Minimum"
+  period              = 60
+  evaluation_periods  = 3
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+  alarm_actions       = local.alarm_action_arns
+  dimensions          = { InstanceId = aws_instance.service[0].id }
+}
+
+resource "aws_cloudwatch_metric_alarm" "core_status_check_failed" {
+  count = local.enable_service_stack ? 1 : 0
+
+  alarm_name          = "${local.name_prefix}-core-status-check-failed"
+  alarm_description   = "The always-on Core EC2 instance failed an AWS system or instance status check"
+  namespace           = "AWS/EC2"
+  metric_name         = "StatusCheckFailed"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 2
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "missing"
+  alarm_actions       = local.alarm_action_arns
+  dimensions          = { InstanceId = aws_instance.service[0].id }
+}
+
 resource "aws_cloudwatch_metric_alarm" "backtest_cpu_high" {
   count = local.enable_service_stack ? 1 : 0
 
@@ -144,6 +220,23 @@ resource "aws_cloudwatch_metric_alarm" "queue_dead_letter_visible" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alarm_action_arns
   dimensions          = { QueueName = aws_sqs_queue.backtest_dlq[each.key].name }
+}
+
+resource "aws_cloudwatch_metric_alarm" "pipeline_dead_letter_visible" {
+  count = local.enable_service_stack ? 1 : 0
+
+  alarm_name          = "${local.name_prefix}-pipeline-dlq"
+  alarm_description   = "Pipeline corporate-action or feature work reached the dead-letter queue"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_action_arns
+  dimensions          = { QueueName = aws_sqs_queue.corporate_action_approval_dlq[0].name }
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
