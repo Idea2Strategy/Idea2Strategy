@@ -1,0 +1,22 @@
+// ISOLATED PROPOSAL ONLY. Do not treat as canonical without the approval in README.md.
+Table trading.candidate_batch_processing {
+  batch_id uuid [pk]
+  evaluation_id uuid [not null]
+  source_created_at timestamptz [not null]
+  status varchar(16) [not null]
+  claim_token uuid [not null]
+  lease_expires_at timestamptz [not null]
+  failure_reason varchar(512)
+  started_at timestamptz [not null, default: `current_timestamp`]
+  updated_at timestamptz [not null, default: `current_timestamp`]
+
+  indexes {
+    evaluation_id [name: 'candidate_batch_processing_evaluation_idx']
+  }
+
+  checks {
+    `status IN ('PROCESSING', 'COMPLETED', 'FAILED')` [name: 'candidate_batch_processing_status_check']
+  }
+
+  Note: 'F90 exactly-once candidate handoff receipt. batch_id is the immutable claim identity; claim_token and lease_expires_at fence abandoned PROCESSING claims before retry.'
+}

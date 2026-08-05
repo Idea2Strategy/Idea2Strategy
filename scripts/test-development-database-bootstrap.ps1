@@ -34,6 +34,8 @@ $artifactManifest = Read-RequiredFile "proposals/development-runtime-policy/arti
 $executionPolicy = Read-RequiredFile "proposals/development-runtime-policy/artifacts/execution-policy.json" | ConvertFrom-Json
 $runtimePolicy = Read-RequiredFile "proposals/development-runtime-policy/artifacts/runtime-policy.json" | ConvertFrom-Json
 $policySeed = Read-RequiredFile "proposals/development-runtime-policy/artifacts/policy-seed.sql"
+$scoringSeed = Read-RequiredFile "proposals/development-scoring-template/artifacts/scoring-template-seed.sql"
+$scoringManifest = Read-RequiredFile "proposals/development-scoring-template/artifacts/artifact-manifest.json" | ConvertFrom-Json
 $migrationManifestLines = @(Get-Content -LiteralPath (Join-Path $root "db/flyway-ci-bundle/migration-bundle.manifest"))
 $expectedMigrationCount = $migrationManifestLines.Count - 1
 Assert-Contains $bootstrap "readonly EXPECTED_MIGRATION_COUNT='$expectedMigrationCount'" "Host bootstrap migration count must match the published Flyway bundle manifest."
@@ -80,6 +82,26 @@ foreach ($needle in @(
     Assert-Contains $policySeed $needle "Development policy seed is missing reviewed value: $needle"
 }
 
+if ($scoringManifest.status -cne "proposed" -or $scoringManifest.approved -ne $false) {
+    throw "Development scoring seed must remain an explicitly unapproved proposal."
+}
+$expectedScoringSeedHash = [string]$scoringManifest.artifacts."scoring-template-seed.sql"
+$actualScoringSeedHash = (Get-FileHash -LiteralPath (Join-Path $root "proposals/development-scoring-template/artifacts/scoring-template-seed.sql") -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($expectedScoringSeedHash -cne $actualScoringSeedHash) {
+    throw "Development scoring seed artifact hash mismatch."
+}
+foreach ($templateCode in @(
+    "SINGLE_TOTAL_RETURN_V1",
+    "SINGLE_SHARPE_V1",
+    "SINGLE_MAX_DRAWDOWN_V1",
+    "COMPOSITE_BALANCED_V1"
+)) {
+    Assert-Contains $scoringSeed $templateCode "Development scoring seed is missing proposed template: $templateCode"
+}
+Assert-Contains $scoringSeed "INSERT INTO competition.scoring_template_versions" "Scoring seed must target the scoring template catalog."
+Assert-NotContains $scoringSeed "INSERT INTO trading." "Scoring seed must remain independent from fee and buffer policy seeds."
+Assert-NotContains $scoringSeed "INSERT INTO backtest." "Scoring seed must remain independent from execution policy seeds."
+
 Assert-Contains $database 'resource "aws_secretsmanager_secret" "runtime_database"' "Terraform must own runtime database secret metadata."
 Assert-Contains $database 'for_each = var.runtime_database_secret_names' "All five configured runtime database secrets must be owned."
 Assert-Contains $database 'prevent_destroy = true' "Runtime database secret metadata must be protected from destroy."
@@ -109,6 +131,8 @@ Assert-NotContains $bootstrap '-c "SELECT 1 FROM pg_database' "psql variables ar
 Assert-Contains $bootstrap 'REVOKE CONNECT ON DATABASE "$database_name" FROM $seed_role' "The temporary seed role must relinquish database access before it is dropped."
 Assert-Contains $bootstrap 'REVOKE USAGE ON SCHEMA trading, backtest FROM $seed_role' "The temporary seed role must relinquish schema access before it is dropped."
 Assert-Contains $bootstrap 'REVOKE SELECT, INSERT ON TABLE trading.fee_policy_versions' "The temporary seed role must relinquish table access before it is dropped."
+Assert-Contains $bootstrap 'REVOKE USAGE ON SCHEMA competition FROM $seed_role' "The temporary seed role must relinquish scoring schema access before it is dropped."
+Assert-Contains $bootstrap 'REVOKE SELECT, INSERT ON TABLE competition.scoring_template_versions' "The temporary seed role must relinquish scoring table access before it is dropped."
 Assert-NotContains $bootstrap 'DROP OWNED BY $seed_role' "RDS master is not automatically a member of the temporary role and cannot use DROP OWNED BY."
 Assert-NotContains $bootstrap 'ALTER ROLE %s LOGIN INHERIT NOSUPERUSER' "Runtime login rotation must not require PostgreSQL superuser-only ALTER ROLE clauses on RDS."
 
@@ -116,8 +140,12 @@ foreach ($needle in @(
     '[switch]$Execute',
     '[string]$PolicySeedSqlPath',
     '[string]$PolicySeedSha256',
+    '[string]$ScoringSeedSqlPath',
+    '[string]$ScoringSeedSha256',
     'policy-seed.sql',
     'policy_seed_sha256',
+    'scoring-template-seed.sql',
+    'scoring_seed_sha256',
     '--database-port',
     'PutRolePolicy',
     'DeleteRolePolicy',
@@ -175,8 +203,11 @@ foreach ($needle in @(
     'trading.fee_policy_versions',
     'trading.buying_power_buffer_policy_versions',
     'backtest.execution_policy_versions',
+    'competition.scoring_template_versions',
     '--single-transaction',
     'policy_seed_sha256',
+    'scoring_seed_sha256',
+    'scoring_versions',
     'policy_versions',
     'PGDATABASE=postgres',
     'CREATE DATABASE',

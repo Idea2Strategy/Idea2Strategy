@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "status": "proposed",
+  "approved": false,
+  "sourceDecision": "proposals/official-room-scoring/official-room-scoring-decision.v1.md",
+  "sourceDecisionSha256": "2ee54daadcd9a204ae33f83ad2aeb1ba0313c6ffc89840ff60e07ec9403928f7",
+  "backendProviderCommit": "3902164",
+  "artifacts": {
+    "scoring-template-seed.sql": "b30060fa1e23988c23684c27e058100cab0ebfd7cad459fc46ef80e79685b75a"
+  }
+}

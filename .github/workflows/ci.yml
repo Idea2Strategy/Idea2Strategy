@@ -60,6 +60,8 @@ jobs:
       - name: Validate one-shot Development database bootstrap boundaries
         shell: pwsh
         run: ./scripts/test-development-database-bootstrap.ps1
+      - name: Validate proposed Development scoring seed boundary
+        run: node --test scripts/validate-development-scoring-seed.test.mjs
       - name: Parse the one-shot host bootstrap
         shell: bash
         run: bash -n scripts/aws/development-database-bootstrap.sh
@@ -133,3 +135,6 @@ jobs:
       - name: Verify pinned central Flyway migration lifecycle
         shell: pwsh
         run: ./scripts/test-flyway-ci-bundle.ps1
+      - name: Verify proposed scoring seed replay and collision safety
+        shell: pwsh
+        run: ./scripts/test-development-scoring-seed-integration.ps1
