@@ -49,6 +49,9 @@ jobs:
       - name: Validate Development transactional email infrastructure
         shell: pwsh
         run: ./scripts/test-development-email-delivery-infrastructure.ps1
+      - name: Validate staged Development www edge cutover
+        shell: pwsh
+        run: ./scripts/test-development-www-edge.ps1
       - name: Validate pre-DNS host-ready deployment phase
         shell: pwsh
         run: ./scripts/test-development-host-ready-phase.ps1

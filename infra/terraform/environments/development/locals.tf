@@ -4,6 +4,7 @@ locals {
   enable_service_stack  = contains(["host_ready", "full"], var.deployment_phase)
   enable_public_edge    = var.deployment_phase == "full"
   enable_dns_foundation = contains(["dns_foundation", "host_ready", "full"], var.deployment_phase)
+  www_domain_name       = "www.${var.domain_name}"
 
   common_tags = {
     Project     = var.project_name
