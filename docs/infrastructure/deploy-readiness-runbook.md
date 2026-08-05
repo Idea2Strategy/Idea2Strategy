@@ -108,8 +108,36 @@ Before requesting an AWS plan, record and review all of the following:
   fails closed when one is absent and cross-checks issuer/audience against the
   Terraform runtime inputs;
 - DNS record inventory and rollback owner before any registrar delegation change.
+- the existing `www.ideatostrategy.com` A record remains pinned to
+  `121.254.178.253` during delegation; move it only in a separately reviewed
+  CloudFront traffic cutover;
+- the SES domain identity is verified, all three DKIM records report `SUCCESS`,
+  and the approved sender is `no-reply@ideatostrategy.com`. The Core instance
+  role is the credential boundary; do not create SMTP or access keys.
+
+Before enabling real customer email, run the credential-safe SES preflight:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-development-email-delivery-prerequisites.ps1 `
+  -ExpectedAwsAccountId <12-digit-development-account> `
+  -RequireProductionAccess
+```
+
+Without `-RequireProductionAccess`, the command can verify identity and DKIM
+while the account remains in the SES sandbox. In the sandbox, recipients must
+also be verified and production user flows are not release-ready. Request SES
+production access separately; Terraform deliberately cannot approve that
+account-level anti-abuse decision. The preflight prints only account/identity
+status and public mail configuration, never credentials or message contents.
 
 Stop if the account, region, commit, provider lockfile, backend, or protected product/contract fingerprint differs from the reviewed candidate.
+
+Do not use `deployment_phase=market_data_bootstrap` against state that already
+owns the DNS foundation. The hosted zone and frontend bucket use
+`prevent_destroy`, so a phase downgrade fails during planning instead of
+silently deleting them. Keep `dns_foundation` or `full` for subsequent plans;
+intentional retirement requires a separate reviewed code change and DNS/data
+recovery plan.
 
 ## AWS-only execution remaining
 

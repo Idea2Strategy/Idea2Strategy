@@ -318,8 +318,8 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 - [x] **D11 — pipeline run·watermark·재처리**: feed별 수집 진도, 실패 재개, backfill과 동일 입력 멱등성을 관리한다.
 - [x] **D12 — 실시간 데이터 일별 적재**: C 시장 사건을 buffer하여 검증된 일별 Parquet으로 만들고 이후 compaction 대상으로 발행한다.
 - [x] **D13 — feature 정의·materialization**: 공식 지표 정의와 입력 Manifest를 고정하고 필요한 feature만 재현 가능하게 물질화한다.
-- [ ] **D14 — 기업행사 AI 조사 후보**: 하루 두 번 공개 근거를 조사해 종목·사건·예정일·근거를 후보로만 저장하고 자동 전략 판단에는 사용하지 않는다.
-- [ ] **D15 — 기업행사 관리자 승인·반영**: A의 admin-mcp 승인 결과만 공식 corporate action과 adjusted dataset 재생성으로 반영한다.
+- [x] **D14 — 기업행사 AI 조사 후보**: 하루 두 번 공개 근거를 조사해 종목·사건·예정일·근거를 후보로만 저장하고 자동 전략 판단에는 사용하지 않는다. — 실제 조사 어댑터가 병합됐다: `market_pipeline_lib/corporate_action_discovery.py`가 Alpaca `GET /v1/corporate-actions`를 source-partitioned discovery로 호출하고, `lambdas/corporate_action_research/handler.py`가 슬롯 하나를 실행한다. 대상은 `ticker_info/etf_universe.csv`의 27개 ETF, 후보 동일성은 content hash라 재실행이 중복 적재하지 않으며, 부분 실패는 실패한 티커를 지목하고 슬롯을 실패시킨다. **어댑터가 연결되지 않으면 즉시 실패한다** — "후보 0건"과 조용한 슬롯을 구분할 수 없기 때문이다. 증거 hash는 가져온 바이트에서 파생하므로 모델이 출처를 주장할 수는 있어도 `content_sha256`·`retrieved_at`을 단언할 수는 없다(루트 #205). 설계는 루트 #209, 데이터 소스·데이터 권리 결정은 루트 #143
+- [x] **D15 — 기업행사 관리자 승인·반영**: A의 admin-mcp 승인 결과만 공식 corporate action과 adjusted dataset 재생성으로 반영한다. — A 측 경계가 실재한다: backend `apps/admin-mcp` `CorporateActionAdminMcpProvider`가 RBAC `permissionId`·`requestSchemaVersion`과 허용 입출력 필드로 승인 relay를 제공한다(이전에는 `origin/develop` 전체에 admin-mcp 참조 0건이었다). D 측은 `corporate_actions/consumer.py`의 `BackendRelayApprovalConsumer`가 relay payload를 `ApprovalResult`로 파싱해 `CorporateActionReviewService.apply_approval_result`로 적용하고 `regeneration.py`가 adjusted dataset을 재생성한다. 승인 상태는 정본 `market_data.corporate_actions.terms_document`의 append-only `review_history`에 남으므로 DDL 추가가 없다. data-pipeline #16 종료. 미승인·위조·중복·취소·superseded의 fail-closed 규칙을 정본 계약으로 고정하는 일은 `proposals/corporate-action-approval/`에 격리된 제안으로 남아 있고 제품 권한자 승인 대기다
 ## D2. 공식 백테스트
 
 - [x] **D16 — 백테스트 요청·결과 계약 fixture**: B가 발행할 요청과 D가 발행할 queued/running/complete/failed/unavailable 결과를 버전화한다.
@@ -402,7 +402,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 - [x] **E32 — 최종 리더보드 접근·보존**: 공개방은 전체 공개, 비밀방은 종료 직전 자격 보유자만 조회하게 하고 종료 후 1년이 지나면 방 단위 조회를 종료한다.
 - [x] **E33 — 제재·철회·무효화 공개 제거**: 대상 봇을 다른 사용자의 순위·비교에서 즉시 제거하되 소유자의 원장·판단·성과 원본과 감사 근거는 보존한다.
 - [x] **E34 — E 묶음 독립 E2E**: fake bot·trading 사건으로 생성→모집→제출→라이브 평가→순위→계속 운영/중단을 모두 검증한다.
-- [ ] **E35 — 방·성과 UI 연결**: 방 생성·탐색·참여·일정·익명 봇 리더보드·내 봇 비교와 종료 후 선택 화면을 실제 API와 연결한다.
+- [x] **E35 — 방·성과 UI 연결**: 방 생성·탐색·참여·일정·익명 봇 리더보드·내 봇 비교와 종료 후 선택 화면을 실제 API와 연결한다. — ui `App.tsx`가 `/competition`에 `RoomsView`를 `competitionRoomsClient`로 배선했고, `src/api/competitionRooms.ts`가 요구된 여섯 표면을 전부 실제 엔드포인트에 건다: `createRoom`(POST `/api/v1/competition/rooms`), `searchRooms`(`/rooms/public`), `joinRoom`(`/rooms/{id}/participations`), `leaderboard`(익명 별칭), `myBots`(`/leaderboard/my-bots`), `get`·`setPostEvaluationChoice`(`/participations/{id}/post-evaluation-choice`, `CONTINUE_PRIVATE`/`STOP_AFTER_EVALUATION`). 일정은 `recruitmentOpensAt`·`participationClosesAt`으로 방 조회에 실린다. 401·403·409를 구분하는 `CompetitionApiError`로 오류 상태를 처리하고, 전략 구조·종목·포지션은 표시하지 않는다(ui `docs/PHASE5_COMPETITION_ROOMS.md` 4절)
 
 ## E4. 통합 구간
 
@@ -449,7 +449,7 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 
 - [x] **F90 — C 주문 후보 실제 연동** `통합`: C의 평가 결과·후보 batch를 중복·역순 전달에서도 정확히 한 번 처리한다.
 - [x] **F91 — B 봇 제어 실제 연동** `통합`: B의 실행·중단 명령과 잠긴 봇 정책을 실제 주문·정산 상태로 연결한다.
-- [ ] **F92 — D 기업행사 실제 연동** `통합`: 승인된 기업행사 버전을 포지션·lot·원장에 정확히 반영한다. — **F 측 적용 경로는 완성·배선됨**: `CorporateActionApplication`·`SplitAdjustment`·`PostgresCorporateActionStore.apply`(정본 `market_data.corporate_actions`와 대조하고 movement id를 `(actionId, positionLotId, botEventId)`에서 파생하므로 재실행이 두 번 분할하지 않고 수렴)·`CorporateActionService`·bean까지 존재한다. 차단 원인은 trigger가 아니라 **승인 증적을 정본이 보관할 곳이 없다는 것**이다: `ApprovedCorporateAction`은 `approvalId`·`approvedByOperatorId`·`approvedAt`·`evidenceDigest`·`policyVersion`을 요구하는데 `market_data.corporate_actions`에는 승인 컬럼이 하나도 없다. 정본을 읽는 poller는 운영자와 승인 id와 증거 digest를 발명해야 하므로 더 작은 가정으로 닫을 수 없다 — 이는 D15가 만들어야 하는 승인 레코드다. 상세: 루트 #143 코멘트
+- [ ] **F92 — D 기업행사 실제 연동** `통합`: 승인된 기업행사 버전을 포지션·lot·원장에 정확히 반영한다. — **F 측 적용 경로는 완성·배선됨**: `CorporateActionApplication`·`SplitAdjustment`·`PostgresCorporateActionStore.apply`(정본 `market_data.corporate_actions`와 대조하고 movement id를 `(actionId, positionLotId, botEventId)`에서 파생하므로 재실행이 두 번 분할하지 않고 수렴)·`CorporateActionService`·bean까지 존재한다. **차단 사유가 2026-08-05 갱신됐다.** 이전 기록("승인 증적을 정본이 보관할 곳이 없다")은 더 이상 맞지 않는다: D15가 병합되면서 승인 상태는 정본 `market_data.corporate_actions.terms_document`의 append-only `review_history`에 남고, `ApprovedCorporateAction`이 요구하는 `approvalId`·`approvedByOperatorId`·`approvedAt`·`evidenceDigest`·`policyVersion`은 거기서 읽을 수 있다. `market_data.corporate_actions`에 승인 컬럼이 없는 것은 맞지만 그것이 설계다(DDL 추가 없음). **남은 차단은 trigger다**: `apps/trading-worker`의 `CorporateActionConfiguration`은 `CorporateActionService` bean만 등록하고, 승인된 기업행사를 정본에서 읽어 적용을 개시하는 프로덕션 poller·consumer가 없다. `JooqCorporateActionQuery`는 적용 *결과*를 되읽는 조회일 뿐 개시 경로가 아니다. 즉 F92는 이제 F 소유의 배선 카드다. 미승인·위조·중복·취소·superseded의 fail-closed 규칙이 정본 계약으로 고정되어야 poller가 무엇을 신뢰할지 정할 수 있다 — `proposals/corporate-action-approval/`, 제품 권한자 승인 대기. 상세: 루트 #143 코멘트
 - [x] **F93 — E live 성과 실제 연동** `통합`: 원장·포지션·체결 사건이 평가 구간 경계에 맞게 E의 성과 projection으로 전달되는지 검증한다.
 
 ---

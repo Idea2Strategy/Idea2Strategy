@@ -181,6 +181,23 @@ variable "existing_hosted_zone_id" {
   default     = ""
 }
 
+variable "legacy_www_ipv4_address" {
+  description = "Existing registrar-era www A record preserved during Route 53 delegation. Change only in a separately reviewed traffic cutover."
+  type        = string
+  default     = "121.254.178.253"
+
+  validation {
+    condition     = can(cidrhost("${var.legacy_www_ipv4_address}/32", 0))
+    error_message = "legacy_www_ipv4_address must be a valid IPv4 address."
+  }
+}
+
+variable "transactional_email_from_address" {
+  description = "Verified SES sender used by Backend API and Worker. This is public configuration, not a credential."
+  type        = string
+  default     = "no-reply@ideatostrategy.com"
+}
+
 variable "dns_delegation_verified" {
   description = "Explicit operator evidence that the public registrar delegates the apex to the reviewed Route 53 zone. Required for full; never infer it from zone creation alone."
   type        = bool
