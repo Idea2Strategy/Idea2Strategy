@@ -99,6 +99,14 @@ foreach ($awsCliBoundary in @(
 if (-not $userData.Contains('install -d -m 0755 /var/lib/idea2strategy')) {
     throw "Runtime artifact materialization requires its /var/lib/idea2strategy parent before mktemp creates atomic staging directories."
 }
+if ($userData.Contains('awslogs-stream-prefix')) {
+    throw "The standalone EC2 Docker awslogs driver rejects the ECS-only awslogs-stream-prefix option."
+}
+foreach ($runtimeLogStream in @('backend-api', 'backend-worker', 'backtest-api', 'backtest-worker', 'market-gateway', 'trading-worker')) {
+    if ($userData -notmatch ('awslogs-stream:\s*' + [regex]::Escape($runtimeLogStream))) {
+        throw "EC2 Docker runtime log stream is missing: $runtimeLogStream"
+    }
+}
 foreach ($required in @(
     'resource "aws_ecr_repository" "runtime"',
     'image_tag_mutability = "IMMUTABLE"',

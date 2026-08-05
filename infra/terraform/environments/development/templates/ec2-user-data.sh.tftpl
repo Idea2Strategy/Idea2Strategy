@@ -386,7 +386,7 @@ services:
     cap_drop: [ALL]
     logging: &awslogs
       driver: awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backend-api}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backend-api}
   backend-worker:
     image: $backend_worker_image
     restart: unless-stopped
@@ -397,7 +397,7 @@ services:
     cap_drop: [ALL]
     logging:
       <<: *awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backend-worker}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backend-worker}
   backtest-api:
     image: $backtest_api_image
     restart: unless-stopped
@@ -416,7 +416,7 @@ services:
       start_period: 30s
     logging:
       <<: *awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backtest-api}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backtest-api}
   backend-batch:
     image: $backend_batch_image
     profiles: [manual]
@@ -427,7 +427,7 @@ services:
     cap_drop: [ALL]
     logging:
       <<: *awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backend-batch}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backend-batch}
   admin-mcp:
     image: $admin_mcp_image
     profiles: [manual]
@@ -439,7 +439,7 @@ services:
     cap_drop: [ALL]
     logging:
       <<: *awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: admin-mcp}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: admin-mcp}
 EOF
 %{ endif ~}
 
@@ -488,7 +488,7 @@ services:
     mem_limit: 3200m
     logging:
       driver: awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: backtest-worker}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backtest-worker}
 EOF
 %{ endif ~}
 
@@ -540,7 +540,7 @@ services:
     stop_grace_period: 45s
     logging:
       driver: awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: market-gateway}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: market-gateway}
   trading-worker:
     image: $trading_worker_image
     restart: unless-stopped
@@ -557,7 +557,7 @@ services:
     stop_grace_period: 45s
     logging:
       driver: awslogs
-      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream-prefix: trading-worker}
+      options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: trading-worker}
 EOF
 %{ endif ~}
 
