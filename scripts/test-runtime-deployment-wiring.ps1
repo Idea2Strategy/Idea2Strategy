@@ -141,6 +141,7 @@ foreach ($required in @(
     'ROOM_LEDGER_OPENED_QUEUE_URL=',
     'ROOM_LEDGER_REJECTED_QUEUE_URL=',
     'TRADING_ROOM_ACCOUNT_OPEN_ENABLED=true',
+    'TRADING_CORPORATE_ACTION_APPLY_ENABLED=true',
     'aws_sqs_queue.room_ledger_opened[0].arn',
     'aws_sqs_queue.room_ledger_open_rejected[0].arn',
     'sqs:ReceiveMessage',
