@@ -185,7 +185,8 @@ materialize_backtest_policies() {
   done < <(jq -r 'keys[]' <<<"$manifest")
   test -s "$temporary/execution-policy.json"
   test -s "$temporary/runtime-policy.json"
-  chmod -R go-w "$temporary"
+  find "$temporary" -type d -exec chmod 0755 {} +
+  find "$temporary" -type f -exec chmod 0444 {} +
   rm -rf "$destination.previous"
   if test -d "$destination"; then mv "$destination" "$destination.previous"; fi
   mv "$temporary" "$destination"
@@ -226,7 +227,8 @@ materialize_trading_artifacts() {
       } >>"$receipt"
       index=$((index + 1))
     done < <(jq -r --arg runtime "$runtime" 'to_entries[] | select(.value.runtime == $runtime) | .key' <<<"$manifest")
-    chmod -R go-w "$temporary"
+    find "$temporary" -type d -exec chmod 0755 {} +
+    find "$temporary" -type f -exec chmod 0444 {} +
     rm -rf "$destination.previous"
     if test -d "$destination"; then mv "$destination" "$destination.previous"; fi
     mv "$temporary" "$destination"

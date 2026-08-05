@@ -53,10 +53,10 @@ resource "aws_secretsmanager_secret_version" "core_internal" {
   count     = local.enable_service_stack ? 1 : 0
   secret_id = aws_secretsmanager_secret.core_internal[0].id
   secret_string = jsonencode({
-    IDENTITY_EMAIL_ENCRYPTION_KEY  = random_password.identity_email_encryption[0].result
-    IDENTITY_LOOKUP_HMAC_KEY       = random_password.identity_lookup_hmac[0].result
-    IDENTITY_VERIFICATION_HMAC_KEY = random_password.identity_verification_hmac[0].result
-    IDENTITY_SESSION_HMAC_KEY      = random_password.identity_session_hmac[0].result
+    IDENTITY_EMAIL_ENCRYPTION_KEY  = base64encode(random_password.identity_email_encryption[0].result)
+    IDENTITY_LOOKUP_HMAC_KEY       = base64encode(random_password.identity_lookup_hmac[0].result)
+    IDENTITY_VERIFICATION_HMAC_KEY = base64encode(random_password.identity_verification_hmac[0].result)
+    IDENTITY_SESSION_HMAC_KEY      = base64encode(random_password.identity_session_hmac[0].result)
     OPERATOR_AUTH_CURRENT_HMAC_KEY = base64encode(random_password.operator_subject_hmac[0].result)
   })
 }
