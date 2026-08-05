@@ -124,6 +124,12 @@ if ($workflow -notmatch "(?s)Publish immutable ARM64 images.*?Wait for ECR secur
 if ($workflow -notmatch "(?s)findingSeverityCounts.*?CRITICAL.*?HIGH") {
     throw "The release scan gate must reject Critical and High findings."
 }
+if ($workflow.Contains('ECR image scan rejected $name:')) {
+    throw 'The ECR scan gate must delimit a variable immediately followed by a colon.'
+}
+if (-not $workflow.Contains('ECR image scan rejected ${name}:')) {
+    throw 'The ECR scan rejection message must use parser-safe variable delimiting.'
+}
 
 if (-not $ciIdentity.Contains('"ecr:StartImageScan"')) {
     throw "The scoped plan role must be allowed to start scans for its exact ECR repositories."

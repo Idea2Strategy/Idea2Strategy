@@ -271,7 +271,7 @@ jobs:
               $critical = if ($null -eq $counts.CRITICAL) { 0 } else { [int]$counts.CRITICAL }
               $high = if ($null -eq $counts.HIGH) { 0 } else { [int]$counts.HIGH }
               if ($critical -gt 0 -or $high -gt 0) {
-                throw "ECR image scan rejected $name: Critical=$critical High=$high."
+                throw "ECR image scan rejected ${name}: Critical=$critical High=$high."
               }
               $pending.Remove($name)
             }
