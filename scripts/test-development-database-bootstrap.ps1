@@ -20,6 +20,39 @@ function Assert-NotContains([string]$Text, [string]$Needle, [string]$Message) {
     if ($Text.Contains($Needle)) { throw $Message }
 }
 
+function Assert-Throws([scriptblock]$Action, [string]$ExpectedMessage, [string]$Message) {
+    try {
+        & $Action
+    } catch {
+        if ($_.Exception.Message -notlike "*$ExpectedMessage*") {
+            throw "$Message Expected an error containing '$ExpectedMessage', got '$($_.Exception.Message)'."
+        }
+        return
+    }
+    throw "$Message Expected an exception."
+}
+
+function Write-Utf8NoBomTestFile([string]$Path, [string]$Content) {
+    [IO.File]::WriteAllText($Path, $Content, [Text.UTF8Encoding]::new($false))
+}
+
+function New-TestFlywayBundle([string]$Path, [hashtable]$Migrations, [string[]]$ManifestOrder) {
+    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    foreach ($name in $Migrations.Keys) {
+        Write-Utf8NoBomTestFile (Join-Path $Path $name) ([string]$Migrations[$name])
+    }
+    $entries = foreach ($name in $ManifestOrder) {
+        $hash = (Get-FileHash -LiteralPath (Join-Path $Path $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$name`t$hash"
+    }
+    $manifest = (@("idea2strategy-flyway-bundle-v1") + @($entries)) -join "`n"
+    $manifest += "`n"
+    $manifestPath = Join-Path $Path "migration-bundle.manifest"
+    Write-Utf8NoBomTestFile $manifestPath $manifest
+    $digest = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Utf8NoBomTestFile (Join-Path $Path "migration-bundle.sha256") "$digest`n"
+}
+
 $database = Read-RequiredFile "infra/terraform/environments/development/database.tf"
 $runtime = Read-RequiredFile "infra/terraform/environments/development/runtime.tf"
 $variables = Read-RequiredFile "infra/terraform/environments/development/variables.tf"
@@ -38,7 +71,52 @@ $scoringSeed = Read-RequiredFile "proposals/development-scoring-template/artifac
 $scoringManifest = Read-RequiredFile "proposals/development-scoring-template/artifacts/artifact-manifest.json" | ConvertFrom-Json
 $migrationManifestLines = @(Get-Content -LiteralPath (Join-Path $root "db/flyway-ci-bundle/migration-bundle.manifest"))
 $expectedMigrationCount = $migrationManifestLines.Count - 1
-Assert-Contains $bootstrap "readonly EXPECTED_MIGRATION_COUNT='$expectedMigrationCount'" "Host bootstrap migration count must match the published Flyway bundle manifest."
+$manifestValidatorPath = Join-Path $root "scripts/lib/development-database-bootstrap-manifest.ps1"
+if (-not (Test-Path -LiteralPath $manifestValidatorPath -PathType Leaf)) {
+    throw "Dynamic Flyway manifest validator is missing."
+}
+. $manifestValidatorPath
+
+$publishedBundle = Get-ValidatedDevelopmentFlywayBundle -BundleRoot (Join-Path $root "db/flyway-ci-bundle")
+if ($publishedBundle.MigrationCount -ne $expectedMigrationCount) {
+    throw "Published Flyway bundle migration count was not derived from its exact manifest."
+}
+
+$testBundleRoot = Join-Path $root ".harness/local/tmp/test-development-database-bootstrap-manifest-$PID"
+try {
+    $futureBundle = Join-Path $testBundleRoot "future"
+    New-TestFlywayBundle $futureBundle @{
+        "V1__first.sql" = "SELECT 1;`n"
+        "V2__second.sql" = "SELECT 2;`n"
+        "R__runtime_grants.sql" = "SELECT 3;`n"
+    } @("V1__first.sql", "V2__second.sql", "R__runtime_grants.sql")
+    $futureResult = Get-ValidatedDevelopmentFlywayBundle -BundleRoot $futureBundle
+    if ($futureResult.MigrationCount -ne 3) {
+        throw "Future versioned and repeatable migrations must be accepted without a source-code count change."
+    }
+
+    $emptyBundle = Join-Path $testBundleRoot "empty"
+    New-TestFlywayBundle $emptyBundle @{} @()
+    Assert-Throws { Get-ValidatedDevelopmentFlywayBundle -BundleRoot $emptyBundle } "at least one migration" "Header-only manifests must fail closed."
+
+    $duplicateBundle = Join-Path $testBundleRoot "duplicate"
+    New-TestFlywayBundle $duplicateBundle @{ "V1__first.sql" = "SELECT 1;`n" } @("V1__first.sql", "V1__first.sql")
+    Assert-Throws { Get-ValidatedDevelopmentFlywayBundle -BundleRoot $duplicateBundle } "duplicate" "Duplicate manifest entries must fail closed."
+
+    $driftBundle = Join-Path $testBundleRoot "checksum-drift"
+    New-TestFlywayBundle $driftBundle @{ "V1__first.sql" = "SELECT 1;`n" } @("V1__first.sql")
+    Write-Utf8NoBomTestFile (Join-Path $driftBundle "V1__first.sql") "SELECT 2;`n"
+    Assert-Throws { Get-ValidatedDevelopmentFlywayBundle -BundleRoot $driftBundle } "checksum mismatch" "Migration checksum drift must fail closed."
+
+    $extraBundle = Join-Path $testBundleRoot "unlisted"
+    New-TestFlywayBundle $extraBundle @{ "V1__first.sql" = "SELECT 1;`n" } @("V1__first.sql")
+    Write-Utf8NoBomTestFile (Join-Path $extraBundle "V2__unlisted.sql") "SELECT 2;`n"
+    Assert-Throws { Get-ValidatedDevelopmentFlywayBundle -BundleRoot $extraBundle } "not listed" "Unlisted SQL files must fail closed."
+} finally {
+    if (Test-Path -LiteralPath $testBundleRoot) {
+        Remove-Item -LiteralPath $testBundleRoot -Recurse -Force
+    }
+}
 
 foreach ($artifactName in @("execution-policy.json", "runtime-policy.json", "policy-seed.sql")) {
     $expectedHash = [string]$artifactManifest.artifacts.$artifactName
@@ -146,6 +224,9 @@ foreach ($needle in @(
     'policy_seed_sha256',
     'scoring-template-seed.sql',
     'scoring_seed_sha256',
+    '--expected-migration-count',
+    '$expectedMigrationCount = $validatedBundle.MigrationCount',
+    '[int]$receipt.migrations -ne $expectedMigrationCount',
     '--database-port',
     'PutRolePolicy',
     'DeleteRolePolicy',
@@ -211,10 +292,15 @@ foreach ($needle in @(
     'policy_versions',
     'PGDATABASE=postgres',
     'CREATE DATABASE',
+    '--expected-migration-count',
+    'expected_migration_count',
+    'declare -A listed_migrations',
+    'Flyway migration is not listed in the manifest',
     '179'
 )) {
     Assert-Contains $bootstrap $needle "Host bootstrap safety or verification is missing: $needle"
 }
+Assert-NotContains $bootstrap 'EXPECTED_MIGRATION_COUNT' "Host bootstrap must receive the locally validated manifest count instead of embedding a migration count."
 if ($bootstrap -match '(?m)^\s*echo\s+["'']?\$(master_json|master_password|password)\b' -or
     $bootstrap -match '(?m)^\s*printf\s+[^>\r\n]*\$(master_json|master_password)\b') {
     throw "Host bootstrap must not print credential-bearing variables."

@@ -14,6 +14,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "lib/development-database-bootstrap-manifest.ps1")
 $expectedConsumers = @("backend", "batch", "backtest", "trading", "pipeline")
 $inlinePolicyName = "idea2strategy-development-database-bootstrap-transient-secrets"
 $awsCliImage = "amazon/aws-cli@sha256:310813a7eae8fd88da1cc9c37970e3500b0ff3984479e1012f0a6fd44e453f63"
@@ -71,28 +72,11 @@ $trackedStatus = (& git -C $root status --porcelain=v1 --untracked-files=no) -jo
 if (-not [string]::IsNullOrWhiteSpace($trackedStatus)) { throw "Database bootstrap requires a checkout with no tracked changes." }
 
 $bundleRoot = Join-Path $root "db/flyway-ci-bundle"
-$manifestPath = Join-Path $bundleRoot "migration-bundle.manifest"
-$digestPath = Join-Path $bundleRoot "migration-bundle.sha256"
 $hostScriptPath = Join-Path $root "scripts/aws/development-database-bootstrap.sh"
-foreach ($path in @($bundleRoot, $manifestPath, $digestPath, $hostScriptPath)) {
-    if (-not (Test-Path -LiteralPath $path)) { throw "Required bootstrap input is missing: $path" }
-}
-$bundleDigest = (Get-Content -LiteralPath $digestPath -Raw).Trim()
-if ($bundleDigest -notmatch '^[0-9a-f]{64}$') { throw "Flyway bundle digest is malformed." }
-$actualManifestDigest = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actualManifestDigest -cne $bundleDigest) { throw "Flyway manifest digest mismatch." }
-
-$manifestLines = @(Get-Content -LiteralPath $manifestPath)
-if ($manifestLines.Count -ne 45 -or $manifestLines[0] -cne "idea2strategy-flyway-bundle-v1") {
-    throw "Expected the exact 44-migration Flyway bundle."
-}
-foreach ($line in $manifestLines[1..44]) {
-    if ($line -notmatch '^([VR][A-Za-z0-9_.-]+\.sql)\t([0-9a-f]{64})$') { throw "Invalid Flyway manifest entry." }
-    $migrationPath = Join-Path $bundleRoot $Matches[1]
-    if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) { throw "Flyway migration is missing." }
-    $actual = (Get-FileHash -LiteralPath $migrationPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actual -cne $Matches[2]) { throw "Flyway migration checksum mismatch: $($Matches[1])" }
-}
+if (-not (Test-Path -LiteralPath $hostScriptPath -PathType Leaf)) { throw "Required bootstrap input is missing: $hostScriptPath" }
+$validatedBundle = Get-ValidatedDevelopmentFlywayBundle -BundleRoot $bundleRoot
+$bundleDigest = $validatedBundle.Digest
+$expectedMigrationCount = $validatedBundle.MigrationCount
 
 $terraform = Get-Executable "terraform"
 $script:aws = Get-Executable "aws" (Join-Path $env:ProgramFiles "Amazon/AWSCLIV2/aws.exe")
@@ -156,6 +140,7 @@ $safePlan = [ordered]@{
     status = if ($Execute) { "ready-to-execute" } else { "validated-dry-run" }
     root_sha = $head
     bundle_sha256 = $bundleDigest
+    migrations = $expectedMigrationCount
     archive_sha256 = $archiveDigest
     host_script_sha256 = $hostScriptDigest
     policy_seed_sha256 = $PolicySeedSha256
@@ -285,7 +270,7 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         "docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $scoringSeedKey) --version-id $(ConvertTo-BashLiteral ([string]$scoringSeedUpload.VersionId)) $(ConvertTo-BashLiteral $scoringSeedRemote) >/dev/null",
         "printf '%s  %s\n' $(ConvertTo-BashLiteral $hostScriptDigest) $(ConvertTo-BashLiteral $scriptRemote) | sha256sum --check --status",
         "chmod 0700 $(ConvertTo-BashLiteral $scriptRemote)",
-        "$(ConvertTo-BashLiteral $scriptRemote) --archive $(ConvertTo-BashLiteral $archiveRemote) --archive-sha256 $(ConvertTo-BashLiteral $archiveDigest) --bundle-sha256 $(ConvertTo-BashLiteral $bundleDigest) --database-host $(ConvertTo-BashLiteral ([string]$target.database_host)) --database-name $(ConvertTo-BashLiteral ([string]$target.database_name)) --database-port $(ConvertTo-BashLiteral ([string]$target.database_port)) --master-secret-arn $(ConvertTo-BashLiteral ([string]$target.master_secret_arn)) --policy-seed-sql $(ConvertTo-BashLiteral $policySeedRemote) --policy-seed-sha256 $(ConvertTo-BashLiteral $PolicySeedSha256) --scoring-seed-sql $(ConvertTo-BashLiteral $scoringSeedRemote) --scoring-seed-sha256 $(ConvertTo-BashLiteral $ScoringSeedSha256) --region $(ConvertTo-BashLiteral $Region) --root-sha $(ConvertTo-BashLiteral $head) --runtime-secret-arns-base64 $(ConvertTo-BashLiteral $secretArnBase64) --work-directory $(ConvertTo-BashLiteral "$remoteRoot/work")"
+        "$(ConvertTo-BashLiteral $scriptRemote) --archive $(ConvertTo-BashLiteral $archiveRemote) --archive-sha256 $(ConvertTo-BashLiteral $archiveDigest) --bundle-sha256 $(ConvertTo-BashLiteral $bundleDigest) --expected-migration-count $(ConvertTo-BashLiteral ([string]$expectedMigrationCount)) --database-host $(ConvertTo-BashLiteral ([string]$target.database_host)) --database-name $(ConvertTo-BashLiteral ([string]$target.database_name)) --database-port $(ConvertTo-BashLiteral ([string]$target.database_port)) --master-secret-arn $(ConvertTo-BashLiteral ([string]$target.master_secret_arn)) --policy-seed-sql $(ConvertTo-BashLiteral $policySeedRemote) --policy-seed-sha256 $(ConvertTo-BashLiteral $PolicySeedSha256) --scoring-seed-sql $(ConvertTo-BashLiteral $scoringSeedRemote) --scoring-seed-sha256 $(ConvertTo-BashLiteral $ScoringSeedSha256) --region $(ConvertTo-BashLiteral $Region) --root-sha $(ConvertTo-BashLiteral $head) --runtime-secret-arns-base64 $(ConvertTo-BashLiteral $secretArnBase64) --work-directory $(ConvertTo-BashLiteral "$remoteRoot/work")"
     )
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($command -join "`n")))
     $commandParametersPath = Join-Path $temporaryRoot "ssm-command-parameters.json"
@@ -317,7 +302,8 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     $receipt = [string]$invocation.StandardOutputContent | ConvertFrom-Json
     if ($receipt.status -ne "passed" -or $receipt.root_sha -cne $head -or $receipt.bundle_sha256 -cne $bundleDigest -or
         $receipt.policy_seed_sha256 -cne $PolicySeedSha256 -or $receipt.scoring_seed_sha256 -cne $ScoringSeedSha256 -or
-        @($receipt.scoring_versions).Count -ne 4 -or [int]$receipt.tables -ne 179 -or
+        @($receipt.scoring_versions).Count -ne 4 -or [int]$receipt.migrations -ne $expectedMigrationCount -or
+        [int]$receipt.tables -ne 179 -or
         [int]$receipt.policy_row_counts.fee -lt 1 -or [int]$receipt.policy_row_counts.buffer -lt 1 -or
         [int]$receipt.policy_row_counts.execution -lt 1) {
         throw "Database bootstrap receipt did not match the exact release candidate."
