@@ -122,6 +122,7 @@ foreach ($needle in @(
     'AWS-RunShellScript',
     'base64 -d | bash',
     'HttpTokens=required',
+    'HttpPutResponseHopLimit=2',
     'GetSecretValue',
     'PutSecretValue',
     'deployment-bootstrap',
@@ -129,6 +130,7 @@ foreach ($needle in @(
 )) {
     Assert-Contains $orchestrator $needle "Orchestrator safety boundary is missing: $needle"
 }
+Assert-NotContains $orchestrator 'HttpPutResponseHopLimit=1' "The pinned AWS CLI container requires two IMDSv2 network hops to use the instance role."
 if ($orchestrator -match '(?i)Write-(Host|Output).*(password|SecretString)') {
     throw "Orchestrator must not print password or SecretString values."
 }
