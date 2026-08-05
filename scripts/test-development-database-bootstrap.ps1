@@ -171,7 +171,7 @@ foreach ($needle in @(
     'policy_versions',
     'PGDATABASE=postgres',
     'CREATE DATABASE',
-    '177'
+    '178'
 )) {
     Assert-Contains $bootstrap $needle "Host bootstrap safety or verification is missing: $needle"
 }
