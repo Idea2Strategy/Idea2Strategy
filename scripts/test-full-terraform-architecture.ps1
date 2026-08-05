@@ -267,6 +267,9 @@ if ($compute -notmatch 'desired_capacity\s*=\s*0' -or
 if ($compute -notmatch '(?s)resource\s+"aws_autoscaling_policy"\s+"backtest_start".*?adjustment_type\s*=\s*"ExactCapacity".*?scaling_adjustment\s*=\s*1.*?cooldown\s*=\s*0') {
     throw "Backtest queue wake-up must bypass scaling cooldown so an alarm can restore desired capacity immediately after idle scale-down."
 }
+if ($compute -notmatch '(?s)resource\s+"aws_cloudwatch_metric_alarm"\s+"backtest_request_queue_start".*?for_each\s*=\s*local\.backtest_request_lanes.*?metric_name\s*=\s*"ApproximateNumberOfMessagesVisible".*?alarm_actions\s*=\s*\[aws_autoscaling_policy\.backtest_start\[0\]\.arn\].*?QueueName\s*=\s*aws_sqs_queue\.backtest_request\[each\.key\]\.name') {
+    throw "Every producer request queue must wake the desired-zero Backtest ASG before an intake worker exists."
+}
 if ($compute -notmatch '(?s)resource\s+"aws_launch_template"\s+"backtest"\s*\{\s*#checkov:skip=CKV_AWS_341:IMDSv2 tokens remain required; hop limit 2 is required for the non-root Docker worker to reach instance-profile credentials through the container network namespace\.') {
     throw "The backtest launch template must document the narrow CKV_AWS_341 exception for container-compatible instance-role access."
 }
@@ -306,6 +309,12 @@ foreach ($required in @(
     if (-not ($frontend.Contains($required) -or $security.Contains($required))) {
         throw "CloudFront-to-Core boundary is missing: $required"
     }
+}
+if ($all -notmatch '(?s)resource\s+"aws_cloudwatch_metric_alarm"\s+"backtest_request_queue_oldest_message".*?for_each\s*=\s*local\.backtest_request_lanes.*?ApproximateAgeOfOldestMessage.*?aws_sqs_queue\.backtest_request\[each\.key\]\.name') {
+    throw "Backtest producer request queue age monitoring is missing."
+}
+if ($all -notmatch '(?s)resource\s+"aws_cloudwatch_metric_alarm"\s+"backtest_request_dead_letter_visible".*?for_each\s*=\s*local\.backtest_request_lanes.*?ApproximateNumberOfMessagesVisible.*?aws_sqs_queue\.backtest_request_dlq\[each\.key\]\.name') {
+    throw "Backtest producer request DLQ monitoring is missing."
 }
 if ($frontend -notmatch 'origin_protocol_policy\s*=\s*"https-only"') {
     throw "CloudFront must use HTTPS to the fixed Core origin."
