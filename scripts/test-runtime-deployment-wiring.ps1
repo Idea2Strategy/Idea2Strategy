@@ -157,6 +157,9 @@ foreach ($required in @(
     "market-gateway",
     "trading-worker",
     "ALPACA_API_SECRET",
+    'MARKET_GATEWAY_ALPACA_FEED=${trading_market_data_feed}',
+    'MARKET_GATEWAY_ALPACA_ENDPOINT=${trading_market_data_endpoint}',
+    'MARKET_GATEWAY_RIGHTS_EVIDENCE_PATH=/runtime/market-gateway/${trading_provider_rights_local_path}',
     "TRADING_WARMUP_MATERIALIZATION_RECEIPT_PATH",
     "MARKET_GATEWAY_MATERIALIZATION_RECEIPT_PATH",
     "source-version-id",
@@ -198,10 +201,13 @@ foreach ($required in @(
     }
 }
 
-foreach ($variable in @("backtest_policy_artifacts", "trading_runtime_artifacts", "runtime_database_secret_names")) {
+foreach ($variable in @("backtest_policy_artifacts", "trading_runtime_artifacts", "trading_market_data_feed", "runtime_database_secret_names")) {
     if (-not $variables.Contains(('variable "' + $variable + '"'))) {
         throw "Immutable runtime artifact input is missing: $variable"
     }
+}
+if (-not $runtime.Contains('try(var.trading_runtime_artifacts["provider-rights"].local_path, "") == "alpaca-${var.trading_market_data_feed}-rights.json"')) {
+    throw "Trading provider-rights artifact path must be bound to the selected Alpaca feed."
 }
 
 foreach ($variable in @(

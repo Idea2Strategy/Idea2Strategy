@@ -36,6 +36,9 @@ resource "aws_instance" "service" {
     core_public_url                             = "https://${var.frontend_domain_name}"
     backtest_policy_manifest                    = base64encode(jsonencode(var.backtest_policy_artifacts))
     trading_artifact_manifest                   = base64encode(jsonencode(var.trading_runtime_artifacts))
+    trading_market_data_feed                    = var.trading_market_data_feed
+    trading_market_data_endpoint                = "wss://stream.data.alpaca.markets/v2/${var.trading_market_data_feed}"
+    trading_provider_rights_local_path          = "alpaca-${var.trading_market_data_feed}-rights.json"
     enable_backtest_outbox_relay                = var.enable_backtest_outbox_relay
     enable_operator_auth                        = var.enable_operator_auth
     operator_auth_issuer                        = var.operator_auth_issuer
@@ -131,6 +134,9 @@ resource "aws_instance" "trading" {
     core_public_url                             = "https://${var.frontend_domain_name}"
     backtest_policy_manifest                    = base64encode(jsonencode(var.backtest_policy_artifacts))
     trading_artifact_manifest                   = base64encode(jsonencode(var.trading_runtime_artifacts))
+    trading_market_data_feed                    = var.trading_market_data_feed
+    trading_market_data_endpoint                = "wss://stream.data.alpaca.markets/v2/${var.trading_market_data_feed}"
+    trading_provider_rights_local_path          = "alpaca-${var.trading_market_data_feed}-rights.json"
     enable_backtest_outbox_relay                = var.enable_backtest_outbox_relay
     enable_operator_auth                        = var.enable_operator_auth
     operator_auth_issuer                        = var.operator_auth_issuer
@@ -231,6 +237,9 @@ resource "aws_launch_template" "backtest" {
     core_public_url                             = "https://${var.frontend_domain_name}"
     backtest_policy_manifest                    = base64encode(jsonencode(var.backtest_policy_artifacts))
     trading_artifact_manifest                   = base64encode(jsonencode(var.trading_runtime_artifacts))
+    trading_market_data_feed                    = var.trading_market_data_feed
+    trading_market_data_endpoint                = "wss://stream.data.alpaca.markets/v2/${var.trading_market_data_feed}"
+    trading_provider_rights_local_path          = "alpaca-${var.trading_market_data_feed}-rights.json"
     enable_backtest_outbox_relay                = var.enable_backtest_outbox_relay
     enable_operator_auth                        = var.enable_operator_auth
     operator_auth_issuer                        = var.operator_auth_issuer

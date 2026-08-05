@@ -84,3 +84,4 @@ operator_rbac_assignment_read_permission_id   = ""
 #   provider-rights    = { runtime = "market-gateway", key = "runtime/trading/alpaca-sip-rights.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__", local_path = "alpaca-sip-rights.json" }
 #   warmup-manifest    = { runtime = "trading-worker", key = "runtime/trading/warmup/manifest.json", version_id = "__S3_VERSION_ID__", sha256 = "__64_LOWERCASE_HEX__", local_path = "warmup/manifest.json" }
 # }
+# trading_market_data_feed = "sip" # For IEX, pin a matching alpaca-iex-rights.json artifact.
