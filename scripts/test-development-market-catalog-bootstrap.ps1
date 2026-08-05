@@ -46,8 +46,8 @@ foreach ($needle in @(
     'PutRolePolicy',
     'DeleteRolePolicy',
     'AWS-RunShellScript',
-    'Sanitized bootstrap diagnostics:',
     'HttpTokens=required',
+    'HttpPutResponseHopLimit=2',
     'sha256sum --check',
     'market-catalog-bootstrap/',
     'VersionId',
@@ -56,6 +56,12 @@ foreach ($needle in @(
 )) {
     Assert-Contains $orchestrator $needle "Market catalog orchestrator safety boundary is missing: $needle"
 }
+Assert-NotContains $orchestrator 'HttpPutResponseHopLimit=1' "The pinned AWS CLI container requires two IMDSv2 network hops to use the instance role."
+Assert-NotContains $orchestrator 'ssm wait command-executed' "The AWS CLI command-executed waiter expires before the one-hour catalog command timeout."
+Assert-NotContains $orchestrator 'Write-Warning "Sanitized bootstrap diagnostics:' "Remote stderr must remain protected instead of being printed without structural redaction."
+Assert-Contains $orchestrator 'ssm get-command-invocation' "The orchestrator must poll the exact SSM invocation until a terminal status."
+Assert-Contains $orchestrator '$commandDeadline' "SSM invocation polling must have an explicit deadline matching the remote timeout."
+Assert-Contains $orchestrator 'Start-Sleep -Seconds 5' "SSM invocation polling must be bounded without a hot loop."
 
 if ($orchestrator.Contains('Get-TerraformOutput "ecr_repository_urls"')) {
     throw "Artifact-foundation ECR must be discovered from the authenticated AWS account, not the runtime Terraform state."

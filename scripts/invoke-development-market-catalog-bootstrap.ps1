@@ -271,7 +271,10 @@ touch /var/lib/idea2strategy-market-catalog-bootstrap-ready
         "--iam-instance-profile", "Name=$([string]$target.instance_profile_name)",
         "--subnet-id", [string]$target.subnet_id, "--security-group-ids", [string]$target.security_group_id,
         "--associate-public-ip-address",
-        "--metadata-options", "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=1",
+        # The pinned AWS CLI runs in a host-network container. IMDSv2 remains
+        # mandatory, while a hop limit of two is required for that container to
+        # obtain only this instance profile's short-lived role credentials.
+        "--metadata-options", "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2",
         "--block-device-mappings", "DeviceName=/dev/sda1,Ebs={VolumeSize=16,VolumeType=gp3,Encrypted=true,DeleteOnTermination=true}",
         "--tag-specifications", $tagSpecification, "--user-data", "file://$userDataPath", "--count", "1"
     )
@@ -309,19 +312,24 @@ touch /var/lib/idea2strategy-market-catalog-bootstrap-ready
     Write-Utf8NoBomFile $parametersPath (@{ commands = @("printf '%s' '$encodedCommand' | base64 -d | bash") } | ConvertTo-Json -Depth 5)
     $sent = Invoke-AwsJson @("ssm", "send-command", "--instance-ids", $instanceId, "--document-name", "AWS-RunShellScript", "--comment", "Idea2Strategy exact market catalog $Phase $head", "--parameters", "file://$parametersPath", "--timeout-seconds", "3600")
     $commandId = [string]$sent.Command.CommandId
-    & $script:aws ssm wait command-executed --command-id $commandId --instance-id $instanceId --profile $AwsProfile --region $Region
-    if ($LASTEXITCODE -ne 0) {
-        try {
-            $failedInvocation = Invoke-AwsJson @("ssm", "get-command-invocation", "--command-id", $commandId, "--instance-id", $instanceId)
-            $diagnostics = ([string]$failedInvocation.StandardErrorContent).Trim()
-            if (-not [string]::IsNullOrWhiteSpace($diagnostics)) {
-                Write-Warning "Sanitized bootstrap diagnostics:`n$diagnostics"
+    # The AWS CLI command-executed waiter stops after about 100 seconds, which
+    # is shorter than this command's reviewed one-hour timeout. Poll only exact
+    # invocation status metadata; remote stderr remains protected diagnostics.
+    $commandDeadline = [DateTimeOffset]::UtcNow.AddMinutes(61)
+    while ($true) {
+        $statusOutput = & $script:aws ssm get-command-invocation --command-id $commandId --instance-id $instanceId `
+            --query '{Status:Status,StatusDetails:StatusDetails}' --profile $AwsProfile --region $Region --output json 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace(($statusOutput -join "`n"))) {
+            $statusMetadata = (($statusOutput -join "`n") | ConvertFrom-Json)
+            if ([string]$statusMetadata.Status -eq "Success") { break }
+            if ([string]$statusMetadata.Status -in @("Cancelled", "Failed", "TimedOut", "Cancelling")) {
+                throw "Market catalog SSM command failed with status '$([string]$statusMetadata.Status)'; inspect protected SSM diagnostics."
             }
         }
-        catch {
-            Write-Warning "The failed SSM invocation diagnostics could not be retrieved before cleanup."
+        if ([DateTimeOffset]::UtcNow -ge $commandDeadline) {
+            throw "Market catalog SSM command exceeded its reviewed one-hour timeout."
         }
-        throw "Market catalog SSM command did not succeed."
+        Start-Sleep -Seconds 5
     }
     $invocation = Invoke-AwsJson @("ssm", "get-command-invocation", "--command-id", $commandId, "--instance-id", $instanceId)
     if ($invocation.Status -ne "Success") { throw "Market catalog SSM command failed with status '$($invocation.Status)'." }
