@@ -15,7 +15,7 @@
 - 과거 시장 데이터 provider는 Alpaca SIP로 유지한다.
 - 실시간 시장 데이터는 Alpaca Algo Trader Plus의 SIP feed를 사용한다. 현재 공식 게시 가격은 월 99달러이며 결제 시점의 요금과 조건을 다시 확인한다.
 - 실시간 대상 universe는 플랫폼이 제공하는 미국 주식·ETF 약 550개다. 하나의 `market-gateway`가 SIP WebSocket으로 구독하며 REST polling을 정상 수집 경로로 사용하지 않는다.
-- 유료 구독과 외부 표시·재배포 권한은 별개로 취급한다. 원시 데이터는 외부에 제공하지 않으며 운영 전 실제 서비스 사용 범위에 대한 Alpaca의 서면 확인과 권리 gate가 필요하다.
+- 유료 구독과 외부 표시·재배포 권한은 별개로 취급한다. 원시 데이터는 외부에 제공하지 않는다. ~~운영 전 실제 서비스 사용 범위에 대한 Alpaca의 서면 확인과 권리 gate가 필요하다.~~ **2026-08-05 제품 권한자 결정으로 별도 서면 확인 절차는 면제됐다** — 데이터 권리는 루트 #143의 2026-08-04 결정(3권리 전부 허용, 구독 종료 후 보존·재생성 포함)으로 확정된 것으로 간주하며, 약관 해석 리스크는 제품 소유자가 인수한다. 결정 기록: 루트 #143 코멘트 (2026-08-05).
 
 ## 1. 사용하는 방법
 
@@ -465,9 +465,9 @@ Provider 구현을 기다릴 필요는 없다. 표의 Producer가 계약 fixture
 - [ ] **INT05 — 운영자 E2E**: RBAC 위임→기업행사 승인→데이터 incident→계정 제재→봇 중단→감사 조회를 검증한다.
 - [ ] **INT06 — 장애·재기동·중복 전달 시험**: API, worker, Redis, queue, RDS, S3 장애와 복구에서 주문·원장·백테스트가 중복·유실되지 않는지 검증한다.
 - [ ] **INT07 — 성능·용량 시험**: 정규장 실시간 부하, 동시 봇, 백테스트·pipeline 자원 격리와 목표 지연을 측정한다.
-- [ ] **INT08 — 보안·개인정보·법적 표현 검토**: 권한 우회, 비공개 전략 노출, 직접 주문, 투자 추천·위험 등급 표현과 데이터 권리를 검토한다. — 1차 검토 기록: `docs/reviews/int08-security-privacy-legal-review-2026-08-05.md` (2026-08-05, 고정 gitlink 기준). 다섯 축 모두 표본 수준 위반 없음: 직접 주문 엔드포인트 부재, 전략 읽기 소유자 스코프 + 타인 백테스트 404 fail-closed, 제재 fail-closed·운영자 MFA/RBAC, '위험 등급' 표현 0건 + 성과 고지 실재, 데이터 권리 3종 허용(루트 #143). **미결 4건이 기록돼 카드는 열어 둔다**: Alpaca 사용 범위 서면 확인(높음, 외부·법적 — INT12 전 필수), 인증 전수 검증(A90 귀속), 성과 카피 전수 확인(INT10 귀속), admin-mcp read 도구 전수 확인(A90 귀속)
+- [ ] **INT08 — 보안·개인정보·법적 표현 검토**: 권한 우회, 비공개 전략 노출, 직접 주문, 투자 추천·위험 등급 표현과 데이터 권리를 검토한다. — 1차 검토 기록: `docs/reviews/int08-security-privacy-legal-review-2026-08-05.md` (2026-08-05, 고정 gitlink 기준). 다섯 축 모두 표본 수준 위반 없음: 직접 주문 엔드포인트 부재, 전략 읽기 소유자 스코프 + 타인 백테스트 404 fail-closed, 제재 fail-closed·운영자 MFA/RBAC, '위험 등급' 표현 0건 + 성과 고지 실재, 데이터 권리 3종 허용(루트 #143). **미결 3건이 남아 카드는 열어 둔다**: 인증 전수 검증(A90 귀속), 성과 카피 전수 확인(INT10 귀속), admin-mcp read 도구 전수 확인(A90 귀속). ~~Alpaca 서면 확인~~은 2026-08-05 제품 권한자 결정으로 면제(리스크 인수, 루트 #143 코멘트) — 출시 차단급 미결은 더 이상 없다
 - [ ] **INT09 — 백업·복구·원장 대사**: RDS/S3 백업 복구, projection 재생성, 원장 균형과 객체 checksum을 검증한다.
-- [ ] **INT10 — UI 계약 연결**: UI가 backend-api와 허용된 관리자 진입점만 사용하고 모든 필수 상태·오류를 처리하는지 검증한다.
+- [ ] **INT10 — UI 계약 연결**: UI가 backend-api와 허용된 관리자 진입점만 사용하고 모든 필수 상태·오류를 처리하는지 검증한다. — 1차 검증 기록 (2026-08-05): **① egress 전수 조사 통과** — 모든 기본 API 클라이언트(account·accountOperations·backtests·botOperations·botTrading·competitionRooms·notifications·strategies)가 단일 `VITE_API_BASE_URL`의 상대 `/api/v1/*` 경로만 호출하고, admin-mcp 참조 0건, 절대 외부 URL은 TradingView 크레딧 anchor 1개(데이터 유출 없음), 운영자 OIDC는 문서화된 IdP 엔드포인트뿐이다. **② 상태·오류 처리** — RuntimeHonesty 스위트가 화면별 loading·empty·error·시드 미폴백을 고정하고 13개 테스트 파일이 401/403 처리를 단언하며, 라이브 조합에서 `/login` 오류 경로가 화면까지 관통함을 확인(잘못된 자격증명 → 401 → alert에 `AUTHENTICATION_REJECTED`+상관 ID, 라우트 유지). **이 검증이 로컬 조합 결함 5건을 적발**(루트 #266: trading-worker validate 실패·backtest env 계약 지연·frontend 설치 루프·identity 키 부재·브라우저 CORS 차단 — 3건 수리 병합 #267·#268·#271·#272, 2건 잔여). 카드 완료는 화면 전수 스위프(성과 카피 포함, INT08 F-3 흡수)와 #266 잔여 수리 후
 - [ ] **INT11 — 정확한 release candidate 검증**: 루트와 모든 서브모듈의 정확한 commit, DB migration, UI baseline, 테스트 증거를 하나의 후보로 고정한다.
 - [ ] **INT12 — v1.0 릴리스**: 검증된 release branch만 main에 병합하고 배포·모니터링·rollback 준비 상태를 확인한다.
 

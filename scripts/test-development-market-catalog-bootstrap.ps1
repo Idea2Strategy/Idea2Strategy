@@ -31,7 +31,8 @@ foreach ($needle in @(
     '[string]$PipelineImageDigest',
     '[string]$ReviewedDryRunSourceDigest',
     '[string]$ReviewedDryRunReceiptVersionId',
-    'ac3cecf5fcd1918d6902fbbaa38ce347af56c23b',
+    '$pipelineSourceCommit = $Matches[1]',
+    'ls-tree HEAD data-pipeline',
     'ExpectedObjectCount = 768',
     'ExpectedManifestCount = 96',
     'architecture,Values=arm64',
@@ -116,9 +117,14 @@ foreach ($needle in @(
     Assert-Contains $runbook $needle "Runbook is missing an operator safety instruction: $needle"
 }
 
+$gitlinkLine = ((& git -C $root ls-tree HEAD data-pipeline) -join "`n").Trim()
+if ($LASTEXITCODE -ne 0 -or $gitlinkLine -notmatch '^160000\s+commit\s+([0-9a-f]{40})\s+data-pipeline$') {
+    throw "Unable to resolve the current data-pipeline gitlink."
+}
+
 [pscustomobject]@{
     status = "passed"
-    pipeline_source_commit = "ac3cecf5fcd1918d6902fbbaa38ce347af56c23b"
+    pipeline_source_commit = $Matches[1]
     expected_objects = 768
     expected_manifests = 96
     secret_values_in_argv = $false
