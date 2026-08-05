@@ -125,16 +125,19 @@ resource "terraform_data" "runtime_artifact_guard" {
     precondition {
       condition = (
         !var.enable_operator_auth || (
-          var.operator_auth_issuer != "" &&
-          var.operator_auth_jwk_set_uri != "" &&
-          var.operator_auth_audience != "" &&
-          length(setunion(var.operator_auth_allowed_acr_values, var.operator_auth_allowed_amr_values)) > 0 &&
+          local.operator_auth_issuer != "" &&
+          local.operator_auth_jwk_set_uri != "" &&
+          local.operator_auth_audience != "" &&
+          (
+            length(setunion(var.operator_auth_allowed_acr_values, var.operator_auth_allowed_amr_values)) > 0 ||
+            (local.operator_auth_mfa_claim_name != "" && length(local.operator_auth_allowed_mfa_claim_values) > 0)
+          ) &&
           var.operator_rbac_catalog_version != "" &&
           can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_catalog_read_permission_id)) &&
           can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_assignment_read_permission_id))
         )
       )
-      error_message = "Enabling operator authentication requires the exact OIDC issuer/JWKS/audience, an MFA acr/amr allow-list, and the reviewed RBAC catalog/read permission UUIDs."
+      error_message = "Enabling operator authentication requires the exact OIDC issuer/JWKS/audience, a reviewed MFA assurance claim allow-list, and the reviewed RBAC catalog/read permission UUIDs."
     }
   }
 }

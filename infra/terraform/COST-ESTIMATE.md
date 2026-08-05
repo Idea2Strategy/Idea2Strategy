@@ -46,6 +46,7 @@ over-provisioned architecture scenario, not as a like-for-like price revision.
 | Edge | CloudFront, WAF, Route 53, viewer certificate | 10-15 |
 | Object and artifact storage | S3 and ECR | 2-4 |
 | Operations | CloudWatch, SQS, Secrets Manager, EventBridge | 8-15 |
+| Operator identity | Cognito Essentials below 10,000 direct MAU plus free-tier Lambda | approximately 0 |
 | **Expected range** | usage-dependent Development workload | **141-181** |
 | **Normal review target** | accepted operating band | **150-165** |
 
