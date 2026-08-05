@@ -6,12 +6,12 @@ umask 077
 readonly FLYWAY_IMAGE='redgate/flyway@sha256:52cdd559dc8ae38a17b56615e3c7137d9b01470271112525b40373de470bb005'
 readonly AWS_CLI_IMAGE='amazon/aws-cli@sha256:310813a7eae8fd88da1cc9c37970e3500b0ff3984479e1012f0a6fd44e453f63'
 readonly EXPECTED_TABLE_COUNT='179'
-readonly EXPECTED_MIGRATION_COUNT='45'
 readonly CONSUMERS=(backend batch backtest trading pipeline)
 
 archive=''
 archive_sha256=''
 bundle_sha256=''
+expected_migration_count=''
 database_host=''
 database_name=''
 database_port=''
@@ -30,6 +30,7 @@ while (($#)); do
     --archive) archive="$2"; shift 2 ;;
     --archive-sha256) archive_sha256="$2"; shift 2 ;;
     --bundle-sha256) bundle_sha256="$2"; shift 2 ;;
+    --expected-migration-count) expected_migration_count="$2"; shift 2 ;;
     --database-host) database_host="$2"; shift 2 ;;
     --database-name) database_name="$2"; shift 2 ;;
     --database-port) database_port="$2"; shift 2 ;;
@@ -46,11 +47,12 @@ while (($#)); do
   esac
 done
 
-for required in archive archive_sha256 bundle_sha256 database_host database_name database_port master_secret_arn policy_seed_sql policy_seed_sha256 scoring_seed_sql scoring_seed_sha256 region root_sha runtime_secret_arns_base64 work_directory; do
+for required in archive archive_sha256 bundle_sha256 expected_migration_count database_host database_name database_port master_secret_arn policy_seed_sql policy_seed_sha256 scoring_seed_sql scoring_seed_sha256 region root_sha runtime_secret_arns_base64 work_directory; do
   test -n "${!required}" || { echo "Missing required argument: $required" >&2; exit 64; }
 done
 [[ "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]
 [[ "$bundle_sha256" =~ ^[0-9a-f]{64}$ ]]
+[[ "$expected_migration_count" =~ ^[1-9][0-9]*$ ]]
 [[ "$policy_seed_sha256" =~ ^[0-9a-f]{64}$ ]]
 [[ "$scoring_seed_sha256" =~ ^[0-9a-f]{64}$ ]]
 [[ "$root_sha" =~ ^[0-9a-f]{40}$ ]]
@@ -151,16 +153,30 @@ printf '%s  %s\n' "$bundle_sha256" "$manifest" | sha256sum --check --status
 test "$(head -n 1 "$manifest" | tr -d '\r')" = 'idea2strategy-flyway-bundle-v1'
 
 sql_count=0
+declare -A listed_migrations=()
 while IFS=$'\t' read -r migration expected_hash; do
   migration="${migration%$'\r'}"
   expected_hash="${expected_hash%$'\r'}"
-  [[ "$migration" =~ ^[VR][A-Za-z0-9_.-]+\.sql$ ]]
-  [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]]
-  test -f "$bundle_directory/$migration"
-  printf '%s  %s\n' "$expected_hash" "$bundle_directory/$migration" | sha256sum --check --status
+  [[ "$migration" =~ ^[VR][A-Za-z0-9_.-]+\.sql$ ]] || { echo 'Invalid Flyway manifest migration name.' >&2; exit 65; }
+  [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid Flyway manifest checksum.' >&2; exit 65; }
+  normalized_migration="${migration,,}"
+  [[ -z "${listed_migrations[$normalized_migration]+x}" ]] || { echo "Duplicate Flyway manifest migration: $migration" >&2; exit 65; }
+  listed_migrations["$normalized_migration"]=1
+  test -f "$bundle_directory/$migration" || { echo "Flyway migration is missing: $migration" >&2; exit 65; }
+  printf '%s  %s\n' "$expected_hash" "$bundle_directory/$migration" | sha256sum --check --status || {
+    echo "Flyway migration checksum mismatch: $migration" >&2
+    exit 65
+  }
   sql_count=$((sql_count + 1))
 done < <(tail -n +2 "$manifest")
-test "$sql_count" = "$EXPECTED_MIGRATION_COUNT"
+test "$sql_count" -gt 0 || { echo 'Flyway manifest must contain at least one migration.' >&2; exit 65; }
+test "$sql_count" = "$expected_migration_count" || { echo 'Flyway manifest migration count does not match the validated invocation.' >&2; exit 65; }
+mapfile -t bundle_sql_files < <(find "$bundle_directory" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+test "${#bundle_sql_files[@]}" = "$sql_count" || { echo 'Flyway bundle SQL file count does not match the exact manifest.' >&2; exit 65; }
+for sql_file in "${bundle_sql_files[@]}"; do
+  normalized_migration="${sql_file,,}"
+  [[ -n "${listed_migrations[$normalized_migration]+x}" ]] || { echo "Flyway migration is not listed in the manifest: $sql_file" >&2; exit 65; }
+done
 
 runtime_secret_arns_file="$work_directory/runtime-secret-arns.json"
 printf '%s' "$runtime_secret_arns_base64" | base64 --decode >"$runtime_secret_arns_file"
@@ -330,7 +346,7 @@ jq -cn \
   --arg scoring_seed_sha256 "$scoring_seed_sha256" \
   --arg flyway_image "$FLYWAY_IMAGE" \
   --arg aws_cli_image "$AWS_CLI_IMAGE" \
-  --argjson migrations "$EXPECTED_MIGRATION_COUNT" \
+  --argjson migrations "$expected_migration_count" \
   --argjson tables "$table_count" \
   --argjson login_roles 5 \
   --argjson policy_row_counts "$policy_row_counts" \
