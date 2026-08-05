@@ -353,6 +353,19 @@ foreach ($required in @(
         throw "Scale-to-zero ARM64 pipeline boundary is missing: $required"
     }
 }
+foreach ($required in @(
+    'name = "pipeline-tmp"',
+    'name                   = "pipeline-volume-init"',
+    'user                   = "0:0"',
+    'containerName = "pipeline-volume-init"',
+    'condition     = "SUCCESS"',
+    'sourceVolume  = "pipeline-tmp"',
+    'containerPath = "/tmp"'
+)) {
+    if (-not $pipeline.Contains($required)) {
+        throw "The non-root Fargate pipeline must initialize writable state and /tmp volumes before starting: $required"
+    }
+}
 if ($pipeline -notmatch 'assign_public_ip\s*=\s*true') {
     throw "The desired-zero Fargate task needs public-IP egress because the design intentionally has no NAT gateway."
 }
