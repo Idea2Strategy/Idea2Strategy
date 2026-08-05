@@ -21,6 +21,9 @@ services:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
       VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-}
       VITE_REAL_API_TARGET: ${VITE_REAL_API_TARGET:-http://backend-api:8080}
+      # The backtest read surface lives on backtest-api, not backend-api; the
+      # vite proxy sends only /api/v1/backtests there (ui fix/frontend-honest-surfaces).
+      VITE_BACKTEST_API_TARGET: ${VITE_BACKTEST_API_TARGET:-http://backtest-api:8082}
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-15173}:5173"
     volumes:
@@ -31,7 +34,7 @@ services:
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5173"]
       interval: 5s
-      timeout: 3s
+      timeout: 10s
       retries: 30
       start_period: 20s
     restart: unless-stopped

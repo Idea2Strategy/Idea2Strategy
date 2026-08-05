@@ -268,7 +268,11 @@ function Wait-DevelopmentEnvironment {
     $postgresDatabase = Get-EnvironmentValue -Name "POSTGRES_DB" -DefaultValue "idea2strategy"
     $frontendUrl = "http://localhost:$frontendPort"
     $minioHealthUrl = "http://localhost:$minioApiPort/minio/health/live"
-    $deadline = (Get-Date).AddMinutes(4)
+    # A first run builds nine images and the probes themselves crawl while the
+    # machine is compiling, so a fixed four minutes lost the race on slower
+    # hosts even though the stack came up fine moments later (root #266).
+    $readyTimeoutMinutes = [int](Get-EnvironmentValue -Name "DEV_READY_TIMEOUT_MINUTES" -DefaultValue "10")
+    $deadline = (Get-Date).AddMinutes($readyTimeoutMinutes)
 
     Write-Host "Waiting for local services..." -ForegroundColor Yellow
     while ((Get-Date) -lt $deadline) {
@@ -302,7 +306,7 @@ function Wait-DevelopmentEnvironment {
     }
 
     Invoke-Compose -Arguments @("ps") -AllowFailure
-    throw "Development services did not become ready within 4 minutes. Run scripts\dev.cmd logs."
+    throw "Development services did not become ready within $readyTimeoutMinutes minutes (override with DEV_READY_TIMEOUT_MINUTES in .env.docker). Run scripts\dev.cmd logs."
 }
 
 function Open-DevelopmentPages {
