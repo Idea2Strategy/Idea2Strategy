@@ -275,8 +275,25 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     $sent = Invoke-AwsJson @("ssm", "send-command", "--instance-ids", $instanceId, "--document-name", "AWS-RunShellScript", "--comment", "Idea2Strategy exact database bootstrap $head", "--parameters", "file://$commandParametersPath", "--timeout-seconds", "1800")
     $commandId = [string]$sent.Command.CommandId
     # AWS-RunShellScript emits only a credential-free JSON receipt on stdout.
-    & $script:aws ssm wait command-executed --command-id $commandId --instance-id $instanceId --profile $AwsProfile --region $Region
-    if ($LASTEXITCODE -ne 0) { throw "Database bootstrap SSM command did not succeed; inspect protected SSM diagnostics." }
+    # The AWS CLI command-executed waiter stops after about 100 seconds, which is
+    # shorter than this command's reviewed 30-minute timeout. Poll only status
+    # metadata until the exact invocation reaches a terminal state instead.
+    $commandDeadline = [DateTimeOffset]::UtcNow.AddMinutes(31)
+    while ($true) {
+        $statusOutput = & $script:aws ssm get-command-invocation --command-id $commandId --instance-id $instanceId `
+            --query '{Status:Status,StatusDetails:StatusDetails}' --profile $AwsProfile --region $Region --output json 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace(($statusOutput -join "`n"))) {
+            $statusMetadata = (($statusOutput -join "`n") | ConvertFrom-Json)
+            if ([string]$statusMetadata.Status -eq "Success") { break }
+            if ([string]$statusMetadata.Status -in @("Cancelled", "Failed", "TimedOut", "Cancelling")) {
+                throw "Database bootstrap SSM command failed with status '$([string]$statusMetadata.Status)'."
+            }
+        }
+        if ([DateTimeOffset]::UtcNow -ge $commandDeadline) {
+            throw "Database bootstrap SSM command exceeded its reviewed 30-minute timeout."
+        }
+        Start-Sleep -Seconds 5
+    }
     $invocation = Invoke-AwsJson @("ssm", "get-command-invocation", "--command-id", $commandId, "--instance-id", $instanceId)
     if ($invocation.Status -ne "Success") { throw "Database bootstrap SSM command failed with status '$($invocation.Status)'." }
     $receipt = [string]$invocation.StandardOutputContent | ConvertFrom-Json
