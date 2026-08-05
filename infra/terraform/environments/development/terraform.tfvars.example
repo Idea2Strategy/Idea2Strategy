@@ -56,6 +56,7 @@ runtime_database_secret_names = {
 
 # Set true only for an exact Backend commit whose three-lane Outbox relay tests passed.
 enable_backtest_outbox_relay = false
+enable_operator_auth          = true
 
 # Dedicated operator OIDC trust. Use the exact reviewed provider values and an
 # access token that contains one exact aud plus auth_time and an approved MFA

@@ -387,6 +387,12 @@ variable "enable_backtest_outbox_relay" {
   default     = false
 }
 
+variable "enable_operator_auth" {
+  description = "Enable the dedicated operator OIDC and RBAC read plane. Set false only for a pre-DNS Development host rollout; operator routes then remain unavailable instead of accepting weaker identity."
+  type        = bool
+  default     = true
+}
+
 variable "operator_auth_issuer" {
   description = "Exact HTTPS issuer for the dedicated operator OIDC JWT. Required for a full release; it is not inferred from customer login."
   type        = string

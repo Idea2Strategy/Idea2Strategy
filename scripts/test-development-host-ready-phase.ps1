@@ -16,6 +16,7 @@ $locals = Read-Terraform "locals.tf"
 $variables = Read-Terraform "variables.tf"
 $deployment = Read-Terraform "deployment.tf"
 $compute = Read-Terraform "compute.tf"
+$runtime = Read-Terraform "runtime.tf"
 $security = Read-Terraform "security.tf"
 $iam = Read-Terraform "iam.tf"
 $frontend = Read-Terraform "frontend.tf"
@@ -32,6 +33,19 @@ foreach ($required in @(
 )) {
     if (-not $all.Contains($required)) {
         throw "Host-ready phase boundary is missing: $required"
+    }
+}
+
+foreach ($required in @(
+    'variable "enable_operator_auth"',
+    'enable_operator_auth                        = var.enable_operator_auth',
+    '!var.enable_operator_auth || (',
+    'OPERATOR_AUTH_ENABLED=${enable_operator_auth}',
+    'OPERATOR_RBAC_READ_ENABLED=${enable_operator_auth}'
+)) {
+    if (-not ($variables.Contains($required) -or $compute.Contains($required) -or
+        $runtime.Contains($required) -or $userData.Contains($required))) {
+        throw "Fail-closed optional operator plane wiring is missing: $required"
     }
 }
 

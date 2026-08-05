@@ -37,6 +37,7 @@ resource "aws_instance" "service" {
     backtest_policy_manifest                    = base64encode(jsonencode(var.backtest_policy_artifacts))
     trading_artifact_manifest                   = base64encode(jsonencode(var.trading_runtime_artifacts))
     enable_backtest_outbox_relay                = var.enable_backtest_outbox_relay
+    enable_operator_auth                        = var.enable_operator_auth
     operator_auth_issuer                        = var.operator_auth_issuer
     operator_auth_jwk_set_uri                   = var.operator_auth_jwk_set_uri
     operator_auth_audience                      = var.operator_auth_audience
@@ -131,6 +132,7 @@ resource "aws_instance" "trading" {
     backtest_policy_manifest                    = base64encode(jsonencode(var.backtest_policy_artifacts))
     trading_artifact_manifest                   = base64encode(jsonencode(var.trading_runtime_artifacts))
     enable_backtest_outbox_relay                = var.enable_backtest_outbox_relay
+    enable_operator_auth                        = var.enable_operator_auth
     operator_auth_issuer                        = var.operator_auth_issuer
     operator_auth_jwk_set_uri                   = var.operator_auth_jwk_set_uri
     operator_auth_audience                      = var.operator_auth_audience
@@ -230,6 +232,7 @@ resource "aws_launch_template" "backtest" {
     backtest_policy_manifest                    = base64encode(jsonencode(var.backtest_policy_artifacts))
     trading_artifact_manifest                   = base64encode(jsonencode(var.trading_runtime_artifacts))
     enable_backtest_outbox_relay                = var.enable_backtest_outbox_relay
+    enable_operator_auth                        = var.enable_operator_auth
     operator_auth_issuer                        = var.operator_auth_issuer
     operator_auth_jwk_set_uri                   = var.operator_auth_jwk_set_uri
     operator_auth_audience                      = var.operator_auth_audience
