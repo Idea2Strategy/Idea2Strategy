@@ -8,6 +8,15 @@ services:
       dockerfile: infra/docker/frontend/Dockerfile
     environment:
       CHOKIDAR_USEPOLLING: "true"
+      # Polling stats run on libuv's threadpool (default 4 threads). On the
+      # Windows bind mount each stat is slow, the pollers monopolize the pool,
+      # and every real file read - index.html, /public assets, any
+      # not-yet-cached module - queues behind them for ~15s per request
+      # (measured; healthchecks also timed out, so the container sat
+      # "unhealthy"). A bigger pool plus a 5s poll interval brings first byte
+      # to <200ms while HMR still sees Windows-side edits within 5s.
+      UV_THREADPOOL_SIZE: "64"
+      CHOKIDAR_INTERVAL: "5000"
       # The entrypoint's pnpm install runs with no TTY. Without CI=true a stale
       # node_modules volume aborts the install with
       # ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY and the container restart-loops
