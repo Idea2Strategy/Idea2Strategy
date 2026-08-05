@@ -340,6 +340,8 @@ foreach ($required in @(
 
 foreach ($required in @(
     'resource "aws_ecs_cluster" "pipeline"',
+    'resource "aws_ecs_cluster_capacity_providers" "pipeline"',
+    'capacity_providers = ["FARGATE", "FARGATE_SPOT"]',
     'resource "aws_ecs_task_definition" "pipeline"',
     'capacity_provider_strategy',
     'FARGATE_SPOT',

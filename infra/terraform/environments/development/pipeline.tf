@@ -8,6 +8,19 @@ resource "aws_ecs_cluster" "pipeline" {
   }
 }
 
+resource "aws_ecs_cluster_capacity_providers" "pipeline" {
+  count        = local.enable_service_stack ? 1 : 0
+  cluster_name = aws_ecs_cluster.pipeline[0].name
+
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+
+  default_capacity_provider_strategy {
+    capacity_provider = "FARGATE_SPOT"
+    weight            = 1
+    base              = 0
+  }
+}
+
 resource "aws_cloudwatch_log_group" "pipeline" {
   count             = local.enable_service_stack ? 1 : 0
   name              = "/${var.project_name}/${var.environment}/pipeline"
