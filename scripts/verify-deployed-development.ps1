@@ -30,19 +30,19 @@ function Invoke-AwsJson([string[]]$Arguments) {
 $caller = Invoke-AwsJson -Arguments @('sts', 'get-caller-identity')
 if ([string]$caller.Account -cne $ExpectedAwsAccountId) { throw "AWS account mismatch." }
 
-$outputs = (& $terraform.Source -chdir=$terraformDirectory output -json) | ConvertFrom-Json
+$outputs = (& $terraform.Source "-chdir=$terraformDirectory" output -json) | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw "Unable to read the applied Terraform outputs." }
 if ([string]$outputs.aws_account_id.value -cne $ExpectedAwsAccountId) { throw "Terraform state account mismatch." }
 
 $serviceUrl = ([string]$outputs.service_url.value).TrimEnd('/')
 if ($serviceUrl -notmatch '^https://') { throw "Applied service URL is not HTTPS." }
 
-$frontend = Invoke-WebRequest -Uri "$serviceUrl/" -Method Get -TimeoutSec 30 -MaximumRedirection 3
+$frontend = Invoke-WebRequest -Uri "$serviceUrl/" -Method Get -TimeoutSec 30 -MaximumRedirection 3 -UseBasicParsing
 if ($frontend.StatusCode -ne 200 -or [string]::IsNullOrWhiteSpace($frontend.Content)) {
     throw "Frontend did not return a non-empty HTTP 200 response."
 }
 foreach ($component in @('backend', 'backtest')) {
-    $health = Invoke-WebRequest -Uri "$serviceUrl/api/healthz/$component" -Method Get -TimeoutSec 30
+    $health = Invoke-WebRequest -Uri "$serviceUrl/api/healthz/$component" -Method Get -TimeoutSec 30 -UseBasicParsing
     if ($health.StatusCode -ne 200 -or [string]::IsNullOrWhiteSpace($health.Content)) {
         throw "$component health check failed."
     }

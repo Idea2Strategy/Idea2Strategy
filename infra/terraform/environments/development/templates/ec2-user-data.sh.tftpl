@@ -417,6 +417,12 @@ services:
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/actuator/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 180s
     logging: &awslogs
       driver: awslogs
       options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backend-api}
@@ -444,9 +450,9 @@ services:
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"]
       interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 30s
+      timeout: 10s
+      retries: 6
+      start_period: 120s
     logging:
       <<: *awslogs
       options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backtest-api}
@@ -599,13 +605,40 @@ cat >/usr/local/sbin/idea2strategy-runtime-start <<'SCRIPT'
 set -euo pipefail
 umask 077
 cd /opt/idea2strategy
-while IFS= read -r image; do
+
+refresh_runtime_images() {
+  local refreshed_compose current_image repository runtime_name replacement
+  refreshed_compose="$(mktemp /opt/idea2strategy/.compose.yaml.XXXXXX)"
+  trap 'rm -f "$refreshed_compose"' EXIT
+  install -m 0600 compose.yaml "$refreshed_compose"
+  while IFS= read -r current_image; do
+    repository="$(printf '%s' "$current_image" | cut -d@ -f1)"
+    runtime_name="$(basename "$repository")"
+    replacement="$(aws ssm get-parameter \
+      --region '${aws_region}' \
+      --name '${parameter_path}/deployment/images/'"$runtime_name" \
+      --query Parameter.Value \
+      --output text)"
+    case "$replacement" in
+      "$repository"@sha256:*) ;;
+      *) echo "SSM returned a mismatched or mutable runtime image for $runtime_name" >&2; exit 1 ;;
+    esac
+    sed -i "s|$current_image|$replacement|g" "$refreshed_compose"
+  done < <(docker compose --project-name idea2strategy config --images)
+  docker compose --file "$refreshed_compose" config --quiet
+  mv -f "$refreshed_compose" compose.yaml
+  trap - EXIT
+}
+
+refresh_runtime_images
+mapfile -t runtime_images < <(docker compose --project-name idea2strategy config --images)
+for image in "$${runtime_images[@]}"; do
   case "$image" in
     *@sha256:*) ;;
     *) echo "Mutable or malformed runtime image reference: $image" >&2; exit 1 ;;
   esac
-done < <(docker compose --project-name idea2strategy config --images)
-registry="$(docker compose --project-name idea2strategy config --images | head -n1 | cut -d/ -f1)"
+done
+registry="$${runtime_images[0]%%/*}"
 test -n "$registry"
 aws ecr get-login-password --region '${aws_region}' | docker login --username AWS --password-stdin "$registry"
 docker compose --project-name idea2strategy config --quiet

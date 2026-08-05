@@ -35,6 +35,14 @@ $ciIdentity = (Get-ChildItem -LiteralPath (Join-Path $root "infra/terraform/ci-i
 }) -join "`n"
 $artifactRoot = Join-Path $root "infra/terraform/artifact-foundation"
 $artifactMain = Get-Content -LiteralPath (Join-Path $artifactRoot "main.tf") -Raw
+$deployedVerifier = Get-Content -LiteralPath (Join-Path $root "scripts/verify-deployed-development.ps1") -Raw
+if (($deployedVerifier | Select-String -Pattern 'Invoke-WebRequest[^\r\n]+-UseBasicParsing' -AllMatches).Matches.Count -ne 2) {
+    throw "Deployed verification must support Windows PowerShell 5 without the retired Internet Explorer parser."
+}
+
+if (-not $deployedVerifier.Contains('& $terraform.Source "-chdir=$terraformDirectory" output -json')) {
+    throw "The deployed verifier must pass Terraform's chdir option as one expanded native argument."
+}
 
 foreach ($forbidden in @(
     'resource "aws_nat_gateway"',
@@ -85,6 +93,34 @@ foreach ($runtimeDependency in @(
 )) {
     if ($compute -notmatch ('(?s)resource "' + [regex]::Escape($runtimeDependency) + '.*?depends_on\s*=\s*\[.*?aws_ssm_parameter\.runtime_image')) {
         throw "Runtime bootstrap can race its image parameter: $runtimeDependency"
+    }
+}
+foreach ($runtimeRefreshBoundary in @(
+    'runtime_name="$(basename "$repository")"',
+    '--name ''${parameter_path}/deployment/images/''"$runtime_name"',
+    'docker compose --file "$refreshed_compose" config --quiet',
+    'mv -f "$refreshed_compose" compose.yaml',
+    'refresh_runtime_images'
+)) {
+    if (-not $userData.Contains($runtimeRefreshBoundary)) {
+        throw "Runtime restart cannot refresh an immutable image pointer: $runtimeRefreshBoundary"
+    }
+}
+if (-not $userData.Contains('mapfile -t runtime_images < <(docker compose --project-name idea2strategy config --images)') -or
+    -not $userData.Contains('registry="$${runtime_images[0]%%/*}"')) {
+    throw "Runtime startup must capture immutable images without a pipefail-sensitive head pipeline."
+}
+if ($userData.Contains('config --images | head -n1')) {
+    throw "Runtime startup can fail with SIGPIPE when pipefail observes docker compose writing into head."
+}
+foreach ($coreHealthBoundary in @(
+    'test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/actuator/health"]',
+    'start_period: 180s',
+    'timeout: 10s',
+    'retries: 6'
+)) {
+    if (-not $userData.Contains($coreHealthBoundary)) {
+        throw "Core health checks are too aggressive for the confirmed t4g.medium runtime: $coreHealthBoundary"
     }
 }
 if (($compute | Select-String -Pattern 'user_data_base64\s*=\s*base64gzip\(' -AllMatches).Matches.Count -ne 2 -or
@@ -184,6 +220,10 @@ foreach ($required in @(
     if (-not $compute.Contains($required)) {
         throw "Compute architecture is missing: $required"
     }
+}
+
+if ($compute -notmatch '(?s)resource "aws_instance" "trading".*?lifecycle\s*\{.*?ignore_changes\s*=\s*\[\s*associate_public_ip_address\s*\]') {
+    throw "Scheduled Trading instances must ignore the stopped-instance public-IP observation to avoid replacement drift."
 }
 if ($compute -notmatch 'desired_capacity\s*=\s*0' -or
     $compute -notmatch 'max_size\s*=\s*1' -or

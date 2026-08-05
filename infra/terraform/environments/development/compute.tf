@@ -207,7 +207,15 @@ resource "aws_instance" "trading" {
   }
 
   monitoring = false
-  lifecycle { create_before_destroy = true }
+  lifecycle {
+    create_before_destroy = true
+
+    # DescribeInstances omits the ephemeral public address while this
+    # schedule-controlled instance is stopped. Keep the launch-time public
+    # address request without replacing an otherwise unchanged instance after
+    # every scheduled shutdown.
+    ignore_changes = [associate_public_ip_address]
+  }
 
   tags = {
     Name = "${local.name_prefix}-trading"
