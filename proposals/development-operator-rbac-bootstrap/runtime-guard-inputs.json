@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "development-operator-rbac-v1",
+  "backendSpringProperties": [
+    {"surface": "RBAC_CATALOG_READ", "property": "idea2strategy.operator-rbac.read-guard.catalog-read-permission-id", "permissionCode": "OPERATOR_RBAC_CATALOG_READ", "permissionId": "72c9c03f-f66d-4095-8c1f-b79e8f4d0eb0"},
+    {"surface": "RBAC_ASSIGNMENT_READ", "property": "idea2strategy.operator-rbac.read-guard.assignment-read-permission-id", "permissionCode": "OPERATOR_RBAC_ASSIGNMENT_READ", "permissionId": "34db0223-cce2-49e0-bdc0-fd00230ac789"},
+    {"surface": "RBAC_GRANT", "property": "idea2strategy.operator-rbac.guard.grant-permission-id", "permissionCode": "OPERATOR_RBAC_GRANT", "permissionId": "2a20a8a6-11fd-45ae-acae-28fa52f041cb"},
+    {"surface": "RBAC_REVOKE", "property": "idea2strategy.operator-rbac.guard.revoke-permission-id", "permissionCode": "OPERATOR_RBAC_REVOKE", "permissionId": "155b2fbe-218e-44a7-ae4e-a7201ff5bac3"},
+    {"surface": "SANCTION_APPLY", "property": "idea2strategy.operator-sanction.guard.apply-permission-id", "permissionCode": "ACCOUNT_SANCTION_APPLY", "permissionId": "40000000-0000-4000-8000-000000000004"},
+    {"surface": "SANCTION_LIFT", "property": "idea2strategy.operator-sanction.guard.lift-permission-id", "permissionCode": "ACCOUNT_SANCTION_LIFT", "permissionId": "50000000-0000-4000-8000-000000000005"},
+    {"surface": "CASE_QUEUE_READ", "property": "idea2strategy.operator-case.guard.queue-permission-id", "permissionCode": "OPERATOR_CASE_QUEUE_READ", "permissionId": "a2000000-0000-4000-8000-000000000018"},
+    {"surface": "CASE_DETAIL_READ", "property": "idea2strategy.operator-case.guard.detail-permission-id", "permissionCode": "OPERATOR_CASE_DETAIL_READ", "permissionId": "a2000000-0000-4000-8000-000000000019"},
+    {"surface": "CASE_ASSIGN", "property": "idea2strategy.operator-case.guard.assign-permission-id", "permissionCode": "OPERATOR_CASE_ASSIGN", "permissionId": "a2000000-0000-4000-8000-000000000020"},
+    {"surface": "CASE_REASSIGN", "property": "idea2strategy.operator-case.guard.reassign-permission-id", "permissionCode": "OPERATOR_CASE_REASSIGN", "permissionId": "a2000000-0000-4000-8000-000000000021"},
+    {"surface": "CASE_UNASSIGN", "property": "idea2strategy.operator-case.guard.unassign-permission-id", "permissionCode": "OPERATOR_CASE_UNASSIGN", "permissionId": "a2000000-0000-4000-8000-000000000022"},
+    {"surface": "CASE_START_REVIEW", "property": "idea2strategy.operator-case.guard.start-review-permission-id", "permissionCode": "OPERATOR_CASE_START_REVIEW", "permissionId": "a2000000-0000-4000-8000-000000000023"},
+    {"surface": "CASE_REQUEST_INFORMATION", "property": "idea2strategy.operator-case.guard.request-information-permission-id", "permissionCode": "OPERATOR_CASE_REQUEST_INFORMATION", "permissionId": "a2000000-0000-4000-8000-000000000024"},
+    {"surface": "CASE_RESOLVE", "property": "idea2strategy.operator-case.guard.resolve-permission-id", "permissionCode": "OPERATOR_CASE_RESOLVE", "permissionId": "a2000000-0000-4000-8000-000000000025"},
+    {"surface": "CASE_REJECT", "property": "idea2strategy.operator-case.guard.reject-permission-id", "permissionCode": "OPERATOR_CASE_REJECT", "permissionId": "a2000000-0000-4000-8000-000000000026"},
+    {"surface": "CASE_APPLY_SANCTION", "property": "idea2strategy.operator-case.guard.apply-sanction-permission-id", "permissionCode": "OPERATOR_CASE_APPLY_SANCTION", "permissionId": "a2000000-0000-4000-8000-000000000027"},
+    {"surface": "CASE_RELEASE_SANCTION", "property": "idea2strategy.operator-case.guard.release-sanction-permission-id", "permissionCode": "OPERATOR_CASE_RELEASE_SANCTION", "permissionId": "a2000000-0000-4000-8000-000000000028"}
+  ],
+  "backendCodeGuards": [
+    {"surface": "COMPETITION_ROOM_READ", "javaConstant": "OperatorRoomPermissions.READ", "permissionCode": "COMPETITION_ROOM_READ", "permissionId": "e3000000-0000-4000-8000-000000000001"},
+    {"surface": "COMPETITION_ROOM_MANAGE", "javaConstant": "OperatorRoomPermissions.MANAGE", "permissionCode": "COMPETITION_ROOM_MANAGE", "permissionId": "e3000000-0000-4000-8000-000000000002"}
+  ],
+  "sharedSettings": {
+    "idea2strategy.operator-rbac.read-guard.enabled": true,
+    "idea2strategy.operator-rbac.read-guard.catalog-version": "development-operator-rbac-v1",
+    "idea2strategy.operator-rbac.read-guard.catalog-read-mfa-required": true,
+    "idea2strategy.operator-rbac.read-guard.assignment-read-mfa-required": true,
+    "idea2strategy.operator-rbac.guard.catalog-version": "development-operator-rbac-v1"
+  },
+  "terraformInputs": {
+    "operator_rbac_catalog_version": "development-operator-rbac-v1",
+    "operator_rbac_catalog_read_permission_id": "72c9c03f-f66d-4095-8c1f-b79e8f4d0eb0",
+    "operator_rbac_assignment_read_permission_id": "34db0223-cce2-49e0-bdc0-fd00230ac789",
+    "operator_rbac_grant_permission_id": "2a20a8a6-11fd-45ae-acae-28fa52f041cb",
+    "operator_rbac_revoke_permission_id": "155b2fbe-218e-44a7-ae4e-a7201ff5bac3"
+  },
+  "frontendBuildInputs": {
+    "VITE_OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID": "72c9c03f-f66d-4095-8c1f-b79e8f4d0eb0",
+    "VITE_OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID": "34db0223-cce2-49e0-bdc0-fd00230ac789"
+  }
+}
