@@ -49,10 +49,13 @@ $required = @(
     "VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER: `${{ vars.OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER }}",
     "VITE_OPERATOR_OIDC_SCOPES: `${{ vars.OPERATOR_OIDC_SCOPES }}",
     "VITE_OPERATOR_OIDC_SIGNING_ALGORITHM: `${{ vars.OPERATOR_OIDC_SIGNING_ALGORITHM }}",
+    "VITE_OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID: `${{ vars.OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID }}",
+    "VITE_OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID: `${{ vars.OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID }}",
     "OIDC build input is missing",
     "OIDC endpoint must use HTTPS",
     "OIDC redirect URI must use the service origin",
     "OIDC logout redirect parameter is invalid",
+    "RBAC permission ID is invalid",
     "test-aws-deployment-prerequisites.ps1",
     "-RequireRuntimeDatabaseSecrets",
     "-RequireAlpacaSecrets",
@@ -104,6 +107,10 @@ if ($workflow -notmatch "(?s)Build same-origin frontend without AWS credentials.
 
 if ($workflow -notmatch "(?s)operator_auth_issuer.*?OPERATOR_OIDC_ISSUER.*?operator_auth_audience.*?OPERATOR_OIDC_AUDIENCE") {
     throw "The frontend OIDC issuer and audience must be cross-checked against the Terraform runtime inputs."
+}
+
+if ($workflow -notmatch "(?s)operator_rbac_catalog_read_permission_id.*?OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID.*?operator_rbac_assignment_read_permission_id.*?OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID") {
+    throw "The frontend RBAC permission IDs must be cross-checked against the Terraform runtime inputs."
 }
 
 if ($workflow -notmatch "(?s)configure-aws-credentials.*?test-aws-deployment-prerequisites\.ps1.*?-RequireRuntimeDatabaseSecrets.*?Create saved Terraform plan") {

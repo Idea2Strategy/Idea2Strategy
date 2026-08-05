@@ -102,7 +102,11 @@ Before requesting an AWS plan, record and review all of the following:
   `OPERATOR_OIDC_CLIENT_ID`, `OPERATOR_OIDC_AUDIENCE`,
   `OPERATOR_OIDC_REDIRECT_URI`, `OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI`,
   `OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER`,
-  `OPERATOR_OIDC_SCOPES`, and `OPERATOR_OIDC_SIGNING_ALGORITHM`. Register the
+  `OPERATOR_OIDC_SCOPES`, `OPERATOR_OIDC_SIGNING_ALGORITHM`,
+  `OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID`, and
+  `OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID`. The two permission UUIDs must
+  come from the same reviewed operator RBAC bootstrap receipt used by the
+  Terraform runtime inputs. Register the
   exact callback and logout URIs with a public Authorization Code + PKCE S256
   client, disable implicit flow, and allow the UI origin at the token endpoint.
   These are public build inputs, never a client secret. The release workflow
