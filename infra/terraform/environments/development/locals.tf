@@ -1,8 +1,9 @@
 locals {
   name_prefix = "${var.project_name}-${var.environment}"
 
-  enable_service_stack  = var.deployment_phase == "full"
-  enable_dns_foundation = contains(["dns_foundation", "full"], var.deployment_phase)
+  enable_service_stack  = contains(["host_ready", "full"], var.deployment_phase)
+  enable_public_edge    = var.deployment_phase == "full"
+  enable_dns_foundation = contains(["dns_foundation", "host_ready", "full"], var.deployment_phase)
 
   common_tags = {
     Project     = var.project_name
@@ -83,13 +84,13 @@ check "two_availability_zones" {
 check "full_phase_account_guard" {
   assert {
     condition     = !local.enable_service_stack || var.expected_aws_account_id != ""
-    error_message = "expected_aws_account_id is required before planning or applying the full phase."
+    error_message = "expected_aws_account_id is required before planning or applying host_ready or full."
   }
 }
 
 check "full_phase_dns_delegation" {
   assert {
-    condition     = !local.enable_service_stack || var.dns_delegation_verified
+    condition     = !local.enable_public_edge || var.dns_delegation_verified
     error_message = "The full phase requires independently verified registrar delegation to the reviewed Route 53 zone."
   }
 }
@@ -97,16 +98,20 @@ check "full_phase_dns_delegation" {
 check "full_phase_database_recovery" {
   assert {
     condition     = !local.enable_service_stack || var.rds_backup_retention_days >= 7
-    error_message = "The full phase requires at least seven days of RDS PITR retention."
+    error_message = "The host_ready and full phases require at least seven days of RDS PITR retention."
   }
 }
 
 check "full_phase_immutable_artifacts" {
   assert {
-    condition = !local.enable_service_stack || (
-      toset(keys(var.container_image_digests)) == local.required_runtime_images &&
-      var.frontend_release_id != ""
-    )
-    error_message = "The full phase requires every runtime image digest and an immutable frontend_release_id."
+    condition     = !local.enable_service_stack || toset(keys(var.container_image_digests)) == local.required_runtime_images
+    error_message = "The host_ready and full phases require every runtime image digest."
+  }
+}
+
+check "full_phase_frontend_artifact" {
+  assert {
+    condition     = !local.enable_public_edge || var.frontend_release_id != ""
+    error_message = "The full phase requires an immutable frontend_release_id."
   }
 }

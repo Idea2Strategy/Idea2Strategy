@@ -70,7 +70,7 @@ Before requesting an AWS plan, record and review all of the following:
 - exact root commit and exact submodule commits;
 - successful CI URL for the exact root commit;
 - Terraform version `1.15.x` and AWS provider version from both lockfiles;
-- intended Development `deployment_phase` (`market_data_bootstrap`, `dns_foundation`, or `full`) and, when publishing images, the separate `infra/terraform/artifact-foundation` state;
+- intended Development `deployment_phase` (`market_data_bootstrap`, `dns_foundation`, `host_ready`, or `full`) and, when publishing images, the separate `infra/terraform/artifact-foundation` state;
 - approved AWS account ID, region, and operator identity from `aws sts get-caller-identity`;
 - reviewed `terraform.tfvars` values, with no credentials in the file;
 - reviewed S3 backend bucket, key, region, and lockfile settings in ignored `backend.hcl`;
@@ -139,6 +139,38 @@ silently deleting them. Keep `dns_foundation` or `full` for subsequent plans;
 intentional retirement requires a separate reviewed code change and DNS/data
 recovery plan.
 
+## Pre-DNS host verification
+
+Use `deployment_phase=host_ready` after immutable runtime artifacts and the
+database bootstrap receipt are ready. This phase creates the runtime hosts,
+Valkey, queues, runtime IAM and SSM configuration, but does not create or enable
+CloudFront, ACM, or public DNS traffic. Core has no inbound security-group rule;
+the public EIP is stable preparation for the later edge cutover, not an access
+path. Transactional email also remains disabled until SES identity verification
+and the `full` cutover succeed.
+
+Verify bootstrap and localhost health through SSM without opening a port:
+
+```powershell
+$coreInstanceId = terraform -chdir=infra/terraform/environments/development output -json core_ssm_health |
+  ConvertFrom-Json | Select-Object -ExpandProperty instance_id
+
+aws ssm start-session `
+  --profile idea2strategy-dev `
+  --region ap-northeast-2 `
+  --target $coreInstanceId `
+  --document-name AWS-StartPortForwardingSession `
+  --parameters '{"portNumber":["8080"],"localPortNumber":["18080"]}'
+```
+
+While the session is open, request
+`http://127.0.0.1:18080/actuator/health`. On the host, the authoritative target
+is `http://127.0.0.1:8080/actuator/health`; Backtest API uses
+`http://127.0.0.1:8082/health`. Also require `cloud-init status --wait` and
+`systemctl is-active idea2strategy-runtime` through an SSM shell. Do not set
+`dns_delegation_verified=true` or use `full` until the registrar change is
+complete and independently resolved against all delegated nameservers.
+
 ## AWS-only execution remaining
 
 The following steps intentionally remain outside this repository-only readiness pass and require explicit authorization, short-lived credentials, and a reviewed change window:
@@ -146,24 +178,21 @@ The following steps intentionally remain outside this repository-only readiness 
 1. Authenticate to the intended AWS account and verify the caller identity and region.
 2. The state bucket already exists. Do not re-apply the bootstrap root without first recovering its historical state. Plan the isolated `infra/terraform/ci-identity` root against its own remote state to create two GitHub Actions OIDC roles. Record the scoped plan/publisher ARN as `AWS_PLAN_ROLE_ARN` in the protected `development-plan` Environment and the privileged exact-plan apply ARN as `AWS_DEPLOY_ROLE_ARN` in the separately protected `development` Environment. Both Environments must allow deployments only from `develop`, require the designated reviewers, prevent self-review, disallow administrator bypass, and contain the exact AWS account/state variables. Do not create a long-lived AWS access key for CI.
 3. Populate ignored `backend.hcl` and `terraform.tfvars` from the examples; never commit them.
-4. Apply a reviewed `dns_foundation` saved plan first. This creates only the Route 53 zone and the private, encrypted, versioned frontend release bucket in addition to the existing market-data foundation. Copy every existing DNS record, record the Route 53 nameservers, and change the registrar delegation with a tested rollback record. Independently verify public delegation before setting `dns_delegation_verified=true`; a `full` plan is deliberately blocked otherwise.
-5. After delegation, build application and frontend inputs without AWS credentials. The `development-plan` job may then use only the scoped plan/publisher role to publish immutable ECR digests and a new `/_releases/<release-id>/` frontend prefix, run `terraform init -backend-config=backend.hcl`, and create `terraform plan -parallelism=1 -out deployment.tfplan`.
-6. Review the complete plan, cost impact, replacements, deletions, IAM changes, public network paths, immutable frontend release ID, and database consequences. A non-zero destroy count requires a separate explicit decision.
-7. Apply only that reviewed plan file through the separate `development` Environment approval. Do not run an unsaved `terraform apply`.
+4. Apply a reviewed `dns_foundation` saved plan first. This creates only the Route 53 zone and the private, encrypted, versioned frontend release bucket in addition to the existing market-data foundation. Copy every existing DNS record and record the Route 53 nameservers, but do not change the registrar delegation yet.
+5. Bootstrap the five database LOGIN roles and Secrets Manager values through the reviewed one-shot database procedure, run Flyway once, and prepare the pinned S3 policy/artifact inputs. Build application inputs without AWS credentials. The `development-plan` job may then use only the scoped plan/publisher role to publish immutable ECR digests, run `terraform init -backend-config=backend.hcl`, and save a `host_ready` plan with `terraform plan -parallelism=1 -out deployment.tfplan`.
+6. Review the complete `host_ready` plan, cost impact, replacements, deletions, IAM changes, immutable artifacts, and database consequences. It must contain no CloudFront, ACM, public DNS cutover, replacement, or destroy action.
+7. Apply only that reviewed `host_ready` plan file through the separate `development` Environment approval. Do not run an unsaved `terraform apply`.
    The pre-approval plan uses deliberately invalid all-zero image digests and is
    never applyable. Apply only an independently reviewed plan from the isolated
    `infra/terraform/artifact-foundation` root to create ECR repositories. That
    state cannot delete or replace the existing Development compute/database
-   state. Publish ARM64 images, then save and re-review a `full` Development plan
+   state. Publish ARM64 images, then save and re-review a `host_ready` Development plan
    containing real digests.
 8. Verify S3 public-access blocks/versioning/encryption, isolated RDS and Valkey
-   reachability, RDS deletion protection/backups, EC2 IMDSv2/SSM access,
-   CloudFront-prefix-list-only Core ingress, secret-header rejection, no SSH,
-   no NAT/ALB, CloudWatch logs/alarms, and Secrets Manager references.
-9. For the full phase, bootstrap the five
-   database LOGIN roles and Secrets Manager values through the reviewed one-shot
-   database procedure, run Flyway once, and set the pinned S3 policy/artifact
-   inputs. The EC2 bootstrap then creates root-only mode-0600 env files, verifies
+   reachability, RDS deletion protection/backups, EC2 IMDSv2/SSM access, no Core
+   inbound rule, no SSH, no NAT/ALB, CloudWatch logs/alarms, Secrets Manager
+   references, and both Core health endpoints over SSM localhost forwarding.
+9. The EC2 bootstrap creates root-only mode-0600 env files, verifies
    every S3 version/checksum, authenticates to ECR, validates the Compose model,
    and starts the systemd-owned Core, Backtest, or Trading stack. Verify
    container health/readiness, three-lane queue processing, scheduled Trading
@@ -175,8 +204,9 @@ The following steps intentionally remain outside this repository-only readiness 
    non-MFA token fails closed. Terraform generates the subject HMAC key in the
    Core secret; the IdP token, subject, and bootstrap material never enter
    Terraform variables or state.
-10. Continue only after the CloudFront viewer ACM certificate is `ISSUED` and the Core DNS-01 ACME certificate is trusted from CloudFront.
-11. Attach the exact plan, apply result, smoke-test evidence, and rollback outcome to the approved deployment record.
+10. Only after host verification succeeds, review the copied DNS inventory and rollback record, change the registrar delegation, and independently verify every Route 53 nameserver before setting `dns_delegation_verified=true`.
+11. Publish the immutable frontend prefix, save and review a separate `full` plan, and require zero replacement/deletion. Apply only that plan after approval; then verify CloudFront-prefix-list-only Core ingress, secret-header rejection, the viewer ACM certificate is `ISSUED`, and the Core DNS-01 ACME certificate is trusted from CloudFront.
+12. Attach both exact plans, apply results, SSM/public smoke-test evidence, and rollback outcome to the approved deployment record.
 
 After apply, CloudFront atomically serves the immutable frontend prefix named in
 the reviewed plan; no mutable S3-root copy or cache invalidation is used. Rollback

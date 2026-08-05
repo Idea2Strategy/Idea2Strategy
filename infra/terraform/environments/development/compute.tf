@@ -8,6 +8,7 @@ resource "aws_instance" "service" {
   iam_instance_profile        = aws_iam_instance_profile.service[0].name
   associate_public_ip_address = true
   source_dest_check           = true
+  ebs_optimized               = true
 
   user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
     runtime_role                                = "service"
@@ -15,8 +16,9 @@ resource "aws_instance" "service" {
     aws_region                                  = var.aws_region
     parameter_path                              = local.parameter_path
     log_group_name                              = aws_cloudwatch_log_group.service[0].name
+    configure_public_origin                     = local.enable_public_edge
     origin_domain_name                          = var.origin_domain_name
-    origin_header_secret_arn                    = aws_secretsmanager_secret.cloudfront_origin_header[0].arn
+    origin_header_secret_arn                    = try(aws_secretsmanager_secret.cloudfront_origin_header[0].arn, "")
     backend_port                                = 8080
     database_host                               = aws_db_instance.this.address
     database_name                               = var.runtime_database_name
@@ -100,6 +102,7 @@ resource "aws_instance" "trading" {
   iam_instance_profile        = aws_iam_instance_profile.trading[0].name
   associate_public_ip_address = true
   source_dest_check           = true
+  ebs_optimized               = true
 
   user_data = templatefile("${path.module}/templates/ec2-user-data.sh.tftpl", {
     runtime_role                                = "trading"
@@ -107,6 +110,7 @@ resource "aws_instance" "trading" {
     aws_region                                  = var.aws_region
     parameter_path                              = local.parameter_path
     log_group_name                              = aws_cloudwatch_log_group.trading[0].name
+    configure_public_origin                     = false
     origin_domain_name                          = ""
     origin_header_secret_arn                    = ""
     backend_port                                = 0
@@ -173,6 +177,7 @@ resource "aws_launch_template" "backtest" {
   name_prefix   = "${local.name_prefix}-backtest-"
   image_id      = data.aws_ami.ubuntu_2404_arm64.id
   instance_type = var.backtest_instance_type
+  ebs_optimized = true
 
   iam_instance_profile { name = aws_iam_instance_profile.batch.name }
   vpc_security_group_ids = [aws_security_group.batch.id]
@@ -204,6 +209,7 @@ resource "aws_launch_template" "backtest" {
     aws_region                                  = var.aws_region
     parameter_path                              = local.parameter_path
     log_group_name                              = aws_cloudwatch_log_group.compute[0].name
+    configure_public_origin                     = false
     origin_domain_name                          = ""
     origin_header_secret_arn                    = ""
     backend_port                                = 0
@@ -276,6 +282,36 @@ resource "aws_autoscaling_group" "backtest" {
   }
 
   lifecycle { ignore_changes = [desired_capacity] }
+
+  tag {
+    key                 = "Name"
+    value               = "${local.name_prefix}-backtest"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Project"
+    value               = var.project_name
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Environment"
+    value               = var.environment
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "ManagedBy"
+    value               = "Terraform"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Role"
+    value               = "backtest-worker"
+    propagate_at_launch = true
+  }
 }
 
 resource "aws_autoscaling_policy" "backtest_start" {

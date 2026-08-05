@@ -601,7 +601,7 @@ touch /opt/idea2strategy/bootstrap-complete
 shutdown -h now
 %{ endif ~}
 
-%{ if runtime_role == "service" ~}
+%{ if runtime_role == "service" && configure_public_origin ~}
 cat >/usr/local/sbin/configure-core-origin <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail

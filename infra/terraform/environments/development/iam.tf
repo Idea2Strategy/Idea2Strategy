@@ -257,15 +257,17 @@ resource "aws_iam_instance_profile" "trading" {
 
 data "aws_iam_policy_document" "rds_secret_access" {
   statement {
-    sid       = "ReadMarketLoaderCredentials"
-    effect    = "Allow"
-    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    resources = [aws_secretsmanager_secret.market_loader.arn]
+    sid     = "ReadMarketLoaderCredentials"
+    effect  = "Allow"
+    actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = local.enable_service_stack ? [
+      aws_secretsmanager_secret.runtime_database["backtest"].arn,
+      aws_secretsmanager_secret.backtest_internal[0].arn
+    ] : [aws_secretsmanager_secret.market_loader.arn]
   }
 }
 
 resource "aws_iam_role_policy" "batch_loader_secret" {
-  count  = local.enable_service_stack ? 0 : 1
   name   = "${local.name_prefix}-batch-loader-secret"
   role   = aws_iam_role.batch.id
   policy = data.aws_iam_policy_document.rds_secret_access.json
@@ -290,24 +292,6 @@ resource "aws_iam_role_policy" "service_runtime_secrets" {
   name   = "${local.name_prefix}-service-runtime-secrets"
   role   = aws_iam_role.service[0].id
   policy = data.aws_iam_policy_document.service_runtime_secrets[0].json
-}
-
-data "aws_iam_policy_document" "batch_runtime_secrets" {
-  count = local.enable_service_stack ? 1 : 0
-  statement {
-    actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    resources = [
-      aws_secretsmanager_secret.runtime_database["backtest"].arn,
-      aws_secretsmanager_secret.backtest_internal[0].arn
-    ]
-  }
-}
-
-resource "aws_iam_role_policy" "batch_runtime_secrets" {
-  count  = local.enable_service_stack ? 1 : 0
-  name   = "${local.name_prefix}-batch-runtime-secrets"
-  role   = aws_iam_role.batch.id
-  policy = data.aws_iam_policy_document.batch_runtime_secrets[0].json
 }
 
 data "aws_iam_policy_document" "trading_database_secret" {
@@ -433,7 +417,7 @@ resource "aws_iam_role_policy" "batch_queue_consume" {
 }
 
 data "aws_iam_policy_document" "service_origin_tls" {
-  count = local.enable_service_stack ? 1 : 0
+  count = local.enable_public_edge ? 1 : 0
   statement {
     actions   = ["route53:ChangeResourceRecordSets", "route53:GetChange"]
     resources = ["arn:aws:route53:::hostedzone/${local.hosted_zone_id}", "arn:aws:route53:::change/*"]
@@ -449,7 +433,7 @@ data "aws_iam_policy_document" "service_origin_tls" {
 }
 
 resource "aws_iam_role_policy" "service_origin_tls" {
-  count  = local.enable_service_stack ? 1 : 0
+  count  = local.enable_public_edge ? 1 : 0
   name   = "${local.name_prefix}-service-origin-tls"
   role   = aws_iam_role.service[0].id
   policy = data.aws_iam_policy_document.service_origin_tls[0].json

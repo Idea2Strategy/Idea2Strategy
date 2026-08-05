@@ -21,7 +21,18 @@ output "private_db_subnet_ids" {
 
 output "service_url" {
   description = "Development service URL. HTTPS becomes valid after DNS delegation and enable_https=true."
-  value       = local.enable_service_stack ? (var.enable_https ? "https://${var.frontend_domain_name}" : "https://${aws_cloudfront_distribution.frontend[0].domain_name}") : null
+  value       = local.enable_public_edge ? "https://${var.frontend_domain_name}" : null
+}
+
+output "core_ssm_health" {
+  description = "Pre-DNS Core verification target. The ports remain localhost-only and require SSM Session Manager."
+  value = local.enable_service_stack ? {
+    instance_id           = aws_instance.service[0].id
+    backend_health_url    = "http://127.0.0.1:8080/actuator/health"
+    backtest_health_url   = "http://127.0.0.1:8082/health"
+    backend_forward_port  = 8080
+    backtest_forward_port = 8082
+  } : null
 }
 
 output "route53_zone_id" {
