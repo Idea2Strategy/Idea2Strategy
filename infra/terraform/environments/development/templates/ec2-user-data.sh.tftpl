@@ -4,7 +4,17 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y awscli ca-certificates certbot curl docker.io docker-compose-v2 jq nginx python3-certbot-dns-route53 unzip
+apt-get install -y ca-certificates certbot curl docker.io docker-compose-v2 jq nginx python3-certbot-dns-route53 unzip
+
+curl --fail --silent --show-error \
+  --output /tmp/awscliv2.zip \
+  https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.36.15.zip
+rm -rf /tmp/aws
+unzip -q /tmp/awscliv2.zip -d /tmp
+/tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
+rm -rf /tmp/aws /tmp/awscliv2.zip
+aws --version
+
 systemctl enable --now docker
 
 if snap list amazon-ssm-agent >/dev/null 2>&1; then

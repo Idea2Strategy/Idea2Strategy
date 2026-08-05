@@ -84,6 +84,18 @@ if ($compute -match 'user_data\s*=\s*templatefile\(' -or
     $compute -match 'user_data\s*=\s*base64encode\(templatefile\(') {
     throw "Uncompressed EC2 bootstrap user data is forbidden."
 }
+if ($userData -match 'apt-get install[^\r\n]*\bawscli\b') {
+    throw "Ubuntu 24.04 ARM64 does not provide an awscli apt candidate; bootstrap must use the pinned AWS CLI v2 ARM64 installer."
+}
+foreach ($awsCliBoundary in @(
+    'awscli-exe-linux-aarch64-2.36.15.zip',
+    '/tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli',
+    'aws --version'
+)) {
+    if (-not $userData.Contains($awsCliBoundary)) {
+        throw "Pinned AWS CLI v2 ARM64 bootstrap is missing: $awsCliBoundary"
+    }
+}
 foreach ($required in @(
     'resource "aws_ecr_repository" "runtime"',
     'image_tag_mutability = "IMMUTABLE"',
