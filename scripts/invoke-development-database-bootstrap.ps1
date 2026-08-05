@@ -229,7 +229,10 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         "--subnet-id", [string]$target.subnet_id,
         "--security-group-ids", [string]$target.security_group_id,
         "--associate-public-ip-address",
-        "--metadata-options", "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=1",
+        # The pinned AWS CLI runs in a host-network container. IMDSv2 remains
+        # mandatory, while a hop limit of two is required for that container to
+        # obtain only this instance profile's short-lived role credentials.
+        "--metadata-options", "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2",
         "--block-device-mappings", "DeviceName=/dev/sda1,Ebs={VolumeSize=16,VolumeType=gp3,Encrypted=true,DeleteOnTermination=true}",
         "--tag-specifications", $tagSpecification,
         "--user-data", "file://$userDataPath",
