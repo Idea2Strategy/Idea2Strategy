@@ -31,11 +31,15 @@ function Get-GitlinkRevision([string]$Path) {
 }
 
 $backendGitlink = Get-GitlinkRevision 'backend'
+$backtestGitlink = Get-GitlinkRevision 'backtest-engine'
 $tradingGitlink = Get-GitlinkRevision 'trading-engine'
 $dataPipelineGitlink = Get-GitlinkRevision 'data-pipeline'
 $refreshHint = 'Run scripts/refresh-flyway-ci-bundle.ps1 in the change that moves the gitlink and commit the refreshed db/flyway-ci-bundle with it.'
 if ($metadata.backend_gitlink -cne $backendGitlink) {
     throw "Pinned bundle backend revision does not match the root gitlink: $($metadata.backend_gitlink) != $backendGitlink. $refreshHint"
+}
+if ($metadata.backtest_gitlink -cne $backtestGitlink) {
+    throw "Pinned bundle backtest revision does not match the root gitlink: $($metadata.backtest_gitlink) != $backtestGitlink. $refreshHint"
 }
 if ($metadata.trading_gitlink -cne $tradingGitlink) {
     throw "Pinned bundle trading revision does not match the root gitlink: $($metadata.trading_gitlink) != $tradingGitlink. $refreshHint"
@@ -56,6 +60,10 @@ if ($runtimeGrantEntries.Count -ne 1) {
 $pipelineUpgradeEntries = @($manifestLines | Where-Object { $_ -match '^V20260805010000__pipeline_upgrade_legacy_market_schema\.sql\t[0-9a-f]{64}$' })
 if ($pipelineUpgradeEntries.Count -ne 1) {
     throw 'The pinned Flyway manifest must contain the legacy market schema upgrade from the pinned data pipeline.'
+}
+$backtestOutcomeEntries = @($manifestLines | Where-Object { $_ -match '^V20260805170000__backtest_run_outcome_detail\.sql\t[0-9a-f]{64}$' })
+if ($backtestOutcomeEntries.Count -ne 1) {
+    throw 'The pinned Flyway manifest must contain the forward-only Backtest outcome migration from the pinned Backtest engine.'
 }
 $runtimeGrantPath = Join-Path $bundle 'R__database_runtime_grants.sql'
 $runtimeGrantSql = Get-Content -LiteralPath $runtimeGrantPath -Raw
@@ -285,6 +293,7 @@ try {
         runtime_grants_contract = 'passed'
         bundle_sha256 = $recordedDigest
         backend_revision = $backendGitlink
+        backtest_revision = $backtestGitlink
         trading_revision = $tradingGitlink
         postgres = '16-alpine'
         flyway = '11-alpine'

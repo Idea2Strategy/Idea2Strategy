@@ -31,6 +31,19 @@ test('canonical DBML exposes fenced attempts and durable cancellation', () => {
   assert.match(schema, /Ref: backtest\.run_input_pins\.input_bundle_id > backtest\.input_bundles\.id/);
 });
 
+test('canonical DBML persists durable outcomes without restoring retired singular pins', () => {
+  const runs = schema.match(/Table backtest\.runs \{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(runs, /\bresult_manifest_id uuid\b/);
+  assert.match(runs, /\bretryable boolean\b/);
+  assert.match(runs, /\bmissing_requirements jsonb\b/);
+  assert.match(runs, /runs_missing_requirements_is_a_non_empty_string_array/);
+
+  const pins = schema.match(/Table backtest\.run_input_pins \{[\s\S]*?\n\}/)?.[0] ?? '';
+  for (const retired of ['dataset_manifest_id', 'dataset_hash', 'feature_materialization_version']) {
+    assert.doesNotMatch(pins, new RegExp(`\\b${retired}\\b`));
+  }
+});
+
 test('canonical DBML preserves content hashes while exempting zero-object manifests', () => {
   assert.match(schema, /dataset_hash varchar\(128\) \[not null\]/);
   assert.match(schema, /object_count bigint \[not null, default: 0/);
