@@ -34,6 +34,9 @@ $artifactManifest = Read-RequiredFile "proposals/development-runtime-policy/arti
 $executionPolicy = Read-RequiredFile "proposals/development-runtime-policy/artifacts/execution-policy.json" | ConvertFrom-Json
 $runtimePolicy = Read-RequiredFile "proposals/development-runtime-policy/artifacts/runtime-policy.json" | ConvertFrom-Json
 $policySeed = Read-RequiredFile "proposals/development-runtime-policy/artifacts/policy-seed.sql"
+$migrationManifestLines = @(Get-Content -LiteralPath (Join-Path $root "db/flyway-ci-bundle/migration-bundle.manifest"))
+$expectedMigrationCount = $migrationManifestLines.Count - 1
+Assert-Contains $bootstrap "readonly EXPECTED_MIGRATION_COUNT='$expectedMigrationCount'" "Host bootstrap migration count must match the published Flyway bundle manifest."
 
 foreach ($artifactName in @("execution-policy.json", "runtime-policy.json", "policy-seed.sql")) {
     $expectedHash = [string]$artifactManifest.artifacts.$artifactName
