@@ -138,3 +138,23 @@ jobs:
       - name: Verify proposed scoring seed replay and collision safety
         shell: pwsh
         run: ./scripts/test-development-scoring-seed-integration.ps1
+
+  three-lane-feature-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backtest-engine/pyproject.toml
+      - name: Install the exact backtest runtime and integration dependencies
+        run: python -m pip install --disable-pip-version-check -e './backtest-engine[test]'
+      - name: Prove BASIC, CUSTOM and COMPETITION on one shared runtime
+        run: >-
+          python -m pytest -c backtest-engine/pyproject.toml
+          scripts/integration/test_three_lane_feature_e2e.py -m docker -vv
