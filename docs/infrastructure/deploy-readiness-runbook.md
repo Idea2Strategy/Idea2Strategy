@@ -101,6 +101,7 @@ Before requesting an AWS plan, record and review all of the following:
   `OPERATOR_OIDC_TOKEN_ENDPOINT`, optional `OPERATOR_OIDC_END_SESSION_ENDPOINT`,
   `OPERATOR_OIDC_CLIENT_ID`, `OPERATOR_OIDC_AUDIENCE`,
   `OPERATOR_OIDC_REDIRECT_URI`, `OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI`,
+  `OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER`,
   `OPERATOR_OIDC_SCOPES`, and `OPERATOR_OIDC_SIGNING_ALGORITHM`. Register the
   exact callback and logout URIs with a public Authorization Code + PKCE S256
   client, disable implicit flow, and allow the UI origin at the token endpoint.

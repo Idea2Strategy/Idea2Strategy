@@ -87,6 +87,7 @@ jobs:
           VITE_OPERATOR_OIDC_AUDIENCE: ${{ vars.OPERATOR_OIDC_AUDIENCE }}
           VITE_OPERATOR_OIDC_REDIRECT_URI: ${{ vars.OPERATOR_OIDC_REDIRECT_URI }}
           VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI: ${{ vars.OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI }}
+          VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER: ${{ vars.OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER }}
           VITE_OPERATOR_OIDC_SCOPES: ${{ vars.OPERATOR_OIDC_SCOPES }}
           VITE_OPERATOR_OIDC_SIGNING_ALGORITHM: ${{ vars.OPERATOR_OIDC_SIGNING_ALGORITHM }}
         run: |
@@ -96,7 +97,7 @@ jobs:
             VITE_OPERATOR_OIDC_TOKEN_ENDPOINT VITE_OPERATOR_OIDC_CLIENT_ID
             VITE_OPERATOR_OIDC_AUDIENCE VITE_OPERATOR_OIDC_REDIRECT_URI
             VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI VITE_OPERATOR_OIDC_SCOPES
-            VITE_OPERATOR_OIDC_SIGNING_ALGORITHM
+            VITE_OPERATOR_OIDC_SIGNING_ALGORITHM VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER
           )
           for name in "${required[@]}"; do
             if [[ -z "${!name}" ]]; then echo "OIDC build input is missing: $name" >&2; exit 1; fi
@@ -113,6 +114,9 @@ jobs:
           service_origin="${VITE_OPERATOR_OIDC_REDIRECT_URI%/operations/callback}"
           if [[ "$VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI" != "$service_origin/operations/login" ]]; then
             echo 'OIDC redirect URI must use the service origin' >&2; exit 1
+          fi
+          if [[ "$VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER" != 'post_logout_redirect_uri' && "$VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER" != 'logout_uri' ]]; then
+            echo 'OIDC logout redirect parameter is invalid' >&2; exit 1
           fi
           if [[ " $VITE_OPERATOR_OIDC_SCOPES " != *' openid '* ]]; then echo 'OIDC scopes must include openid' >&2; exit 1; fi
           cd ui
