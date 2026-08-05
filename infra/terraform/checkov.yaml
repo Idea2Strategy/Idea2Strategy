@@ -9,6 +9,10 @@ skip-check:
   - CKV_AWS_161   # Current applications use rotated Secrets Manager credentials, not IAM DB auth.
   - CKV_AWS_353   # Performance Insights/Database Insights is enabled only when load evidence requires it.
   - CKV_AWS_130   # Egress-only runtimes intentionally use public subnets without NAT.
+  - CKV_AWS_88    # Public IPv4 supplies outbound package/AWS access without NAT; Core remains inbound-closed until the CloudFront-only rule.
+  - CKV_AWS_126   # EC2 detailed monitoring adds cost; CloudWatch Agent and workload alarms cover the Development evidence threshold.
+  - CKV_AWS_333   # Desired-zero Fargate needs public-IP egress because this Development VPC intentionally has no NAT gateway.
+  - CKV_AWS_297   # AWS-owned Scheduler encryption is accepted for non-secret Development start/stop payloads without a CMK fixed cost.
   - CKV_AWS_273   # Existing MFA-protected IAM users are preserved pending an Identity Center migration.
   - CKV_AWS_149   # AWS-managed encryption is accepted for Development secrets.
   - CKV_AWS_158   # AWS-managed encryption is accepted for short-retention Development logs.
