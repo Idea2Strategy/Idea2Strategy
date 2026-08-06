@@ -476,6 +476,10 @@ Assert-Contains $bootstrap '--arg database_name "$database_name"' "The remote re
 Assert-Contains $bootstrap 'database_name:$database_name' "The credential-free receipt JSON must bind the exact database target."
 Assert-Contains $releaseWorkflow "runtime_database_name" "The release workflow must derive the reviewed runtime database name from Terraform variables."
 Assert-Contains $releaseWorkflow "RuntimeDatabaseName = `$runtimeDatabaseName" "Receipt lookup and bootstrap execution must receive the same runtime database name."
+$runtimeDatabaseArguments = [regex]::Matches($releaseWorkflow, '(?m)^\s+-RuntimeDatabaseName \$runtimeDatabaseName')
+if ($runtimeDatabaseArguments.Count -ne 3) {
+    throw "Bootstrap execution and both downstream receipt gates must pass the same runtime database name."
+}
 Assert-NotContains $bootstrap 'flyway migrate >&2' "Central multi-service migration bundles must explicitly apply validated late-arriving versions."
 Assert-NotContains $bootstrap 'EXPECTED_MIGRATION_COUNT' "Host bootstrap must receive the locally validated manifest count instead of embedding a migration count."
 Assert-NotContains $bootstrap "EXPECTED_TABLE_COUNT='179'" "The exact bundle receipt must not require a manually synchronized table-count constant."
