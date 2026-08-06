@@ -337,7 +337,7 @@ jobs:
           terraform validate
           terraform plan -parallelism=1 -out=deployment.tfplan
           terraform show -json deployment.tfplan > deployment.plan.json
-          pwsh ../../../scripts/assert-development-terraform-plan-safe.ps1 \
+          pwsh "$GITHUB_WORKSPACE/scripts/assert-development-terraform-plan-safe.ps1" \
             -PlanJsonPath deployment.plan.json \
             -AllowedReplacementAddresses \
               'aws_ecs_task_definition.pipeline[0];aws_instance.service[0];aws_instance.trading[0]'

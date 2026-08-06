@@ -205,6 +205,12 @@ if ($workflow -notmatch "(?s)Verify required deployment secrets.*?Verify databas
 if ($workflow -notmatch "(?s)terraform plan -parallelism=1 -out=deployment\.tfplan.*?terraform show -json deployment\.tfplan.*?assert-development-terraform-plan-safe\.ps1.*?-AllowedReplacementAddresses.*?aws_ecs_task_definition\.pipeline\[0\].*?aws_instance\.service\[0\].*?aws_instance\.trading\[0\].*?Archive exact plan") {
     throw "The saved Development plan must reject destructive changes except the exact reviewed create-before-destroy runtime replacement allowlist."
 }
+if (-not $workflow.Contains('pwsh "$GITHUB_WORKSPACE/scripts/assert-development-terraform-plan-safe.ps1"')) {
+    throw "The saved-plan safety gate must resolve its script from the GitHub workspace root."
+}
+if ($workflow.Contains('pwsh ../../../scripts/assert-development-terraform-plan-safe.ps1')) {
+    throw "The saved-plan safety gate path resolves under infra/ instead of the repository root."
+}
 
 if ($workflow -notmatch "(?s)terraform apply -parallelism=1 deployment\.tfplan.*?deploy-development-core-runtime\.ps1.*?verify-deployed-development\.ps1") {
     throw "The exact Core image rollout and rollback guard must run after apply and before deployed verification."
