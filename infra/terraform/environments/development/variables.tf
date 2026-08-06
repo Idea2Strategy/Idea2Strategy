@@ -209,6 +209,17 @@ variable "transactional_email_from_address" {
   default     = "no-reply@ideatostrategy.com"
 }
 
+variable "google_oauth_client_id" {
+  description = "Public Google OAuth web client ID. Empty keeps customer Google sign-in disabled."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.google_oauth_client_id == "" || can(regex("^[0-9]+-[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com$", var.google_oauth_client_id))
+    error_message = "google_oauth_client_id must be empty or a Google web client ID."
+  }
+}
+
 variable "dns_delegation_verified" {
   description = "Explicit operator evidence that the public registrar delegates the apex to the reviewed Route 53 zone. Required for full; never infer it from zone creation alone."
   type        = bool

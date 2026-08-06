@@ -1,0 +1,98 @@
+schema_version: 1
+id: work.customer-jwt-google-oauth-proposal
+readiness: ready
+title: Prepare customer JWT and Google OIDC implementation proposal
+outcome: A reviewable proposal replaces opaque customer access sessions with short-lived signed access JWTs and rotating revocable refresh JWTs, makes backtest verification independent of identity schema reads, and adds disabled-by-default Google OIDC login wiring.
+acceptance:
+    - id: acceptance.google-oidc
+      given: Google OAuth credentials are configured later
+      when: A user completes a nonce-bound Google Identity Services ID-token popup
+      then: The backend validates Google issuer, audience, signature, nonce, and immutable subject and never auto-links solely by email
+      failure: Missing credentials break startup, the client secret reaches UI, or matching email silently links an identity
+    - id: acceptance.jwt-access
+      given: A verified active customer authenticates by password, a linked Google identity, or a new Google identity whose verified email is unbound
+      when: Authentication succeeds
+      then: The API returns a signed short-lived access JWT and rotating refresh JWT with explicit type and expiry metadata
+      failure: An opaque access token is returned, an inactive account receives tokens, or signing material leaves backend runtime
+    - id: acceptance.jwt-shared-verification
+      given: A customer access JWT issued by backend-api
+      when: backend-api or backtest-api authorizes a request
+      then: Both verify issuer, audience, signature, token type, subject, issued-at, and expiry locally from configured verification material
+      failure: Backtest queries identity tables, accepts an invalid claim set, or returns 500 for an invalid bearer token
+    - id: acceptance.refresh-rotation
+      given: A valid refresh JWT
+      when: It is exchanged, logged out, reused after rotation, or invalidated by a security change
+      then: Rotation revokes the previous server session secret and the access lifetime bounds delayed revocation
+      failure: A rotated refresh JWT remains usable or an un-hashed server session secret is persisted
+refs:
+    - quality.auditability
+    - quality.failure-safety
+    - quality.reproducibility
+workspaces:
+    - workspace.backend
+    - workspace.backtest-engine
+    - workspace.root
+    - workspace.ui
+scope:
+    repositories:
+        - repository.github.backend
+        - repository.github.backtest
+        - repository.github.root
+        - repository.github.ui
+    paths:
+        - .github/workflows/development-release.yml
+        - backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/identity/**
+        - backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/identity/**
+        - backend/db-migration/src/main/resources/db/migration/**
+        - backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/identity/**
+        - backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/identity/**
+        - backtest-engine/src/backtest_engine/api.py
+        - backtest-engine/src/backtest_engine/production.py
+        - backtest-engine/tests/**
+        - infra/terraform/environments/development/**
+        - ui/src/**/*.test.ts*
+        - ui/src/api/account.ts
+        - ui/src/api/sessionAccessToken.ts
+        - ui/src/auth/**
+        - ui/src/views/AuthViews.tsx
+    policy_ids: []
+    scenario_ids: []
+    contract_ids: []
+    db_entities:
+        - identity.account_security_states
+        - identity.accounts
+        - identity.auth_providers
+        - identity.authentication_events
+        - identity.login_identities
+        - identity.sessions
+    migration_slots:
+        - flyway.20260806100000.backend.google-oidc-provider
+    ui_flows: []
+    dependency_majors: []
+    root_pointers:
+        - workspace.backend
+        - workspace.backtest-engine
+        - workspace.ui
+dependencies:
+    - work.a07-email-auth
+    - work.a08-oidc-linking
+    - work.a09-session-management
+merge_order:
+    - workspace.backend
+    - workspace.backtest-engine
+    - workspace.ui
+    - workspace.root
+first_failing_test: An invalid or expired customer access JWT sent to backtest returns 401 without opening a database connection to the identity schema.
+evidence:
+    kinds:
+        - backend-api-integration
+        - backend-unit
+        - backtest-unit
+        - flyway-postgresql
+        - root-deployment-wiring
+        - ui-unit
+    integration_required: true
+    user_validation: true
+    migration_required: true
+    rollback_required: true
+fingerprint: sha256:c2e090e2fa930b52c8c74a2290562a6a5634e38756b70fb7e8377891340b2eb2

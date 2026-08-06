@@ -100,6 +100,8 @@ $required = @(
     "VITE_OPERATOR_OIDC_SIGNING_ALGORITHM: `${{ vars.OPERATOR_OIDC_SIGNING_ALGORITHM }}",
     "VITE_OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID: `${{ vars.OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID }}",
     "VITE_OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID: `${{ vars.OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID }}",
+    "VITE_GOOGLE_OAUTH_CLIENT_ID: `${{ vars.VITE_GOOGLE_OAUTH_CLIENT_ID }}",
+    "`$config.google_oauth_client_id -cne '`${{ vars.VITE_GOOGLE_OAUTH_CLIENT_ID }}'",
     "OIDC build input is missing",
     "OIDC endpoint must use HTTPS",
     "OIDC redirect URI must use the service origin",

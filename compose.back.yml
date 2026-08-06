@@ -22,6 +22,10 @@ x-spring-environment: &spring-environment
   IDENTITY_CRYPTO_LOOKUP_HMAC_KEY: ${IDENTITY_CRYPTO_LOOKUP_HMAC_KEY}
   IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY: ${IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY}
   IDENTITY_CRYPTO_SESSION_HMAC_KEY: ${IDENTITY_CRYPTO_SESSION_HMAC_KEY}
+  IDENTITY_OIDC_ENABLED: ${IDENTITY_OIDC_ENABLED:-false}
+  IDENTITY_OIDC_PROVIDERS_GOOGLE_ISSUER: https://accounts.google.com
+  IDENTITY_OIDC_PROVIDERS_GOOGLE_JWKS_URI: https://www.googleapis.com/oauth2/v3/certs
+  IDENTITY_OIDC_PROVIDERS_GOOGLE_AUDIENCES_0: ${GOOGLE_OAUTH_CLIENT_ID:-disabled.apps.googleusercontent.com}
 
 x-python-environment: &python-environment
   DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -46,6 +50,8 @@ x-backtest-environment: &backtest-environment
   # unpadded 32-byte value, so the single trailing '=' restores its wire form.
   BACKTEST_SESSION_HMAC_KEY_BASE64: ${IDENTITY_CRYPTO_SESSION_HMAC_KEY}=
   BACKTEST_RESULT_PRINCIPAL_ID: 00000000-0000-4000-8000-000000000266
+  CUSTOMER_JWT_ISSUER: https://ideatostrategy.com
+  CUSTOMER_JWT_ACCESS_AUDIENCE: idea2strategy-api
   AWS_ENDPOINT_URL_S3: http://minio:9000
   AWS_ENDPOINT_URL_SQS: http://localstack:4566
   # LocalStack accepts arbitrary credentials; using MinIO's credentials lets

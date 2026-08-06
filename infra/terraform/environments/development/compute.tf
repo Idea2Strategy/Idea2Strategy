@@ -41,6 +41,7 @@ resource "aws_instance" "service" {
     trading_provider_rights_local_path          = "alpaca-${var.trading_market_data_feed}-rights.json"
     enable_backtest_outbox_relay                = var.enable_backtest_outbox_relay
     enable_operator_auth                        = var.enable_operator_auth
+    google_oauth_client_id                      = var.google_oauth_client_id
     operator_auth_issuer                        = local.operator_auth_issuer
     operator_auth_jwk_set_uri                   = local.operator_auth_jwk_set_uri
     operator_auth_audience                      = local.operator_auth_audience
@@ -160,6 +161,7 @@ resource "aws_instance" "trading" {
     trading_provider_rights_local_path          = "alpaca-${var.trading_market_data_feed}-rights.json"
     enable_backtest_outbox_relay                = var.enable_backtest_outbox_relay
     enable_operator_auth                        = var.enable_operator_auth
+    google_oauth_client_id                      = var.google_oauth_client_id
     operator_auth_issuer                        = local.operator_auth_issuer
     operator_auth_jwk_set_uri                   = local.operator_auth_jwk_set_uri
     operator_auth_audience                      = local.operator_auth_audience
@@ -293,6 +295,7 @@ resource "aws_launch_template" "backtest" {
     trading_provider_rights_local_path          = "alpaca-${var.trading_market_data_feed}-rights.json"
     enable_backtest_outbox_relay                = var.enable_backtest_outbox_relay
     enable_operator_auth                        = var.enable_operator_auth
+    google_oauth_client_id                      = var.google_oauth_client_id
     operator_auth_issuer                        = local.operator_auth_issuer
     operator_auth_jwk_set_uri                   = local.operator_auth_jwk_set_uri
     operator_auth_audience                      = local.operator_auth_audience

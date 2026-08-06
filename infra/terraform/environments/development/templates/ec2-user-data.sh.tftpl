@@ -311,6 +311,10 @@ append_env_value "$runtime_secret_env" EMAIL_DELIVERY_AWS_REGION "$(ssm_value '$
 append_env_value "$runtime_secret_env" EMAIL_DELIVERY_BASE_URL "$(ssm_value '${parameter_path}/email/base-url')"
 cat >>"$runtime_secret_env" <<EOF
 OPERATOR_AUTH_ENABLED=${enable_operator_auth}
+IDENTITY_OIDC_ENABLED=${google_oauth_client_id != ""}
+IDENTITY_OIDC_PROVIDERS_GOOGLE_ISSUER=https://accounts.google.com
+IDENTITY_OIDC_PROVIDERS_GOOGLE_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs
+IDENTITY_OIDC_PROVIDERS_GOOGLE_AUDIENCES_0=${google_oauth_client_id}
 OPERATOR_AUTH_ISSUER=${operator_auth_issuer}
 OPERATOR_AUTH_JWK_SET_URI=${operator_auth_jwk_set_uri}
 OPERATOR_AUTH_AUDIENCE=${operator_auth_audience}
