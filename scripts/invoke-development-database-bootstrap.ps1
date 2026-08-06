@@ -47,6 +47,20 @@ function Get-AwsCommonArguments([switch]$Json) {
     return $arguments
 }
 
+function Get-SanitizedSsmFailure([object]$Invocation) {
+    $errorText = [string]$Invocation.StandardErrorContent
+    if ([string]::IsNullOrWhiteSpace($errorText)) {
+        return "Remote stderr was empty."
+    }
+    $safeDiagnostics = @($errorText -split "`r?`n" | Where-Object {
+            $_ -match '^(ERROR:|Detected resolved migration|Flyway still reports pending migrations|Flyway migration (checksum mismatch|is missing|is not listed)|Database bootstrap |failed to run commands:)'
+        } | Select-Object -Last 12)
+    if ($safeDiagnostics.Count -eq 0) {
+        return "Remote stderr contained no allowlisted diagnostic."
+    }
+    return "Remote diagnostics: $($safeDiagnostics -join ' | ')"
+}
+
 function ConvertTo-BashLiteral([string]$Value) {
     if ($Value.Contains("'")) { throw "Bootstrap target contains an unsupported quote character." }
     return "'$Value'"
@@ -309,7 +323,9 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
             $statusMetadata = (($statusOutput -join "`n") | ConvertFrom-Json)
             if ([string]$statusMetadata.Status -eq "Success") { break }
             if ([string]$statusMetadata.Status -in @("Cancelled", "Failed", "TimedOut", "Cancelling")) {
-                throw "Database bootstrap SSM command failed with status '$([string]$statusMetadata.Status)'."
+                $failedInvocation = Invoke-AwsJson @("ssm", "get-command-invocation", "--command-id", $commandId, "--instance-id", $instanceId)
+                $failureDetail = Get-SanitizedSsmFailure $failedInvocation
+                throw "Database bootstrap SSM command failed with status '$([string]$statusMetadata.Status)'. CommandId '$commandId'. $failureDetail"
             }
         }
         if ([DateTimeOffset]::UtcNow -ge $commandDeadline) {
@@ -318,7 +334,10 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         Start-Sleep -Seconds 5
     }
     $invocation = Invoke-AwsJson @("ssm", "get-command-invocation", "--command-id", $commandId, "--instance-id", $instanceId)
-    if ($invocation.Status -ne "Success") { throw "Database bootstrap SSM command failed with status '$($invocation.Status)'." }
+    if ($invocation.Status -ne "Success") {
+        $failureDetail = Get-SanitizedSsmFailure $invocation
+        throw "Database bootstrap SSM command failed with status '$($invocation.Status)'. CommandId '$commandId'. $failureDetail"
+    }
     $receipt = [string]$invocation.StandardOutputContent | ConvertFrom-Json
     if ($receipt.status -ne "passed" -or $receipt.root_sha -cne $head -or $receipt.bundle_sha256 -cne $bundleDigest -or
         $receipt.policy_seed_sha256 -cne $PolicySeedSha256 -or $receipt.scoring_seed_sha256 -cne $ScoringSeedSha256 -or
