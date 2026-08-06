@@ -3,7 +3,7 @@ schema_version: 1
 id: contract.backtest.execution.v1
 kind: data
 status: approved
-revision: 3
+revision: 4
 refs:
   - capability.backtest.automatic
   - journey.backtest.review
@@ -15,7 +15,8 @@ refs:
 # contract.backtest.execution.v1
 
 Status: approved canonical contract. Product authority `user:pjy008008`
-approved the exact source proposal on root PR #219 before this canonical write.
+approved the original source proposal on root PR #219; product authority
+`user:kcrmin` approved the historical feature-output extension on root PR #312.
 
 ## 1. Lanes and immutable inputs
 
@@ -146,3 +147,28 @@ positions, or the official trading ledger.
 - result manifest cannot become available before every object verifies;
 - worker shutdown with visible, in-flight, claimed, or unpublished work is
   rejected.
+
+## 7. Pinned historical feature consumption
+
+For every tuple in `requiredFeatures x instruments`, the accepted input bundle
+contains exactly one SUCCEEDED feature materialization covering warm-up and the
+full evaluation interval. Missing, duplicate, extra, unavailable, wrong-period,
+wrong-instrument, wrong-definition, wrong-resolution, wrong-schema, wrong-feed,
+wrong-provider-rights, wrong-run, or hash-mismatched pins fail before execution;
+the runtime never recomputes an official feature from market bars.
+
+`LOAD_FEATURE` consumes `feature-series.parquet.v1` from the exact versioned
+objects in the pinned DERIVED manifest. It validates bytes against the storage
+receipt, schema and strictly increasing unique timestamps, manifest/object
+period and row-count agreement, complete no-gap coverage, and recomputes the
+materialization result hash. At `as_of`, it exposes only the latest feature row
+whose source bar has completed. A missing instant follows the deterministic
+data-gap policy and never falls back to recalculation.
+
+The official RSI identity is definition ID
+`0f1b0000-0000-4000-8000-000000000001`, feature code `RSI_14`, calculator
+adapter `rsi:1.0.0`, exact stored definition hash
+`sha256:1a7c3e5b9d2f4068a1c3e5b7d9f20416283a5c7e9b1d3f50627496a8c0e2b4d6`,
+and deterministic feed ID `063f8f27-5c6a-5348-b2bb-abc3c634149c`. The
+`sha256:` prefix is part of feed UUID identity. Aliases such as `RSI` / `1.0.0`
+must not create a second production identity.

@@ -99,6 +99,8 @@ jobs:
         run: pnpm dbml:validate
       - name: Validate canonical COM A contracts
         run: pnpm dbml:validate:com-a-canonical
+      - name: Validate release adoption contracts and registry
+        run: pnpm contract:validate:release-adoption
       - name: Validate A12 account lifecycle contract
         run: pnpm dbml:validate:a12
       - name: Test dbdiagram export preparation
