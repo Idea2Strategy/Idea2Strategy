@@ -157,6 +157,9 @@ jobs:
       plan_key: ${{ steps.archive.outputs.plan_key }}
       plan_version: ${{ steps.archive.outputs.plan_version }}
       plan_sha256: ${{ steps.archive.outputs.plan_sha256 }}
+      lambda_package_key: ${{ steps.archive.outputs.lambda_package_key }}
+      lambda_package_version: ${{ steps.archive.outputs.lambda_package_version }}
+      lambda_package_sha256: ${{ steps.archive.outputs.lambda_package_sha256 }}
       release_id: ${{ needs.build.outputs.release_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -350,15 +353,24 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $prefix = "idea2strategy/development/release-candidates/${{ github.run_id }}/${{ github.run_attempt }}"
           $plan = 'infra/terraform/environments/development/deployment.tfplan'
+          $lambdaPackage = 'infra/terraform/environments/development/.terraform/operator-pre-token.zip'
+          if (-not (Test-Path -LiteralPath $lambdaPackage -PathType Leaf)) { throw 'Terraform did not materialize the operator pre-token Lambda package.' }
           $planHash = (Get-FileHash -Algorithm SHA256 $plan).Hash.ToLowerInvariant()
+          $lambdaPackageHash = (Get-FileHash -Algorithm SHA256 $lambdaPackage).Hash.ToLowerInvariant()
           $put = aws s3api put-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key "$prefix/deployment.tfplan" --body $plan --server-side-encryption AES256 --output json | ConvertFrom-Json
           if ([string]::IsNullOrWhiteSpace([string]$put.VersionId)) { throw 'Versioned saved-plan publication failed.' }
+          $lambdaPut = aws s3api put-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key "$prefix/operator-pre-token.zip" --body $lambdaPackage --server-side-encryption AES256 --output json | ConvertFrom-Json
+          if ([string]::IsNullOrWhiteSpace([string]$lambdaPut.VersionId)) { throw 'Versioned Lambda package publication failed.' }
           "plan_key=$prefix/deployment.tfplan" >> $env:GITHUB_OUTPUT
           "plan_version=$($put.VersionId)" >> $env:GITHUB_OUTPUT
           "plan_sha256=$planHash" >> $env:GITHUB_OUTPUT
+          "lambda_package_key=$prefix/operator-pre-token.zip" >> $env:GITHUB_OUTPUT
+          "lambda_package_version=$($lambdaPut.VersionId)" >> $env:GITHUB_OUTPUT
+          "lambda_package_sha256=$lambdaPackageHash" >> $env:GITHUB_OUTPUT
           "### Development plan awaiting apply approval" >> $env:GITHUB_STEP_SUMMARY
           "* Root commit: ${{ github.sha }}" >> $env:GITHUB_STEP_SUMMARY
           "* Plan SHA-256: $planHash" >> $env:GITHUB_STEP_SUMMARY
+          "* Lambda package SHA-256: $lambdaPackageHash" >> $env:GITHUB_STEP_SUMMARY
           "* Frontend release: ${{ needs.build.outputs.release_id }}" >> $env:GITHUB_STEP_SUMMARY
           "* Apply requested: ${{ github.event.inputs.apply_reviewed_plan }}" >> $env:GITHUB_STEP_SUMMARY
           Get-Content infra/terraform/environments/development/deployment.plan.txt >> $env:GITHUB_STEP_SUMMARY
@@ -389,6 +401,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           aws s3api get-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key '${{ needs.prepare-and-plan.outputs.plan_key }}' --version-id '${{ needs.prepare-and-plan.outputs.plan_version }}' deployment.tfplan | Out-Null
           if ((Get-FileHash -Algorithm SHA256 deployment.tfplan).Hash.ToLowerInvariant() -ne '${{ needs.prepare-and-plan.outputs.plan_sha256 }}') { throw 'Saved plan hash mismatch.' }
+          aws s3api get-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key '${{ needs.prepare-and-plan.outputs.lambda_package_key }}' --version-id '${{ needs.prepare-and-plan.outputs.lambda_package_version }}' operator-pre-token.zip | Out-Null
+          if ((Get-FileHash -Algorithm SHA256 operator-pre-token.zip).Hash.ToLowerInvariant() -ne '${{ needs.prepare-and-plan.outputs.lambda_package_sha256 }}') { throw 'Lambda package hash mismatch.' }
 
       - name: Apply only the reviewed saved plan
         working-directory: infra/terraform/environments/development
@@ -396,6 +410,7 @@ jobs:
         run: |
           Move-Item "$env:GITHUB_WORKSPACE/deployment.tfplan" ./deployment.tfplan
           terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="key=idea2strategy/development/terraform.tfstate" -backend-config="region=${{ env.AWS_REGION }}" -backend-config="use_lockfile=true" -backend-config="encrypt=true"
+          Move-Item "$env:GITHUB_WORKSPACE/operator-pre-token.zip" ./.terraform/operator-pre-token.zip
           terraform apply -parallelism=1 deployment.tfplan
 
       - name: Roll out and verify exact Core runtime images

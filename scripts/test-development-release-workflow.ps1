@@ -211,6 +211,9 @@ if (-not $workflow.Contains('pwsh "$GITHUB_WORKSPACE/scripts/assert-development-
 if ($workflow.Contains('pwsh ../../../scripts/assert-development-terraform-plan-safe.ps1')) {
     throw "The saved-plan safety gate path resolves under infra/ instead of the repository root."
 }
+if ($workflow -notmatch '(?s)Archive exact plan in protected state storage.*?\.terraform/operator-pre-token\.zip.*?lambda_package_key.*?lambda_package_version.*?lambda_package_sha256.*?Download and verify exact reviewed plan.*?operator-pre-token\.zip.*?Lambda package hash mismatch.*?terraform init.*?Move-Item.*?\.terraform/operator-pre-token\.zip.*?terraform apply -parallelism=1 deployment\.tfplan') {
+    throw "The reviewed saved plan must carry its exact versioned and hash-verified local Lambda package into the apply runner."
+}
 
 if ($workflow -notmatch "(?s)terraform apply -parallelism=1 deployment\.tfplan.*?deploy-development-core-runtime\.ps1.*?verify-deployed-development\.ps1") {
     throw "The exact Core image rollout and rollback guard must run after apply and before deployed verification."
