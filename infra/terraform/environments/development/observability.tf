@@ -206,6 +206,23 @@ resource "aws_cloudwatch_metric_alarm" "queue_oldest_message" {
   dimensions          = { QueueName = aws_sqs_queue.backtest[each.key].name }
 }
 
+resource "aws_cloudwatch_metric_alarm" "backtest_request_queue_oldest_message" {
+  for_each = local.backtest_request_lanes
+
+  alarm_name          = "${local.name_prefix}-backtest-${each.key}-request-oldest"
+  alarm_description   = "A producer request is waiting for Backtest intake"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateAgeOfOldestMessage"
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = each.key == "competition" ? 300 : 900
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_action_arns
+  dimensions          = { QueueName = aws_sqs_queue.backtest_request[each.key].name }
+}
+
 resource "aws_cloudwatch_metric_alarm" "queue_dead_letter_visible" {
   for_each = local.backtest_lanes
 
@@ -220,6 +237,23 @@ resource "aws_cloudwatch_metric_alarm" "queue_dead_letter_visible" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alarm_action_arns
   dimensions          = { QueueName = aws_sqs_queue.backtest_dlq[each.key].name }
+}
+
+resource "aws_cloudwatch_metric_alarm" "backtest_request_dead_letter_visible" {
+  for_each = local.backtest_request_lanes
+
+  alarm_name          = "${local.name_prefix}-backtest-${each.key}-request-dlq"
+  alarm_description   = "A producer request failed Backtest intake and reached its dead-letter queue"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_action_arns
+  dimensions          = { QueueName = aws_sqs_queue.backtest_request_dlq[each.key].name }
 }
 
 resource "aws_cloudwatch_metric_alarm" "pipeline_dead_letter_visible" {

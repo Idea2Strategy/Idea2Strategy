@@ -46,6 +46,20 @@ if (-not $deployedVerifier.Contains('& $terraform.Source "-chdir=$terraformDirec
 if (-not $deployedVerifier.Contains('CORE_RUNTIME_STABLE')) {
     throw "Deployed verification must inspect Core container health and restart stability through SSM."
 }
+foreach ($portableSsmBoundary in @(
+    '$runtimeCheckScriptBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($runtimeCheckScript))',
+    'base64 -d | bash',
+    '[IO.File]::WriteAllText($runtimeParametersPath, $runtimeParameters, [Text.UTF8Encoding]::new($false))',
+    'file://$runtimeParametersPath',
+    'Remove-Item -LiteralPath $runtimeParametersPath -Force -ErrorAction SilentlyContinue'
+)) {
+    if (-not $deployedVerifier.Contains($portableSsmBoundary)) {
+        throw "Deployed verification must pass multiline SSM parameters through a UTF-8 JSON file and clean it up on every host: $portableSsmBoundary"
+    }
+}
+if ($deployedVerifier.Contains("'--parameters', `$runtimeParameters")) {
+    throw "Deployed verification must not pass multiline SSM JSON inline because Windows PowerShell 5 splits it into AWS CLI options."
+}
 
 foreach ($forbidden in @(
     'resource "aws_nat_gateway"',
@@ -253,6 +267,9 @@ if ($compute -notmatch 'desired_capacity\s*=\s*0' -or
 if ($compute -notmatch '(?s)resource\s+"aws_autoscaling_policy"\s+"backtest_start".*?adjustment_type\s*=\s*"ExactCapacity".*?scaling_adjustment\s*=\s*1.*?cooldown\s*=\s*0') {
     throw "Backtest queue wake-up must bypass scaling cooldown so an alarm can restore desired capacity immediately after idle scale-down."
 }
+if ($compute -notmatch '(?s)resource\s+"aws_cloudwatch_metric_alarm"\s+"backtest_request_queue_start".*?for_each\s*=\s*local\.backtest_request_lanes.*?metric_name\s*=\s*"ApproximateNumberOfMessagesVisible".*?alarm_actions\s*=\s*\[aws_autoscaling_policy\.backtest_start\[0\]\.arn\].*?QueueName\s*=\s*aws_sqs_queue\.backtest_request\[each\.key\]\.name') {
+    throw "Every producer request queue must wake the desired-zero Backtest ASG before an intake worker exists."
+}
 if ($compute -notmatch '(?s)resource\s+"aws_launch_template"\s+"backtest"\s*\{\s*#checkov:skip=CKV_AWS_341:IMDSv2 tokens remain required; hop limit 2 is required for the non-root Docker worker to reach instance-profile credentials through the container network namespace\.') {
     throw "The backtest launch template must document the narrow CKV_AWS_341 exception for container-compatible instance-role access."
 }
@@ -292,6 +309,12 @@ foreach ($required in @(
     if (-not ($frontend.Contains($required) -or $security.Contains($required))) {
         throw "CloudFront-to-Core boundary is missing: $required"
     }
+}
+if ($all -notmatch '(?s)resource\s+"aws_cloudwatch_metric_alarm"\s+"backtest_request_queue_oldest_message".*?for_each\s*=\s*local\.backtest_request_lanes.*?ApproximateAgeOfOldestMessage.*?aws_sqs_queue\.backtest_request\[each\.key\]\.name') {
+    throw "Backtest producer request queue age monitoring is missing."
+}
+if ($all -notmatch '(?s)resource\s+"aws_cloudwatch_metric_alarm"\s+"backtest_request_dead_letter_visible".*?for_each\s*=\s*local\.backtest_request_lanes.*?ApproximateNumberOfMessagesVisible.*?aws_sqs_queue\.backtest_request_dlq\[each\.key\]\.name') {
+    throw "Backtest producer request DLQ monitoring is missing."
 }
 if ($frontend -notmatch 'origin_protocol_policy\s*=\s*"https-only"') {
     throw "CloudFront must use HTTPS to the fixed Core origin."
@@ -539,6 +562,16 @@ if ($probeExitCode -ne 0) {
 
 if ($deployedVerifier.Contains('test "$stable_total" -eq "$restart_total"')) {
     throw "The deployed verifier must compare container identity and restart counts per service, not only an aggregate total."
+}
+
+foreach ($digestBoundary in @(
+    '/idea2strategy/dev/deployment/images/$service',
+    "docker inspect --format '{{.Config.Image}}'",
+    'test "$configured_image" = "$expected_image"'
+)) {
+    if (-not $deployedVerifier.Contains($digestBoundary)) {
+        throw "The deployed verifier must bind each Core container to its applied immutable digest: $digestBoundary"
+    }
 }
 
 foreach ($required in @(

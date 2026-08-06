@@ -426,6 +426,24 @@ resource "aws_cloudwatch_metric_alarm" "backtest_queue_start" {
   dimensions          = { QueueName = aws_sqs_queue.backtest[each.key].name }
 }
 
+# Producer requests arrive before an instance exists to turn them into
+# execution jobs. These alarms close the desired-zero intake deadlock.
+resource "aws_cloudwatch_metric_alarm" "backtest_request_queue_start" {
+  for_each = local.backtest_request_lanes
+
+  alarm_name          = "${local.name_prefix}-backtest-${each.key}-request-start"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_autoscaling_policy.backtest_start[0].arn]
+  dimensions          = { QueueName = aws_sqs_queue.backtest_request[each.key].name }
+}
+
 resource "aws_ssm_parameter" "market_data_bucket" {
   name  = "${local.parameter_path}/storage/market-data-bucket"
   type  = "String"

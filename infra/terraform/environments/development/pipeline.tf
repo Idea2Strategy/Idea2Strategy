@@ -135,6 +135,7 @@ resource "aws_ecs_task_definition" "pipeline" {
   family                   = "${local.name_prefix}-pipeline"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
+  skip_destroy             = true
   cpu                      = "1024"
   memory                   = "2048"
   execution_role_arn       = aws_iam_role.pipeline_execution[0].arn
@@ -261,6 +262,10 @@ resource "aws_ecs_task_definition" "pipeline" {
       startPeriod = 20
     }
   }])
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_ecs_service" "pipeline" {
