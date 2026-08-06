@@ -156,6 +156,17 @@ foreach ($forbidden in @("aws-access-key-id", "aws-secret-access-key", "terrafor
     }
 }
 
+foreach ($developerGroupBoundary in @(
+    'ManagedDevelopmentDeveloperGroupPolicies',
+    '"iam:PutGroupPolicy"',
+    '"iam:DeleteGroupPolicy"',
+    'group/Idea2StrategyDevelopmentSsmUsers'
+)) {
+    if (-not $ciIdentity.Contains($developerGroupBoundary)) {
+        throw "The deploy role cannot reconcile the Terraform-managed Development developer group policy: $developerGroupBoundary"
+    }
+}
+
 $requiredImages = @(
     "admin-mcp",
     "backend-api",

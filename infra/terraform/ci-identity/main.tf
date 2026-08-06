@@ -267,6 +267,18 @@ data "aws_iam_policy_document" "github_deploy_state_and_iam" {
   }
 
   statement {
+    sid    = "ManagedDevelopmentDeveloperGroupPolicies"
+    effect = "Allow"
+    actions = [
+      "iam:DeleteGroupPolicy",
+      "iam:PutGroupPolicy"
+    ]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:group/Idea2StrategyDevelopmentSsmUsers"
+    ]
+  }
+
+  statement {
     sid       = "CreateRequiredServiceLinkedRoles"
     effect    = "Allow"
     actions   = ["iam:CreateServiceLinkedRole"]
