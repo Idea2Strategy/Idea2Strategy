@@ -179,8 +179,8 @@ if ($workflow -notmatch "(?s)Verify required deployment secrets.*?Verify exact d
     throw "The release plan must verify the exact root-and-Flyway database bootstrap receipt before planning."
 }
 
-if ($workflow -notmatch "(?s)terraform plan -parallelism=1 -out=deployment\.tfplan.*?terraform show -json deployment\.tfplan.*?assert-development-terraform-plan-safe\.ps1.*?Archive exact plan") {
-    throw "The saved Development plan must reject every delete or replacement before it can be archived or approved."
+if ($workflow -notmatch "(?s)terraform plan -parallelism=1 -out=deployment\.tfplan.*?terraform show -json deployment\.tfplan.*?assert-development-terraform-plan-safe\.ps1.*?-AllowedReplacementAddresses.*?aws_ecs_task_definition\.pipeline\[0\].*?aws_instance\.service\[0\].*?aws_instance\.trading\[0\].*?Archive exact plan") {
+    throw "The saved Development plan must reject destructive changes except the exact reviewed create-before-destroy runtime replacement allowlist."
 }
 
 if ($workflow -notmatch "(?s)terraform apply -parallelism=1 deployment\.tfplan.*?deploy-development-core-runtime\.ps1.*?verify-deployed-development\.ps1") {
@@ -221,17 +221,30 @@ try {
     $safePlan = Join-Path $temporary "safe.json"
     $deletePlan = Join-Path $temporary "delete.json"
     $replacementPlan = Join-Path $temporary "replacement.json"
+    $destroyFirstReplacementPlan = Join-Path $temporary "destroy-first-replacement.json"
+    $unexplainedReplacementPlan = Join-Path $temporary "unexplained-replacement.json"
     '{"resource_changes":[{"address":"aws_ssm_parameter.safe","change":{"actions":["update"]}}]}' | Set-Content -NoNewline $safePlan
     '{"resource_changes":[{"address":"aws_s3_bucket.data","change":{"actions":["delete"]}}]}' | Set-Content -NoNewline $deletePlan
-    '{"resource_changes":[{"address":"aws_instance.core","change":{"actions":["create","delete"]}}]}' | Set-Content -NoNewline $replacementPlan
+    '{"resource_changes":[{"address":"aws_instance.core","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"]}}]}' | Set-Content -NoNewline $replacementPlan
+    '{"resource_changes":[{"address":"aws_instance.core","action_reason":"replace_because_cannot_update","change":{"actions":["delete","create"]}}]}' | Set-Content -NoNewline $destroyFirstReplacementPlan
+    '{"resource_changes":[{"address":"aws_instance.core","change":{"actions":["create","delete"]}}]}' | Set-Content -NoNewline $unexplainedReplacementPlan
     $safeResult = & $planGatePath -PlanJsonPath $safePlan | ConvertFrom-Json
     if ($safeResult.status -cne "passed" -or [int]$safeResult.delete_or_replace_count -ne 0) {
         throw "Safe Terraform plan fixture was rejected."
     }
-    foreach ($unsafePlan in @($deletePlan, $replacementPlan)) {
+    foreach ($unsafePlan in @($deletePlan, $replacementPlan, $destroyFirstReplacementPlan, $unexplainedReplacementPlan)) {
         $rejected = $false
         try { & $planGatePath -PlanJsonPath $unsafePlan | Out-Null } catch { $rejected = $true }
         if (-not $rejected) { throw "Delete or replacement Terraform plan fixture was accepted: $unsafePlan" }
+    }
+    $allowedReplacement = & $planGatePath `
+        -PlanJsonPath $replacementPlan `
+        -AllowedReplacementAddresses 'aws_instance.core' |
+        ConvertFrom-Json
+    if ($allowedReplacement.status -cne "passed" -or
+        [int]$allowedReplacement.allowed_replacement_count -ne 1 -or
+        [int]$allowedReplacement.delete_or_replace_count -ne 0) {
+        throw "The exact create-before-destroy replacement allowlist was not enforced."
     }
 }
 finally {
