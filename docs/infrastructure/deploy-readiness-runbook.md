@@ -104,7 +104,11 @@ Before requesting an AWS plan, record and review all of the following:
   `OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER`,
   `OPERATOR_OIDC_SCOPES`, `OPERATOR_OIDC_SIGNING_ALGORITHM`,
   `OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID`, and
-  `OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID`. The two permission UUIDs must
+  `OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID`. The dedicated Cognito pool
+  uses the approved signed namespaced claim
+  `https://ideatostrategy.com/claims/mfa=cognito:mfa-required`; Backend still
+  enforces the exact issuer, client audience, RS256 signature, and signed
+  `auth_time` freshness. The two permission UUIDs must
   come from the same reviewed operator RBAC bootstrap receipt used by the
   Terraform runtime inputs. Register the
   exact callback and logout URIs with a public Authorization Code + PKCE S256
@@ -189,10 +193,13 @@ The following steps intentionally remain outside this repository-only readiness 
    `deployment-bootstrap/<root-sha>/<flyway-bundle-sha>/receipt.json` key. It
    also requires all five receipt-bound database secret versions to remain
    `AWSCURRENT`; a receipt from an older root or Flyway bundle is not accepted.
-6. Review the complete `host_ready` plan, cost impact, replacements, deletions, IAM changes, immutable artifacts, and database consequences. It must contain no CloudFront, ACM, public DNS cutover, replacement, or destroy action.
-   The release workflow converts the saved plan to JSON and rejects every
-   action containing `delete`, including create-before-destroy replacement,
-   before the plan can be archived for approval.
+6. Review the complete `host_ready` plan, cost impact, replacements, deletions, IAM changes, immutable artifacts, and database consequences. It must contain no CloudFront, ACM, public DNS cutover, or unreviewed destroy action.
+   The release workflow converts the saved plan to JSON and rejects ordinary
+   deletes and all replacements except its exact create-before-destroy
+   allow-list for ECS task-definition revisions and the Core/Trading EC2
+   instances. Allowed replacements must preserve their reviewed type and stable
+   network, IAM, security-group, and task identity; RDS, subnet, security group,
+   hosted-zone, S3, and secret replacement remains prohibited.
 7. Apply only that reviewed `host_ready` plan file through the separate `development` Environment approval. Do not run an unsaved `terraform apply`.
    The pre-approval plan uses deliberately invalid all-zero image digests and is
    never applyable. Apply only an independently reviewed plan from the isolated
