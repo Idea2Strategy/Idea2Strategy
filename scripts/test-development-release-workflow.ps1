@@ -223,11 +223,15 @@ try {
     $replacementPlan = Join-Path $temporary "replacement.json"
     $destroyFirstReplacementPlan = Join-Path $temporary "destroy-first-replacement.json"
     $unexplainedReplacementPlan = Join-Path $temporary "unexplained-replacement.json"
+    $wrongTypeReplacementPlan = Join-Path $temporary "wrong-type-replacement.json"
+    $identityDriftReplacementPlan = Join-Path $temporary "identity-drift-replacement.json"
     '{"resource_changes":[{"address":"aws_ssm_parameter.safe","change":{"actions":["update"]}}]}' | Set-Content -NoNewline $safePlan
     '{"resource_changes":[{"address":"aws_s3_bucket.data","change":{"actions":["delete"]}}]}' | Set-Content -NoNewline $deletePlan
-    '{"resource_changes":[{"address":"aws_instance.core","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"]}}]}' | Set-Content -NoNewline $replacementPlan
-    '{"resource_changes":[{"address":"aws_instance.core","action_reason":"replace_because_cannot_update","change":{"actions":["delete","create"]}}]}' | Set-Content -NoNewline $destroyFirstReplacementPlan
-    '{"resource_changes":[{"address":"aws_instance.core","change":{"actions":["create","delete"]}}]}' | Set-Content -NoNewline $unexplainedReplacementPlan
+    '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"],"before":{"id":"i-old","instance_type":"t4g.medium","subnet_id":"subnet-a","iam_instance_profile":"profile-a","associate_public_ip_address":true,"vpc_security_group_ids":["sg-a"]},"after":{"instance_type":"t4g.medium","subnet_id":"subnet-a","iam_instance_profile":"profile-a","associate_public_ip_address":true,"vpc_security_group_ids":["sg-a"]}}}]}' | Set-Content -NoNewline $replacementPlan
+    '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["delete","create"],"before":{"id":"i-old","instance_type":"t4g.medium","subnet_id":"subnet-a"},"after":{"instance_type":"t4g.medium","subnet_id":"subnet-a"}}}]}' | Set-Content -NoNewline $destroyFirstReplacementPlan
+    '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","change":{"actions":["create","delete"],"before":{"id":"i-old","instance_type":"t4g.medium","subnet_id":"subnet-a"},"after":{"instance_type":"t4g.medium","subnet_id":"subnet-a"}}}]}' | Set-Content -NoNewline $unexplainedReplacementPlan
+    '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_s3_bucket","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"],"before":{"id":"bucket"},"after":{}}}]}' | Set-Content -NoNewline $wrongTypeReplacementPlan
+    '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"],"before":{"id":"i-old","instance_type":"t4g.medium","subnet_id":"subnet-a","iam_instance_profile":"profile-a","associate_public_ip_address":true,"vpc_security_group_ids":["sg-a"]},"after":{"instance_type":"m7g.large","subnet_id":"subnet-b","iam_instance_profile":"profile-b","associate_public_ip_address":false,"vpc_security_group_ids":["sg-b"]}}}]}' | Set-Content -NoNewline $identityDriftReplacementPlan
     $safeResult = & $planGatePath -PlanJsonPath $safePlan | ConvertFrom-Json
     if ($safeResult.status -cne "passed" -or [int]$safeResult.delete_or_replace_count -ne 0) {
         throw "Safe Terraform plan fixture was rejected."
@@ -239,12 +243,23 @@ try {
     }
     $allowedReplacement = & $planGatePath `
         -PlanJsonPath $replacementPlan `
-        -AllowedReplacementAddresses 'aws_instance.core' |
+        -AllowedReplacementAddresses 'aws_instance.service[0]' |
         ConvertFrom-Json
     if ($allowedReplacement.status -cne "passed" -or
         [int]$allowedReplacement.allowed_replacement_count -ne 1 -or
         [int]$allowedReplacement.delete_or_replace_count -ne 0) {
         throw "The exact create-before-destroy replacement allowlist was not enforced."
+    }
+    foreach ($unsafeAllowedPlan in @($wrongTypeReplacementPlan, $identityDriftReplacementPlan)) {
+        $rejected = $false
+        try {
+            & $planGatePath `
+                -PlanJsonPath $unsafeAllowedPlan `
+                -AllowedReplacementAddresses 'aws_instance.service[0]' |
+                Out-Null
+        }
+        catch { $rejected = $true }
+        if (-not $rejected) { throw "A replacement with a drifted resource identity was accepted: $unsafeAllowedPlan" }
     }
 }
 finally {
