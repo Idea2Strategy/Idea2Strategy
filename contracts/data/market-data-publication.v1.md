@@ -3,7 +3,7 @@ schema_version: 1
 id: contract.market-data.publication.v1
 kind: data
 status: approved
-revision: 1
+revision: 2
 refs:
   - technology.need.market-data
   - technology.need.object-storage
@@ -13,7 +13,8 @@ refs:
 # contract.market-data.publication.v1
 
 Status: approved canonical contract. Product authority `user:pjy008008`
-approved the exact source proposal on root PR #219 before this canonical write.
+approved the original source proposal on root PR #219; product authority
+`user:kcrmin` approved the historical feature-output extension on root PR #312.
 
 ## 1. Ownership and immutable objects
 
@@ -80,3 +81,57 @@ failure codes. A poison item does not block unrelated later items.
 - durable watermark overlap recovery without missing or duplicate publication;
 - corporate action correction/supersession and exact historical reproduction;
 - cancellation race and DLQ redrive evidence.
+
+## 7. Historical feature-output identity and encoding
+
+An official feature output uses schema `feature-series.parquet.v1`, exactly one
+immutable feature definition and instrument per manifest, strictly increasing
+unique `bar_start_at` UTC timestamps, and decimal `value` rows at scale 8. A
+value becomes visible only after its source bar completes. Feature and
+instrument identity come from the authoritative relational materialization,
+not an object path or caller payload.
+
+Each immutable feature definition has its own deterministic internal feed. The
+feed UUID is derived from the exact lowercase stored `definition_hash`,
+including its `sha256:` prefix, the exact calculator version and resolution,
+and `feature-series.parquet.v1`; consumers must not strip or normalize those
+identity inputs differently. The first official definition is `RSI_14` with
+calculator adapter `rsi:1.0.0`, definition ID
+`0f1b0000-0000-4000-8000-000000000001`, definition hash
+`sha256:1a7c3e5b9d2f4068a1c3e5b7d9f20416283a5c7e9b1d3f50627496a8c0e2b4d6`,
+and deterministic feed ID `063f8f27-5c6a-5348-b2bb-abc3c634149c`.
+
+That feed has code `FEATURE_RSI_14_1M_RSI_1_0_0`, kind `FEATURE_SERIES`,
+resolution `1m`, timezone `UTC`, and version
+`rsi-1.0.0+feature-series.parquet.v1`. It belongs to the deterministic
+`IDEA2STRATEGY_INTERNAL` provider with rights version `internal-derived-v1`;
+it is never an Alpaca BAR/BARS feed. Seeds are forward-only and idempotent and
+must refuse immutable drift instead of updating it.
+
+## 8. Trusted materialization lifecycle
+
+`MATERIALIZE_FEATURE_OUTPUT` resolves the authoritative complete intersecting
+source-object set from PostgreSQL. A caller-provided subset, output feed,
+manifest, revision, hash, row count, or inline bars is not an attestation. Every
+receipt must match storage provider, bucket, key and exact VersionId, size,
+encryption, schema, ordering, period, row count and checksum. A missing service
+checksum succeeds only when the implementation independently stream-hashes the
+bytes against the receipt. Objects must cover the complete warm-up and
+evaluation interval without gaps and be AVAILABLE at the exact instrument and
+resolution.
+
+The worker durably reconciles command ID and canonical input hash before local
+duplicate suppression or queue acknowledgement. Same-input replay returns the
+verified result; changed-input reuse fails closed. Its pipeline run has code
+`MATERIALIZE_FEATURE_OUTPUT`, version `feature-series.parquet.v1`, input hash
+equal to `feature_materializations.input_dataset_set_hash`, and output hash
+equal to the materialization result hash. Success follows exact-version object
+verification and atomic relational publication. Failure records a stable code;
+cleanup deletes only the exact version created by that attempt. Catalog reads
+are targeted and decoding is bounded/streamed; implementations must not load
+whole production tables or silently truncate an interval to avoid memory use.
+
+Required evidence includes changed-input redelivery, omitted canonical object,
+period gap, wrong provider/bucket/version/checksum/schema/ordering/row count,
+immutable UUID collision, PostgreSQL revision races, LocalStack exact-version
+cleanup and concurrent writers, and bounded-memory decoding.

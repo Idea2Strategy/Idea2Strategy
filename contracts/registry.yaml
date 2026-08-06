@@ -132,7 +132,7 @@ contracts:
   - id: contract.operations.operator-trust.v1
     kind: business
     status: approved
-    revision: 1
+    revision: 2
     source: business/operator-trust.v1.md
     compatibility: additive
     providers: [workspace.root]
@@ -154,7 +154,7 @@ contracts:
       - journey.operator.administer
       - scenario.account.sanction
       - capability.audit.evidence
-    fingerprint: sha256:32b2a4918f823b21e76f9b362f1e186b4c78d5bc5f7ed0527fa208f834c74596
+    fingerprint: sha256:4ab7defc8349220368117665d9a51368f9070a3b34c89fdf34bd48012f24e95c
   - id: contract.operations.corporate-action-approval.v1
     kind: data
     status: approved
@@ -186,7 +186,7 @@ contracts:
   - id: contract.backtest.execution.v1
     kind: data
     status: approved
-    revision: 2
+    revision: 4
     source: data/backtest-execution.v1.md
     compatibility: additive
     providers: [workspace.root, workspace.backend]
@@ -206,11 +206,12 @@ contracts:
       - scenario.strategy.release
       - ui.backtest.results
       - quality.failure-safety
-    fingerprint: sha256:068cc5203b616d0b1db78f4eaa16ade3cc6a00ef805cf894fc00dc1ec3e0c144
+      - quality.reproducibility
+    fingerprint: sha256:1351bf7c0e0d5a52ccb2893b51447696f987a8d854af8492bcd212916e5e3fb9
   - id: contract.market-data.publication.v1
     kind: data
     status: approved
-    revision: 1
+    revision: 2
     source: data/market-data-publication.v1.md
     compatibility: additive
     providers: [workspace.root, workspace.data-pipeline]
@@ -226,7 +227,7 @@ contracts:
       - technology.need.market-data
       - technology.need.object-storage
       - quality.failure-safety
-    fingerprint: sha256:b6adb283fe109e071a47332c80565ceb85f35d8d6024adea25c74ff071cd6237
+    fingerprint: sha256:b87586f0de4abcdd70559a13d10e2d27c53edaf6cf26a51c515bc1daeea019c4
   - id: contract.trading.virtual-execution.v1
     kind: business
     status: approved

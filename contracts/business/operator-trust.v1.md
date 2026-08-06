@@ -3,7 +3,7 @@ schema_version: 1
 id: contract.operations.operator-trust.v1
 kind: business
 status: approved
-revision: 1
+revision: 2
 refs:
   - contract.operations.operator-rbac.v1
   - role.operator
@@ -14,7 +14,9 @@ refs:
 
 # contract.operations.operator-trust.v1
 
-Status: approved canonical contract. Product authority `user:kcrmin` merged proposal PR [#166](https://github.com/Idea2Strategy/Idea2Strategy/pull/166).
+Status: approved canonical contract. Product authority `user:kcrmin` approved
+the Cognito assurance extension on root PR #312 in addition to the original
+proposal merged by root PR #166.
 
 ## 1. Credential separation
 
@@ -35,6 +37,21 @@ ALB validation is defense in depth. The backend authorization decision never tru
 After token verification, the backend creates the lookup input from a length-delimited canonical pair `(issuer, subject)`, protects it with the configured versioned HMAC key, and requires exactly one matching `operations.operator_accounts` row and HMAC key version with status `ACTIVE`. Rotation may query explicitly configured current and previous key versions, but a successful mapping records the matched version and never falls back to an unversioned digest. Missing, duplicate, disabled, or unmigrated mappings fail closed without revealing whether the subject is registered.
 
 Current MFA is true only when the verified token proves an approved `acr` value or contains an approved `amr` member and its signed `auth_time` is within the configured maximum age. `mfa_enrolled_at`, `last_mfa_verified_at`, a role name, or an edge-only claim is supporting/audit state, not sufficient proof. Successful current proof may update `last_mfa_verified_at` monotonically after verification; stale proof cannot refresh it.
+
+For the dedicated Development Amazon Cognito operator pool, the signed HTTPS
+namespaced claim `https://ideatostrategy.com/claims/mfa` with the sole value
+`cognito:mfa-required` is an approved equivalent current-MFA value. It counts
+only when the same token has the exact configured issuer, current app-client
+audience, RS256 signature, and a signed `auth_time` within the configured
+freshness window, and the deployed pool has `MfaConfiguration=ON`, TOTP as its
+only second factor, administrator-only account creation, no remembered-device
+bypass or federation, and one public Authorization Code + PKCE S256 client.
+The V2 pre-token transformer may issue this value only for supported human
+authentication, initial password-change, and refresh events, and refresh must
+not advance `auth_time`. Missing, stale, future, differently named or valued,
+wrong-client, wrong-issuer, or unverifiable evidence fails closed. A Cognito
+group, email, enrollment record, frontend assertion, or alternate claim never
+substitutes for these controls.
 
 RBAC is recalculated from the active catalog and current assignments for every request as required by `contract.operations.operator-rbac.v1`. UI visibility is not authorization.
 
@@ -78,6 +95,10 @@ The schema change is additive. Existing unversioned operator digests are backfil
 - same subject under another issuer maps differently;
 - inactive, missing, and duplicate operator mappings fail without enumeration;
 - absent, stale, or unapproved MFA claims deny high-risk work even when DB enrollment exists;
+- the dedicated Cognito flow covers invitation password change, TOTP enrollment,
+  interactive login, refresh before and after freshness expiry, revocation, and
+  pool/client/Lambda drift; unknown transformer events and reserved `acr`/`amr`
+  substitution fail closed;
 - role/assignment/catalog revocation takes effect on the next request;
 - bootstrap first run, exact replay, conflicting replay, non-empty state, and partial-failure rollback;
 - permission self/catalog/assignment reads enforce their distinct guards and redact provider data;
