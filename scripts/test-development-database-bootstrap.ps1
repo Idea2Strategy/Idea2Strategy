@@ -235,6 +235,8 @@ Assert-NotContains $bootstrap 'ALTER ROLE %s LOGIN INHERIT NOSUPERUSER' "Runtime
 
 foreach ($needle in @(
     '[switch]$Execute',
+    'function Get-AwsCommonArguments',
+    'if (-not [string]::IsNullOrWhiteSpace($AwsProfile))',
     '[string]$PolicySeedSqlPath',
     '[string]$PolicySeedSha256',
     '[string]$ScoringSeedSqlPath',
@@ -264,15 +266,19 @@ foreach ($needle in @(
 )) {
     Assert-Contains $orchestrator $needle "Orchestrator safety boundary is missing: $needle"
 }
+Assert-NotContains $orchestrator '@($Arguments) + @("--profile", $AwsProfile' "GitHub OIDC execution must not pass an empty AWS profile argument."
 
 foreach ($needle in @(
+    '[switch]$AllowMissingReceipt',
     'Get-DevelopmentDatabaseBootstrapFingerprint',
     'deployment-bootstrap/artifacts/$artifactFingerprint/receipt.json',
     'list-objects-v2',
     'policy_seed_sha256',
     'scoring_seed_sha256',
     'requested_root_sha',
-    'receipt_root_sha'
+    'receipt_root_sha',
+    'status = "missing"',
+    'BOOTSTRAP_DEVELOPMENT_DATABASE'
 )) {
     Assert-Contains $receiptVerifier $needle "Receipt reuse boundary is missing: $needle"
 }

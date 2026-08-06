@@ -7,6 +7,7 @@ param(
     [string]$BundleRoot = "db/flyway-ci-bundle",
     [string]$PolicyArtifactRoot = "proposals/development-runtime-policy/artifacts",
     [string]$ScoringArtifactRoot = "proposals/development-scoring-template/artifacts",
+    [switch]$AllowMissingReceipt,
     [hashtable]$RuntimeDatabaseSecretNames = @{
         backend  = "idea2strategy-dev/database/backend-runtime"
         batch    = "idea2strategy-dev/database/batch-runtime"
@@ -145,7 +146,18 @@ foreach ($candidateKey in $candidateKeys) {
     }
 }
 if ($null -eq $selected) {
-    throw "No versioned database bootstrap receipt matches artifact fingerprint '$artifactFingerprint'."
+    if ($AllowMissingReceipt) {
+        [pscustomobject]@{
+            status = "missing"
+            requested_root_sha = $RootSha
+            artifact_fingerprint = $artifactFingerprint
+            bundle_sha256 = $bundle.Digest
+            migrations = $bundle.MigrationCount
+            required_authorization = "BOOTSTRAP_DEVELOPMENT_DATABASE"
+        } | ConvertTo-Json -Compress
+        return
+    }
+    throw "No versioned database bootstrap receipt matches artifact fingerprint '$artifactFingerprint'. Re-run Development release with database_bootstrap_authorization set to BOOTSTRAP_DEVELOPMENT_DATABASE and approve the Development environment bootstrap gate."
 }
 
 $receipt = $selected.Receipt
