@@ -220,7 +220,11 @@ flyway() {
     "$FLYWAY_IMAGE" -connectRetries=30 "$@"
 }
 
-flyway migrate >&2
+# The canonical bundle is assembled from independently versioned services.
+# A reviewed migration can therefore arrive after a higher version from another
+# service has already been applied. The manifest/checksum gate above keeps this
+# bounded to the exact published bundle while allowing that late migration.
+flyway -outOfOrder=true migrate >&2
 flyway validate >&2
 flyway_info="$(flyway -outputType=json info)"
 if jq -e '[.. | objects | .state? // empty | ascii_downcase] | any(. == "pending")' <<<"$flyway_info" >/dev/null; then

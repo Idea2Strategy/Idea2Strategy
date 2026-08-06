@@ -236,6 +236,10 @@ Assert-NotContains $bootstrap 'ALTER ROLE %s LOGIN INHERIT NOSUPERUSER' "Runtime
 foreach ($needle in @(
     '[switch]$Execute',
     'function Get-AwsCommonArguments',
+    'function Get-SanitizedSsmFailure',
+    'StandardErrorContent',
+    'Select-Object -Last 12',
+    "CommandId '`$commandId'",
     'if (-not [string]::IsNullOrWhiteSpace($AwsProfile))',
     '$awsFallback = ""',
     'if (-not [string]::IsNullOrWhiteSpace([string]$env:ProgramFiles))',
@@ -318,6 +322,7 @@ foreach ($needle in @(
     'redgate/flyway@sha256:',
     'amazon/aws-cli@sha256:',
     'migrate',
+    'flyway -outOfOrder=true migrate >&2',
     'validate',
     'PIPELINE_WORKER_DATABASE_URL',
     'postgresql+psycopg://',
@@ -344,6 +349,7 @@ foreach ($needle in @(
 )) {
     Assert-Contains $bootstrap $needle "Host bootstrap safety or verification is missing: $needle"
 }
+Assert-NotContains $bootstrap 'flyway migrate >&2' "Central multi-service migration bundles must explicitly apply validated late-arriving versions."
 Assert-NotContains $bootstrap 'EXPECTED_MIGRATION_COUNT' "Host bootstrap must receive the locally validated manifest count instead of embedding a migration count."
 if ($bootstrap -match '(?m)^\s*echo\s+["'']?\$(master_json|master_password|password)\b' -or
     $bootstrap -match '(?m)^\s*printf\s+[^>\r\n]*\$(master_json|master_password)\b') {
