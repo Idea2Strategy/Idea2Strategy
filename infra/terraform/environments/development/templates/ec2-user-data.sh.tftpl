@@ -407,6 +407,8 @@ ROOM_LEDGER_OPENED_QUEUE_URL=$(ssm_value '${parameter_path}/queues/room-ledger-o
 ROOM_LEDGER_REJECTED_QUEUE_URL=$(ssm_value '${parameter_path}/queues/room-ledger-open-rejected/url')
 ROOM_LEDGER_RESULT_CONSUMER_ENABLED=true
 BACKTEST_OUTBOX_RELAY_ENABLED=${enable_backtest_outbox_relay}
+MARKET_DATA_REDIS_URI=rediss://${cache_endpoint}:6379
+MARKET_DATA_REDIS_KEY_PREFIX=i2s
 EOF
 
 cat >>"$backtest_secret_env" <<EOF
@@ -568,6 +570,8 @@ MARKET_GATEWAY_ALPACA_FEED=${trading_market_data_feed}
 MARKET_GATEWAY_RIGHTS_EVIDENCE_PATH=/runtime/market-gateway/${trading_provider_rights_local_path}
 MARKET_GATEWAY_MATERIALIZATION_RECEIPT_PATH=/runtime/market-gateway/materialization.properties
 MARKET_GATEWAY_ALPACA_ENDPOINT=${trading_market_data_endpoint}
+MARKET_GATEWAY_MINIMUM_INSTRUMENT_COUNT=500
+MARKET_GATEWAY_RECENT_BAR_CAPACITY=390
 I2S_READINESS_FILE=/tmp/idea2strategy-ready
 TRADING_MARKET_EVENTS_REDIS_URI=rediss://${cache_endpoint}:6379
 TRADING_MARKET_EVENTS_REDIS_KEY_PREFIX=i2s
@@ -798,7 +802,7 @@ test -n "$registry"
 aws ecr get-login-password --region '${aws_region}' | docker login --username AWS --password-stdin "$registry"
 docker compose --project-name idea2strategy config --quiet
 docker compose --project-name idea2strategy pull
-docker compose --project-name idea2strategy up --detach --remove-orphans --wait
+docker compose --project-name idea2strategy up --detach --remove-orphans --wait%{ if runtime_role == "trading" } --force-recreate%{ endif }
 SCRIPT
 chmod 0700 /usr/local/sbin/idea2strategy-runtime-start
 

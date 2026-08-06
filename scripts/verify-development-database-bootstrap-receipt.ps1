@@ -148,7 +148,28 @@ function Test-ReceiptMatchesArtifacts([object]$Receipt) {
             @($Receipt.scoring_versions).Count -ne $expectedScoringVersionCount -or
             [int]$Receipt.policy_row_counts.fee -lt 1 -or
             [int]$Receipt.policy_row_counts.buffer -lt 1 -or
-            [int]$Receipt.policy_row_counts.execution -lt 1) {
+            [int]$Receipt.policy_row_counts.execution -lt 1 -or
+            [int]$Receipt.instrument_count -lt 500 -or
+            $null -eq $Receipt.trading_runtime_artifacts) {
+            return $false
+        }
+        $rightsExpiry = [DateTimeOffset]::MinValue
+        if (-not [DateTimeOffset]::TryParse([string]$Receipt.rights_expires_at, [ref]$rightsExpiry) -or
+            $rightsExpiry -le [DateTimeOffset]::UtcNow.AddHours(2)) {
+            return $false
+        }
+        foreach ($artifactName in @('instrument-mapping', 'provider-rights')) {
+            $artifactProperty = $Receipt.trading_runtime_artifacts.PSObject.Properties[$artifactName]
+            if ($null -eq $artifactProperty -or
+                [string]$artifactProperty.Value.runtime -cne 'market-gateway' -or
+                [string]$artifactProperty.Value.key -notmatch '^runtime/trading/[A-Za-z0-9._/-]+$' -or
+                [string]$artifactProperty.Value.version_id -eq '' -or
+                [string]$artifactProperty.Value.sha256 -notmatch '^[0-9a-f]{64}$') {
+                return $false
+            }
+        }
+        if ([string]$Receipt.trading_runtime_artifacts.PSObject.Properties['instrument-mapping'].Value.local_path -cne 'instruments.json' -or
+            [string]$Receipt.trading_runtime_artifacts.PSObject.Properties['provider-rights'].Value.local_path -cne 'alpaca-sip-rights.json') {
             return $false
         }
         $fingerprintProperty = $Receipt.PSObject.Properties['artifact_fingerprint']
@@ -230,6 +251,23 @@ foreach ($consumer in $expectedConsumers) {
     $currentSecretVersions[$consumer] = [string]$currentVersions[0].Name
 }
 
+$secretVersionsCurrent = (($expectedConsumers | Where-Object {
+    [string]$receipt.secret_versions.$_ -cne [string]$currentSecretVersions[$_]
+}).Count -eq 0)
+if (-not $secretVersionsCurrent) {
+    if ($AllowMissingReceipt) {
+        [pscustomobject]@{
+            status = "stale"
+            requested_root_sha = $RootSha
+            artifact_fingerprint = $artifactFingerprint
+            reason = "runtime-secret-version-mismatch"
+            required_authorization = "BOOTSTRAP_DEVELOPMENT_DATABASE"
+        } | ConvertTo-Json -Compress
+        return
+    }
+    throw "Database bootstrap receipt runtime secret versions are not AWSCURRENT. Re-run the authorized Development database bootstrap before deployment."
+}
+
 $receiptRootSha = [string]$receipt.root_sha
 [pscustomobject]@{
     status = "passed"
@@ -241,6 +279,9 @@ $receiptRootSha = [string]$receipt.root_sha
     migrations = $bundle.MigrationCount
     receipt_key = $selected.Key
     receipt_version = $selected.VersionId
-    receipt_secret_versions_current = (($expectedConsumers | Where-Object { [string]$receipt.secret_versions.$_ -cne [string]$currentSecretVersions[$_] }).Count -eq 0)
+    receipt_secret_versions_current = $secretVersionsCurrent
     current_secret_versions = $currentSecretVersions
+    instrument_count = [int]$receipt.instrument_count
+    rights_expires_at = [string]$receipt.rights_expires_at
+    trading_runtime_artifacts = $receipt.trading_runtime_artifacts
 } | ConvertTo-Json -Compress
