@@ -21,6 +21,15 @@ locals {
     for secret_name in local.deployment_prerequisite_secret_names :
     "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${secret_name}-*"
   ]
+  terraform_managed_secret_names = [
+    "${local.name_prefix}/runtime/core-internal",
+    "${local.name_prefix}/runtime/backtest-internal",
+    "${local.name_prefix}/edge/origin-header"
+  ]
+  terraform_managed_secret_arns = [
+    for secret_name in local.terraform_managed_secret_names :
+    "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${secret_name}-*"
+  ]
 }
 
 data "aws_iam_policy_document" "github_plan_assume" {
@@ -66,6 +75,13 @@ data "aws_iam_policy_document" "github_plan_artifacts" {
     effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue"]
     resources = local.deployment_prerequisite_secret_arns
+  }
+
+  statement {
+    sid       = "ReadTerraformManagedSecretVersions"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = local.terraform_managed_secret_arns
   }
 
   statement {

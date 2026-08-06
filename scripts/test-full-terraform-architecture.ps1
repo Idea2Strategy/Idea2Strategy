@@ -391,9 +391,13 @@ foreach ($required in @(
     'github_plan_role_arn',
     'PublishImmutableFrontendRelease',
     'ReadDeploymentPrerequisiteSecrets',
+    'ReadTerraformManagedSecretVersions',
     'secretsmanager:GetSecretValue',
     '${local.name_prefix}/backtest/alpaca-secret',
     '${local.name_prefix}/database/pipeline-runtime',
+    '${local.name_prefix}/runtime/core-internal',
+    '${local.name_prefix}/runtime/backtest-internal',
+    '${local.name_prefix}/edge/origin-header',
     'TerraformStateObject',
     'iam:PassRole'
 )) {
