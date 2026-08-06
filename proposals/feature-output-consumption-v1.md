@@ -101,6 +101,13 @@ Alpaca-owned identity.
 The RSI seed is bound to feature-definition ID
 `0f1b0000-0000-4000-8000-000000000001` and definition hash
 `sha256:1a7c3e5b9d2f4068a1c3e5b7d9f20416283a5c7e9b1d3f50627496a8c0e2b4d6`.
+The UUID input uses that exact lowercase database value, including the
+`sha256:` prefix; consumers must not silently strip the prefix for feed
+identity while providers use the bare digest. With calculator version
+`rsi:1.0.0`, resolution `1m`, and schema `feature-series.parquet.v1`, the exact
+feed UUID is `063f8f27-5c6a-5348-b2bb-abc3c634149c`. The production calculator
+adapter resolves the approved definition tuple `RSI_14` / `rsi:1.0.0`; it must
+not require an unrelated `RSI` / `1.0.0` alias or create a second identity.
 The seed migration must pin the deterministic provider and feed UUID literals,
 recompute them in a test, insert idempotently, and fail on any pre-existing row
 whose immutable fields differ. It must not silently update drift.
@@ -122,11 +129,18 @@ Identifiers in a queue message are requests, not storage attestations.
 2. Accept source dataset-object IDs, then load their manifests and
    `storage.objects` receipts from PostgreSQL. Require AVAILABLE state, matching
    instrument and resolution, complete period coverage, and exact lineage-ready
-   identities.
+   identities. Resolve the authoritative intersecting object set from the
+   catalog and require the request to name that complete set; a non-empty subset,
+   overlapping gaps, or objects outside the required warm-up/evaluation interval
+   cannot satisfy completeness.
 3. Open each source object by its exact `provider_version_id`, verify S3 metadata
    SHA-256, service checksum, size, encryption state, schema, ordering, period,
-   row count, and instrument before decoding bars. Never read the latest key
-   without a VersionId and never calculate from inline bars.
+   row count, and instrument before decoding bars. The receipt's storage
+   provider and bucket must equal the selected adapter as well as its key and
+   VersionId. An absent service checksum is not success; the implementation must
+   require the checksum or independently stream-hash the returned bytes against
+   the receipt. Never read the latest key without a VersionId and never calculate
+   from inline bars.
 4. Derive the input-set hash only from those verified canonical receipts. For
    RSI_14, require an AVAILABLE 1m source and at least fifteen ordered completed
    1m bars. A 30m SIP catalog is not a valid substitute merely because the
@@ -149,10 +163,15 @@ Manual SQL is not an operational prerequisite.
 2. Reusing a command ID with the same input reconciles the same run. A prior
    SUCCEEDED result returns the already verified output without uploading or
    inserting again. Reusing it with a different input fails closed.
+   Process-local duplicate suppression must not acknowledge this command before
+   the durable PostgreSQL reconciliation and changed-input check executes.
 3. Success sets the pipeline run to SUCCEEDED with `output_hash` equal to the
    materialization result hash and a completion time, after the exact S3 version,
    storage object, dataset object, lineage, AVAILABLE manifest, and SUCCEEDED
-   materialization agree.
+   materialization agree. The materialization must reference that same run, and
+   the run's exact pipeline code/version and `input_hash` must match the approved
+   feature materialization command and `input_dataset_set_hash`; a merely
+   SUCCEEDED unrelated run with a copied output hash is invalid.
 4. Failure stores a stable failure code. If this attempt created an S3 version
    but relational publication fails, cleanup deletes that exact VersionId only.
    It must not delete a pre-existing reconciled version or a newer version.
@@ -168,9 +187,10 @@ Manual SQL is not an operational prerequisite.
 | feed collision | two definitions for one instrument and period publish to distinct feeds; a generic shared feed is rejected |
 | command trust | arbitrary output feed/manifest/revision and inline bars cannot redirect or forge publication |
 | source attestation | missing, unavailable, wrong-resolution, wrong-instrument, wrong-version, checksum, schema, ordering, period, and row-count mismatches fail closed |
+| storage binding | wrong provider or bucket, absent service checksum without verified stream hash, omitted canonical object, and period gap fail closed |
 | RSI_14 | exactly fifteen real 1m bars produce one warm result; 30m bars and fewer than fifteen 1m bars are rejected |
-| pipeline run | create, same-input replay, changed-input conflict, success completion, stable failure, and retry exhaustion |
-| publication | PostgreSQL 16 transaction races, one immutable object and manifest, complete manifest/object lineage, and no duplicate rows |
+| pipeline run | worker-level create, same-input replay, changed-input conflict, exact pipeline/input binding, success completion, stable failure, and retry exhaustion |
+| publication | PostgreSQL 16 transaction races, immutable-field collision refusal, one immutable object and manifest, complete manifest/object lineage, and no duplicate rows |
 | S3 | LocalStack version pinning, read-after-write verification, exact-version cleanup, pre-existing object reconciliation, and concurrent writer race |
 | consumer | missing/extra/duplicate pin, wrong feed/schema/version/hash, look-ahead, and unavailable output remain fail closed |
 
@@ -219,6 +239,11 @@ Data pipeline:
   manifest, lineage, and only then the SUCCEEDED materialization/result hash;
 - prove byte hash, decoded result hash, duplicate retry, partial-upload cleanup,
   ordering, schema, and LocalStack version-pinning behavior.
+- use targeted catalog queries and bounded Arrow batch decoding rather than
+  loading every catalog table and the whole Parquet result into Python object
+  lists. Any maximum supported period or row-count limit is a separate product
+  decision; an implementation-only memory shortcut must not silently truncate a
+  requested interval.
 
 Backend BASIC producer:
 
