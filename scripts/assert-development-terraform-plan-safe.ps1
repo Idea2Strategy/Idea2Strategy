@@ -78,6 +78,44 @@ function Test-StableReplacementIdentity([object]$Change) {
     return $true
 }
 
+function Test-ApprovedDeposedDelete([object]$Change) {
+    $address = [string]$Change.address
+    if (-not $allowedAddresses.Contains($address)) { return $false }
+    $policy = $reviewedReplacementPolicies[$address]
+    $deposedProperty = $Change.PSObject.Properties["deposed"]
+    $actions = @($Change.change.actions)
+    if ($null -eq $deposedProperty -or
+        [string]::IsNullOrWhiteSpace([string]$deposedProperty.Value) -or
+        $actions.Count -ne 1 -or
+        $actions[0] -cne "delete" -or
+        [string]$Change.mode -cne "managed" -or
+        [string]$Change.type -cne [string]$policy.type -or
+        [string]$Change.provider_name -cne "registry.terraform.io/hashicorp/aws" -or
+        $null -eq $Change.change.before -or
+        $null -ne $Change.change.after -or
+        [string]::IsNullOrWhiteSpace([string]$Change.change.before.id)) {
+        return $false
+    }
+    $currentObjects = @(
+        $plan.resource_changes |
+            Where-Object {
+                [string]$_.address -ceq $address -and
+                $null -eq $_.PSObject.Properties["deposed"]
+            }
+    )
+    if ($currentObjects.Count -ne 1) { return $false }
+    $current = $currentObjects[0]
+    $currentActions = @($current.change.actions)
+    if ([string]$current.mode -cne "managed" -or
+        [string]$current.type -cne [string]$policy.type -or
+        [string]$current.provider_name -cne "registry.terraform.io/hashicorp/aws" -or
+        (($currentActions -contains "delete") -and
+            -not (Test-StableReplacementIdentity -Change $current))) {
+        return $false
+    }
+    return $true
+}
+
 $allowedReplacements = @(
     $plan.resource_changes |
         Where-Object {
@@ -89,12 +127,17 @@ $allowedReplacements = @(
             (Test-StableReplacementIdentity -Change $_)
         }
 )
+$allowedDeposedDeletes = @(
+    $plan.resource_changes |
+        Where-Object { Test-ApprovedDeposedDelete -Change $_ }
+)
 $destructive = @(
     $plan.resource_changes |
         Where-Object {
             $change = $_
             @($change.change.actions) -contains "delete" -and
-            -not ($allowedReplacements | Where-Object { $_ -eq $change })
+            -not ($allowedReplacements | Where-Object { $_ -eq $change }) -and
+            -not ($allowedDeposedDeletes | Where-Object { $_ -eq $change })
         } |
         ForEach-Object {
             [pscustomobject]@{
@@ -113,5 +156,6 @@ if ($destructive.Count -gt 0) {
     status = "passed"
     delete_or_replace_count = 0
     allowed_replacement_count = $allowedReplacements.Count
+    allowed_deposed_delete_count = $allowedDeposedDeletes.Count
     resource_change_count = @($plan.resource_changes).Count
 } | ConvertTo-Json -Compress

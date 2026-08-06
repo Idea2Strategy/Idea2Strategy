@@ -288,6 +288,10 @@ try {
     $unexplainedReplacementPlan = Join-Path $temporary "unexplained-replacement.json"
     $wrongTypeReplacementPlan = Join-Path $temporary "wrong-type-replacement.json"
     $identityDriftReplacementPlan = Join-Path $temporary "identity-drift-replacement.json"
+    $deposedDeletePlan = Join-Path $temporary "deposed-delete.json"
+    $orphanDeposedDeletePlan = Join-Path $temporary "orphan-deposed-delete.json"
+    $currentDeletePlan = Join-Path $temporary "current-delete.json"
+    $wrongTypeDeposedDeletePlan = Join-Path $temporary "wrong-type-deposed-delete.json"
     '{"resource_changes":[{"address":"aws_ssm_parameter.safe","change":{"actions":["update"]}}]}' | Set-Content -NoNewline $safePlan
     '{"resource_changes":[{"address":"aws_s3_bucket.data","change":{"actions":["delete"]}}]}' | Set-Content -NoNewline $deletePlan
     '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"],"before":{"id":"i-old","instance_type":"t4g.medium","subnet_id":"subnet-a","iam_instance_profile":"profile-a","associate_public_ip_address":true,"vpc_security_group_ids":["sg-a"]},"after":{"instance_type":"t4g.medium","subnet_id":"subnet-a","iam_instance_profile":"profile-a","associate_public_ip_address":true,"vpc_security_group_ids":["sg-a"]}}}]}' | Set-Content -NoNewline $replacementPlan
@@ -295,6 +299,10 @@ try {
     '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","change":{"actions":["create","delete"],"before":{"id":"i-old","instance_type":"t4g.medium","subnet_id":"subnet-a"},"after":{"instance_type":"t4g.medium","subnet_id":"subnet-a"}}}]}' | Set-Content -NoNewline $unexplainedReplacementPlan
     '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_s3_bucket","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"],"before":{"id":"bucket"},"after":{}}}]}' | Set-Content -NoNewline $wrongTypeReplacementPlan
     '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"],"before":{"id":"i-old","instance_type":"t4g.medium","subnet_id":"subnet-a","iam_instance_profile":"profile-a","associate_public_ip_address":true,"vpc_security_group_ids":["sg-a"]},"after":{"instance_type":"m7g.large","subnet_id":"subnet-b","iam_instance_profile":"profile-b","associate_public_ip_address":false,"vpc_security_group_ids":["sg-b"]}}}]}' | Set-Content -NoNewline $identityDriftReplacementPlan
+    '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","change":{"actions":["no-op"],"before":{"id":"i-current"},"after":{"id":"i-current"}}},{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","deposed":"deadbeef","change":{"actions":["delete"],"before":{"id":"i-old"},"after":null}}]}' | Set-Content -NoNewline $deposedDeletePlan
+    '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","deposed":"deadbeef","change":{"actions":["delete"],"before":{"id":"i-old"},"after":null}}]}' | Set-Content -NoNewline $orphanDeposedDeletePlan
+    '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","change":{"actions":["delete"],"before":{"id":"i-current"},"after":null}}]}' | Set-Content -NoNewline $currentDeletePlan
+    '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_s3_bucket","provider_name":"registry.terraform.io/hashicorp/aws","deposed":"deadbeef","change":{"actions":["delete"],"before":{"id":"bucket"},"after":null}}]}' | Set-Content -NoNewline $wrongTypeDeposedDeletePlan
     $safeResult = & $planGatePath -PlanJsonPath $safePlan | ConvertFrom-Json
     if ($safeResult.status -cne "passed" -or [int]$safeResult.delete_or_replace_count -ne 0) {
         throw "Safe Terraform plan fixture was rejected."
@@ -312,6 +320,26 @@ try {
         [int]$allowedReplacement.allowed_replacement_count -ne 1 -or
         [int]$allowedReplacement.delete_or_replace_count -ne 0) {
         throw "The exact create-before-destroy replacement allowlist was not enforced."
+    }
+    $allowedDeposedDelete = & $planGatePath `
+        -PlanJsonPath $deposedDeletePlan `
+        -AllowedReplacementAddresses 'aws_instance.service[0]' |
+        ConvertFrom-Json
+    if ($allowedDeposedDelete.status -cne "passed" -or
+        [int]$allowedDeposedDelete.allowed_deposed_delete_count -ne 1 -or
+        [int]$allowedDeposedDelete.delete_or_replace_count -ne 0) {
+        throw "An exact deposed object cleanup from an approved create-before-destroy runtime was not accepted."
+    }
+    foreach ($unsafeDeletePlan in @($orphanDeposedDeletePlan, $currentDeletePlan, $wrongTypeDeposedDeletePlan)) {
+        $rejected = $false
+        try {
+            & $planGatePath `
+                -PlanJsonPath $unsafeDeletePlan `
+                -AllowedReplacementAddresses 'aws_instance.service[0]' |
+                Out-Null
+        }
+        catch { $rejected = $true }
+        if (-not $rejected) { throw "A non-deposed or wrong-type delete was accepted: $unsafeDeletePlan" }
     }
     foreach ($unsafeAllowedPlan in @($wrongTypeReplacementPlan, $identityDriftReplacementPlan)) {
         $rejected = $false
