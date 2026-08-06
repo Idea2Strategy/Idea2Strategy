@@ -50,8 +50,8 @@ for ($lineIndex = 0; $lineIndex -lt $workflowLines.Count; $lineIndex++) {
     }
     $parsedPowerShellBlocks++
 }
-if ($parsedPowerShellBlocks -ne 16) {
-    throw "Expected to parse exactly 16 inline PowerShell blocks; observed $parsedPowerShellBlocks."
+if ($parsedPowerShellBlocks -ne 17) {
+    throw "Expected to parse exactly 17 inline PowerShell blocks; observed $parsedPowerShellBlocks."
 }
 
 $required = @(
@@ -118,6 +118,9 @@ $required = @(
     "-AllowMissingReceipt",
     "-Execute -Confirm:`$false",
     "deploy-development-core-runtime.ps1",
+    "-RuntimeRole trading",
+    "trading_market_data_feed = 'sip'",
+    "instrument_count -lt 500",
     "-RequireRuntimeDatabaseSecrets",
     "-RequireAlpacaSecrets",
     "verify-deployed-development.ps1",

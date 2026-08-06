@@ -3,6 +3,7 @@ param(
     [string]$TerraformRoot = "infra/terraform/environments/development",
     [string]$AwsProfile = "idea2strategy-terraform",
     [string]$AwsRegion = "ap-northeast-2",
+    [ValidateSet("core", "trading")][string]$RuntimeRole = "core",
     [ValidateRange(60, 1800)][int]$ReadinessTimeoutSeconds = 900,
     [ValidateRange(60, 1800)][int]$RolloutTimeoutSeconds = 900
 )
@@ -16,6 +17,16 @@ $terraform = Get-Command terraform -ErrorAction SilentlyContinue
 $aws = Get-Command aws -ErrorAction SilentlyContinue
 if ($null -eq $terraform) { throw "Terraform 1.15.x is required." }
 if ($null -eq $aws) { throw "AWS CLI v2 is required." }
+$runtimeLabel = if ($RuntimeRole -ceq "trading") { "Trading" } else { "Core" }
+$terraformOutputName = if ($RuntimeRole -ceq "trading") { "trading_instance_id" } else { "service_instance_id" }
+$runtimeServices = if ($RuntimeRole -ceq "trading") {
+    @("market-gateway", "trading-worker")
+} else {
+    @("backend-api", "backend-worker", "backtest-api")
+}
+$runtimeServiceWords = $runtimeServices -join " "
+$hostReadyMarker = "$($RuntimeRole.ToUpperInvariant())_HOST_READY"
+$rolloutMarker = "$($RuntimeRole.ToUpperInvariant())_RUNTIME_ROLLED_OUT"
 
 $commonAwsArguments = @("--region", $AwsRegion, "--output", "json")
 if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) { $commonAwsArguments += @("--profile", $AwsProfile) }
@@ -49,7 +60,7 @@ function Invoke-SsmShellCommand {
         [IO.File]::WriteAllText($parametersPath, $parameters, [Text.UTF8Encoding]::new($false))
         $sent = Invoke-AwsJson @(
             "ssm", "send-command",
-            "--instance-ids", $serviceInstanceId,
+            "--instance-ids", $runtimeInstanceId,
             "--document-name", "AWS-RunShellScript",
             "--comment", $Comment,
             "--parameters", "file://$parametersPath",
@@ -70,7 +81,7 @@ function Invoke-SsmShellCommand {
             $invocation = Invoke-AwsJson @(
                 "ssm", "get-command-invocation",
                 "--command-id", $commandId,
-                "--instance-id", $serviceInstanceId
+                "--instance-id", $runtimeInstanceId
             )
         }
         catch {
@@ -92,9 +103,9 @@ try {
     } else {
         Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
     }
-    $serviceInstanceId = (& $terraform.Source "-chdir=$terraformDirectory" output -raw service_instance_id).Trim()
-    if ($LASTEXITCODE -ne 0 -or $serviceInstanceId -notmatch '^i-[0-9a-f]+$') {
-        throw "Unable to resolve the exact Core instance from applied Terraform state."
+    $runtimeInstanceId = (& $terraform.Source "-chdir=$terraformDirectory" output -raw $terraformOutputName).Trim()
+    if ($LASTEXITCODE -ne 0 -or $runtimeInstanceId -notmatch '^i-[0-9a-f]+$') {
+        throw "Unable to resolve the exact $runtimeLabel instance from applied Terraform state."
     }
 } finally {
     if ($null -eq $previousAwsProfile) {
@@ -104,15 +115,15 @@ try {
     }
 }
 
-& $aws.Source ec2 wait instance-running --instance-ids $serviceInstanceId @commonAwsArguments
-if ($LASTEXITCODE -ne 0) { throw "Core instance did not reach EC2 running state within the AWS waiter timeout." }
+& $aws.Source ec2 wait instance-running --instance-ids $runtimeInstanceId @commonAwsArguments
+if ($LASTEXITCODE -ne 0) { throw "$runtimeLabel instance did not reach EC2 running state within the AWS waiter timeout." }
 
 $ssmDeadline = [DateTimeOffset]::UtcNow.AddSeconds($ReadinessTimeoutSeconds)
 $ssmOnline = $false
 while ([DateTimeOffset]::UtcNow -lt $ssmDeadline) {
     $information = Invoke-AwsJson @(
         "ssm", "describe-instance-information",
-        "--filters", "Key=InstanceIds,Values=$serviceInstanceId"
+        "--filters", "Key=InstanceIds,Values=$runtimeInstanceId"
     )
     if (@($information.InstanceInformationList).Count -eq 1 -and
         [string]$information.InstanceInformationList[0].PingStatus -ceq "Online") {
@@ -121,7 +132,7 @@ while ([DateTimeOffset]::UtcNow -lt $ssmDeadline) {
     }
     Start-Sleep -Seconds 5
 }
-if (-not $ssmOnline) { throw "Core instance did not become SSM Online within the readiness timeout." }
+if (-not $ssmOnline) { throw "$runtimeLabel instance did not become SSM Online within the readiness timeout." }
 
 $cloudInitTimeout = [Math]::Max(60, $ReadinessTimeoutSeconds - 60)
 $readinessScript = @'
@@ -135,12 +146,12 @@ systemctl is-active --quiet idea2strategy-runtime.service
 cd /opt/idea2strategy
 docker compose --project-name idea2strategy config --quiet
 echo CORE_HOST_READY
-'@.Replace('__CLOUD_INIT_TIMEOUT__', [string]$cloudInitTimeout)
+'@.Replace('__CLOUD_INIT_TIMEOUT__', [string]$cloudInitTimeout).Replace('CORE_HOST_READY', $hostReadyMarker)
 
 $readinessCommandId = Invoke-SsmShellCommand `
     -Script $readinessScript `
-    -Comment "Verify Core cloud-init and runtime readiness" `
-    -SuccessMarker "CORE_HOST_READY" `
+    -Comment "Verify $runtimeLabel cloud-init and runtime readiness" `
+    -SuccessMarker $hostReadyMarker `
     -TimeoutSeconds $ReadinessTimeoutSeconds
 
 $remoteScript = @'
@@ -164,7 +175,7 @@ container_ready() {
 
 runtime_ready() {
   local service container expected configured
-  for service in backend-api backend-worker backtest-api; do
+  for service in __RUNTIME_SERVICES__; do
     expected="$(aws ssm get-parameter --region '__AWS_REGION__' --name "/idea2strategy/dev/deployment/images/$service" --query Parameter.Value --output text)"
     case "$expected" in (*@sha256:*) ;; (*) return 1 ;; esac
     container="$(docker compose --project-name idea2strategy ps -q "$service")"
@@ -181,7 +192,7 @@ rollback() {
   docker compose --project-name idea2strategy pull
   docker compose --project-name idea2strategy up --detach --remove-orphans --wait
   sleep 20
-  for service in backend-api backend-worker backtest-api; do
+  for service in __RUNTIME_SERVICES__; do
     container="$(docker compose --project-name idea2strategy ps -q "$service")"
     test -n "$container"
     container_ready "$container"
@@ -207,17 +218,36 @@ if ! runtime_ready; then
 fi
 rm -f "$rollback_compose"
 echo CORE_RUNTIME_ROLLED_OUT
-'@.Replace('__AWS_REGION__', $AwsRegion)
+'@.Replace('__AWS_REGION__', $AwsRegion).Replace('__RUNTIME_SERVICES__', $runtimeServiceWords).Replace('CORE_RUNTIME_ROLLED_OUT', $rolloutMarker).Replace('__RUNTIME_ROLE__', $RuntimeRole.ToUpperInvariant())
+
+if ($RuntimeRole -ceq 'trading') {
+    $tradingEvidence = @'
+set -euo pipefail
+cd /opt/idea2strategy
+test "$(jq 'length' /var/lib/idea2strategy/market-gateway/instruments.json)" -ge 500
+jq -e '.provider == "alpaca" and .feed == "sip" and ((.expiresAt | fromdateiso8601) > (now + 7200))' /var/lib/idea2strategy/market-gateway/alpaca-sip-rights.json >/dev/null
+grep -Fxq 'MARKET_GATEWAY_ALPACA_FEED=sip' /etc/idea2strategy/runtime-secret.env
+grep -Fxq 'MARKET_GATEWAY_MINIMUM_INSTRUMENT_COUNT=500' /etc/idea2strategy/runtime-secret.env
+for service in market-gateway trading-worker; do
+  container="$(docker compose --project-name idea2strategy ps -q "$service")"
+  test -n "$container"
+  test "$(docker inspect --format '{{.RestartCount}}' "$container")" = 0
+done
+echo TRADING_RUNTIME_EVIDENCE_VERIFIED
+'@
+    $remoteScript = $remoteScript.Replace("echo $rolloutMarker", "$tradingEvidence`necho $rolloutMarker")
+}
 
 $rolloutCommandId = Invoke-SsmShellCommand `
     -Script $remoteScript `
-    -Comment "Roll out exact Idea2Strategy Core image digests" `
-    -SuccessMarker "CORE_RUNTIME_ROLLED_OUT" `
+    -Comment "Roll out exact Idea2Strategy $runtimeLabel image digests" `
+    -SuccessMarker $rolloutMarker `
     -TimeoutSeconds $RolloutTimeoutSeconds
 
 [pscustomobject]@{
     status = "passed"
-    instance_id = $serviceInstanceId
+    runtime_role = $RuntimeRole
+    instance_id = $runtimeInstanceId
     readiness_command_id = $readinessCommandId
     command_id = $rolloutCommandId
     cloud_init_ready = $true

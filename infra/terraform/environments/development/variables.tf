@@ -113,13 +113,13 @@ variable "trading_instance_type" {
 }
 
 variable "trading_market_data_feed" {
-  description = "Explicit Alpaca real-time feed for the Development trading runtime. IEX is a lower-coverage fallback and requires matching reviewed rights evidence."
+  description = "Paid Alpaca SIP real-time feed for the internal Development demonstration."
   type        = string
   default     = "sip"
 
   validation {
-    condition     = contains(["sip", "iex"], var.trading_market_data_feed)
-    error_message = "trading_market_data_feed must be sip or iex."
+    condition     = var.trading_market_data_feed == "sip"
+    error_message = "trading_market_data_feed must be sip."
   }
 }
 

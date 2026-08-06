@@ -392,6 +392,12 @@ try {
                 Effect = "Allow"
                 Action = @("secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecretVersionStage", "secretsmanager:DescribeSecret")
                 Resource = @($secretResources | Select-Object -Skip 1)
+            },
+            [ordered]@{
+                Sid = "PublishTradingRuntimeArtifacts"
+                Effect = "Allow"
+                Action = @("s3:PutObject")
+                Resource = "arn:aws:s3:::$([string]$target.artifact_bucket)/runtime/trading/*"
             }
         )
     }
@@ -491,7 +497,7 @@ trap - EXIT
         "retry docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $scoringSeedKey) --version-id $(ConvertTo-BashLiteral ([string]$scoringSeedUpload.VersionId)) $(ConvertTo-BashLiteral $scoringSeedRemote) >/dev/null",
         "printf '%s  %s\n' $(ConvertTo-BashLiteral $hostScriptDigest) $(ConvertTo-BashLiteral $scriptRemote) | sha256sum --check --status",
         "chmod 0700 $(ConvertTo-BashLiteral $scriptRemote)",
-        "$(ConvertTo-BashLiteral $scriptRemote) --archive $(ConvertTo-BashLiteral $archiveRemote) --archive-sha256 $(ConvertTo-BashLiteral $archiveDigest) --bundle-sha256 $(ConvertTo-BashLiteral $bundleDigest) --expected-migration-count $(ConvertTo-BashLiteral ([string]$expectedMigrationCount)) --database-host $(ConvertTo-BashLiteral ([string]$target.database_host)) --database-name $(ConvertTo-BashLiteral ([string]$target.database_name)) --database-port $(ConvertTo-BashLiteral ([string]$target.database_port)) --master-secret-arn $(ConvertTo-BashLiteral ([string]$target.master_secret_arn)) --policy-seed-sql $(ConvertTo-BashLiteral $policySeedRemote) --policy-seed-sha256 $(ConvertTo-BashLiteral $PolicySeedSha256) --scoring-seed-sql $(ConvertTo-BashLiteral $scoringSeedRemote) --scoring-seed-sha256 $(ConvertTo-BashLiteral $ScoringSeedSha256) --region $(ConvertTo-BashLiteral $Region) --root-sha $(ConvertTo-BashLiteral $head) --runtime-secret-arns-base64 $(ConvertTo-BashLiteral $secretArnBase64) --work-directory $(ConvertTo-BashLiteral "$remoteRoot/work")"
+        "$(ConvertTo-BashLiteral $scriptRemote) --archive $(ConvertTo-BashLiteral $archiveRemote) --archive-sha256 $(ConvertTo-BashLiteral $archiveDigest) --bundle-sha256 $(ConvertTo-BashLiteral $bundleDigest) --expected-migration-count $(ConvertTo-BashLiteral ([string]$expectedMigrationCount)) --database-host $(ConvertTo-BashLiteral ([string]$target.database_host)) --database-name $(ConvertTo-BashLiteral ([string]$target.database_name)) --database-port $(ConvertTo-BashLiteral ([string]$target.database_port)) --master-secret-arn $(ConvertTo-BashLiteral ([string]$target.master_secret_arn)) --policy-seed-sql $(ConvertTo-BashLiteral $policySeedRemote) --policy-seed-sha256 $(ConvertTo-BashLiteral $PolicySeedSha256) --scoring-seed-sql $(ConvertTo-BashLiteral $scoringSeedRemote) --scoring-seed-sha256 $(ConvertTo-BashLiteral $ScoringSeedSha256) --region $(ConvertTo-BashLiteral $Region) --root-sha $(ConvertTo-BashLiteral $head) --runtime-secret-arns-base64 $(ConvertTo-BashLiteral $secretArnBase64) --work-directory $(ConvertTo-BashLiteral "$remoteRoot/work") --artifact-bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket))"
     )
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($command -join "`n")))
     $commandParametersPath = Join-Path $temporaryRoot "ssm-command-parameters.json"
@@ -531,6 +537,9 @@ trap - EXIT
         $receipt.policy_seed_sha256 -cne $PolicySeedSha256 -or $receipt.scoring_seed_sha256 -cne $ScoringSeedSha256 -or
         @($receipt.scoring_versions).Count -ne $expectedScoringVersionCount -or [int]$receipt.migrations -ne $expectedMigrationCount -or
         [int]$receipt.tables -lt 1 -or
+        [int]$receipt.instrument_count -lt 500 -or
+        [string]$receipt.rights_expires_at -notmatch '^\d{4}-\d{2}-\d{2}T' -or
+        $null -eq $receipt.trading_runtime_artifacts -or
         [int]$receipt.policy_row_counts.fee -lt 1 -or [int]$receipt.policy_row_counts.buffer -lt 1 -or
         [int]$receipt.policy_row_counts.execution -lt 1) {
         throw "Database bootstrap receipt did not match the exact release candidate."

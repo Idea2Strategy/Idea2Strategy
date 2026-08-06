@@ -65,7 +65,7 @@ jobs:
             AwsRegion = '${{ env.AWS_REGION }}'
           }
           $receipt = ./scripts/verify-development-database-bootstrap-receipt.ps1 @receiptArguments -AllowMissingReceipt | ConvertFrom-Json
-          if ($receipt.status -eq 'missing') {
+          if ($receipt.status -ne 'passed') {
             $policyRoot = 'proposals/development-runtime-policy/artifacts'
             $scoringRoot = 'proposals/development-scoring-template/artifacts'
             $policyManifest = Get-Content "$policyRoot/artifact-manifest.json" -Raw | ConvertFrom-Json
@@ -422,6 +422,25 @@ jobs:
           if (-not $config -or $config.ContainsKey('password') -or $config.ContainsKey('secret')) {
             throw 'TF_VARS_JSON must contain reviewed non-secret Terraform variables only.'
           }
+          if ($config.ContainsKey('trading_market_data_feed') -and [string]$config.trading_market_data_feed -cne 'sip') {
+            throw 'The Development release supports only the paid Alpaca SIP feed.'
+          }
+          $databaseReceipt = ./scripts/verify-development-database-bootstrap-receipt.ps1 `
+            -RootSha '${{ github.sha }}' `
+            -ReceiptBucket 'idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-market-data' `
+            -AwsProfile '' `
+            -AwsRegion '${{ env.AWS_REGION }}' | ConvertFrom-Json
+          if ($databaseReceipt.status -cne 'passed' -or [int]$databaseReceipt.instrument_count -lt 500) {
+            throw 'Database bootstrap did not publish a deployment-sized Trading instrument mapping.'
+          }
+          if (-not $config.ContainsKey('trading_runtime_artifacts') -or
+              -not $config.trading_runtime_artifacts.ContainsKey('warmup-manifest')) {
+            throw 'TF_VARS_JSON must retain the reviewed Trading warmup manifest.'
+          }
+          $runtimeArtifacts = $databaseReceipt.trading_runtime_artifacts | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable
+          $config.trading_runtime_artifacts['instrument-mapping'] = $runtimeArtifacts['instrument-mapping']
+          $config.trading_runtime_artifacts['provider-rights'] = $runtimeArtifacts['provider-rights']
+          $config.trading_market_data_feed = 'sip'
           if (-not $config.ContainsKey('dns_delegation_verified') -or $config.dns_delegation_verified -ne $true) {
             throw 'TF_VARS_JSON must carry independently reviewed public DNS delegation evidence.'
           }
@@ -541,6 +560,14 @@ jobs:
           ./scripts/deploy-development-core-runtime.ps1 `
             -AwsProfile '' `
             -AwsRegion '${{ env.AWS_REGION }}'
+
+      - name: Roll out and verify exact Trading runtime images
+        shell: pwsh
+        run: |
+          ./scripts/deploy-development-core-runtime.ps1 `
+            -AwsProfile '' `
+            -AwsRegion '${{ env.AWS_REGION }}' `
+            -RuntimeRole trading
 
       - name: Verify deployed Development environment
         shell: pwsh

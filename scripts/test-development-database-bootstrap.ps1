@@ -440,7 +440,11 @@ foreach ($needle in @(
     'declare -A listed_migrations',
     'declare -A listed_versions',
     'Flyway migration is not listed in the manifest',
-    'expected_scoring_ids'
+    'expected_scoring_ids',
+    '--artifact-bucket',
+    'instrument_count',
+    'runtime/trading/instruments.json',
+    'alpaca-sip-rights.json'
 )) {
     Assert-Contains $bootstrap $needle "Host bootstrap safety or verification is missing: $needle"
 }
