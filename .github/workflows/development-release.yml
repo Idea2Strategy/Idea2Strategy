@@ -92,6 +92,7 @@ jobs:
           VITE_OPERATOR_OIDC_SIGNING_ALGORITHM: ${{ vars.OPERATOR_OIDC_SIGNING_ALGORITHM }}
           VITE_OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID: ${{ vars.OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID }}
           VITE_OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID: ${{ vars.OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID }}
+          VITE_GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
         run: |
           set -euo pipefail
           required=(
@@ -313,6 +314,9 @@ jobs:
           if ([string]$config.operator_rbac_catalog_read_permission_id -cne '${{ vars.OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID }}' -or
               [string]$config.operator_rbac_assignment_read_permission_id -cne '${{ vars.OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID }}') {
             throw 'Frontend RBAC permission IDs must exactly match the Terraform runtime inputs.'
+          }
+          if ([string]$config.google_oauth_client_id -cne '${{ vars.GOOGLE_OAUTH_CLIENT_ID }}') {
+            throw 'Frontend Google OAuth client ID must exactly match the Terraform runtime input.'
           }
           $config.aws_profile = ''
           $config.aws_region = '${{ env.AWS_REGION }}'

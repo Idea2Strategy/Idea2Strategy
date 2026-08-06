@@ -33,6 +33,7 @@ services:
       # The backtest read surface lives on backtest-api, not backend-api; the
       # vite proxy sends only /api/v1/backtests there (ui fix/frontend-honest-surfaces).
       VITE_BACKTEST_API_TARGET: ${VITE_BACKTEST_API_TARGET:-http://backtest-api:8082}
+      VITE_GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-15173}:5173"
     volumes:
