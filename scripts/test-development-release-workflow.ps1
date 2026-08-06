@@ -50,12 +50,15 @@ for ($lineIndex = 0; $lineIndex -lt $workflowLines.Count; $lineIndex++) {
     }
     $parsedPowerShellBlocks++
 }
-if ($parsedPowerShellBlocks -ne 14) {
-    throw "Expected to parse exactly 14 inline PowerShell blocks; observed $parsedPowerShellBlocks."
+if ($parsedPowerShellBlocks -ne 16) {
+    throw "Expected to parse exactly 16 inline PowerShell blocks; observed $parsedPowerShellBlocks."
 }
 
 $required = @(
     "workflow_dispatch:",
+    "database_bootstrap_authorization:",
+    "default: REUSE_EXISTING_RECEIPT",
+    "BOOTSTRAP_DEVELOPMENT_DATABASE",
     "id-token: write",
     "github.ref == 'refs/heads/develop'",
     "environment: development-plan",
@@ -109,6 +112,9 @@ $required = @(
     "RBAC permission ID is invalid",
     "test-aws-deployment-prerequisites.ps1",
     "verify-development-database-bootstrap-receipt.ps1",
+    "invoke-development-database-bootstrap.ps1",
+    "-AllowMissingReceipt",
+    "-Execute -Confirm:`$false",
     "deploy-development-core-runtime.ps1",
     "-RequireRuntimeDatabaseSecrets",
     "-RequireAlpacaSecrets",
@@ -189,6 +195,14 @@ foreach ($image in $requiredImages) {
 
 if ($workflow -notmatch "(?s)apply-reviewed-plan:.*?needs: prepare-and-plan.*?environment: development") {
     throw "Apply must consume the reviewed plan and cross the Development environment gate."
+}
+
+if ($workflow -notmatch "(?s)bootstrap-database:.*?github\.event\.inputs\.database_bootstrap_authorization == 'BOOTSTRAP_DEVELOPMENT_DATABASE'.*?environment: development.*?AWS_DEPLOY_ROLE_ARN.*?verify-development-database-bootstrap-receipt\.ps1.*?-AllowMissingReceipt.*?invoke-development-database-bootstrap\.ps1.*?-Execute.*?verify-development-database-bootstrap-receipt\.ps1.*?build:") {
+    throw "An explicitly authorized, environment-gated bootstrap must create and re-verify a missing receipt before any release build."
+}
+
+if ($workflow -notmatch "(?s)build:.*?needs: bootstrap-database.*?needs\.bootstrap-database\.result == 'skipped'.*?Build untrusted ARM64 runtime inputs without AWS credentials") {
+    throw "The release build must wait for an authorized bootstrap while allowing the safe receipt-reuse path to skip it."
 }
 
 if ($workflow -notmatch "(?s)build:.*?Build untrusted ARM64 runtime inputs without AWS credentials.*?prepare-and-plan:.*?environment: development-plan.*?configure-aws-credentials") {

@@ -37,7 +37,14 @@ function Invoke-ExternalJson([string]$Executable, [string[]]$Arguments) {
 }
 
 function Invoke-AwsJson([string[]]$Arguments) {
-    return Invoke-ExternalJson $script:aws (@($Arguments) + @("--profile", $AwsProfile, "--region", $Region, "--output", "json"))
+    return Invoke-ExternalJson $script:aws (@($Arguments) + @(Get-AwsCommonArguments -Json))
+}
+
+function Get-AwsCommonArguments([switch]$Json) {
+    $arguments = @("--region", $Region)
+    if ($Json) { $arguments += @("--output", "json") }
+    if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) { $arguments += @("--profile", $AwsProfile) }
+    return $arguments
 }
 
 function ConvertTo-BashLiteral([string]$Value) {
@@ -245,7 +252,8 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     )
     $instanceId = [string]$launch.Instances[0].InstanceId
     if ($instanceId -notmatch '^i-[0-9a-f]+$') { throw "EC2 did not return one exact bootstrap instance ID." }
-    & $script:aws ec2 wait instance-running --instance-ids $instanceId --profile $AwsProfile --region $Region
+    $awsCommonArguments = @(Get-AwsCommonArguments)
+    & $script:aws ec2 wait instance-running --instance-ids $instanceId @awsCommonArguments
     if ($LASTEXITCODE -ne 0) { throw "Bootstrap instance did not reach running state." }
 
     $ssmOnline = $false
@@ -290,8 +298,9 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     # metadata until the exact invocation reaches a terminal state instead.
     $commandDeadline = [DateTimeOffset]::UtcNow.AddMinutes(31)
     while ($true) {
+        $awsJsonArguments = @(Get-AwsCommonArguments -Json)
         $statusOutput = & $script:aws ssm get-command-invocation --command-id $commandId --instance-id $instanceId `
-            --query '{Status:Status,StatusDetails:StatusDetails}' --profile $AwsProfile --region $Region --output json 2>$null
+            --query '{Status:Status,StatusDetails:StatusDetails}' @awsJsonArguments 2>$null
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace(($statusOutput -join "`n"))) {
             $statusMetadata = (($statusOutput -join "`n") | ConvertFrom-Json)
             if ([string]$statusMetadata.Status -eq "Success") { break }
@@ -343,14 +352,17 @@ finally {
     $cleanupErrors = [Collections.Generic.List[string]]::new()
     if ($policyAttached) {
         # DeleteRolePolicy: revoke master-secret access before instance cleanup.
-        & $script:aws iam delete-role-policy --role-name ([string]$target.role_name) --policy-name $inlinePolicyName --profile $AwsProfile --region $Region 2>$null | Out-Null
+        $awsCommonArguments = @(Get-AwsCommonArguments)
+        & $script:aws iam delete-role-policy --role-name ([string]$target.role_name) --policy-name $inlinePolicyName @awsCommonArguments 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { $cleanupErrors.Add("transient IAM policy removal") }
     }
     if ($instanceId -match '^i-[0-9a-f]+$') {
         # TerminateInstances: only the exact ID returned by this invocation.
-        & $script:aws ec2 terminate-instances --instance-ids $instanceId --profile $AwsProfile --region $Region --output json 2>$null | Out-Null
+        $awsJsonArguments = @(Get-AwsCommonArguments -Json)
+        & $script:aws ec2 terminate-instances --instance-ids $instanceId @awsJsonArguments 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { $cleanupErrors.Add("exact EC2 termination request") }
-        & $script:aws ec2 wait instance-terminated --instance-ids $instanceId --profile $AwsProfile --region $Region 2>$null
+        $awsCommonArguments = @(Get-AwsCommonArguments)
+        & $script:aws ec2 wait instance-terminated --instance-ids $instanceId @awsCommonArguments 2>$null
         if ($LASTEXITCODE -ne 0) { $cleanupErrors.Add("exact EC2 termination waiter") }
     }
     if ($cleanupErrors.Count -gt 0) {

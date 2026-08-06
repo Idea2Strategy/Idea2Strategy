@@ -7,6 +7,11 @@ on:
         description: Type PREPARE_DEVELOPMENT_RC after the release candidate is approved for artifact publication and planning
         required: true
         type: string
+      database_bootstrap_authorization:
+        description: Type BOOTSTRAP_DEVELOPMENT_DATABASE only when the exact Flyway/seed fingerprint has no reusable receipt
+        required: true
+        default: REUSE_EXISTING_RECEIPT
+        type: string
       apply_reviewed_plan:
         description: Apply the exact saved plan after the second Development environment approval
         required: true
@@ -27,8 +32,65 @@ env:
   TF_INPUT: "false"
 
 jobs:
+  bootstrap-database:
+    if: github.ref == 'refs/heads/develop' && github.event.inputs.release_authorization == 'PREPARE_DEVELOPMENT_RC' && github.event.inputs.database_bootstrap_authorization == 'BOOTSTRAP_DEVELOPMENT_DATABASE'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: development
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify exact AWS account for database bootstrap
+        shell: pwsh
+        run: |
+          $actual = aws sts get-caller-identity --query Account --output text
+          if ($actual -ne '${{ vars.AWS_ACCOUNT_ID }}') { throw 'AWS account mismatch.' }
+
+      - name: Create and verify a missing database bootstrap receipt
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $receiptArguments = @{
+            RootSha = '${{ github.sha }}'
+            ReceiptBucket = 'idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-market-data'
+            AwsProfile = ''
+            AwsRegion = '${{ env.AWS_REGION }}'
+          }
+          $receipt = ./scripts/verify-development-database-bootstrap-receipt.ps1 @receiptArguments -AllowMissingReceipt | ConvertFrom-Json
+          if ($receipt.status -eq 'missing') {
+            terraform -chdir=infra/terraform/environments/development init `
+              -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" `
+              -backend-config="key=idea2strategy/development/terraform.tfstate" `
+              -backend-config="region=${{ env.AWS_REGION }}" `
+              -backend-config="use_lockfile=true" `
+              -backend-config="encrypt=true"
+            $policyRoot = 'proposals/development-runtime-policy/artifacts'
+            $scoringRoot = 'proposals/development-scoring-template/artifacts'
+            $policyManifest = Get-Content "$policyRoot/artifact-manifest.json" -Raw | ConvertFrom-Json
+            $scoringManifest = Get-Content "$scoringRoot/artifact-manifest.json" -Raw | ConvertFrom-Json
+            ./scripts/invoke-development-database-bootstrap.ps1 `
+              -AwsProfile '' `
+              -Region '${{ env.AWS_REGION }}' `
+              -ExpectedAwsAccountId '${{ vars.AWS_ACCOUNT_ID }}' `
+              -PolicySeedSqlPath "$policyRoot/policy-seed.sql" `
+              -PolicySeedSha256 ([string]$policyManifest.artifacts.'policy-seed.sql') `
+              -ScoringSeedSqlPath "$scoringRoot/scoring-template-seed.sql" `
+              -ScoringSeedSha256 ([string]$scoringManifest.artifacts.'scoring-template-seed.sql') `
+              -Execute -Confirm:$false
+          }
+          ./scripts/verify-development-database-bootstrap-receipt.ps1 @receiptArguments
+
   build:
-    if: github.ref == 'refs/heads/develop' && github.event.inputs.release_authorization == 'PREPARE_DEVELOPMENT_RC'
+    needs: bootstrap-database
+    if: always() && (needs.bootstrap-database.result == 'success' || needs.bootstrap-database.result == 'skipped') && github.ref == 'refs/heads/develop' && github.event.inputs.release_authorization == 'PREPARE_DEVELOPMENT_RC'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     outputs:
