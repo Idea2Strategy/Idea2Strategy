@@ -237,6 +237,8 @@ foreach ($needle in @(
     '[switch]$Execute',
     'function Get-AwsCommonArguments',
     'if (-not [string]::IsNullOrWhiteSpace($AwsProfile))',
+    '$awsFallback = ""',
+    'if (-not [string]::IsNullOrWhiteSpace([string]$env:ProgramFiles))',
     '[string]$PolicySeedSqlPath',
     '[string]$PolicySeedSha256',
     '[string]$ScoringSeedSqlPath',
@@ -267,6 +269,7 @@ foreach ($needle in @(
     Assert-Contains $orchestrator $needle "Orchestrator safety boundary is missing: $needle"
 }
 Assert-NotContains $orchestrator '@($Arguments) + @("--profile", $AwsProfile' "GitHub OIDC execution must not pass an empty AWS profile argument."
+Assert-NotContains $orchestrator 'Get-Executable "aws" (Join-Path $env:ProgramFiles' "Linux runners must not evaluate the Windows AWS CLI fallback path."
 
 foreach ($needle in @(
     '[switch]$AllowMissingReceipt',

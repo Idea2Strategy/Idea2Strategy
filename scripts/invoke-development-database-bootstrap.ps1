@@ -86,7 +86,11 @@ $bundleDigest = $validatedBundle.Digest
 $expectedMigrationCount = $validatedBundle.MigrationCount
 
 $terraform = Get-Executable "terraform"
-$script:aws = Get-Executable "aws" (Join-Path $env:ProgramFiles "Amazon/AWSCLIV2/aws.exe")
+$awsFallback = ""
+if (-not [string]::IsNullOrWhiteSpace([string]$env:ProgramFiles)) {
+    $awsFallback = Join-Path $env:ProgramFiles "Amazon/AWSCLIV2/aws.exe"
+}
+$script:aws = Get-Executable "aws" $awsFallback
 $terraformPath = Join-Path $root $TerraformRoot
 $targetText = (& $terraform "-chdir=$terraformPath" output -json database_bootstrap 2>$null) -join "`n"
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($targetText)) {
