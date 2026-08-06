@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')][string]$ReceiptBucket,
     [string]$AwsProfile = "idea2strategy-terraform",
     [string]$AwsRegion = "ap-northeast-2",
+    [ValidatePattern('^[a-z][a-z0-9_]{2,62}$')][string]$RuntimeDatabaseName = "idea2strategy_runtime",
     [string]$BundleRoot = "db/flyway-ci-bundle",
     [string]$PolicyArtifactRoot = "proposals/development-runtime-policy/artifacts",
     [string]$ScoringArtifactRoot = "proposals/development-scoring-template/artifacts",
@@ -22,6 +23,9 @@ Set-StrictMode -Version Latest
 
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "lib/development-database-bootstrap-manifest.ps1")
+if ($RuntimeDatabaseName -ceq "idea2strategy" -or $RuntimeDatabaseName -in @("postgres", "rdsadmin")) {
+    throw "RuntimeDatabaseName must identify the isolated canonical runtime database, not a preserved or administrative database."
+}
 
 function Resolve-RepositoryPath([string]$Path) {
     if ([IO.Path]::IsPathRooted($Path)) { return $Path }
@@ -57,7 +61,8 @@ $expectedScoringVersionCount = @(Get-DevelopmentScoringSeedIds -SeedSqlPath $res
 $artifactFingerprint = Get-DevelopmentDatabaseBootstrapFingerprint `
     -BundleSha256 $bundle.Digest `
     -PolicySeedSha256 $policySeedSha256 `
-    -ScoringSeedSha256 $scoringSeedSha256
+    -ScoringSeedSha256 $scoringSeedSha256 `
+    -DatabaseName $RuntimeDatabaseName
 $exactReceiptKey = "deployment-bootstrap/$RootSha/$($bundle.Digest)/receipt.json"
 $artifactReceiptKey = "deployment-bootstrap/artifacts/$artifactFingerprint/receipt.json"
 
@@ -143,6 +148,7 @@ function Test-ReceiptMatchesArtifacts([object]$Receipt) {
             [string]$Receipt.bundle_sha256 -cne $bundle.Digest -or
             [string]$Receipt.policy_seed_sha256 -cne $policySeedSha256 -or
             [string]$Receipt.scoring_seed_sha256 -cne $scoringSeedSha256 -or
+            [string]$Receipt.database_name -cne $RuntimeDatabaseName -or
             [int]$Receipt.migrations -ne $bundle.MigrationCount -or
             [int]$Receipt.tables -lt 1 -or
             @($Receipt.scoring_versions).Count -ne $expectedScoringVersionCount -or
@@ -211,6 +217,7 @@ if ($null -eq $selected) {
             requested_root_sha = $RootSha
             artifact_fingerprint = $artifactFingerprint
             bundle_sha256 = $bundle.Digest
+            database_name = $RuntimeDatabaseName
             migrations = $bundle.MigrationCount
             required_authorization = "BOOTSTRAP_DEVELOPMENT_DATABASE"
         } | ConvertTo-Json -Compress

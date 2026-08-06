@@ -4,6 +4,7 @@ param(
     [string]$Region = "ap-northeast-2",
     [string]$ExpectedAwsAccountId = "",
     [string]$TerraformRoot = "infra/terraform/environments/development",
+    [ValidatePattern('^[a-z][a-z0-9_]{2,62}$')][string]$RuntimeDatabaseName = "idea2strategy_runtime",
     [string]$InstanceType = "t3.small",
     [string]$PolicySeedSqlPath = "",
     [string]$PolicySeedSha256 = "",
@@ -229,6 +230,9 @@ function Write-Utf8NoBomFile([string]$LiteralPath, [string]$Content) {
 
 if ($Region -ne "ap-northeast-2") { throw "The Development database bootstrap is restricted to ap-northeast-2." }
 if ($InstanceType -notmatch '^t3\.(micro|small|medium)$') { throw "Use a bounded x86 t3 instance for the amd64-only Flyway image." }
+if ($RuntimeDatabaseName -ceq "idea2strategy" -or $RuntimeDatabaseName -in @("postgres", "rdsadmin")) {
+    throw "RuntimeDatabaseName must identify the isolated canonical runtime database, not a preserved or administrative database."
+}
 if ([string]::IsNullOrWhiteSpace($PolicySeedSqlPath) -or -not (Test-Path -LiteralPath $PolicySeedSqlPath -PathType Leaf)) {
     throw "PolicySeedSqlPath must identify the separately approved post-Flyway policy seed SQL artifact."
 }
@@ -296,6 +300,11 @@ if ($null -eq $target) {
 if (-not (Test-DatabaseBootstrapTarget $target)) {
     throw 'Applied database bootstrap target discovery returned an incomplete boundary.'
 }
+# Infrastructure discovery supplies the applied RDS endpoint and IAM/network
+# boundary. The target database is a reviewed release input because the applied
+# SSM/Terraform state can still name the preserved loader database until this
+# same release updates it.
+$target.database_name = $RuntimeDatabaseName
 $bootstrapImageReference = "resolve:ssm:/aws/service/canonical/ubuntu/server/noble/stable/current/amd64/hvm/ebs-gp3/ami-id"
 
 $secretProperties = @($target.runtime_database_secrets.PSObject.Properties)
@@ -323,7 +332,8 @@ $hostScriptDigest = (Get-FileHash -LiteralPath $hostScriptPath -Algorithm SHA256
 $artifactFingerprint = Get-DevelopmentDatabaseBootstrapFingerprint `
     -BundleSha256 $bundleDigest `
     -PolicySeedSha256 $PolicySeedSha256 `
-    -ScoringSeedSha256 $ScoringSeedSha256
+    -ScoringSeedSha256 $ScoringSeedSha256 `
+    -DatabaseName $RuntimeDatabaseName
 
 $artifactPrefix = "deployment-bootstrap/$head/$bundleDigest"
 $archiveKey = "$artifactPrefix/flyway-ci-bundle.tar.gz"
@@ -341,6 +351,7 @@ $safePlan = [ordered]@{
     host_script_sha256 = $hostScriptDigest
     policy_seed_sha256 = $PolicySeedSha256
     scoring_seed_sha256 = $ScoringSeedSha256
+    database_name = $RuntimeDatabaseName
     artifact_fingerprint = $artifactFingerprint
     region = $Region
     instance_type = $InstanceType
@@ -535,6 +546,7 @@ trap - EXIT
     $receipt = [string]$invocation.StandardOutputContent | ConvertFrom-Json
     if ($receipt.status -ne "passed" -or $receipt.root_sha -cne $head -or $receipt.bundle_sha256 -cne $bundleDigest -or
         $receipt.policy_seed_sha256 -cne $PolicySeedSha256 -or $receipt.scoring_seed_sha256 -cne $ScoringSeedSha256 -or
+        [string]$receipt.database_name -cne $RuntimeDatabaseName -or
         @($receipt.scoring_versions).Count -ne $expectedScoringVersionCount -or [int]$receipt.migrations -ne $expectedMigrationCount -or
         [int]$receipt.tables -lt 1 -or
         [int]$receipt.instrument_count -lt 500 -or
@@ -560,6 +572,7 @@ trap - EXIT
         bundle_sha256 = $bundleDigest
         policy_seed_sha256 = $PolicySeedSha256
         scoring_seed_sha256 = $ScoringSeedSha256
+        database_name = $RuntimeDatabaseName
         artifact_fingerprint = $artifactFingerprint
         bootstrap_ami_id = $resolvedBootstrapAmiId
         instance_id = $instanceId

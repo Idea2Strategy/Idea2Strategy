@@ -58,11 +58,22 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $terraformConfig = '${{ vars.TF_VARS_JSON }}' | ConvertFrom-Json -AsHashtable
+          $runtimeDatabaseName = if ($terraformConfig -and $terraformConfig.ContainsKey('runtime_database_name')) {
+            [string]$terraformConfig.runtime_database_name
+          } else {
+            'idea2strategy_runtime'
+          }
+          if ($runtimeDatabaseName -notmatch '^[a-z][a-z0-9_]{2,62}$' -or
+              $runtimeDatabaseName -in @('idea2strategy', 'postgres', 'rdsadmin')) {
+            throw 'runtime_database_name must identify the isolated canonical runtime database.'
+          }
           $receiptArguments = @{
             RootSha = '${{ github.sha }}'
             ReceiptBucket = 'idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-market-data'
             AwsProfile = ''
             AwsRegion = '${{ env.AWS_REGION }}'
+            RuntimeDatabaseName = $runtimeDatabaseName
           }
           $receipt = ./scripts/verify-development-database-bootstrap-receipt.ps1 @receiptArguments -AllowMissingReceipt | ConvertFrom-Json
           if ($receipt.status -ne 'passed') {
@@ -74,6 +85,7 @@ jobs:
               -AwsProfile '' `
               -Region '${{ env.AWS_REGION }}' `
               -ExpectedAwsAccountId '${{ vars.AWS_ACCOUNT_ID }}' `
+              -RuntimeDatabaseName $runtimeDatabaseName `
               -PolicySeedSqlPath "$policyRoot/policy-seed.sql" `
               -PolicySeedSha256 ([string]$policyManifest.artifacts.'policy-seed.sql') `
               -ScoringSeedSqlPath "$scoringRoot/scoring-template-seed.sql" `
@@ -254,11 +266,14 @@ jobs:
       - name: Verify database bootstrap artifact receipt
         shell: pwsh
         run: |
+          $terraformConfig = '${{ vars.TF_VARS_JSON }}' | ConvertFrom-Json -AsHashtable
+          $runtimeDatabaseName = if ($terraformConfig -and $terraformConfig.ContainsKey('runtime_database_name')) { [string]$terraformConfig.runtime_database_name } else { 'idea2strategy_runtime' }
           ./scripts/verify-development-database-bootstrap-receipt.ps1 `
             -RootSha '${{ github.sha }}' `
             -ReceiptBucket 'idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-market-data' `
             -AwsProfile '' `
-            -AwsRegion '${{ env.AWS_REGION }}'
+            -AwsRegion '${{ env.AWS_REGION }}' `
+            -RuntimeDatabaseName $runtimeDatabaseName
 
       - name: Publish immutable ARM64 images and capture registry digests
         id: images
@@ -425,11 +440,13 @@ jobs:
           if ($config.ContainsKey('trading_market_data_feed') -and [string]$config.trading_market_data_feed -cne 'sip') {
             throw 'The Development release supports only the paid Alpaca SIP feed.'
           }
+          $runtimeDatabaseName = if ($config.ContainsKey('runtime_database_name')) { [string]$config.runtime_database_name } else { 'idea2strategy_runtime' }
           $databaseReceipt = ./scripts/verify-development-database-bootstrap-receipt.ps1 `
             -RootSha '${{ github.sha }}' `
             -ReceiptBucket 'idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-market-data' `
             -AwsProfile '' `
-            -AwsRegion '${{ env.AWS_REGION }}' | ConvertFrom-Json
+            -AwsRegion '${{ env.AWS_REGION }}' `
+            -RuntimeDatabaseName $runtimeDatabaseName | ConvertFrom-Json
           if ($databaseReceipt.status -cne 'passed' -or [int]$databaseReceipt.instrument_count -lt 500) {
             throw 'Database bootstrap did not publish a deployment-sized Trading instrument mapping.'
           }

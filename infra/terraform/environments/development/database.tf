@@ -82,7 +82,7 @@ resource "aws_ssm_parameter" "rds_port" {
 resource "aws_ssm_parameter" "rds_name" {
   name  = "${local.parameter_path}/database/name"
   type  = "String"
-  value = aws_db_instance.this.db_name
+  value = var.runtime_database_name
 }
 
 resource "aws_ssm_parameter" "rds_secret_arn" {

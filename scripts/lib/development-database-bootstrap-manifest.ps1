@@ -101,14 +101,16 @@ function Get-DevelopmentDatabaseBootstrapFingerprint {
     param(
         [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$BundleSha256,
         [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$PolicySeedSha256,
-        [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ScoringSeedSha256
+        [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ScoringSeedSha256,
+        [Parameter(Mandatory = $true)][ValidatePattern('^[a-z][a-z0-9_]{2,62}$')][string]$DatabaseName
     )
 
     $material = @(
-        "idea2strategy-development-database-bootstrap-v1"
+        "idea2strategy-development-database-bootstrap-v2"
         "bundle_sha256=$BundleSha256"
         "policy_seed_sha256=$PolicySeedSha256"
         "scoring_seed_sha256=$ScoringSeedSha256"
+        "database_name=$DatabaseName"
     ) -join "`n"
     $material += "`n"
 

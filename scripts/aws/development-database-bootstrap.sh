@@ -578,6 +578,7 @@ jq -cn \
   --arg bundle_sha256 "$bundle_sha256" \
   --arg policy_seed_sha256 "$policy_seed_sha256" \
   --arg scoring_seed_sha256 "$scoring_seed_sha256" \
+  --arg database_name "$database_name" \
   --arg flyway_image "$FLYWAY_IMAGE" \
   --arg aws_cli_image "$AWS_CLI_IMAGE" \
   --argjson migrations "$expected_migration_count" \
@@ -595,4 +596,4 @@ jq -cn \
   --arg rights_version "$rights_version" \
   --arg rights_sha256 "$rights_sha256" \
   --arg rights_expires_at "$rights_expires_at" \
-  '{status:$status,root_sha:$root_sha,bundle_sha256:$bundle_sha256,policy_seed_sha256:$policy_seed_sha256,scoring_seed_sha256:$scoring_seed_sha256,flyway_image:$flyway_image,aws_cli_image:$aws_cli_image,migrations:$migrations,tables:$tables,login_roles:$login_roles,policy_row_counts:$policy_row_counts,policy_versions:$policy_versions,scoring_versions:$scoring_versions,secret_versions:$secret_versions,instrument_count:$instrument_count,rights_expires_at:$rights_expires_at,trading_runtime_artifacts:{"instrument-mapping":{runtime:"market-gateway",key:$instrument_mapping_key,version_id:$instrument_mapping_version,sha256:$instrument_mapping_sha256,local_path:"instruments.json"},"provider-rights":{runtime:"market-gateway",key:$rights_key,version_id:$rights_version,sha256:$rights_sha256,local_path:"alpaca-sip-rights.json"}}}'
+  '{status:$status,root_sha:$root_sha,bundle_sha256:$bundle_sha256,policy_seed_sha256:$policy_seed_sha256,scoring_seed_sha256:$scoring_seed_sha256,database_name:$database_name,flyway_image:$flyway_image,aws_cli_image:$aws_cli_image,migrations:$migrations,tables:$tables,login_roles:$login_roles,policy_row_counts:$policy_row_counts,policy_versions:$policy_versions,scoring_versions:$scoring_versions,secret_versions:$secret_versions,instrument_count:$instrument_count,rights_expires_at:$rights_expires_at,trading_runtime_artifacts:{"instrument-mapping":{runtime:"market-gateway",key:$instrument_mapping_key,version_id:$instrument_mapping_version,sha256:$instrument_mapping_sha256,local_path:"instruments.json"},"provider-rights":{runtime:"market-gateway",key:$rights_key,version_id:$rights_version,sha256:$rights_sha256,local_path:"alpaca-sip-rights.json"}}}'

@@ -63,6 +63,7 @@ $outputs = Read-RequiredFile "infra/terraform/environments/development/outputs.t
 $orchestrator = Read-RequiredFile "scripts/invoke-development-database-bootstrap.ps1"
 $receiptVerifier = Read-RequiredFile "scripts/verify-development-database-bootstrap-receipt.ps1"
 $bootstrap = Read-RequiredFile "scripts/aws/development-database-bootstrap.sh"
+$releaseWorkflow = Read-RequiredFile ".github/workflows/development-release.yml"
 $artifactRoot = Join-Path $root "proposals/development-runtime-policy/artifacts"
 $artifactManifest = Read-RequiredFile "proposals/development-runtime-policy/artifacts/artifact-manifest.json" | ConvertFrom-Json
 $executionPolicy = Read-RequiredFile "proposals/development-runtime-policy/artifacts/execution-policy.json" | ConvertFrom-Json
@@ -99,6 +100,7 @@ $fingerprintInputs = @{
     BundleSha256 = "1" * 64
     PolicySeedSha256 = "2" * 64
     ScoringSeedSha256 = "3" * 64
+    DatabaseName = "idea2strategy_runtime"
 }
 $artifactFingerprint = Get-DevelopmentDatabaseBootstrapFingerprint @fingerprintInputs
 if ($artifactFingerprint -notmatch '^[0-9a-f]{64}$' -or
@@ -108,9 +110,18 @@ if ($artifactFingerprint -notmatch '^[0-9a-f]{64}$' -or
 $changedFingerprint = Get-DevelopmentDatabaseBootstrapFingerprint `
     -BundleSha256 ("4" * 64) `
     -PolicySeedSha256 $fingerprintInputs.PolicySeedSha256 `
-    -ScoringSeedSha256 $fingerprintInputs.ScoringSeedSha256
+    -ScoringSeedSha256 $fingerprintInputs.ScoringSeedSha256 `
+    -DatabaseName $fingerprintInputs.DatabaseName
 if ($changedFingerprint -ceq $artifactFingerprint) {
     throw "Database bootstrap artifact fingerprint must change when an input digest changes."
+}
+$changedDatabaseFingerprint = Get-DevelopmentDatabaseBootstrapFingerprint `
+    -BundleSha256 $fingerprintInputs.BundleSha256 `
+    -PolicySeedSha256 $fingerprintInputs.PolicySeedSha256 `
+    -ScoringSeedSha256 $fingerprintInputs.ScoringSeedSha256 `
+    -DatabaseName "idea2strategy_runtime_next"
+if ($changedDatabaseFingerprint -ceq $artifactFingerprint) {
+    throw "Database bootstrap artifact fingerprint must bind the exact target database."
 }
 
 $publishedBundle = Get-ValidatedDevelopmentFlywayBundle -BundleRoot (Join-Path $root "db/flyway-ci-bundle")
@@ -266,6 +277,7 @@ Assert-Contains $outputs 'database_port            = aws_db_instance.this.port' 
 Assert-Contains $variables 'variable "runtime_database_name"' "The canonical runtime database must be separate from the preserved legacy loader database."
 Assert-Contains $outputs 'database_name            = var.runtime_database_name' "Database bootstrap must target the canonical runtime database."
 Assert-Contains $compute 'database_name                               = var.runtime_database_name' "Every runtime host must target the canonical runtime database."
+Assert-Contains $database 'value = var.runtime_database_name' "The applied SSM database name must identify the canonical runtime database, not the preserved RDS initial database."
 Assert-NotContains $bootstrap '-c "SELECT 1 FROM pg_database' "psql variables are not expanded reliably through -c; use standard input."
 Assert-Contains $bootstrap 'REVOKE CONNECT ON DATABASE "$database_name" FROM $seed_role' "The temporary seed role must relinquish database access before it is dropped."
 Assert-Contains $bootstrap 'REVOKE USAGE ON SCHEMA trading, backtest FROM $seed_role' "The temporary seed role must relinquish schema access before it is dropped."
@@ -331,6 +343,15 @@ foreach ($discoveryBoundary in @(
     Assert-Contains $orchestrator $discoveryBoundary "Applied AWS bootstrap target discovery is missing: $discoveryBoundary"
 }
 Assert-NotContains $orchestrator 'Apply the reviewed Terraform secret-metadata/bootstrap-boundary plan before running this procedure.' "Bootstrap must fall back to exact applied AWS discovery when the local Terraform output schema has changed."
+foreach ($databaseBoundary in @(
+    '[string]$RuntimeDatabaseName = "idea2strategy_runtime"',
+    '$RuntimeDatabaseName -ceq "idea2strategy"',
+    '$target.database_name = $RuntimeDatabaseName',
+    '[string]$receipt.database_name -cne $RuntimeDatabaseName',
+    '-DatabaseName $RuntimeDatabaseName'
+)) {
+    Assert-Contains $orchestrator $databaseBoundary "Orchestrator must bind bootstrap execution and receipt evidence to the reviewed canonical database: $databaseBoundary"
+}
 
 foreach ($needle in @(
     '[switch]$AllowMissingReceipt',
@@ -346,6 +367,9 @@ foreach ($needle in @(
 )) {
     Assert-Contains $receiptVerifier $needle "Receipt reuse boundary is missing: $needle"
 }
+Assert-Contains $receiptVerifier '[string]$RuntimeDatabaseName = "idea2strategy_runtime"' "Receipt verification must name the reviewed canonical database."
+Assert-Contains $receiptVerifier '[string]$Receipt.database_name -cne $RuntimeDatabaseName' "A receipt for another database must not be reusable."
+Assert-Contains $receiptVerifier '-DatabaseName $RuntimeDatabaseName' "Receipt fingerprints must bind the canonical database name."
 Assert-NotContains $receiptVerifier '[string]$receipt.root_sha -cne $RootSha' "Artifact-identical receipts must be reusable across root commits."
 Assert-Contains $receiptVerifier 'function Get-AwsFailureCategory' "Receipt reads must classify AWS failures instead of treating all failures as missing objects."
 Assert-Contains $receiptVerifier 'NoSuchKey' "Only an explicit S3 missing-object response may be treated as a missing receipt."
@@ -447,6 +471,14 @@ foreach ($needle in @(
     'alpaca-sip-rights.json'
 )) {
     Assert-Contains $bootstrap $needle "Host bootstrap safety or verification is missing: $needle"
+}
+Assert-Contains $bootstrap '--arg database_name "$database_name"' "The remote receipt must include the exact database that Flyway changed."
+Assert-Contains $bootstrap 'database_name:$database_name' "The credential-free receipt JSON must bind the exact database target."
+Assert-Contains $releaseWorkflow "runtime_database_name" "The release workflow must derive the reviewed runtime database name from Terraform variables."
+Assert-Contains $releaseWorkflow "RuntimeDatabaseName = `$runtimeDatabaseName" "Receipt lookup and bootstrap execution must receive the same runtime database name."
+$runtimeDatabaseArguments = [regex]::Matches($releaseWorkflow, '(?m)^\s+-RuntimeDatabaseName \$runtimeDatabaseName')
+if ($runtimeDatabaseArguments.Count -ne 3) {
+    throw "Bootstrap execution and both downstream receipt gates must pass the same runtime database name."
 }
 Assert-NotContains $bootstrap 'flyway migrate >&2' "Central multi-service migration bundles must explicitly apply validated late-arriving versions."
 Assert-NotContains $bootstrap 'EXPECTED_MIGRATION_COUNT' "Host bootstrap must receive the locally validated manifest count instead of embedding a migration count."
