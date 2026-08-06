@@ -201,6 +201,10 @@ if ($workflow -notmatch "(?s)bootstrap-database:.*?github\.event\.inputs\.databa
     throw "An explicitly authorized, environment-gated bootstrap must create and re-verify a missing receipt before any release build."
 }
 
+if ($workflow -notmatch "(?s)bootstrap-database:.*?hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e.*?terraform_version: 1\.15\.8.*?terraform_wrapper: false.*?terraform -chdir=infra/terraform/environments/development init.*?build:") {
+    throw "The isolated database bootstrap runner must install the pinned Terraform version before reading remote state outputs."
+}
+
 if ($workflow -notmatch "(?s)build:.*?needs: bootstrap-database.*?needs\.bootstrap-database\.result == 'skipped'.*?Build untrusted ARM64 runtime inputs without AWS credentials") {
     throw "The release build must wait for an authorized bootstrap while allowing the safe receipt-reuse path to skip it."
 }
