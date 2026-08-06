@@ -9,6 +9,8 @@ param(
     [string]$PolicySeedSha256 = "",
     [string]$ScoringSeedSqlPath = "",
     [string]$ScoringSeedSha256 = "",
+    [ValidatePattern('^[0-9]+-[0-9]+$')][string]$ExecutionId = "0-0",
+    [switch]$ReclaimPriorExecution,
     [switch]$Execute
 )
 
@@ -47,7 +49,120 @@ function Get-AwsCommonArguments([switch]$Json) {
     return $arguments
 }
 
-function Remove-StaleBootstrapInstances([object[]]$Instances) {
+function Invoke-WithRetry([scriptblock]$Operation, [string]$Description, [int]$Attempts = 5) {
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            return & $Operation
+        }
+        catch {
+            if ($attempt -eq $Attempts) { throw "$Description failed after $Attempts attempts. $($_.Exception.Message)" }
+            Start-Sleep -Seconds ([Math]::Min(20, $attempt * 4))
+        }
+    }
+}
+
+function Test-DatabaseBootstrapTarget([object]$Candidate) {
+    if ($null -eq $Candidate) { return $false }
+    foreach ($propertyName in @(
+            'artifact_bucket',
+            'database_host',
+            'database_name',
+            'database_port',
+            'instance_profile_name',
+            'role_name',
+            'security_group_id',
+            'subnet_id',
+            'master_secret_arn',
+            'runtime_database_secrets'
+        )) {
+        if ($null -eq $Candidate.PSObject.Properties[$propertyName]) { return $false }
+    }
+    if ([string]$Candidate.artifact_bucket -cne "idea2strategy-dev-$ExpectedAwsAccountId-market-data" -or
+        [string]$Candidate.database_host -notmatch '^[A-Za-z0-9.-]+$' -or
+        [string]$Candidate.database_name -notmatch '^[A-Za-z0-9_]+$' -or
+        [string]$Candidate.database_port -notmatch '^\d+$' -or
+        [string]$Candidate.instance_profile_name -cne 'idea2strategy-dev-database-bootstrap-instance-profile' -or
+        [string]$Candidate.role_name -cne 'idea2strategy-dev-database-bootstrap-role' -or
+        [string]$Candidate.security_group_id -notmatch '^sg-[0-9a-f]+$' -or
+        [string]$Candidate.subnet_id -notmatch '^subnet-[0-9a-f]+$' -or
+        [string]$Candidate.master_secret_arn -notmatch "^arn:aws:secretsmanager:$([regex]::Escape($Region)):${ExpectedAwsAccountId}:secret:") {
+        return $false
+    }
+    $runtimeSecrets = $Candidate.runtime_database_secrets
+    if ($null -eq $runtimeSecrets) { return $false }
+    $secretProperties = @($runtimeSecrets.PSObject.Properties)
+    $observedSecretNames = (($secretProperties.Name | Sort-Object) -join ',')
+    $expectedSecretNames = (($expectedConsumers | Sort-Object) -join ',')
+    if ($observedSecretNames -cne $expectedSecretNames) { return $false }
+    $secretArnPattern = "^arn:aws:secretsmanager:$([regex]::Escape($Region)):${ExpectedAwsAccountId}:secret:"
+    return @($secretProperties | Where-Object { [string]$_.Value -notmatch $secretArnPattern }).Count -eq 0
+}
+
+function Resolve-AppliedDatabaseBootstrapTarget {
+    $parameterNames = @(
+        '/idea2strategy/dev/database/host',
+        '/idea2strategy/dev/database/port',
+        '/idea2strategy/dev/database/name',
+        '/idea2strategy/dev/database/master-secret-arn'
+    )
+    $parameterArguments = @('ssm', 'get-parameters', '--names') + $parameterNames
+    $parameterResponse = Invoke-AwsJson $parameterArguments
+    $parameterValues = @{}
+    foreach ($parameter in @($parameterResponse.Parameters)) {
+        $parameterValues[[string]$parameter.Name] = [string]$parameter.Value
+    }
+    if ($parameterValues.Count -ne $parameterNames.Count) {
+        throw 'Applied database bootstrap SSM parameters are incomplete.'
+    }
+
+    $subnets = Invoke-AwsJson @('ec2', 'describe-subnets', '--filters', 'Name=tag:Name,Values=idea2strategy-dev-public-a', 'Name=state,Values=available')
+    $subnet = @($subnets.Subnets)
+    if ($subnet.Count -ne 1 -or [string]$subnet[0].SubnetId -notmatch '^subnet-[0-9a-f]+$') {
+        throw 'Unable to discover the exact applied database bootstrap subnet.'
+    }
+    $securityGroups = Invoke-AwsJson @('ec2', 'describe-security-groups', '--filters', 'Name=group-name,Values=idea2strategy-dev-database-bootstrap')
+    $securityGroup = @($securityGroups.SecurityGroups)
+    if ($securityGroup.Count -ne 1 -or [string]$securityGroup[0].GroupId -notmatch '^sg-[0-9a-f]+$') {
+        throw 'Unable to discover the exact applied database bootstrap security group.'
+    }
+    if ([string]$subnet[0].VpcId -cne [string]$securityGroup[0].VpcId) {
+        throw 'Applied database bootstrap subnet and security group belong to different VPCs.'
+    }
+
+    $instanceProfileName = 'idea2strategy-dev-database-bootstrap-instance-profile'
+    $roleName = 'idea2strategy-dev-database-bootstrap-role'
+    $instanceProfile = Invoke-AwsJson @('iam', 'get-instance-profile', '--instance-profile-name', $instanceProfileName)
+    $profileRoles = @($instanceProfile.InstanceProfile.Roles)
+    if ($profileRoles.Count -ne 1 -or [string]$profileRoles[0].RoleName -cne $roleName) {
+        throw 'Applied database bootstrap instance profile has an unexpected role attachment.'
+    }
+    $null = Invoke-AwsJson @('iam', 'get-role', '--role-name', $roleName)
+    $runtimeSecrets = [ordered]@{}
+    foreach ($consumer in $expectedConsumers) {
+        $secret = Invoke-AwsJson @('secretsmanager', 'describe-secret', '--secret-id', "idea2strategy-dev/database/$consumer-runtime")
+        if ([string]$secret.ARN -notmatch "^arn:aws:secretsmanager:$([regex]::Escape($Region)):${ExpectedAwsAccountId}:secret:") {
+            throw "Unable to discover the applied runtime database secret for '$consumer'."
+        }
+        $runtimeSecrets[$consumer] = [string]$secret.ARN
+    }
+    $artifactBucket = "idea2strategy-dev-$ExpectedAwsAccountId-market-data"
+    $null = Invoke-AwsJson @('s3api', 'head-bucket', '--bucket', $artifactBucket)
+
+    return [pscustomobject]@{
+        artifact_bucket = $artifactBucket
+        database_host = $parameterValues['/idea2strategy/dev/database/host']
+        database_name = $parameterValues['/idea2strategy/dev/database/name']
+        database_port = $parameterValues['/idea2strategy/dev/database/port']
+        instance_profile_name = $instanceProfileName
+        role_name = $roleName
+        security_group_id = [string]$securityGroup[0].GroupId
+        subnet_id = [string]$subnet[0].SubnetId
+        master_secret_arn = $parameterValues['/idea2strategy/dev/database/master-secret-arn']
+        runtime_database_secrets = [pscustomobject]$runtimeSecrets
+    }
+}
+
+function Remove-StaleBootstrapInstances([object[]]$Instances, [string]$CurrentExecutionId) {
     $staleCutoff = [DateTimeOffset]::UtcNow.AddMinutes(-60)
     $staleIds = [Collections.Generic.List[string]]::new()
     $activeIds = [Collections.Generic.List[string]]::new()
@@ -57,6 +172,8 @@ function Remove-StaleBootstrapInstances([object[]]$Instances) {
             throw "Existing database bootstrap instance has an invalid ID."
         }
         $state = [string]$instance.State.Name
+        $executionTag = @($instance.Tags | Where-Object { [string]$_.Key -ceq 'ExecutionId' } | Select-Object -First 1)
+        $observedExecutionId = if ($executionTag.Count -eq 1) { [string]$executionTag[0].Value } else { '' }
         $launchTime = [DateTimeOffset]::MaxValue
         if ($null -ne $instance.PSObject.Properties['LaunchTime']) {
             $parsedLaunchTime = [DateTimeOffset]::MinValue
@@ -64,7 +181,8 @@ function Remove-StaleBootstrapInstances([object[]]$Instances) {
                 $launchTime = $parsedLaunchTime
             }
         }
-        if ($state -in @('stopped', 'stopping') -or $launchTime -le $staleCutoff) {
+        if ($state -in @('stopped', 'stopping') -or $launchTime -le $staleCutoff -or
+            ($ReclaimPriorExecution -and $observedExecutionId -cne $CurrentExecutionId)) {
             $staleIds.Add($instanceId)
         }
         else {
@@ -139,38 +257,46 @@ $validatedBundle = Get-ValidatedDevelopmentFlywayBundle -BundleRoot $bundleRoot
 $bundleDigest = $validatedBundle.Digest
 $expectedMigrationCount = $validatedBundle.MigrationCount
 
-$terraform = Get-Executable "terraform"
 $awsFallback = ""
 if (-not [string]::IsNullOrWhiteSpace([string]$env:ProgramFiles)) {
     $awsFallback = Join-Path $env:ProgramFiles "Amazon/AWSCLIV2/aws.exe"
 }
 $script:aws = Get-Executable "aws" $awsFallback
-$terraformPath = Join-Path $root $TerraformRoot
-$targetText = (& $terraform "-chdir=$terraformPath" output -json database_bootstrap 2>$null) -join "`n"
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($targetText)) {
-    throw "Apply the reviewed Terraform secret-metadata/bootstrap-boundary plan before running this procedure."
-}
-$target = $targetText | ConvertFrom-Json
-
 $caller = Invoke-AwsJson @("sts", "get-caller-identity")
 if ([string]::IsNullOrWhiteSpace($ExpectedAwsAccountId) -or $ExpectedAwsAccountId -notmatch '^\d{12}$') {
     throw "ExpectedAwsAccountId must be the reviewed 12-digit Development account."
 }
 if ([string]$caller.Account -cne $ExpectedAwsAccountId) { throw "AWS account mismatch." }
-$images = Invoke-AwsJson @(
-    "ec2", "describe-images",
-    "--owners", "099720109477",
-    "--filters",
-    "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*",
-    "Name=architecture,Values=x86_64",
-    "Name=virtualization-type,Values=hvm",
-    "Name=state,Values=available"
-)
-$bootstrapImage = @($images.Images | Sort-Object CreationDate -Descending | Select-Object -First 1)
-if ($bootstrapImage.Count -ne 1 -or [string]$bootstrapImage[0].ImageId -notmatch '^ami-[0-9a-f]+$') {
-    throw "Unable to pin one current Canonical Ubuntu 24.04 amd64 bootstrap AMI."
+$target = $null
+$terraform = Get-Command terraform -ErrorAction SilentlyContinue
+if ($null -ne $terraform) {
+    $terraformPath = Join-Path $root $TerraformRoot
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $targetText = (& $terraform.Source "-chdir=$terraformPath" output -json database_bootstrap 2>$null) -join "`n"
+        $targetExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($targetExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($targetText)) {
+        try {
+            $candidateTarget = $targetText | ConvertFrom-Json
+            if (Test-DatabaseBootstrapTarget $candidateTarget) { $target = $candidateTarget }
+        }
+        catch {
+            $target = $null
+        }
+    }
 }
-$bootstrapAmiId = [string]$bootstrapImage[0].ImageId
+if ($null -eq $target) {
+    $target = Resolve-AppliedDatabaseBootstrapTarget
+}
+if (-not (Test-DatabaseBootstrapTarget $target)) {
+    throw 'Applied database bootstrap target discovery returned an incomplete boundary.'
+}
+$bootstrapImageReference = "resolve:ssm:/aws/service/canonical/ubuntu/server/noble/stable/current/amd64/hvm/ebs-gp3/ami-id"
 
 $secretProperties = @($target.runtime_database_secrets.PSObject.Properties)
 $observedSecretNames = (($secretProperties.Name | Sort-Object) -join ',')
@@ -218,7 +344,7 @@ $safePlan = [ordered]@{
     artifact_fingerprint = $artifactFingerprint
     region = $Region
     instance_type = $InstanceType
-    ami_id = $bootstrapAmiId
+    ami_reference = $bootstrapImageReference
     consumers = $expectedConsumers
     artifact_prefix = $artifactPrefix
     artifact_receipt_key = $artifactReceiptKey
@@ -236,6 +362,9 @@ $instanceId = ""
 $policyAttached = $false
 $commandId = ""
 $result = $null
+$primaryError = $null
+$cleanupErrors = [Collections.Generic.List[string]]::new()
+$cleanupFailure = ""
 try {
     $archiveUpload = Invoke-AwsJson @("s3api", "put-object", "--bucket", [string]$target.artifact_bucket, "--key", $archiveKey, "--body", $archivePath)
     $scriptUpload = Invoke-AwsJson @("s3api", "put-object", "--bucket", [string]$target.artifact_bucket, "--key", $hostScriptKey, "--body", $hostScriptPath)
@@ -259,9 +388,9 @@ try {
                 Resource = @([string]$target.master_secret_arn)
             },
             [ordered]@{
-                Sid = "WriteOnlyRuntimeCredentialVersions"
+                Sid = "RotateRuntimeCredentialVersions"
                 Effect = "Allow"
-                Action = @("secretsmanager:PutSecretValue", "secretsmanager:DescribeSecret")
+                Action = @("secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecretVersionStage", "secretsmanager:DescribeSecret")
                 Resource = @($secretResources | Select-Object -Skip 1)
             }
         )
@@ -271,6 +400,9 @@ try {
     # PutRolePolicy: this exact secret policy exists only for the command window.
     $null = Invoke-AwsJson @("iam", "put-role-policy", "--role-name", [string]$target.role_name, "--policy-name", $inlinePolicyName, "--policy-document", "file://$policyPath")
     $policyAttached = $true
+    $null = Invoke-WithRetry {
+        Invoke-AwsJson @('iam', 'get-role-policy', '--role-name', [string]$target.role_name, '--policy-name', $inlinePolicyName)
+    } 'Transient database bootstrap IAM policy propagation'
 
     $userDataPath = Join-Path $temporaryRoot "bootstrap-user-data.sh"
     $userData = @'
@@ -278,22 +410,34 @@ try {
 set -Eeuo pipefail
 set +x
 export DEBIAN_FRONTEND=noninteractive
+failure_marker=/var/lib/idea2strategy-database-bootstrap-provisioning-failed
+trap 'status=$?; if [[ $status -ne 0 ]]; then printf "Database bootstrap host provisioning failed with status %s.\n" "$status" >"$failure_marker"; fi' EXIT
+retry_command() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    "$@" && return 0
+    sleep $((attempt * 5))
+  done
+  return 1
+}
 systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || true
-apt-get update -qq
-apt-get install -y -qq docker.io jq postgresql-client python3 openssl ca-certificates
-systemctl enable --now docker
+retry_command apt-get update -qq
+retry_command apt-get install -y -qq docker.io jq postgresql-client python3 openssl ca-certificates
+retry_command systemctl enable --now docker
 touch /var/lib/idea2strategy-database-bootstrap-ready
+rm -f "$failure_marker"
+trap - EXIT
 '@
     Write-Utf8NoBomFile $userDataPath $userData
 
     $existing = Invoke-AwsJson @("ec2", "describe-instances", "--filters", "Name=tag:Purpose,Values=idea2strategy-development-database-bootstrap", "Name=instance-state-name,Values=pending,running,stopping,stopped")
     $existingInstances = @($existing.Reservations | ForEach-Object { $_.Instances })
-    Remove-StaleBootstrapInstances $existingInstances
+    Remove-StaleBootstrapInstances $existingInstances $ExecutionId
 
-    $tagSpecification = "ResourceType=instance,Tags=[{Key=Name,Value=idea2strategy-dev-database-bootstrap},{Key=Project,Value=idea2strategy},{Key=Environment,Value=dev},{Key=Purpose,Value=idea2strategy-development-database-bootstrap},{Key=SourceCommit,Value=$head}]"
+    $tagSpecification = "ResourceType=instance,Tags=[{Key=Name,Value=idea2strategy-dev-database-bootstrap},{Key=Project,Value=idea2strategy},{Key=Environment,Value=dev},{Key=Purpose,Value=idea2strategy-development-database-bootstrap},{Key=SourceCommit,Value=$head},{Key=ExecutionId,Value=$ExecutionId}]"
     $launch = Invoke-AwsJson @(
         "ec2", "run-instances",
-        "--image-id", $bootstrapAmiId,
+        "--image-id", $bootstrapImageReference,
         "--instance-type", $InstanceType,
         "--iam-instance-profile", "Name=$([string]$target.instance_profile_name)",
         "--subnet-id", [string]$target.subnet_id,
@@ -309,7 +453,9 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         "--count", "1"
     )
     $instanceId = [string]$launch.Instances[0].InstanceId
+    $resolvedBootstrapAmiId = [string]$launch.Instances[0].ImageId
     if ($instanceId -notmatch '^i-[0-9a-f]+$') { throw "EC2 did not return one exact bootstrap instance ID." }
+    if ($resolvedBootstrapAmiId -notmatch '^ami-[0-9a-f]+$') { throw "EC2 did not resolve the Canonical bootstrap image reference." }
     $awsCommonArguments = @(Get-AwsCommonArguments)
     & $script:aws ec2 wait instance-running --instance-ids $instanceId @awsCommonArguments
     if ($LASTEXITCODE -ne 0) { throw "Bootstrap instance did not reach running state." }
@@ -335,12 +481,14 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     $scoringSeedRemote = "$remoteRoot/scoring-template-seed.sql"
     $command = @(
         "set -Eeuo pipefail; set +x",
-        "while [ ! -f /var/lib/idea2strategy-database-bootstrap-ready ]; do sleep 5; done",
+        'retry() { for attempt in 1 2 3 4 5; do "$@" && return 0; sleep $((attempt * 5)); done; return 1; }',
+        'for attempt in $(seq 1 180); do if [ -f /var/lib/idea2strategy-database-bootstrap-ready ]; then break; fi; if [ -f /var/lib/idea2strategy-database-bootstrap-provisioning-failed ]; then cat /var/lib/idea2strategy-database-bootstrap-provisioning-failed >&2; exit 70; fi; sleep 5; done; if [ ! -f /var/lib/idea2strategy-database-bootstrap-ready ]; then echo "Database bootstrap host readiness timed out." >&2; exit 70; fi',
+        "retry docker pull $(ConvertTo-BashLiteral $awsCliImage) >/dev/null",
         "install -d -m 0700 $(ConvertTo-BashLiteral $remoteRoot)",
-        "docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $archiveKey) --version-id $(ConvertTo-BashLiteral ([string]$archiveUpload.VersionId)) $(ConvertTo-BashLiteral $archiveRemote) >/dev/null",
-        "docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $hostScriptKey) --version-id $(ConvertTo-BashLiteral ([string]$scriptUpload.VersionId)) $(ConvertTo-BashLiteral $scriptRemote) >/dev/null",
-        "docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $policySeedKey) --version-id $(ConvertTo-BashLiteral ([string]$policySeedUpload.VersionId)) $(ConvertTo-BashLiteral $policySeedRemote) >/dev/null",
-        "docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $scoringSeedKey) --version-id $(ConvertTo-BashLiteral ([string]$scoringSeedUpload.VersionId)) $(ConvertTo-BashLiteral $scoringSeedRemote) >/dev/null",
+        "retry docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $archiveKey) --version-id $(ConvertTo-BashLiteral ([string]$archiveUpload.VersionId)) $(ConvertTo-BashLiteral $archiveRemote) >/dev/null",
+        "retry docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $hostScriptKey) --version-id $(ConvertTo-BashLiteral ([string]$scriptUpload.VersionId)) $(ConvertTo-BashLiteral $scriptRemote) >/dev/null",
+        "retry docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $policySeedKey) --version-id $(ConvertTo-BashLiteral ([string]$policySeedUpload.VersionId)) $(ConvertTo-BashLiteral $policySeedRemote) >/dev/null",
+        "retry docker run --rm --network host --volume $(ConvertTo-BashLiteral "${remoteRoot}:${remoteRoot}") --env AWS_REGION=$(ConvertTo-BashLiteral $Region) --env AWS_DEFAULT_REGION=$(ConvertTo-BashLiteral $Region) $(ConvertTo-BashLiteral $awsCliImage) s3api get-object --bucket $(ConvertTo-BashLiteral ([string]$target.artifact_bucket)) --key $(ConvertTo-BashLiteral $scoringSeedKey) --version-id $(ConvertTo-BashLiteral ([string]$scoringSeedUpload.VersionId)) $(ConvertTo-BashLiteral $scoringSeedRemote) >/dev/null",
         "printf '%s  %s\n' $(ConvertTo-BashLiteral $hostScriptDigest) $(ConvertTo-BashLiteral $scriptRemote) | sha256sum --check --status",
         "chmod 0700 $(ConvertTo-BashLiteral $scriptRemote)",
         "$(ConvertTo-BashLiteral $scriptRemote) --archive $(ConvertTo-BashLiteral $archiveRemote) --archive-sha256 $(ConvertTo-BashLiteral $archiveDigest) --bundle-sha256 $(ConvertTo-BashLiteral $bundleDigest) --expected-migration-count $(ConvertTo-BashLiteral ([string]$expectedMigrationCount)) --database-host $(ConvertTo-BashLiteral ([string]$target.database_host)) --database-name $(ConvertTo-BashLiteral ([string]$target.database_name)) --database-port $(ConvertTo-BashLiteral ([string]$target.database_port)) --master-secret-arn $(ConvertTo-BashLiteral ([string]$target.master_secret_arn)) --policy-seed-sql $(ConvertTo-BashLiteral $policySeedRemote) --policy-seed-sha256 $(ConvertTo-BashLiteral $PolicySeedSha256) --scoring-seed-sql $(ConvertTo-BashLiteral $scoringSeedRemote) --scoring-seed-sha256 $(ConvertTo-BashLiteral $ScoringSeedSha256) --region $(ConvertTo-BashLiteral $Region) --root-sha $(ConvertTo-BashLiteral $head) --runtime-secret-arns-base64 $(ConvertTo-BashLiteral $secretArnBase64) --work-directory $(ConvertTo-BashLiteral "$remoteRoot/work")"
@@ -404,6 +552,7 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         policy_seed_sha256 = $PolicySeedSha256
         scoring_seed_sha256 = $ScoringSeedSha256
         artifact_fingerprint = $artifactFingerprint
+        bootstrap_ami_id = $resolvedBootstrapAmiId
         instance_id = $instanceId
         command_id = $commandId
         receipt_key = $receiptKey
@@ -411,8 +560,10 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         credential_values_printed = $false
     }
 }
+catch {
+    $primaryError = $_
+}
 finally {
-    $cleanupErrors = [Collections.Generic.List[string]]::new()
     if ($policyAttached) {
         # DeleteRolePolicy: revoke master-secret access before instance cleanup.
         $awsCommonArguments = @(Get-AwsCommonArguments)
@@ -429,8 +580,16 @@ finally {
         if ($LASTEXITCODE -ne 0) { $cleanupErrors.Add("exact EC2 termination waiter") }
     }
     if ($cleanupErrors.Count -gt 0) {
-        throw "Database bootstrap cleanup requires immediate operator attention: $($cleanupErrors -join ', ')."
+        $cleanupFailure = "Database bootstrap cleanup requires immediate operator attention: $($cleanupErrors -join ', ')."
     }
 }
+
+if ($null -ne $primaryError) {
+    if (-not [string]::IsNullOrWhiteSpace($cleanupFailure)) {
+        throw "$($primaryError.Exception.Message) Cleanup also failed: $cleanupFailure"
+    }
+    throw $primaryError
+}
+if (-not [string]::IsNullOrWhiteSpace($cleanupFailure)) { throw $cleanupFailure }
 
 $result | ConvertTo-Json

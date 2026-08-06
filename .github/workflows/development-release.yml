@@ -35,18 +35,13 @@ jobs:
   bootstrap-database:
     if: github.ref == 'refs/heads/develop' && github.event.inputs.release_authorization == 'PREPARE_DEVELOPMENT_RC' && github.event.inputs.database_bootstrap_authorization == 'BOOTSTRAP_DEVELOPMENT_DATABASE'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     environment: development
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           submodules: recursive
-
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_version: 1.15.8
-          terraform_wrapper: false
 
       - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
@@ -71,12 +66,6 @@ jobs:
           }
           $receipt = ./scripts/verify-development-database-bootstrap-receipt.ps1 @receiptArguments -AllowMissingReceipt | ConvertFrom-Json
           if ($receipt.status -eq 'missing') {
-            terraform -chdir=infra/terraform/environments/development init `
-              -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" `
-              -backend-config="key=idea2strategy/development/terraform.tfstate" `
-              -backend-config="region=${{ env.AWS_REGION }}" `
-              -backend-config="use_lockfile=true" `
-              -backend-config="encrypt=true"
             $policyRoot = 'proposals/development-runtime-policy/artifacts'
             $scoringRoot = 'proposals/development-scoring-template/artifacts'
             $policyManifest = Get-Content "$policyRoot/artifact-manifest.json" -Raw | ConvertFrom-Json
@@ -89,6 +78,8 @@ jobs:
               -PolicySeedSha256 ([string]$policyManifest.artifacts.'policy-seed.sql') `
               -ScoringSeedSqlPath "$scoringRoot/scoring-template-seed.sql" `
               -ScoringSeedSha256 ([string]$scoringManifest.artifacts.'scoring-template-seed.sql') `
+              -ExecutionId '${{ github.run_id }}-${{ github.run_attempt }}' `
+              -ReclaimPriorExecution `
               -Execute -Confirm:$false
           }
           ./scripts/verify-development-database-bootstrap-receipt.ps1 @receiptArguments
@@ -115,7 +106,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $tag = "rc-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          $tag = "rc-${{ github.sha }}-${{ github.run_id }}"
           $images = @(
             @{ name='admin-mcp'; context='backend'; file='backend/apps/admin-mcp/Dockerfile' },
             @{ name='backend-api'; context='backend'; file='backend/apps/backend-api/Dockerfile' },
@@ -203,17 +194,18 @@ jobs:
         id: release
         shell: pwsh
         run: |
-          $releaseId = "${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          $releaseId = "${{ github.sha }}-${{ github.run_id }}"
           tar -czf "$env:RUNNER_TEMP/frontend.tgz" -C ui/dist .
           "release_id=$releaseId" >> $env:GITHUB_OUTPUT
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: development-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: development-${{ github.sha }}-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/runtime-images.tar
             ${{ runner.temp }}/frontend.tgz
-          retention-days: 1
+          retention-days: 7
+          overwrite: true
           if-no-files-found: error
 
   prepare-and-plan:
@@ -236,7 +228,7 @@ jobs:
           submodules: recursive
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: development-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: development-${{ github.sha }}-${{ github.run_id }}
           path: ${{ runner.temp }}/release
 
       - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
@@ -275,7 +267,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           docker load --input "$env:RUNNER_TEMP/release/runtime-images.tar"
           $registry = '${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com'
-          $tag = "rc-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          $tag = "rc-${{ github.sha }}-${{ github.run_id }}"
           aws ecr get-login-password | docker login --username AWS --password-stdin $registry
           $names = @('admin-mcp','backend-api','backend-batch','backend-worker','backtest-api','backtest-worker','market-gateway','pipeline-worker','trading-worker')
           $digests = @{}
@@ -284,10 +276,32 @@ jobs:
             $target = "$registry/idea2strategy-dev/${name}:$tag"
             $platform = docker image inspect $source --format '{{.Os}}/{{.Architecture}}'
             if ([string]$platform -cne 'linux/arm64') { throw "Built image has unexpected platform: ${name}/$platform" }
+            $sourceImageId = [string](docker image inspect $source --format '{{.Id}}')
+            if ($LASTEXITCODE -ne 0 -or $sourceImageId -notmatch '^sha256:[0-9a-f]{64}$') {
+              throw "Unable to fingerprint the built image: $name"
+            }
             docker tag $source $target
-            docker push $target
-            if ($LASTEXITCODE -ne 0) { throw "Image publish failed: $name" }
-            $digest = aws ecr describe-images --repository-name "idea2strategy-dev/$name" --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text
+            $digest = [string](aws ecr list-images `
+              --repository-name "idea2strategy-dev/$name" `
+              --filter tagStatus=TAGGED `
+              --query "imageIds[?imageTag=='$tag'].imageDigest | [0]" `
+              --output text)
+            if ($LASTEXITCODE -ne 0) { throw "Unable to inspect the immutable ECR tag: $name" }
+            if ([string]::IsNullOrWhiteSpace($digest) -or $digest -ceq 'None') {
+              docker push $target
+              if ($LASTEXITCODE -ne 0) { throw "Image publish failed: $name" }
+              $digest = [string](aws ecr describe-images --repository-name "idea2strategy-dev/$name" --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text)
+            }
+            else {
+              if ($digest -notmatch '^sha256:[0-9a-f]{64}$') { throw "Existing ECR digest is invalid: $name" }
+              docker pull --platform linux/arm64 $target | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Unable to verify the existing immutable ECR image: $name" }
+              $existingImageId = [string](docker image inspect $target --format '{{.Id}}')
+              if ($LASTEXITCODE -ne 0 -or $existingImageId -cne $sourceImageId) {
+                throw "Immutable ECR image fingerprint collision: $name"
+              }
+              Write-Output "Reusing verified immutable ECR image: $name@$digest"
+            }
             if ($digest -notmatch '^sha256:[0-9a-f]{64}$') { throw "Invalid ECR digest for $name." }
             $digests[$name] = $digest
           }
@@ -349,15 +363,52 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $bucket = "idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-frontend"
           $release = '${{ needs.build.outputs.release_id }}'
-          $existingJson = @(aws s3api list-objects-v2 --bucket $bucket --prefix "_releases/$release/" --max-keys 1 --output json)
-          if ($LASTEXITCODE -ne 0) { throw "Unable to inspect the immutable frontend release prefix." }
-          $existingResponse = ($existingJson -join "`n") | ConvertFrom-Json
-          if ($null -eq $existingResponse.KeyCount) { throw "S3 returned no KeyCount for the frontend release prefix." }
-          if ([int]$existingResponse.KeyCount -ne 0) { throw "Frontend release prefix already exists: $release" }
           New-Item -ItemType Directory "$env:RUNNER_TEMP/frontend" -Force | Out-Null
           tar -xzf "$env:RUNNER_TEMP/release/frontend.tgz" -C "$env:RUNNER_TEMP/frontend"
-          aws s3 sync "$env:RUNNER_TEMP/frontend" "s3://$bucket/_releases/$release/" --cache-control 'public,max-age=31536000,immutable' --exclude 'index.html'
+
+          $frontendRoot = (Resolve-Path "$env:RUNNER_TEMP/frontend").Path
+          $fingerprintLines = @(Get-ChildItem -LiteralPath $frontendRoot -Recurse -File | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($frontendRoot, $_.FullName).Replace('\', '/')
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$relative`t$hash"
+          } | Sort-Object -CaseSensitive)
+          if ($fingerprintLines.Count -eq 0 -or -not (Test-Path -LiteralPath "$frontendRoot/index.html" -PathType Leaf)) {
+            throw 'Frontend release bundle is incomplete.'
+          }
+          $fingerprintMaterial = ($fingerprintLines -join "`n") + "`n"
+          $sha256 = [Security.Cryptography.SHA256]::Create()
+          try {
+            $contentFingerprint = ([BitConverter]::ToString($sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($fingerprintMaterial)))).Replace('-', '').ToLowerInvariant()
+          } finally {
+            $sha256.Dispose()
+          }
+          $releaseMarkerKey = "_releases/$release/.release-content.sha256"
+          $markerPath = "$env:RUNNER_TEMP/frontend-release.sha256"
+          [IO.File]::WriteAllText($markerPath, "$contentFingerprint`n", [Text.UTF8Encoding]::new($false))
+
+          $markerListingJson = @(aws s3api list-objects-v2 --bucket $bucket --prefix $releaseMarkerKey --max-keys 1 --output json)
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the immutable frontend completion marker.' }
+          $markerListing = ($markerListingJson -join "`n") | ConvertFrom-Json
+          $markerExists = $null -ne $markerListing.PSObject.Properties['Contents'] -and
+            @($markerListing.Contents | Where-Object { [string]$_.Key -ceq $releaseMarkerKey }).Count -eq 1
+          if ($markerExists) {
+            $existingMarkerPath = "$env:RUNNER_TEMP/existing-frontend-release.sha256"
+            aws s3api get-object --bucket $bucket --key $releaseMarkerKey $existingMarkerPath | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to read the immutable frontend completion marker.' }
+            $existingFingerprint = (Get-Content -LiteralPath $existingMarkerPath -Raw).Trim()
+            if ($existingFingerprint -cne $contentFingerprint) {
+              throw "Frontend release content fingerprint collision: $release"
+            }
+            Write-Output "Reusing verified immutable frontend release: $release"
+            return
+          }
+
+          aws s3 sync "$frontendRoot" "s3://$bucket/_releases/$release/" --delete --cache-control 'public,max-age=31536000,immutable' --exclude 'index.html' --exclude '.release-content.sha256'
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend asset sync failed.' }
           aws s3 cp "$env:RUNNER_TEMP/frontend/index.html" "s3://$bucket/_releases/$release/index.html" --cache-control 'no-store' --content-type 'text/html'
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend index publication failed.' }
+          aws s3 cp $markerPath "s3://$bucket/$releaseMarkerKey" --cache-control 'no-store' --content-type 'text/plain'
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend completion marker publication failed.' }
 
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:

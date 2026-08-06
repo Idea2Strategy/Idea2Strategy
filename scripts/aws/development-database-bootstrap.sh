@@ -71,9 +71,37 @@ aws() {
     "$AWS_CLI_IMAGE" "$@"
 }
 
+pull_image() {
+  local image="$1" attempt
+  for attempt in 1 2 3 4 5; do
+    docker pull "$image" >/dev/null && return 0
+    sleep $((attempt * 5))
+  done
+  echo "Database bootstrap image pull failed after retries: $image" >&2
+  return 1
+}
+
+aws_retry() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    aws "$@" && return 0
+    sleep $((attempt * 5))
+  done
+  echo 'Database bootstrap AWS command failed after retries.' >&2
+  return 1
+}
+
 master_json=''
 seed_role='idea2strategy_policy_seed_bootstrap'
 declare -A passwords=()
+declare -A old_passwords=()
+declare -A old_versions=()
+declare -A new_versions=()
+declare -A promoted_versions=()
+rotation_started=false
+rotation_committed=false
+initial_rotation=false
+pending_cleanup_complete=false
 drop_seed_role() {
   local exists
   exists="$(PGUSER="$master_username" PGPASSWORD="$master_password" psql -X -qAt -v ON_ERROR_STOP=1 -c \
@@ -89,17 +117,77 @@ DROP ROLE $seed_role;
 SQL
   fi
 }
+rollback_runtime_credentials() {
+  local consumer secret_arn rollback_sql
+  local rollback_failed=false
+  if [[ "$rotation_started" == true && "$rotation_committed" != true ]]; then
+    rollback_sql="$work_directory/runtime-roles-rollback.sql"
+    {
+      echo 'BEGIN;'
+      if [[ "$initial_rotation" == true ]]; then
+        for consumer in "${CONSUMERS[@]}"; do
+          printf "SELECT format('REVOKE %%I FROM %%I', 'idea2strategy_%s', 'idea2strategy_%s_runtime') WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_%s_runtime') \\gexec\n" "$consumer" "$consumer" "$consumer"
+          printf 'DROP ROLE IF EXISTS idea2strategy_%s_runtime;\n' "$consumer"
+        done
+      else
+        for consumer in "${CONSUMERS[@]}"; do
+          printf "ALTER ROLE idea2strategy_%s_runtime PASSWORD '%s';\n" "$consumer" "${old_passwords[$consumer]}"
+        done
+      fi
+      echo 'COMMIT;'
+    } >"$rollback_sql"
+    chmod 0600 "$rollback_sql"
+    PGUSER="$master_username" PGPASSWORD="$master_password" psql -X -q -v ON_ERROR_STOP=1 -f "$rollback_sql" >/dev/null || rollback_failed=true
+    rm -f -- "$rollback_sql"
+
+    for consumer in "${CONSUMERS[@]}"; do
+      if [[ -n "${promoted_versions[$consumer]:-}" ]]; then
+        secret_arn="$(jq -er --arg consumer "$consumer" '.[$consumer]' "$runtime_secret_arns_file")"
+        if [[ "$initial_rotation" == true && -z "${old_versions[$consumer]:-}" ]]; then
+          aws_retry secretsmanager update-secret-version-stage --region "$region" --secret-id "$secret_arn" \
+            --version-stage AWSCURRENT --remove-from-version-id "${new_versions[$consumer]}" >/dev/null || rollback_failed=true
+        else
+          aws_retry secretsmanager update-secret-version-stage --region "$region" --secret-id "$secret_arn" \
+            --version-stage AWSCURRENT --move-to-version-id "${old_versions[$consumer]}" \
+            --remove-from-version-id "${new_versions[$consumer]}" >/dev/null || rollback_failed=true
+        fi
+      fi
+    done
+  fi
+
+  if [[ "$pending_cleanup_complete" != true ]]; then
+    for consumer in "${CONSUMERS[@]}"; do
+      if [[ -n "${new_versions[$consumer]:-}" ]]; then
+        secret_arn="$(jq -er --arg consumer "$consumer" '.[$consumer]' "$runtime_secret_arns_file")"
+        aws_retry secretsmanager update-secret-version-stage --region "$region" --secret-id "$secret_arn" \
+          --version-stage AWSPENDING --remove-from-version-id "${new_versions[$consumer]}" >/dev/null || rollback_failed=true
+      fi
+    done
+  fi
+  if [[ "$rollback_failed" == true ]]; then
+    echo 'Database bootstrap credential rollback failed and requires operator attention.' >&2
+    return 1
+  fi
+}
 cleanup() {
   local status=$?
+  local rollback_status=0
   trap - EXIT
   set +e
   if [[ -n "${PGHOST:-}" && -n "${PGDATABASE:-}" && -n "${master_username:-}" && -n "${master_password:-}" ]]; then
+    rollback_runtime_credentials || rollback_status=$?
     drop_seed_role >/dev/null 2>&1
   fi
   master_json=''
-  for consumer in "${CONSUMERS[@]}"; do passwords["$consumer"]=''; done
+  for consumer in "${CONSUMERS[@]}"; do
+    passwords["$consumer"]=''
+    old_passwords["$consumer"]=''
+  done
   find "$work_directory" -type f -exec chmod 0600 {} + 2>/dev/null
   rm -rf -- "$work_directory"
+  if [[ "$rollback_status" -ne 0 ]]; then
+    exit 68
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -201,7 +289,10 @@ for consumer in "${CONSUMERS[@]}"; do
   jq -er --arg consumer "$consumer" '.[$consumer] | select(startswith("arn:aws:secretsmanager:"))' "$runtime_secret_arns_file" >/dev/null
 done
 
-master_json="$(aws secretsmanager get-secret-value \
+pull_image "$AWS_CLI_IMAGE"
+pull_image "$FLYWAY_IMAGE"
+
+master_json="$(aws_retry secretsmanager get-secret-value \
   --region "$region" \
   --secret-id "$master_secret_arn" \
   --query SecretString \
@@ -290,8 +381,64 @@ scoring_versions="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
   "SELECT COALESCE(json_agg(json_build_object('id',id,'template_code',template_code,'version',version,'rules_hash',rules_hash) ORDER BY template_code,version),'[]'::json) FROM competition.scoring_template_versions WHERE id IN ($scoring_id_list);")"
 jq -e --argjson expected "${#expected_scoring_ids[@]}" 'length == $expected' <<<"$scoring_versions" >/dev/null
 
+existing_runtime_login_count="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
+  "SELECT count(*) FROM pg_roles WHERE rolname IN ('idea2strategy_backend_runtime','idea2strategy_batch_runtime','idea2strategy_backtest_runtime','idea2strategy_trading_runtime','idea2strategy_pipeline_runtime');")"
+if [[ "$existing_runtime_login_count" == '0' ]]; then
+  initial_rotation=true
+elif [[ "$existing_runtime_login_count" != '5' ]]; then
+  echo 'Database bootstrap found a partial runtime login role set.' >&2
+  exit 67
+fi
+
+versions='{}'
 for consumer in "${CONSUMERS[@]}"; do
+  login_role="idea2strategy_${consumer}_runtime"
+  secret_arn="$(jq -er --arg consumer "$consumer" '.[$consumer]' "$runtime_secret_arns_file")"
+  if [[ "$initial_rotation" != true ]]; then
+    current_secret="$(aws_retry secretsmanager get-secret-value --region "$region" --secret-id "$secret_arn" \
+      --version-stage AWSCURRENT --query '{VersionId:VersionId,SecretString:SecretString}' --output json)"
+    old_versions["$consumer"]="$(jq -er '.VersionId | select(length > 0)' <<<"$current_secret")"
+    current_username="$(jq -er '.SecretString | fromjson | .username' <<<"$current_secret")"
+    old_passwords["$consumer"]="$(jq -er '.SecretString | fromjson | .password | select(test("^[0-9a-f]{64}$"))' <<<"$current_secret")"
+    [[ "$current_username" == "$login_role" ]] || {
+      echo "Database bootstrap current secret username mismatch: $consumer" >&2
+      exit 67
+    }
+    current_secret=''
+    current_username=''
+  else
+    secret_description="$(aws_retry secretsmanager describe-secret --region "$region" --secret-id "$secret_arn")"
+    old_versions["$consumer"]="$(jq -r '[((.VersionIdsToStages // {}) | to_entries[]) | select(.value | index("AWSCURRENT")) | .key][0] // ""' <<<"$secret_description")"
+    secret_description=''
+  fi
+
   passwords["$consumer"]="$(openssl rand -hex 32)"
+  password="${passwords[$consumer]}"
+  pipeline_url=''
+  if [[ "$consumer" == pipeline ]]; then
+    pipeline_url="$(jq -cn \
+      --arg username "$login_role" --arg password "$password" \
+      --arg host "$database_host" --arg port "$database_port" --arg dbname "$database_name" \
+      '{username:$username,password:$password,host:$host,port:$port,dbname:$dbname}' | \
+      python3 -c 'import json,sys; from urllib.parse import quote; d=json.load(sys.stdin); print("postgresql+psycopg://%s:%s@%s:%s/%s?sslmode=require" % (quote(d["username"],safe=""),quote(d["password"],safe=""),d["host"],d["port"],quote(d["dbname"],safe="")))')"
+  fi
+  secret_file="$work_directory/${consumer}-secret.json"
+  if [[ "$consumer" == pipeline ]]; then
+    jq -cn --arg engine postgres --arg host "$database_host" --arg port "$database_port" \
+      --arg dbname "$database_name" --arg username "$login_role" --arg password "$password" \
+      --arg url "$pipeline_url" \
+      '{engine:$engine,host:$host,port:$port,dbname:$dbname,username:$username,password:$password,PIPELINE_WORKER_DATABASE_URL:$url}' >"$secret_file"
+  else
+    jq -cn --arg engine postgres --arg host "$database_host" --arg port "$database_port" \
+      --arg dbname "$database_name" --arg username "$login_role" --arg password "$password" \
+      '{engine:$engine,host:$host,port:$port,dbname:$dbname,username:$username,password:$password}' >"$secret_file"
+  fi
+  chmod 0600 "$secret_file"
+  new_versions["$consumer"]="$(aws_retry secretsmanager put-secret-value --region "$region" --secret-id "$secret_arn" \
+    --secret-string "file://$secret_file" --version-stages AWSPENDING --query VersionId --output text)"
+  rm -f -- "$secret_file"
+  [[ -n "${new_versions[$consumer]}" && "${new_versions[$consumer]}" != None ]]
+  versions="$(jq -cn --argjson current "$versions" --arg consumer "$consumer" --arg version "${new_versions[$consumer]}" '$current + {($consumer):$version}')"
 done
 
 roles_sql="$work_directory/runtime-roles.sql"
@@ -309,6 +456,7 @@ roles_sql="$work_directory/runtime-roles.sql"
   echo 'COMMIT;'
 } >"$roles_sql"
 chmod 0600 "$roles_sql"
+rotation_started=true
 psql -X -q -v ON_ERROR_STOP=1 -f "$roles_sql" >/dev/null
 rm -f -- "$roles_sql"
 
@@ -326,39 +474,36 @@ table_count="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
   "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('identity','strategy','bot','storage','market_data','trading','backtest','performance','competition','operations') AND table_type='BASE TABLE';")"
 test "$table_count" -gt 0
 
-versions='{}'
 for consumer in "${CONSUMERS[@]}"; do
   login_role="idea2strategy_${consumer}_runtime"
   password="${passwords[$consumer]}"
   PGPASSWORD="$password" PGUSER="$login_role" psql -X -qAt -v ON_ERROR_STOP=1 -c 'SELECT 1;' >/dev/null
-
-  pipeline_url=''
-  if [[ "$consumer" == pipeline ]]; then
-    pipeline_url="$(jq -cn \
-      --arg username "$login_role" --arg password "$password" \
-      --arg host "$database_host" --arg port "$database_port" --arg dbname "$database_name" \
-      '{username:$username,password:$password,host:$host,port:$port,dbname:$dbname}' | \
-      python3 -c 'import json,sys; from urllib.parse import quote; d=json.load(sys.stdin); print("postgresql+psycopg://%s:%s@%s:%s/%s?sslmode=require" % (quote(d["username"],safe=""),quote(d["password"],safe=""),d["host"],d["port"],quote(d["dbname"],safe="")))')"
-  fi
-
-  secret_file="$work_directory/${consumer}-secret.json"
-  if [[ "$consumer" == pipeline ]]; then
-    jq -cn --arg engine postgres --arg host "$database_host" --arg port "$database_port" \
-      --arg dbname "$database_name" --arg username "$login_role" --arg password "$password" \
-      --arg url "$pipeline_url" \
-      '{engine:$engine,host:$host,port:$port,dbname:$dbname,username:$username,password:$password,PIPELINE_WORKER_DATABASE_URL:$url}' >"$secret_file"
-  else
-    jq -cn --arg engine postgres --arg host "$database_host" --arg port "$database_port" \
-      --arg dbname "$database_name" --arg username "$login_role" --arg password "$password" \
-      '{engine:$engine,host:$host,port:$port,dbname:$dbname,username:$username,password:$password}' >"$secret_file"
-  fi
-  chmod 0600 "$secret_file"
   secret_arn="$(jq -er --arg consumer "$consumer" '.[$consumer]' "$runtime_secret_arns_file")"
-  version_id="$(aws secretsmanager put-secret-value --region "$region" --secret-id "$secret_arn" \
-    --secret-string "file://$secret_file" --query VersionId --output text)"
-  rm -f -- "$secret_file"
-  versions="$(jq -cn --argjson current "$versions" --arg consumer "$consumer" --arg version "$version_id" '$current + {($consumer):$version}')"
+  if [[ "$initial_rotation" == true ]]; then
+    if [[ -n "${old_versions[$consumer]}" ]]; then
+      aws_retry secretsmanager update-secret-version-stage --region "$region" --secret-id "$secret_arn" \
+        --version-stage AWSCURRENT --move-to-version-id "${new_versions[$consumer]}" \
+        --remove-from-version-id "${old_versions[$consumer]}" >/dev/null
+    else
+      aws_retry secretsmanager update-secret-version-stage --region "$region" --secret-id "$secret_arn" \
+        --version-stage AWSCURRENT --move-to-version-id "${new_versions[$consumer]}" >/dev/null
+    fi
+  else
+    aws_retry secretsmanager update-secret-version-stage --region "$region" --secret-id "$secret_arn" \
+      --version-stage AWSCURRENT --move-to-version-id "${new_versions[$consumer]}" \
+      --remove-from-version-id "${old_versions[$consumer]}" >/dev/null
+  fi
+  promoted_versions["$consumer"]="${new_versions[$consumer]}"
 done
+rotation_committed=true
+for consumer in "${CONSUMERS[@]}"; do
+  secret_arn="$(jq -er --arg consumer "$consumer" '.[$consumer]' "$runtime_secret_arns_file")"
+  if ! aws_retry secretsmanager update-secret-version-stage --region "$region" --secret-id "$secret_arn" \
+    --version-stage AWSPENDING --remove-from-version-id "${new_versions[$consumer]}" >/dev/null; then
+    echo "Database bootstrap could not remove the optional AWSPENDING label for $consumer." >&2
+  fi
+done
+pending_cleanup_complete=true
 
 master_json=''
 master_username=''
