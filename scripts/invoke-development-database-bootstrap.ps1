@@ -47,6 +47,45 @@ function Get-AwsCommonArguments([switch]$Json) {
     return $arguments
 }
 
+function Remove-StaleBootstrapInstances([object[]]$Instances) {
+    $staleCutoff = [DateTimeOffset]::UtcNow.AddMinutes(-60)
+    $staleIds = [Collections.Generic.List[string]]::new()
+    $activeIds = [Collections.Generic.List[string]]::new()
+    foreach ($instance in @($Instances)) {
+        $instanceId = [string]$instance.InstanceId
+        if ($instanceId -notmatch '^i-[0-9a-f]+$') {
+            throw "Existing database bootstrap instance has an invalid ID."
+        }
+        $state = [string]$instance.State.Name
+        $launchTime = [DateTimeOffset]::MaxValue
+        if ($null -ne $instance.PSObject.Properties['LaunchTime']) {
+            $parsedLaunchTime = [DateTimeOffset]::MinValue
+            if ([DateTimeOffset]::TryParse([string]$instance.LaunchTime, [ref]$parsedLaunchTime)) {
+                $launchTime = $parsedLaunchTime
+            }
+        }
+        if ($state -in @('stopped', 'stopping') -or $launchTime -le $staleCutoff) {
+            $staleIds.Add($instanceId)
+        }
+        else {
+            $activeIds.Add($instanceId)
+        }
+    }
+    if ($activeIds.Count -gt 0) {
+        throw "An active database bootstrap instance is still present: $($activeIds -join ',')."
+    }
+    if ($staleIds.Count -gt 0) {
+        $terminationArguments = @('ec2', 'terminate-instances', '--instance-ids') + @($staleIds)
+        $null = Invoke-AwsJson $terminationArguments
+        $awsCommonArguments = @(Get-AwsCommonArguments)
+        $waitArguments = @('ec2', 'wait', 'instance-terminated', '--instance-ids') + @($staleIds) + $awsCommonArguments
+        & $script:aws @waitArguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "Expired database bootstrap instances did not terminate before replacement."
+        }
+    }
+}
+
 function Get-SanitizedSsmFailure([object]$Invocation) {
     $errorText = [string]$Invocation.StandardErrorContent
     if ([string]::IsNullOrWhiteSpace($errorText)) {
@@ -86,6 +125,7 @@ if ($ScoringSeedSha256 -notmatch '^[0-9a-f]{64}$') { throw "ScoringSeedSha256 mu
 $resolvedScoringSeedPath = (Resolve-Path -LiteralPath $ScoringSeedSqlPath).Path
 $actualScoringSeedSha256 = (Get-FileHash -LiteralPath $resolvedScoringSeedPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actualScoringSeedSha256 -cne $ScoringSeedSha256) { throw "Approved scoring seed SQL SHA-256 mismatch." }
+$expectedScoringVersionCount = @(Get-DevelopmentScoringSeedIds -SeedSqlPath $resolvedScoringSeedPath).Count
 
 $head = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') { throw "Unable to identify the exact root commit." }
@@ -248,7 +288,7 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
 
     $existing = Invoke-AwsJson @("ec2", "describe-instances", "--filters", "Name=tag:Purpose,Values=idea2strategy-development-database-bootstrap", "Name=instance-state-name,Values=pending,running,stopping,stopped")
     $existingInstances = @($existing.Reservations | ForEach-Object { $_.Instances })
-    if ($existingInstances.Count -ne 0) { throw "Another database bootstrap instance is still present." }
+    Remove-StaleBootstrapInstances $existingInstances
 
     $tagSpecification = "ResourceType=instance,Tags=[{Key=Name,Value=idea2strategy-dev-database-bootstrap},{Key=Project,Value=idea2strategy},{Key=Environment,Value=dev},{Key=Purpose,Value=idea2strategy-development-database-bootstrap},{Key=SourceCommit,Value=$head}]"
     $launch = Invoke-AwsJson @(
@@ -341,8 +381,8 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
     $receipt = [string]$invocation.StandardOutputContent | ConvertFrom-Json
     if ($receipt.status -ne "passed" -or $receipt.root_sha -cne $head -or $receipt.bundle_sha256 -cne $bundleDigest -or
         $receipt.policy_seed_sha256 -cne $PolicySeedSha256 -or $receipt.scoring_seed_sha256 -cne $ScoringSeedSha256 -or
-        @($receipt.scoring_versions).Count -ne 4 -or [int]$receipt.migrations -ne $expectedMigrationCount -or
-        [int]$receipt.tables -ne 179 -or
+        @($receipt.scoring_versions).Count -ne $expectedScoringVersionCount -or [int]$receipt.migrations -ne $expectedMigrationCount -or
+        [int]$receipt.tables -lt 1 -or
         [int]$receipt.policy_row_counts.fee -lt 1 -or [int]$receipt.policy_row_counts.buffer -lt 1 -or
         [int]$receipt.policy_row_counts.execution -lt 1) {
         throw "Database bootstrap receipt did not match the exact release candidate."

@@ -38,6 +38,7 @@ function Get-ValidatedDevelopmentFlywayBundle {
 
     $entries = @()
     $listedFiles = @{}
+    $listedVersions = @{}
     foreach ($line in $manifestLines[1..($manifestLines.Count - 1)]) {
         if ($line -notmatch '^([VR][A-Za-z0-9_.-]+\.sql)\t([0-9a-f]{64})$') {
             throw "Invalid Flyway manifest entry."
@@ -50,6 +51,17 @@ function Get-ValidatedDevelopmentFlywayBundle {
             throw "Flyway manifest contains a duplicate migration: $migrationName"
         }
         $listedFiles[$normalizedName] = $true
+
+        if ($migrationName -match '^V([0-9]+(?:[._][0-9]+)*)__') {
+            $normalizedVersion = (($Matches[1] -split '[._]') | ForEach-Object {
+                    $segment = $_.TrimStart('0')
+                    if ([string]::IsNullOrEmpty($segment)) { '0' } else { $segment }
+                }) -join '.'
+            if ($listedVersions.ContainsKey($normalizedVersion)) {
+                throw "Flyway manifest contains a duplicate version '$normalizedVersion': $migrationName and $($listedVersions[$normalizedVersion])"
+            }
+            $listedVersions[$normalizedVersion] = $migrationName
+        }
 
         $migrationPath = Join-Path $BundleRoot $migrationName
         if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) {
@@ -108,4 +120,23 @@ function Get-DevelopmentDatabaseBootstrapFingerprint {
     finally {
         $sha256.Dispose()
     }
+}
+
+function Get-DevelopmentScoringSeedIds {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SeedSqlPath
+    )
+
+    if (-not (Test-Path -LiteralPath $SeedSqlPath -PathType Leaf)) {
+        throw "Scoring seed SQL is missing: $SeedSqlPath"
+    }
+    $seedSql = Get-Content -LiteralPath $SeedSqlPath -Raw
+    $ids = @([regex]::Matches($seedSql, "'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'") |
+        ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    if ($ids.Count -eq 0) {
+        throw "Scoring seed SQL must identify at least one immutable scoring version ID."
+    }
+    return $ids
 }

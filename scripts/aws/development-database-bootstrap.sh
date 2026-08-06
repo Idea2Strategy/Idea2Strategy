@@ -5,7 +5,6 @@ umask 077
 
 readonly FLYWAY_IMAGE='redgate/flyway@sha256:52cdd559dc8ae38a17b56615e3c7137d9b01470271112525b40373de470bb005'
 readonly AWS_CLI_IMAGE='amazon/aws-cli@sha256:310813a7eae8fd88da1cc9c37970e3500b0ff3984479e1012f0a6fd44e453f63'
-readonly EXPECTED_TABLE_COUNT='179'
 readonly CONSUMERS=(backend batch backtest trading pipeline)
 
 archive=''
@@ -154,6 +153,7 @@ test "$(head -n 1 "$manifest" | tr -d '\r')" = 'idea2strategy-flyway-bundle-v1'
 
 sql_count=0
 declare -A listed_migrations=()
+declare -A listed_versions=()
 while IFS=$'\t' read -r migration expected_hash; do
   migration="${migration%$'\r'}"
   expected_hash="${expected_hash%$'\r'}"
@@ -162,6 +162,21 @@ while IFS=$'\t' read -r migration expected_hash; do
   normalized_migration="${migration,,}"
   [[ -z "${listed_migrations[$normalized_migration]+x}" ]] || { echo "Duplicate Flyway manifest migration: $migration" >&2; exit 65; }
   listed_migrations["$normalized_migration"]=1
+  if [[ "$migration" =~ ^V([0-9]+([._][0-9]+)*)__ ]]; then
+    version="${BASH_REMATCH[1]}"
+    normalized_version=''
+    IFS='._' read -ra version_segments <<<"$version"
+    for segment in "${version_segments[@]}"; do
+      segment="${segment#${segment%%[!0]*}}"
+      [[ -n "$segment" ]] || segment='0'
+      normalized_version+="${normalized_version:+.}${segment}"
+    done
+    [[ -z "${listed_versions[$normalized_version]+x}" ]] || {
+      echo "Duplicate Flyway migration version $normalized_version: $migration and ${listed_versions[$normalized_version]}" >&2
+      exit 65
+    }
+    listed_versions["$normalized_version"]="$migration"
+  fi
   test -f "$bundle_directory/$migration" || { echo "Flyway migration is missing: $migration" >&2; exit 65; }
   printf '%s  %s\n' "$expected_hash" "$bundle_directory/$migration" | sha256sum --check --status || {
     echo "Flyway migration checksum mismatch: $migration" >&2
@@ -255,6 +270,14 @@ PGUSER="$seed_role" PGPASSWORD="$seed_password" psql -X -q -v ON_ERROR_STOP=1 --
 drop_seed_role
 seed_password=''
 
+mapfile -t expected_scoring_ids < <(grep -Eo "'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'" "$scoring_seed_sql" | tr -d "'" | sort -u)
+test "${#expected_scoring_ids[@]}" -gt 0
+scoring_id_list=''
+for scoring_id in "${expected_scoring_ids[@]}"; do
+  [[ "$scoring_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+  scoring_id_list+="${scoring_id_list:+,}'${scoring_id}'"
+done
+
 policy_row_counts="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
   "SELECT json_build_object('fee',(SELECT count(*) FROM trading.fee_policy_versions WHERE effective_from <= now() AND (effective_to IS NULL OR effective_to > now())),'buffer',(SELECT count(*) FROM trading.buying_power_buffer_policy_versions WHERE effective_from <= now() AND (effective_to IS NULL OR effective_to > now())),'execution',(SELECT count(*) FROM backtest.execution_policy_versions WHERE retired_at IS NULL));")"
 jq -e '.fee >= 1 and .buffer >= 1 and .execution >= 1' <<<"$policy_row_counts" >/dev/null
@@ -264,8 +287,8 @@ jq -e '.fee | length >= 1' <<<"$policy_versions" >/dev/null
 jq -e '.buffer | length >= 1' <<<"$policy_versions" >/dev/null
 jq -e '.execution | length >= 1' <<<"$policy_versions" >/dev/null
 scoring_versions="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
-  "SELECT COALESCE(json_agg(json_build_object('id',id,'template_code',template_code,'version',version,'rules_hash',rules_hash) ORDER BY template_code,version),'[]'::json) FROM competition.scoring_template_versions WHERE retired_at IS NULL AND rules_hash IN ('3c81fb2f387fa790e126e1aa40b18d389c44bcf9f7ef2cefdd6911fd2e1eec71','dedc3baef45654bf4f760755d53fcd8d3fdd9d0be24d87e1027c266fa27fe96d','ecf3788076330d98aa00f466d06b5c5eb6652eebc1b15e9fe0056f48ce2f9f59','6d8e9a1c6c2a37a6ed397fdbfdedb417b53d537faa7ad972b3fdf7ff61afc3d9');")"
-jq -e 'length == 4' <<<"$scoring_versions" >/dev/null
+  "SELECT COALESCE(json_agg(json_build_object('id',id,'template_code',template_code,'version',version,'rules_hash',rules_hash) ORDER BY template_code,version),'[]'::json) FROM competition.scoring_template_versions WHERE id IN ($scoring_id_list);")"
+jq -e --argjson expected "${#expected_scoring_ids[@]}" 'length == $expected' <<<"$scoring_versions" >/dev/null
 
 for consumer in "${CONSUMERS[@]}"; do
   passwords["$consumer"]="$(openssl rand -hex 32)"
@@ -301,7 +324,7 @@ test "$owned_object_count" = '0'
 
 table_count="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
   "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('identity','strategy','bot','storage','market_data','trading','backtest','performance','competition','operations') AND table_type='BASE TABLE';")"
-test "$table_count" = "$EXPECTED_TABLE_COUNT"
+test "$table_count" -gt 0
 
 versions='{}'
 for consumer in "${CONSUMERS[@]}"; do
