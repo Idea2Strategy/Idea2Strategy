@@ -278,8 +278,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $bucket = "idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-frontend"
           $release = '${{ needs.build.outputs.release_id }}'
-          $existing = aws s3api list-objects-v2 --bucket $bucket --prefix "_releases/$release/" --max-items 1 --query KeyCount --output text
-          if ([int]$existing -ne 0) { throw "Frontend release prefix already exists: $release" }
+          $existingJson = @(aws s3api list-objects-v2 --bucket $bucket --prefix "_releases/$release/" --max-keys 1 --output json)
+          if ($LASTEXITCODE -ne 0) { throw "Unable to inspect the immutable frontend release prefix." }
+          $existingResponse = ($existingJson -join "`n") | ConvertFrom-Json
+          if ($null -eq $existingResponse.KeyCount) { throw "S3 returned no KeyCount for the frontend release prefix." }
+          if ([int]$existingResponse.KeyCount -ne 0) { throw "Frontend release prefix already exists: $release" }
           New-Item -ItemType Directory "$env:RUNNER_TEMP/frontend" -Force | Out-Null
           tar -xzf "$env:RUNNER_TEMP/release/frontend.tgz" -C "$env:RUNNER_TEMP/frontend"
           aws s3 sync "$env:RUNNER_TEMP/frontend" "s3://$bucket/_releases/$release/" --cache-control 'public,max-age=31536000,immutable' --exclude 'index.html'

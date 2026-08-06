@@ -128,6 +128,21 @@ if ($workflow.Contains('${{ github.sha }}-${{ github.run_attempt }}')) {
     throw "A sha-plus-attempt identifier can collide across workflow runs; github.run_id is mandatory."
 }
 
+foreach ($frontendPrefixBoundary in @(
+    '$existingJson = @(aws s3api list-objects-v2',
+    '--max-keys 1 --output json',
+    'if ($LASTEXITCODE -ne 0)',
+    '$existingResponse = ($existingJson -join "`n") | ConvertFrom-Json',
+    '[int]$existingResponse.KeyCount'
+)) {
+    if (-not $workflow.Contains($frontendPrefixBoundary)) {
+        throw "Immutable frontend prefix detection is missing: $frontendPrefixBoundary"
+    }
+}
+if ($workflow.Contains('--max-items 1 --query KeyCount --output text')) {
+    throw "AWS CLI text output returns None for an empty frontend prefix; parse the JSON response instead."
+}
+
 $deployedVerifier = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'verify-deployed-development.ps1') -Raw
 foreach ($token in @('$env:AWS_PROFILE = $AwsProfile', 'Remove-Item Env:AWS_PROFILE', '$previousAwsProfile')) {
     if (-not $deployedVerifier.Contains($token)) {
