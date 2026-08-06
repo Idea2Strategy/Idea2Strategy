@@ -189,10 +189,16 @@ The following steps intentionally remain outside this repository-only readiness 
 3. Populate ignored `backend.hcl` and `terraform.tfvars` from the examples; never commit them.
 4. Apply a reviewed `dns_foundation` saved plan first. This creates only the Route 53 zone and the private, encrypted, versioned frontend release bucket in addition to the existing market-data foundation. Copy every existing DNS record and record the Route 53 nameservers, but do not change the registrar delegation yet.
 5. Bootstrap the five database LOGIN roles and Secrets Manager values through the reviewed one-shot database procedure, run Flyway once, and prepare the pinned S3 policy/artifact inputs. Build application inputs without AWS credentials. The `development-plan` job may then use only the scoped plan/publisher role to publish immutable ECR digests, run `terraform init -backend-config=backend.hcl`, and save a `host_ready` plan with `terraform plan -parallelism=1 -out deployment.tfplan`.
-   The release job requires the versioned receipt at the exact
-   `deployment-bootstrap/<root-sha>/<flyway-bundle-sha>/receipt.json` key. It
-   also requires all five receipt-bound database secret versions to remain
-   `AWSCURRENT`; a receipt from an older root or Flyway bundle is not accepted.
+   The release job first checks the versioned receipt at
+   `deployment-bootstrap/<root-sha>/<flyway-bundle-sha>/receipt.json`, then the
+   stable `deployment-bootstrap/artifacts/<artifact-fingerprint>/receipt.json`
+   key. For receipts created before the stable key existed, it may reuse a
+   versioned legacy receipt only when the current Flyway bundle, policy seed,
+   and scoring seed hashes produce the same artifact fingerprint. In every
+   case, the recorded migration/table/policy/scoring evidence must still pass
+   and all five receipt-bound database secret versions must remain
+   `AWSCURRENT`. A root-only change therefore does not force a database
+   bootstrap, while any database artifact or secret-version drift fails closed.
 6. Review the complete `host_ready` plan, cost impact, replacements, deletions, IAM changes, immutable artifacts, and database consequences. It must contain no CloudFront, ACM, public DNS cutover, or unreviewed destroy action.
    The release workflow converts the saved plan to JSON and rejects ordinary
    deletes and all replacements except its exact create-before-destroy

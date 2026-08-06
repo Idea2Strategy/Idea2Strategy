@@ -2,7 +2,9 @@
 param(
     [string]$TerraformRoot = "infra/terraform/environments/development",
     [string]$AwsProfile = "idea2strategy-terraform",
-    [string]$AwsRegion = "ap-northeast-2"
+    [string]$AwsRegion = "ap-northeast-2",
+    [ValidateRange(60, 1800)][int]$ReadinessTimeoutSeconds = 900,
+    [ValidateRange(60, 1800)][int]$RolloutTimeoutSeconds = 900
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,6 +16,74 @@ $terraform = Get-Command terraform -ErrorAction SilentlyContinue
 $aws = Get-Command aws -ErrorAction SilentlyContinue
 if ($null -eq $terraform) { throw "Terraform 1.15.x is required." }
 if ($null -eq $aws) { throw "AWS CLI v2 is required." }
+
+$commonAwsArguments = @("--region", $AwsRegion, "--output", "json")
+if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) { $commonAwsArguments += @("--profile", $AwsProfile) }
+
+function Invoke-AwsJson([string[]]$Arguments) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $aws.Source @Arguments @commonAwsArguments 2>$null
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) { throw "AWS command failed without exposing remote output: $($Arguments[0]) $($Arguments[1])" }
+    return (($output -join "`n") | ConvertFrom-Json)
+}
+
+function Invoke-SsmShellCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Script,
+        [Parameter(Mandatory = $true)][string]$Comment,
+        [Parameter(Mandatory = $true)][string]$SuccessMarker,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script))
+    $parameters = @{ commands = @("printf '%s' '$encoded' | base64 -d | bash") } | ConvertTo-Json -Compress
+    $parametersPath = [IO.Path]::GetTempFileName()
+    try {
+        [IO.File]::WriteAllText($parametersPath, $parameters, [Text.UTF8Encoding]::new($false))
+        $sent = Invoke-AwsJson @(
+            "ssm", "send-command",
+            "--instance-ids", $serviceInstanceId,
+            "--document-name", "AWS-RunShellScript",
+            "--comment", $Comment,
+            "--parameters", "file://$parametersPath",
+            "--timeout-seconds", [string]$TimeoutSeconds
+        )
+        $commandId = [string]$sent.Command.CommandId
+        if ($commandId -notmatch '^[0-9a-f-]{36}$') { throw "SSM did not return an exact command ID." }
+    }
+    finally {
+        Remove-Item -LiteralPath $parametersPath -Force -ErrorAction SilentlyContinue
+    }
+
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds + 60)
+    $invocation = $null
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        Start-Sleep -Seconds 5
+        try {
+            $invocation = Invoke-AwsJson @(
+                "ssm", "get-command-invocation",
+                "--command-id", $commandId,
+                "--instance-id", $serviceInstanceId
+            )
+        }
+        catch {
+            continue
+        }
+        if ([string]$invocation.Status -in @("Success", "Failed", "Cancelled", "TimedOut")) { break }
+    }
+    if ($null -eq $invocation -or [string]$invocation.Status -cne "Success" -or
+        -not ([string]$invocation.StandardOutputContent).Contains($SuccessMarker)) {
+        throw "SSM command '$Comment' failed or exceeded its bounded timeout."
+    }
+    return $commandId
+}
 
 $previousAwsProfile = [Environment]::GetEnvironmentVariable('AWS_PROFILE', 'Process')
 try {
@@ -33,6 +103,45 @@ try {
         $env:AWS_PROFILE = $previousAwsProfile
     }
 }
+
+& $aws.Source ec2 wait instance-running --instance-ids $serviceInstanceId @commonAwsArguments
+if ($LASTEXITCODE -ne 0) { throw "Core instance did not reach EC2 running state within the AWS waiter timeout." }
+
+$ssmDeadline = [DateTimeOffset]::UtcNow.AddSeconds($ReadinessTimeoutSeconds)
+$ssmOnline = $false
+while ([DateTimeOffset]::UtcNow -lt $ssmDeadline) {
+    $information = Invoke-AwsJson @(
+        "ssm", "describe-instance-information",
+        "--filters", "Key=InstanceIds,Values=$serviceInstanceId"
+    )
+    if (@($information.InstanceInformationList).Count -eq 1 -and
+        [string]$information.InstanceInformationList[0].PingStatus -ceq "Online") {
+        $ssmOnline = $true
+        break
+    }
+    Start-Sleep -Seconds 5
+}
+if (-not $ssmOnline) { throw "Core instance did not become SSM Online within the readiness timeout." }
+
+$cloudInitTimeout = [Math]::Max(60, $ReadinessTimeoutSeconds - 60)
+$readinessScript = @'
+set -euo pipefail
+timeout __CLOUD_INIT_TIMEOUT__ cloud-init status --wait
+test -f /opt/idea2strategy/bootstrap-complete
+test -s /opt/idea2strategy/compose.yaml
+test -x /usr/local/sbin/idea2strategy-runtime-start
+systemctl is-enabled --quiet idea2strategy-runtime.service
+systemctl is-active --quiet idea2strategy-runtime.service
+cd /opt/idea2strategy
+docker compose --project-name idea2strategy config --quiet
+echo CORE_HOST_READY
+'@.Replace('__CLOUD_INIT_TIMEOUT__', [string]$cloudInitTimeout)
+
+$readinessCommandId = Invoke-SsmShellCommand `
+    -Script $readinessScript `
+    -Comment "Verify Core cloud-init and runtime readiness" `
+    -SuccessMarker "CORE_HOST_READY" `
+    -TimeoutSeconds $ReadinessTimeoutSeconds
 
 $remoteScript = @'
 set -euo pipefail
@@ -100,39 +209,18 @@ rm -f "$rollback_compose"
 echo CORE_RUNTIME_ROLLED_OUT
 '@.Replace('__AWS_REGION__', $AwsRegion)
 
-$encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($remoteScript))
-$parameters = @{ commands = @("printf '%s' '$encoded' | base64 -d | bash") } | ConvertTo-Json -Compress
-$parametersPath = [IO.Path]::GetTempFileName()
-try {
-    [IO.File]::WriteAllText($parametersPath, $parameters, [Text.UTF8Encoding]::new($false))
-    $common = @("--region", $AwsRegion, "--output", "json")
-    if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) { $common += @("--profile", $AwsProfile) }
-    $sentJson = & $aws.Source ssm send-command --instance-ids $serviceInstanceId --document-name AWS-RunShellScript --comment "Roll out exact Idea2Strategy Core image digests" --parameters "file://$parametersPath" --timeout-seconds 900 @common
-    if ($LASTEXITCODE -ne 0) { throw "Unable to start the Core runtime rollout." }
-    $commandId = [string](($sentJson -join "`n") | ConvertFrom-Json).Command.CommandId
-}
-finally {
-    Remove-Item -LiteralPath $parametersPath -Force -ErrorAction SilentlyContinue
-}
-
-$invocation = $null
-for ($attempt = 0; $attempt -lt 120; $attempt++) {
-    Start-Sleep -Seconds 5
-    $arguments = @("ssm", "get-command-invocation", "--command-id", $commandId, "--instance-id", $serviceInstanceId, "--region", $AwsRegion, "--output", "json")
-    if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) { $arguments += @("--profile", $AwsProfile) }
-    $output = & $aws.Source @arguments 2>$null
-    if ($LASTEXITCODE -ne 0) { continue }
-    $invocation = ($output -join "`n") | ConvertFrom-Json
-    if ([string]$invocation.Status -in @("Success", "Failed", "Cancelled", "TimedOut")) { break }
-}
-if ($null -eq $invocation -or [string]$invocation.Status -cne "Success" -or
-    -not ([string]$invocation.StandardOutputContent).Contains("CORE_RUNTIME_ROLLED_OUT")) {
-    throw "Core runtime rollout failed; the remote command attempted the rollback before returning failure."
-}
+$rolloutCommandId = Invoke-SsmShellCommand `
+    -Script $remoteScript `
+    -Comment "Roll out exact Idea2Strategy Core image digests" `
+    -SuccessMarker "CORE_RUNTIME_ROLLED_OUT" `
+    -TimeoutSeconds $RolloutTimeoutSeconds
 
 [pscustomobject]@{
     status = "passed"
     instance_id = $serviceInstanceId
-    command_id = $commandId
+    readiness_command_id = $readinessCommandId
+    command_id = $rolloutCommandId
+    cloud_init_ready = $true
+    ssm_online = $true
     exact_image_rollout = $true
 } | ConvertTo-Json -Compress

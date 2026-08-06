@@ -129,6 +129,10 @@ $tar = Get-Executable "tar"
 if ($LASTEXITCODE -ne 0) { throw "Unable to create the Flyway bundle archive." }
 $archiveDigest = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $hostScriptDigest = (Get-FileHash -LiteralPath $hostScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$artifactFingerprint = Get-DevelopmentDatabaseBootstrapFingerprint `
+    -BundleSha256 $bundleDigest `
+    -PolicySeedSha256 $PolicySeedSha256 `
+    -ScoringSeedSha256 $ScoringSeedSha256
 
 $artifactPrefix = "deployment-bootstrap/$head/$bundleDigest"
 $archiveKey = "$artifactPrefix/flyway-ci-bundle.tar.gz"
@@ -136,6 +140,7 @@ $hostScriptKey = "$artifactPrefix/development-database-bootstrap.sh"
 $policySeedKey = "$artifactPrefix/policy-seed-$PolicySeedSha256.sql"
 $scoringSeedKey = "$artifactPrefix/scoring-template-seed-$ScoringSeedSha256.sql"
 $receiptKey = "$artifactPrefix/receipt.json"
+$artifactReceiptKey = "deployment-bootstrap/artifacts/$artifactFingerprint/receipt.json"
 $safePlan = [ordered]@{
     status = if ($Execute) { "ready-to-execute" } else { "validated-dry-run" }
     root_sha = $head
@@ -145,11 +150,13 @@ $safePlan = [ordered]@{
     host_script_sha256 = $hostScriptDigest
     policy_seed_sha256 = $PolicySeedSha256
     scoring_seed_sha256 = $ScoringSeedSha256
+    artifact_fingerprint = $artifactFingerprint
     region = $Region
     instance_type = $InstanceType
     ami_id = $bootstrapAmiId
     consumers = $expectedConsumers
     artifact_prefix = $artifactPrefix
+    artifact_receipt_key = $artifactReceiptKey
     secret_values_in_terraform = $false
 }
 
@@ -308,9 +315,15 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         [int]$receipt.policy_row_counts.execution -lt 1) {
         throw "Database bootstrap receipt did not match the exact release candidate."
     }
+    $receipt | Add-Member -NotePropertyName artifact_fingerprint -NotePropertyValue $artifactFingerprint -Force
     $receiptPath = Join-Path $temporaryRoot "receipt.json"
     Write-Utf8NoBomFile $receiptPath ($receipt | ConvertTo-Json -Depth 8)
-    $null = Invoke-AwsJson @("s3api", "put-object", "--bucket", [string]$target.artifact_bucket, "--key", $receiptKey, "--body", $receiptPath)
+    $exactReceiptUpload = Invoke-AwsJson @("s3api", "put-object", "--bucket", [string]$target.artifact_bucket, "--key", $receiptKey, "--body", $receiptPath)
+    $artifactReceiptUpload = Invoke-AwsJson @("s3api", "put-object", "--bucket", [string]$target.artifact_bucket, "--key", $artifactReceiptKey, "--body", $receiptPath)
+    if ([string]::IsNullOrWhiteSpace([string]$exactReceiptUpload.VersionId) -or
+        [string]::IsNullOrWhiteSpace([string]$artifactReceiptUpload.VersionId)) {
+        throw "Database bootstrap receipts must be stored as versioned S3 objects."
+    }
 
     $result = [ordered]@{
         status = "passed"
@@ -318,9 +331,11 @@ touch /var/lib/idea2strategy-database-bootstrap-ready
         bundle_sha256 = $bundleDigest
         policy_seed_sha256 = $PolicySeedSha256
         scoring_seed_sha256 = $ScoringSeedSha256
+        artifact_fingerprint = $artifactFingerprint
         instance_id = $instanceId
         command_id = $commandId
         receipt_key = $receiptKey
+        artifact_receipt_key = $artifactReceiptKey
         credential_values_printed = $false
     }
 }

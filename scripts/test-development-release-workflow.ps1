@@ -120,6 +120,14 @@ foreach ($token in $required) {
     }
 }
 
+$immutableReleaseExpression = '${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}'
+if (([regex]::Matches($workflow, [regex]::Escape($immutableReleaseExpression))).Count -lt 5) {
+    throw "Every release artifact, image tag, and release bundle must include the immutable GitHub run_id."
+}
+if ($workflow.Contains('${{ github.sha }}-${{ github.run_attempt }}')) {
+    throw "A sha-plus-attempt identifier can collide across workflow runs; github.run_id is mandatory."
+}
+
 $deployedVerifier = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'verify-deployed-development.ps1') -Raw
 foreach ($token in @('$env:AWS_PROFILE = $AwsProfile', 'Remove-Item Env:AWS_PROFILE', '$previousAwsProfile')) {
     if (-not $deployedVerifier.Contains($token)) {
@@ -175,8 +183,8 @@ if ($workflow -notmatch "(?s)configure-aws-credentials.*?test-aws-deployment-pre
     throw "The release plan must fail closed on populated runtime database secrets after AWS authentication and before Terraform planning."
 }
 
-if ($workflow -notmatch "(?s)Verify required deployment secrets.*?Verify exact database bootstrap receipt.*?Create saved Terraform plan") {
-    throw "The release plan must verify the exact root-and-Flyway database bootstrap receipt before planning."
+if ($workflow -notmatch "(?s)Verify required deployment secrets.*?Verify database bootstrap artifact receipt.*?Create saved Terraform plan") {
+    throw "The release plan must verify the artifact-fingerprinted database bootstrap receipt before planning."
 }
 
 if ($workflow -notmatch "(?s)terraform plan -parallelism=1 -out=deployment\.tfplan.*?terraform show -json deployment\.tfplan.*?assert-development-terraform-plan-safe\.ps1.*?-AllowedReplacementAddresses.*?aws_ecs_task_definition\.pipeline\[0\].*?aws_instance\.service\[0\].*?aws_instance\.trading\[0\].*?Archive exact plan") {
@@ -213,6 +221,26 @@ foreach ($scriptPath in @($planGatePath, $receiptGatePath, $coreRolloutPath)) {
     $parseErrors = $null
     [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
     if (@($parseErrors).Count -ne 0) { throw "Release safety script has invalid PowerShell syntax: $scriptPath" }
+}
+
+$coreRollout = Get-Content -LiteralPath $coreRolloutPath -Raw
+foreach ($readinessBoundary in @(
+    'ec2 wait instance-running',
+    'describe-instance-information',
+    'PingStatus',
+    'cloud-init status --wait',
+    '/opt/idea2strategy/bootstrap-complete',
+    'systemctl is-active --quiet idea2strategy-runtime.service',
+    'CORE_HOST_READY',
+    'Invoke-SsmShellCommand',
+    'ReadinessTimeoutSeconds'
+)) {
+    if (-not $coreRollout.Contains($readinessBoundary)) {
+        throw "Core rollout is missing a bounded host-readiness boundary: $readinessBoundary"
+    }
+}
+if ($coreRollout.IndexOf('CORE_HOST_READY') -gt $coreRollout.IndexOf('CORE_RUNTIME_ROLLED_OUT')) {
+    throw "Core host readiness must complete before the runtime rollout command is constructed."
 }
 
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ("idea2strategy-plan-gate-" + [guid]::NewGuid().ToString("N"))
@@ -269,10 +297,12 @@ finally {
 $receiptGate = Get-Content -LiteralPath $receiptGatePath -Raw
 foreach ($requiredReceiptBoundary in @(
     'deployment-bootstrap/$RootSha/$($bundle.Digest)/receipt.json',
-    'root_sha', 'bundle_sha256', 'migrations', 'secret_versions', 'AWSCURRENT', 'VersionId'
+    'deployment-bootstrap/artifacts/$artifactFingerprint/receipt.json',
+    'root_sha', 'bundle_sha256', 'policy_seed_sha256', 'scoring_seed_sha256',
+    'migrations', 'secret_versions', 'AWSCURRENT', 'VersionId'
 )) {
     if (-not $receiptGate.Contains($requiredReceiptBoundary)) {
-        throw "Exact database bootstrap receipt gate is missing: $requiredReceiptBoundary"
+        throw "Artifact-fingerprinted database bootstrap receipt gate is missing: $requiredReceiptBoundary"
     }
 }
 

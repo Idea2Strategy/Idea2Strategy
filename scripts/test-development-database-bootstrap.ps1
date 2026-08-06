@@ -61,6 +61,7 @@ $iam = Read-RequiredFile "infra/terraform/environments/development/iam.tf"
 $security = Read-RequiredFile "infra/terraform/environments/development/security.tf"
 $outputs = Read-RequiredFile "infra/terraform/environments/development/outputs.tf"
 $orchestrator = Read-RequiredFile "scripts/invoke-development-database-bootstrap.ps1"
+$receiptVerifier = Read-RequiredFile "scripts/verify-development-database-bootstrap-receipt.ps1"
 $bootstrap = Read-RequiredFile "scripts/aws/development-database-bootstrap.sh"
 $artifactRoot = Join-Path $root "proposals/development-runtime-policy/artifacts"
 $artifactManifest = Read-RequiredFile "proposals/development-runtime-policy/artifacts/artifact-manifest.json" | ConvertFrom-Json
@@ -76,6 +77,24 @@ if (-not (Test-Path -LiteralPath $manifestValidatorPath -PathType Leaf)) {
     throw "Dynamic Flyway manifest validator is missing."
 }
 . $manifestValidatorPath
+
+$fingerprintInputs = @{
+    BundleSha256 = "1" * 64
+    PolicySeedSha256 = "2" * 64
+    ScoringSeedSha256 = "3" * 64
+}
+$artifactFingerprint = Get-DevelopmentDatabaseBootstrapFingerprint @fingerprintInputs
+if ($artifactFingerprint -notmatch '^[0-9a-f]{64}$' -or
+    $artifactFingerprint -cne (Get-DevelopmentDatabaseBootstrapFingerprint @fingerprintInputs)) {
+    throw "Database bootstrap artifact fingerprint must be deterministic lowercase SHA-256."
+}
+$changedFingerprint = Get-DevelopmentDatabaseBootstrapFingerprint `
+    -BundleSha256 ("4" * 64) `
+    -PolicySeedSha256 $fingerprintInputs.PolicySeedSha256 `
+    -ScoringSeedSha256 $fingerprintInputs.ScoringSeedSha256
+if ($changedFingerprint -ceq $artifactFingerprint) {
+    throw "Database bootstrap artifact fingerprint must change when an input digest changes."
+}
 
 $publishedBundle = Get-ValidatedDevelopmentFlywayBundle -BundleRoot (Join-Path $root "db/flyway-ci-bundle")
 if ($publishedBundle.MigrationCount -ne $expectedMigrationCount) {
@@ -238,10 +257,26 @@ foreach ($needle in @(
     'GetSecretValue',
     'PutSecretValue',
     'deployment-bootstrap',
+    'Get-DevelopmentDatabaseBootstrapFingerprint',
+    'deployment-bootstrap/artifacts/$artifactFingerprint/receipt.json',
+    'artifact_fingerprint',
     'finally'
 )) {
     Assert-Contains $orchestrator $needle "Orchestrator safety boundary is missing: $needle"
 }
+
+foreach ($needle in @(
+    'Get-DevelopmentDatabaseBootstrapFingerprint',
+    'deployment-bootstrap/artifacts/$artifactFingerprint/receipt.json',
+    'list-objects-v2',
+    'policy_seed_sha256',
+    'scoring_seed_sha256',
+    'requested_root_sha',
+    'receipt_root_sha'
+)) {
+    Assert-Contains $receiptVerifier $needle "Receipt reuse boundary is missing: $needle"
+}
+Assert-NotContains $receiptVerifier '[string]$receipt.root_sha -cne $RootSha' "Artifact-identical receipts must be reusable across root commits."
 Assert-NotContains $orchestrator 'HttpPutResponseHopLimit=1' "The pinned AWS CLI container requires two IMDSv2 network hops to use the instance role."
 if ($orchestrator -match '(?i)Write-(Host|Output).*(password|SecretString)') {
     throw "Orchestrator must not print password or SecretString values."

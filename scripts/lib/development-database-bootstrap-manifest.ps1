@@ -83,3 +83,29 @@ function Get-ValidatedDevelopmentFlywayBundle {
         Entries = $entries
     }
 }
+
+function Get-DevelopmentDatabaseBootstrapFingerprint {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$BundleSha256,
+        [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$PolicySeedSha256,
+        [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{64}$')][string]$ScoringSeedSha256
+    )
+
+    $material = @(
+        "idea2strategy-development-database-bootstrap-v1"
+        "bundle_sha256=$BundleSha256"
+        "policy_seed_sha256=$PolicySeedSha256"
+        "scoring_seed_sha256=$ScoringSeedSha256"
+    ) -join "`n"
+    $material += "`n"
+
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($material)
+        return ([BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
+}

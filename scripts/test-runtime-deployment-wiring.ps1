@@ -59,6 +59,42 @@ if (-not $userData.Contains("jq -Rrs --arg name") -or
     throw "Runtime bootstrap must pass generated env values and database credentials through stdin."
 }
 
+foreach ($refreshFunction in @(
+    'refresh_service_runtime_secrets',
+    'refresh_backtest_worker_runtime_secrets',
+    'refresh_trading_runtime_secrets'
+)) {
+    if (-not $userData.Contains($refreshFunction)) {
+        throw "Role-specific runtime secret refresh is missing: $refreshFunction"
+    }
+}
+foreach ($atomicSecretFile in @(
+    '.runtime-secret.env.XXXXXX',
+    '.batch-secret.env.XXXXXX',
+    '.backtest-secret.env.XXXXXX'
+)) {
+    if (-not $userData.Contains($atomicSecretFile)) {
+        throw "Runtime secret refresh must stage an atomic replacement: $atomicSecretFile"
+    }
+}
+foreach ($refreshedSecret in @(
+    'IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY',
+    'OPERATOR_AUTH_CURRENT_HMAC_KEY',
+    'BACKTEST_SESSION_HMAC_KEY_BASE64',
+    'BACKTEST_RESULT_INGEST_TOKEN',
+    'ALPACA_API_KEY',
+    'ALPACA_API_SECRET'
+)) {
+    if (-not $userData.Contains($refreshedSecret)) {
+        throw "Runtime restart does not refresh required secret material: $refreshedSecret"
+    }
+}
+if ($userData -notmatch '(?s)runtime_role == "service".*?refresh_service_runtime_secrets' -or
+    $userData -notmatch '(?s)runtime_role == "backtest-worker".*?refresh_backtest_worker_runtime_secrets' -or
+    $userData -notmatch '(?s)runtime_role == "trading".*?refresh_trading_runtime_secrets') {
+    throw "Every runtime role must invoke only its role-specific secret refresh before Compose starts."
+}
+
 foreach ($service in @("backend-api", "backend-worker", "backtest-api")) {
     if (-not $userData.Contains($service)) {
         throw "Core runtime does not start required service: $service"
