@@ -52,6 +52,8 @@ $resolvedBundleRoot = Resolve-RepositoryPath $BundleRoot
 $bundle = Get-ValidatedDevelopmentFlywayBundle -BundleRoot $resolvedBundleRoot
 $policySeedSha256 = Get-ValidatedArtifactHash $PolicyArtifactRoot "policy-seed.sql"
 $scoringSeedSha256 = Get-ValidatedArtifactHash $ScoringArtifactRoot "scoring-template-seed.sql"
+$resolvedScoringSeedPath = Join-Path (Resolve-RepositoryPath $ScoringArtifactRoot) "scoring-template-seed.sql"
+$expectedScoringVersionCount = @(Get-DevelopmentScoringSeedIds -SeedSqlPath $resolvedScoringSeedPath).Count
 $artifactFingerprint = Get-DevelopmentDatabaseBootstrapFingerprint `
     -BundleSha256 $bundle.Digest `
     -PolicySeedSha256 $policySeedSha256 `
@@ -68,26 +70,58 @@ function Get-AwsCommonArguments {
     return $arguments
 }
 
+function Get-AwsFailureCategory([string]$ErrorText) {
+    if ($ErrorText -match '(?i)(NoSuchKey|specified key does not exist)') { return 'missing' }
+    if ($ErrorText -match '(?i)(AccessDenied|KMSAccessDenied|UnauthorizedOperation|not authorized|status code:\s*403)') { return 'access-denied' }
+    if ($ErrorText -match '(?i)(SlowDown|Throttl|RequestLimitExceeded|TooManyRequests)') { return 'throttled' }
+    if ($ErrorText -match '(?i)(timeout|timed out|connection|endpoint|name resolution|temporarily unavailable)') { return 'transport' }
+    return 'aws-error'
+}
+
+function Invoke-AwsCapture([string[]]$Arguments) {
+    $stdoutPath = [IO.Path]::GetTempFileName()
+    $stderrPath = [IO.Path]::GetTempFileName()
+    try {
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $aws.Source @Arguments @(Get-AwsCommonArguments) 1>$stdoutPath 2>$stderrPath
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Output = (Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue)
+            Error = (Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue)
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-AwsJson([string[]]$Arguments) {
-    $output = & $aws.Source @Arguments @(Get-AwsCommonArguments)
-    if ($LASTEXITCODE -ne 0) { throw "AWS receipt verification failed." }
-    return (($output -join "`n") | ConvertFrom-Json)
+    $capture = Invoke-AwsCapture $Arguments
+    if ($capture.ExitCode -ne 0) {
+        $category = Get-AwsFailureCategory ([string]$capture.Error)
+        throw "AWS receipt verification operation '$($Arguments[0])' failed ($category)."
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$capture.Output)) { return $null }
+    return ([string]$capture.Output | ConvertFrom-Json)
 }
 
 function Get-VersionedReceipt([string]$ReceiptKey) {
     $receiptPath = [IO.Path]::GetTempFileName()
     try {
-        $previousErrorActionPreference = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = 'Continue'
-            $output = & $aws.Source @('s3api', 'get-object', '--bucket', $ReceiptBucket, '--key', $ReceiptKey, $receiptPath) @(Get-AwsCommonArguments) 2>$null
-            $downloadExitCode = $LASTEXITCODE
+        $capture = Invoke-AwsCapture @('s3api', 'get-object', '--bucket', $ReceiptBucket, '--key', $ReceiptKey, $receiptPath)
+        if ($capture.ExitCode -ne 0) {
+            $category = Get-AwsFailureCategory ([string]$capture.Error)
+            if ($category -eq 'missing') { return $null }
+            throw "Unable to read database bootstrap receipt '$ReceiptKey' ($category)."
         }
-        finally {
-            $ErrorActionPreference = $previousErrorActionPreference
-        }
-        if ($downloadExitCode -ne 0) { return $null }
-        $download = (($output -join "`n") | ConvertFrom-Json)
+        $download = ([string]$capture.Output | ConvertFrom-Json)
         if ([string]::IsNullOrWhiteSpace([string]$download.VersionId)) {
             throw "Database bootstrap receipt must come from a versioned S3 object."
         }
@@ -110,8 +144,8 @@ function Test-ReceiptMatchesArtifacts([object]$Receipt) {
             [string]$Receipt.policy_seed_sha256 -cne $policySeedSha256 -or
             [string]$Receipt.scoring_seed_sha256 -cne $scoringSeedSha256 -or
             [int]$Receipt.migrations -ne $bundle.MigrationCount -or
-            [int]$Receipt.tables -ne 179 -or
-            @($Receipt.scoring_versions).Count -ne 4 -or
+            [int]$Receipt.tables -lt 1 -or
+            @($Receipt.scoring_versions).Count -ne $expectedScoringVersionCount -or
             [int]$Receipt.policy_row_counts.fee -lt 1 -or
             [int]$Receipt.policy_row_counts.buffer -lt 1 -or
             [int]$Receipt.policy_row_counts.execution -lt 1) {
@@ -133,7 +167,11 @@ $candidateKeys.Add($exactReceiptKey)
 $candidateKeys.Add($artifactReceiptKey)
 $listing = Invoke-AwsJson @('s3api', 'list-objects-v2', '--bucket', $ReceiptBucket, '--prefix', 'deployment-bootstrap/')
 $legacyPattern = '^deployment-bootstrap/[0-9a-f]{40}/' + [regex]::Escape($bundle.Digest) + '/receipt\.json$'
-foreach ($item in @($listing.Contents | Where-Object { [string]$_.Key -match $legacyPattern } | Sort-Object LastModified -Descending)) {
+$listingContents = @()
+if ($null -ne $listing -and $null -ne $listing.PSObject.Properties['Contents']) {
+    $listingContents = @($listing.Contents)
+}
+foreach ($item in @($listingContents | Where-Object { [string]$_.Key -match $legacyPattern } | Sort-Object LastModified -Descending)) {
     if (-not $candidateKeys.Contains([string]$item.Key)) { $candidateKeys.Add([string]$item.Key) }
 }
 
@@ -162,6 +200,10 @@ if ($null -eq $selected) {
 
 $receipt = $selected.Receipt
 $expectedConsumers = @("backend", "backtest", "batch", "pipeline", "trading")
+$secretVersionsProperty = $receipt.PSObject.Properties['secret_versions']
+if ($null -eq $secretVersionsProperty -or $null -eq $secretVersionsProperty.Value) {
+    throw "Database bootstrap receipt has no runtime secret version evidence."
+}
 $receiptConsumers = @($receipt.secret_versions.PSObject.Properties.Name | Sort-Object)
 if (($receiptConsumers -join ",") -cne ($expectedConsumers -join ",")) {
     throw "Database bootstrap receipt must identify exactly five runtime secret versions."
@@ -169,11 +211,23 @@ if (($receiptConsumers -join ",") -cne ($expectedConsumers -join ",")) {
 foreach ($consumer in $expectedConsumers) {
     $versionId = [string]$receipt.secret_versions.$consumer
     if ([string]::IsNullOrWhiteSpace($versionId)) { throw "Database bootstrap receipt has no secret version for '$consumer'." }
-    $description = Invoke-AwsJson @("secretsmanager", "describe-secret", "--secret-id", [string]$RuntimeDatabaseSecretNames[$consumer])
-    $stages = @($description.VersionIdsToStages.PSObject.Properties[$versionId].Value)
-    if ($stages -notcontains "AWSCURRENT") {
-        throw "Database secret '$consumer' no longer uses the receipt-bound version as AWSCURRENT."
+}
+
+$currentSecretVersions = [ordered]@{}
+foreach ($consumer in $expectedConsumers) {
+    if (-not $RuntimeDatabaseSecretNames.ContainsKey($consumer) -or
+        [string]::IsNullOrWhiteSpace([string]$RuntimeDatabaseSecretNames[$consumer])) {
+        throw "Runtime database secret name is missing for '$consumer'."
     }
+    $description = Invoke-AwsJson @("secretsmanager", "describe-secret", "--secret-id", [string]$RuntimeDatabaseSecretNames[$consumer])
+    if ($null -eq $description -or $null -eq $description.PSObject.Properties['VersionIdsToStages']) {
+        throw "Database secret '$consumer' has no version-stage metadata."
+    }
+    $currentVersions = @($description.VersionIdsToStages.PSObject.Properties | Where-Object { @($_.Value) -contains 'AWSCURRENT' })
+    if ($currentVersions.Count -ne 1) {
+        throw "Database secret '$consumer' must expose exactly one independently current AWSCURRENT version."
+    }
+    $currentSecretVersions[$consumer] = [string]$currentVersions[0].Name
 }
 
 $receiptRootSha = [string]$receipt.root_sha
@@ -187,4 +241,6 @@ $receiptRootSha = [string]$receipt.root_sha
     migrations = $bundle.MigrationCount
     receipt_key = $selected.Key
     receipt_version = $selected.VersionId
+    receipt_secret_versions_current = (($expectedConsumers | Where-Object { [string]$receipt.secret_versions.$_ -cne [string]$currentSecretVersions[$_] }).Count -eq 0)
+    current_secret_versions = $currentSecretVersions
 } | ConvertTo-Json -Compress

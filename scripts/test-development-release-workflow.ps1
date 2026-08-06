@@ -88,7 +88,7 @@ $required = @(
     "TF_STATE_BUCKET",
     "TF_VARS_JSON",
     "must carry independently reviewed public DNS delegation evidence",
-    "aws s3 sync `"`$env:RUNNER_TEMP/frontend`"",
+    "aws s3 sync `"`$frontendRoot`"",
     "_releases/",
     "VITE_OPERATOR_OIDC_ENABLED: 'true'",
     "VITE_OPERATOR_OIDC_ISSUER: `${{ vars.OPERATOR_OIDC_ISSUER }}",
@@ -113,6 +113,8 @@ $required = @(
     "test-aws-deployment-prerequisites.ps1",
     "verify-development-database-bootstrap-receipt.ps1",
     "invoke-development-database-bootstrap.ps1",
+    "-ExecutionId '`${{ github.run_id }}-`${{ github.run_attempt }}'",
+    "-ReclaimPriorExecution",
     "-AllowMissingReceipt",
     "-Execute -Confirm:`$false",
     "deploy-development-core-runtime.ps1",
@@ -128,23 +130,53 @@ foreach ($token in $required) {
     }
 }
 
-$immutableReleaseExpression = '${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}'
+$immutableReleaseExpression = '${{ github.sha }}-${{ github.run_id }}'
 if (([regex]::Matches($workflow, [regex]::Escape($immutableReleaseExpression))).Count -lt 5) {
     throw "Every release artifact, image tag, and release bundle must include the immutable GitHub run_id."
 }
 if ($workflow.Contains('${{ github.sha }}-${{ github.run_attempt }}')) {
     throw "A sha-plus-attempt identifier can collide across workflow runs; github.run_id is mandatory."
 }
+foreach ($attemptCoupledArtifact in @(
+    'development-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}',
+    'rc-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}'
+)) {
+    if ($workflow.Contains($attemptCoupledArtifact)) {
+        throw "Build outputs must remain reusable when only a failed downstream job is rerun: $attemptCoupledArtifact"
+    }
+}
+foreach ($artifactRecoveryBoundary in @(
+    'retention-days: 7',
+    'overwrite: true'
+)) {
+    if (-not $workflow.Contains($artifactRecoveryBoundary)) {
+        throw "Build artifacts must survive approval delays and full-run retries: $artifactRecoveryBoundary"
+    }
+}
+foreach ($imageRecoveryBoundary in @(
+    'aws ecr list-images',
+    "imageIds[?imageTag=='`$tag'].imageDigest | [0]",
+    '$sourceImageId',
+    '$existingImageId',
+    'Immutable ECR image fingerprint collision',
+    'Reusing verified immutable ECR image'
+)) {
+    if (-not $workflow.Contains($imageRecoveryBoundary)) {
+        throw "Immutable ECR publication must be safely reusable after a downstream job retry: $imageRecoveryBoundary"
+    }
+}
 
 foreach ($frontendPrefixBoundary in @(
-    '$existingJson = @(aws s3api list-objects-v2',
-    '--max-keys 1 --output json',
-    'if ($LASTEXITCODE -ne 0)',
-    '$existingResponse = ($existingJson -join "`n") | ConvertFrom-Json',
-    '[int]$existingResponse.KeyCount'
+    '$releaseMarkerKey = "_releases/$release/.release-content.sha256"',
+    '$contentFingerprint',
+    'Frontend release content fingerprint collision',
+    '--delete',
+    'Frontend asset sync failed',
+    'Frontend index publication failed',
+    'Frontend completion marker publication failed'
 )) {
     if (-not $workflow.Contains($frontendPrefixBoundary)) {
-        throw "Immutable frontend prefix detection is missing: $frontendPrefixBoundary"
+        throw "Idempotent immutable frontend publication is missing: $frontendPrefixBoundary"
     }
 }
 if ($workflow.Contains('--max-items 1 --query KeyCount --output text')) {
@@ -200,9 +232,12 @@ if ($workflow -notmatch "(?s)apply-reviewed-plan:.*?needs: prepare-and-plan.*?en
 if ($workflow -notmatch "(?s)bootstrap-database:.*?github\.event\.inputs\.database_bootstrap_authorization == 'BOOTSTRAP_DEVELOPMENT_DATABASE'.*?environment: development.*?AWS_DEPLOY_ROLE_ARN.*?verify-development-database-bootstrap-receipt\.ps1.*?-AllowMissingReceipt.*?invoke-development-database-bootstrap\.ps1.*?-Execute.*?verify-development-database-bootstrap-receipt\.ps1.*?build:") {
     throw "An explicitly authorized, environment-gated bootstrap must create and re-verify a missing receipt before any release build."
 }
+if ($workflow -notmatch '(?s)bootstrap-database:.*?timeout-minutes:\s*75.*?build:') {
+    throw "Database bootstrap job timeout must cover EC2, SSM, migration, credential staging, and cleanup budgets."
+}
 
-if ($workflow -notmatch "(?s)bootstrap-database:.*?hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e.*?terraform_version: 1\.15\.8.*?terraform_wrapper: false.*?terraform -chdir=infra/terraform/environments/development init.*?build:") {
-    throw "The isolated database bootstrap runner must install the pinned Terraform version before reading remote state outputs."
+if ($workflow -match "(?s)bootstrap-database:.*?terraform -chdir=infra/terraform/environments/development init.*?build:") {
+    throw "Database bootstrap must discover the applied AWS boundary without requiring the next release's Terraform state schema."
 }
 
 if ($workflow -notmatch "(?s)build:.*?needs: bootstrap-database.*?needs\.bootstrap-database\.result == 'skipped'.*?Build untrusted ARM64 runtime inputs without AWS credentials") {

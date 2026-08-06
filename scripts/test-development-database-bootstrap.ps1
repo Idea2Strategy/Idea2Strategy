@@ -78,6 +78,23 @@ if (-not (Test-Path -LiteralPath $manifestValidatorPath -PathType Leaf)) {
 }
 . $manifestValidatorPath
 
+$receiptTokens = $null
+$receiptParseErrors = $null
+$receiptAst = [Management.Automation.Language.Parser]::ParseInput($receiptVerifier, [ref]$receiptTokens, [ref]$receiptParseErrors)
+if ($receiptParseErrors.Count -gt 0) { throw "Receipt verifier must parse before its failure classifier can be tested." }
+$failureClassifierAst = $receiptAst.Find({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-AwsFailureCategory'
+    }, $true)
+if ($null -eq $failureClassifierAst) { throw "AWS receipt failure classifier is missing." }
+Invoke-Expression $failureClassifierAst.Extent.Text
+if ((Get-AwsFailureCategory 'An error occurred (NoSuchKey) when calling GetObject') -cne 'missing' -or
+    (Get-AwsFailureCategory 'An error occurred (AccessDenied) when calling GetObject') -cne 'access-denied' -or
+    (Get-AwsFailureCategory 'An error occurred (SlowDown) when calling GetObject') -cne 'throttled' -or
+    (Get-AwsFailureCategory 'Could not connect to the endpoint URL') -cne 'transport') {
+    throw "AWS receipt failures must distinguish missing objects from authorization and transient failures."
+}
+
 $fingerprintInputs = @{
     BundleSha256 = "1" * 64
     PolicySeedSha256 = "2" * 64
@@ -121,6 +138,31 @@ try {
     $duplicateBundle = Join-Path $testBundleRoot "duplicate"
     New-TestFlywayBundle $duplicateBundle @{ "V1__first.sql" = "SELECT 1;`n" } @("V1__first.sql", "V1__first.sql")
     Assert-Throws { Get-ValidatedDevelopmentFlywayBundle -BundleRoot $duplicateBundle } "duplicate" "Duplicate manifest entries must fail closed."
+
+    $duplicateVersionBundle = Join-Path $testBundleRoot "duplicate-version"
+    New-TestFlywayBundle $duplicateVersionBundle @{
+        "V20260806100000__identity.sql" = "SELECT 1;`n"
+        "V20260806100000__strategy.sql" = "SELECT 2;`n"
+    } @("V20260806100000__identity.sql", "V20260806100000__strategy.sql")
+    Assert-Throws { Get-ValidatedDevelopmentFlywayBundle -BundleRoot $duplicateVersionBundle } "duplicate version" "Independent service migrations must not reuse a Flyway version."
+
+    $normalizedDuplicateVersionBundle = Join-Path $testBundleRoot "normalized-duplicate-version"
+    New-TestFlywayBundle $normalizedDuplicateVersionBundle @{
+        "V01_002__identity.sql" = "SELECT 1;`n"
+        "V1.2__strategy.sql" = "SELECT 2;`n"
+    } @("V01_002__identity.sql", "V1.2__strategy.sql")
+    Assert-Throws { Get-ValidatedDevelopmentFlywayBundle -BundleRoot $normalizedDuplicateVersionBundle } "duplicate version" "Flyway-equivalent version spellings must collide before deployment."
+
+    $dynamicScoringSeed = Join-Path $testBundleRoot "dynamic-scoring-seed.sql"
+    Write-Utf8NoBomTestFile $dynamicScoringSeed @"
+SELECT '11111111-1111-1111-1111-111111111111';
+SELECT '22222222-2222-2222-2222-222222222222';
+SELECT '11111111-1111-1111-1111-111111111111';
+"@
+    $dynamicScoringIds = @(Get-DevelopmentScoringSeedIds -SeedSqlPath $dynamicScoringSeed)
+    if ($dynamicScoringIds.Count -ne 2) {
+        throw "Scoring receipt cardinality must be derived from unique IDs in the exact seed artifact."
+    }
 
     $driftBundle = Join-Path $testBundleRoot "checksum-drift"
     New-TestFlywayBundle $driftBundle @{ "V1__first.sql" = "SELECT 1;`n" } @("V1__first.sql")
@@ -274,6 +316,21 @@ foreach ($needle in @(
 }
 Assert-NotContains $orchestrator '@($Arguments) + @("--profile", $AwsProfile' "GitHub OIDC execution must not pass an empty AWS profile argument."
 Assert-NotContains $orchestrator 'Get-Executable "aws" (Join-Path $env:ProgramFiles' "Linux runners must not evaluate the Windows AWS CLI fallback path."
+foreach ($discoveryBoundary in @(
+    'function Test-DatabaseBootstrapTarget',
+    'function Resolve-AppliedDatabaseBootstrapTarget',
+    "'ssm', 'get-parameters'",
+    'Name=tag:Name,Values=idea2strategy-dev-public-a',
+    'Name=group-name,Values=idea2strategy-dev-database-bootstrap',
+    'idea2strategy-dev-database-bootstrap-instance-profile',
+    'idea2strategy-dev-database-bootstrap-role',
+    'subnet and security group belong to different VPCs',
+    'instance profile has an unexpected role attachment',
+    'if (Test-DatabaseBootstrapTarget $candidateTarget)'
+)) {
+    Assert-Contains $orchestrator $discoveryBoundary "Applied AWS bootstrap target discovery is missing: $discoveryBoundary"
+}
+Assert-NotContains $orchestrator 'Apply the reviewed Terraform secret-metadata/bootstrap-boundary plan before running this procedure.' "Bootstrap must fall back to exact applied AWS discovery when the local Terraform output schema has changed."
 
 foreach ($needle in @(
     '[switch]$AllowMissingReceipt',
@@ -290,6 +347,21 @@ foreach ($needle in @(
     Assert-Contains $receiptVerifier $needle "Receipt reuse boundary is missing: $needle"
 }
 Assert-NotContains $receiptVerifier '[string]$receipt.root_sha -cne $RootSha' "Artifact-identical receipts must be reusable across root commits."
+Assert-Contains $receiptVerifier 'function Get-AwsFailureCategory' "Receipt reads must classify AWS failures instead of treating all failures as missing objects."
+Assert-Contains $receiptVerifier 'NoSuchKey' "Only an explicit S3 missing-object response may be treated as a missing receipt."
+Assert-Contains $receiptVerifier 'access-denied' "S3/IAM/KMS authorization failures must remain actionable errors."
+Assert-Contains $receiptVerifier 'current_secret_versions' "Receipt verification must report the independently current runtime secret versions."
+Assert-NotContains $receiptVerifier 'no longer uses the receipt-bound version as AWSCURRENT' "Normal runtime secret rotation must not invalidate an artifact-bound database receipt."
+Assert-NotContains $receiptVerifier '[int]$Receipt.tables -ne 179' "Receipt reuse must not embed a schema table-count constant."
+Assert-NotContains $receiptVerifier '@($Receipt.scoring_versions).Count -ne 4' "Receipt reuse must derive scoring catalog cardinality from the hash-bound seed."
+Assert-Contains $orchestrator 'function Remove-StaleBootstrapInstances' "A prior timed-out bootstrap instance must be recovered before a new run."
+Assert-Contains $orchestrator '[string]$ExecutionId' "Each bootstrap lease must identify the exact workflow execution."
+Assert-Contains $orchestrator '[switch]$ReclaimPriorExecution' "Workflow concurrency must explicitly authorize reclaiming a prior execution."
+Assert-Contains $orchestrator 'Key=ExecutionId,Value=$ExecutionId' "Ephemeral instances must carry their exact execution lease owner."
+Assert-Contains $orchestrator '$ReclaimPriorExecution -and $observedExecutionId -cne $CurrentExecutionId' "A completed prior workflow execution must be reclaimable without a fixed cooldown."
+Assert-Contains $orchestrator 'wait instance-terminated' "Stale bootstrap recovery must finish before launching a replacement."
+Assert-NotContains $orchestrator '[int]$receipt.tables -ne 179' "Orchestrator receipt validation must not embed a schema table-count constant."
+Assert-NotContains $orchestrator '@($receipt.scoring_versions).Count -ne 4' "Orchestrator receipt validation must accept the exact hash-bound scoring catalog size."
 Assert-NotContains $orchestrator 'HttpPutResponseHopLimit=1' "The pinned AWS CLI container requires two IMDSv2 network hops to use the instance role."
 if ($orchestrator -match '(?i)Write-(Host|Output).*(password|SecretString)') {
     throw "Orchestrator must not print password or SecretString values."
@@ -310,6 +382,18 @@ Assert-NotContains $orchestrator 'ssm wait command-executed' "The AWS CLI comman
 Assert-Contains $orchestrator 'ssm get-command-invocation' "The orchestrator must poll the exact SSM invocation until a terminal status."
 Assert-Contains $orchestrator '$commandDeadline' "SSM invocation polling must have an explicit deadline matching the remote timeout."
 Assert-Contains $orchestrator 'Start-Sleep -Seconds 5' "SSM invocation polling must be bounded without a hot loop."
+foreach ($resilienceBoundary in @(
+    'database-bootstrap-provisioning-failed',
+    'Database bootstrap host readiness timed out.',
+    'docker pull',
+    'function Invoke-WithRetry',
+    '$primaryError',
+    'Cleanup also failed'
+)) {
+    Assert-Contains $orchestrator $resilienceBoundary "Bootstrap provisioning and cleanup resilience is missing: $resilienceBoundary"
+}
+Assert-Contains $orchestrator 'resolve:ssm:/aws/service/canonical/ubuntu/server/noble/stable/current/amd64/hvm/ebs-gp3/ami-id' "Bootstrap AMI resolution must use Canonical's supported public parameter boundary."
+Assert-NotContains $orchestrator 'Sort-Object CreationDate -Descending' "Bootstrap must not select an unreviewed AMI by sorting the live EC2 catalog."
 
 foreach ($consumer in @("backend", "batch", "backtest", "trading", "pipeline")) {
     Assert-Contains $bootstrap "idea2strategy_${consumer}_runtime" "Bootstrap LOGIN role is missing for $consumer."
@@ -327,6 +411,16 @@ foreach ($needle in @(
     'PIPELINE_WORKER_DATABASE_URL',
     'postgresql+psycopg://',
     'secretsmanager put-secret-value',
+    'AWSPENDING',
+    'update-secret-version-stage',
+    'rollback_runtime_credentials',
+    'rotation_started',
+    'old_versions',
+    'pull_image',
+    'credential rollback failed and requires operator attention',
+    'rollback_status',
+    'pending_cleanup_complete',
+    "WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'idea2strategy_%s_runtime')",
     'rolcanlogin',
     'pg_auth_members',
     'idea2strategy_policy_seed_bootstrap',
@@ -344,13 +438,23 @@ foreach ($needle in @(
     '--expected-migration-count',
     'expected_migration_count',
     'declare -A listed_migrations',
+    'declare -A listed_versions',
     'Flyway migration is not listed in the manifest',
-    '179'
+    'expected_scoring_ids'
 )) {
     Assert-Contains $bootstrap $needle "Host bootstrap safety or verification is missing: $needle"
 }
 Assert-NotContains $bootstrap 'flyway migrate >&2' "Central multi-service migration bundles must explicitly apply validated late-arriving versions."
 Assert-NotContains $bootstrap 'EXPECTED_MIGRATION_COUNT' "Host bootstrap must receive the locally validated manifest count instead of embedding a migration count."
+Assert-NotContains $bootstrap "EXPECTED_TABLE_COUNT='179'" "The exact bundle receipt must not require a manually synchronized table-count constant."
+Assert-Contains $bootstrap 'test "$table_count" -gt 0' "The receipt must still reject an empty application schema."
+Assert-NotContains $bootstrap "jq -e 'length == 4'" "Scoring validation must derive cardinality from the hash-bound seed artifact."
+Assert-NotContains $bootstrap '3c81fb2f387fa790e126e1aa40b18d389c44bcf9f7ef2cefdd6911fd2e1eec71' "Scoring row selection must not duplicate seed-specific hashes in executable code."
+Assert-Contains $bootstrap '--version-stage AWSCURRENT' "Rollback-safe rotation must capture the current secret version before changing database passwords."
+Assert-Contains $bootstrap '--version-stages AWSPENDING' "New credential values must be staged before database passwords change."
+if ($bootstrap.IndexOf('--version-stages AWSPENDING') -gt $bootstrap.IndexOf('ALTER ROLE %s LOGIN')) {
+    throw "Every new secret version must be staged before runtime database passwords are changed."
+}
 if ($bootstrap -match '(?m)^\s*echo\s+["'']?\$(master_json|master_password|password)\b' -or
     $bootstrap -match '(?m)^\s*printf\s+[^>\r\n]*\$(master_json|master_password)\b') {
     throw "Host bootstrap must not print credential-bearing variables."
