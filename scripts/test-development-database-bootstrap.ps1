@@ -96,6 +96,36 @@ if ((Get-AwsFailureCategory 'An error occurred (NoSuchKey) when calling GetObjec
     throw "AWS receipt failures must distinguish missing objects from authorization and transient failures."
 }
 
+$orchestratorTokens = $null
+$orchestratorParseErrors = $null
+$orchestratorAst = [Management.Automation.Language.Parser]::ParseInput($orchestrator, [ref]$orchestratorTokens, [ref]$orchestratorParseErrors)
+if ($orchestratorParseErrors.Count -gt 0) { throw "Database bootstrap orchestrator must parse before its receipt expiry validator can be tested." }
+$receiptExpiryValidatorAst = $orchestratorAst.Find({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-DatabaseBootstrapReceiptRightsExpiry'
+    }, $true)
+if ($null -eq $receiptExpiryValidatorAst) { throw "Database bootstrap receipt rights expiry validator is missing." }
+Invoke-Expression $receiptExpiryValidatorAst.Extent.Text
+
+$isoUtcExpiry = '2026-09-06T03:13:00Z'
+$convertFromJsonExpiry = ('{"rights_expires_at":"2026-09-06T03:13:00Z"}' | ConvertFrom-Json).rights_expires_at
+$deserializedUtcExpiry = [DateTime]::SpecifyKind([DateTime]::Parse('2026-09-06T03:13:00'), [DateTimeKind]::Utc)
+$deserializedLocalExpiry = [DateTime]::SpecifyKind([DateTime]::Parse('2026-09-06T03:13:00'), [DateTimeKind]::Local)
+$deserializedUnspecifiedExpiry = [DateTime]::SpecifyKind([DateTime]::Parse('2026-09-06T03:13:00'), [DateTimeKind]::Unspecified)
+$deserializedUtcOffsetExpiry = [DateTimeOffset]::Parse('2026-09-06T03:13:00+00:00')
+$deserializedNonUtcOffsetExpiry = [DateTimeOffset]::Parse('2026-09-06T03:13:00+09:00')
+if (-not (Test-DatabaseBootstrapReceiptRightsExpiry $isoUtcExpiry) -or
+    -not (Test-DatabaseBootstrapReceiptRightsExpiry $convertFromJsonExpiry) -or
+    -not (Test-DatabaseBootstrapReceiptRightsExpiry $deserializedUtcExpiry) -or
+    -not (Test-DatabaseBootstrapReceiptRightsExpiry $deserializedUtcOffsetExpiry) -or
+    (Test-DatabaseBootstrapReceiptRightsExpiry $deserializedLocalExpiry) -or
+    (Test-DatabaseBootstrapReceiptRightsExpiry $deserializedUnspecifiedExpiry) -or
+    (Test-DatabaseBootstrapReceiptRightsExpiry $deserializedNonUtcOffsetExpiry) -or
+    (Test-DatabaseBootstrapReceiptRightsExpiry '2026-09-06 03:13:00') -or
+    (Test-DatabaseBootstrapReceiptRightsExpiry $null)) {
+    throw "Receipt rights expiry validation must accept ISO UTC text and PowerShell UTC date representations only."
+}
+
 $fingerprintInputs = @{
     BundleSha256 = "1" * 64
     PolicySeedSha256 = "2" * 64

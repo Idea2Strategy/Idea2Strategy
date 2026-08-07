@@ -228,6 +228,25 @@ function Write-Utf8NoBomFile([string]$LiteralPath, [string]$Content) {
     [IO.File]::WriteAllText($LiteralPath, $Content, [Text.UTF8Encoding]::new($false))
 }
 
+function Test-DatabaseBootstrapReceiptRightsExpiry([AllowNull()][object]$Value) {
+    if ($null -eq $Value) { return $false }
+    if ($Value -is [DateTime]) {
+        return ([DateTime]$Value).Kind -eq [DateTimeKind]::Utc
+    }
+    if ($Value -is [DateTimeOffset]) {
+        return ([DateTimeOffset]$Value).Offset -eq [TimeSpan]::Zero
+    }
+
+    $parsed = [DateTimeOffset]::MinValue
+    $styles = [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal
+    return [DateTimeOffset]::TryParseExact(
+        [string]$Value,
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        [Globalization.CultureInfo]::InvariantCulture,
+        $styles,
+        [ref]$parsed)
+}
+
 if ($Region -ne "ap-northeast-2") { throw "The Development database bootstrap is restricted to ap-northeast-2." }
 if ($InstanceType -notmatch '^t3\.(micro|small|medium)$') { throw "Use a bounded x86 t3 instance for the amd64-only Flyway image." }
 if ($RuntimeDatabaseName -ceq "idea2strategy" -or $RuntimeDatabaseName -in @("postgres", "rdsadmin")) {
@@ -550,7 +569,7 @@ trap - EXIT
         @($receipt.scoring_versions).Count -ne $expectedScoringVersionCount -or [int]$receipt.migrations -ne $expectedMigrationCount -or
         [int]$receipt.tables -lt 1 -or
         [int]$receipt.instrument_count -lt 500 -or
-        [string]$receipt.rights_expires_at -notmatch '^\d{4}-\d{2}-\d{2}T' -or
+        -not (Test-DatabaseBootstrapReceiptRightsExpiry $receipt.rights_expires_at) -or
         $null -eq $receipt.trading_runtime_artifacts -or
         [int]$receipt.policy_row_counts.fee -lt 1 -or [int]$receipt.policy_row_counts.buffer -lt 1 -or
         [int]$receipt.policy_row_counts.execution -lt 1) {
