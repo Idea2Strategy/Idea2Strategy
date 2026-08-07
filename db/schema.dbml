@@ -1052,7 +1052,7 @@ Table identity.authentication_events {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
   event_sequence bigint [not null]
-  event_type varchar(60) [not null, note: 'LOGIN_IDENTITY_CREATED, VERIFIED, ACTIVATED, REPLACED, DISABLED, PASSWORD_CHANGED, SESSIONS_REVOKED 등.']
+  event_type varchar(60) [not null, note: 'LOGIN_IDENTITY_CREATED, VERIFIED, ACTIVATED, REPLACED, DISABLED, PASSWORD_CHANGED, CREDENTIALS_REVOKED, REFRESH_TOKEN_REVOKED 등.']
   subject_login_identity_id uuid
   previous_login_identity_id uuid
   new_login_identity_id uuid
@@ -1446,7 +1446,7 @@ Table strategy.strategy_edit_leases {
     `heartbeat_at >= acquired_at AND expires_at > heartbeat_at` [name: 'strategy_edit_lease_time_order_valid']
   }
 
-  Note: 'Allows exactly one active editor across the web, direct user CLI, and delegated external AI. Revoked or expired credentials invalidate the lease, and a stale edit_sequence or lease token rejects late saves.'
+  Note: 'Allows exactly one active editor. Customer leases are account-owned and independently protected by the lease token; refresh token families are not editor identities. A delegated lease is invalidated by a revoked or expired credential, and a stale edit_sequence or lease token rejects late saves.'
 
   Records (strategy_id, account_id, delegated_credential_id, lease_token_digest, digest_key_version, acquired_at, heartbeat_at, expires_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:05:00+09:00'
