@@ -247,6 +247,11 @@ if ($workflow -notmatch "(?s)apply-reviewed-plan:.*?needs: prepare-and-plan.*?en
 if ($workflow -notmatch "(?s)bootstrap-database:.*?github\.event\.inputs\.database_bootstrap_authorization == 'BOOTSTRAP_DEVELOPMENT_DATABASE'.*?environment: development.*?AWS_DEPLOY_ROLE_ARN.*?verify-development-database-bootstrap-receipt\.ps1.*?-AllowMissingReceipt.*?invoke-development-database-bootstrap\.ps1.*?-Execute.*?verify-development-database-bootstrap-receipt\.ps1.*?build:") {
     throw "An explicitly authorized, environment-gated bootstrap must create and re-verify a missing receipt before any release build."
 }
+$sipGuardIndex = $workflow.IndexOf("[string]`$terraformConfig.trading_market_data_feed -cne 'sip'")
+$databaseBootstrapIndex = $workflow.IndexOf('./scripts/invoke-development-database-bootstrap.ps1')
+if ($sipGuardIndex -lt 0 -or $databaseBootstrapIndex -lt 0 -or $sipGuardIndex -gt $databaseBootstrapIndex) {
+    throw "Database bootstrap must reject non-SIP release inputs before starting any AWS bootstrap work."
+}
 if ($workflow -notmatch '(?s)bootstrap-database:.*?timeout-minutes:\s*75.*?build:') {
     throw "Database bootstrap job timeout must cover EC2, SSM, migration, credential staging, and cleanup budgets."
 }
