@@ -2,173 +2,55 @@
   "schema_version": 1,
   "claims": [
     {
-      "id": "claim.a09-session-management-juwon-na",
-      "work_id": "work.a09-session-management",
-      "definition_fingerprint": "sha256:ce86dd746ea001f5648288504b4a97373830f931b5102f435a6cfc9392f653e9",
-      "status": "review",
-      "owner": "Juwon-Na",
-      "branch": "feature/67-session-management",
-      "repository": "repository.github.backend",
+      "id": "claim.customer-stateless-jwt",
+      "work_id": "work.customer-stateless-jwt",
+      "definition_fingerprint": "sha256:2d745e05c5b8fb577b03fe49564a679b6541362bf2c403367720e0900c19662c",
+      "status": "in_progress",
+      "owner": "hjcud",
+      "branch": "feature/customer-stateless-jwt",
+      "repository": "repository.github.backend,repository.github.backtest,repository.github.root,repository.github.ui",
       "paths": [
         "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/identity/**",
         "backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/identity/**",
+        "backend/apps/backend-batch/src/main/java/com/idea2strategy/backend/batch/**",
+        "backend/db-migration/src/main/resources/db/migration/**",
         "backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/identity/**",
-        "backend/modules/backend-application/src/test/java/com/idea2strategy/backend/application/identity/**",
-        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/identity/**"
+        "backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/strategy/**",
+        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/identity/**",
+        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/strategy/**",
+        "backtest-engine/src/backtest_engine/production.py",
+        "backtest-engine/tests/**",
+        "db/schema.dbml",
+        "infra/terraform/environments/development/**",
+        "ui/e2e/**",
+        "ui/src/**/*.test.ts*",
+        "ui/src/api/account.ts",
+        "ui/src/components/AccountApiPanels.tsx",
+        "ui/src/lib/session.ts"
       ],
       "policy_ids": [],
-      "scenario_ids": [],
+      "scenario_ids": [
+        "scenario.account.sanction"
+      ],
       "contract_ids": [],
       "db_entities": [
         "identity.account_security_states",
         "identity.authentication_events",
-        "identity.login_identities",
-        "identity.password_credentials",
-        "identity.sessions"
+        "identity.sessions",
+        "strategy.strategy_edit_leases"
       ],
-      "migration_slots": [],
-      "ui_flows": [],
-      "dependency_majors": [],
-      "stable_ids": [],
-      "root_pointer": true,
-      "starts_at": "2026-08-01T15:57:28.5754761Z",
-      "expires_at": "2026-08-04T15:57:28.3286574Z"
-    },
-    {
-      "id": "claim.c90-bot-control-integration-pjy008008",
-      "work_id": "work.c90-bot-control-integration",
-      "definition_fingerprint": "sha256:18c12ce9a5eef485b411ab777ad12fcd7d3d4f9fb7f7bbb5f60b2969472a9e56",
-      "status": "in_progress",
-      "owner": "pjy008008",
-      "branch": "feature/47-bot-control-integration",
-      "repository": "idea2strategy.trading-engine",
-      "paths": [
-        "trading-engine/apps/trading-worker/**",
-        "trading-engine/modules/strategy-runtime/**",
-        "trading-engine/modules/trading-messaging/**"
-      ],
-      "policy_ids": [
-        "policy.execution.server-only"
-      ],
-      "scenario_ids": [
-        "scenario.bot.evaluate"
-      ],
-      "contract_ids": [],
-      "db_entities": [],
-      "migration_slots": [],
-      "ui_flows": [],
-      "dependency_majors": [],
-      "stable_ids": [
-        "capability.bot.server-execution",
-        "quality.auditability",
-        "quality.failure-safety",
-        "quality.reproducibility",
-        "scenario.bot.evaluate"
-      ],
-      "root_pointer": true,
-      "starts_at": "2026-08-02T04:35:52.0621607Z",
-      "expires_at": "2026-08-03T04:35:51.8412729Z"
-    },
-    {
-      "id": "claim.com07-29-competition-currency-schema-drift",
-      "work_id": "work.com07-29-competition-currency-schema-drift",
-      "definition_fingerprint": "sha256:e0fa4bc713a86a511ace7b95f64af3ad657f474e97daabdee7d2ff29212dc016",
-      "status": "blocked",
-      "owner": "dertz569",
-      "branch": "fix/29-competition-currency-schema-drift",
-      "repository": "repository.github.backend",
-      "paths": [
-        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/competition/CompetitionRoomRulesJpaEntity.java",
-        "backend/modules/backend-persistence/src/test"
-      ],
-      "policy_ids": [],
-      "scenario_ids": [],
-      "contract_ids": [],
-      "db_entities": [
-        "competition.room_rules"
-      ],
-      "migration_slots": [],
-      "ui_flows": [],
-      "dependency_majors": [],
-      "stable_ids": [
-        "quality.reproducibility"
-      ],
-      "root_pointer": false,
-      "starts_at": "2026-08-01T13:03:53.0605406Z",
-      "expires_at": "2026-08-03T13:03:52.8429987Z"
-    },
-    {
-      "id": "claim.com07-central-flyway-20260802",
-      "work_id": "work.com07-flyway-integration",
-      "definition_fingerprint": "sha256:dc4cca35790953a85eff20d9c1226ed8bc3b0c6dbf3c1512589e441dca85033f",
-      "status": "in_progress",
-      "owner": "kcrmin",
-      "branch": "feature/com07-central-flyway",
-      "repository": "repository.github.backend,repository.github.root,repository.github.trading-engine",
-      "paths": [
-        ".github/workflows/**",
-        "backend/db-migration/**",
-        "backend/modules/backend-persistence/build.gradle.kts",
-        "backend/modules/backend-persistence/src/test/**",
-        "compose.back.yml",
-        "scripts/**",
-        "trading-engine/apps/trading-worker/build.gradle.kts",
-        "trading-engine/apps/trading-worker/src/main/resources/application.yaml",
-        "trading-engine/db/migration-contributions/**",
-        "trading-engine/modules/trading-persistence/build.gradle.kts",
-        "trading-engine/modules/trading-persistence/src/test/**"
-      ],
-      "policy_ids": [],
-      "scenario_ids": [],
-      "contract_ids": [],
-      "db_entities": [],
       "migration_slots": [
-        "flyway.central-integration"
+        "flyway.20260807120000.backend.stateless-customer-jwt"
       ],
       "ui_flows": [],
       "dependency_majors": [],
       "stable_ids": [
         "quality.auditability",
-        "quality.failure-safety",
-        "quality.reproducibility"
+        "quality.failure-safety"
       ],
       "root_pointer": true,
-      "starts_at": "2026-08-02T04:09:13.8511998Z",
-      "expires_at": "2026-08-03T04:09:13.5855446Z"
-    },
-    {
-      "id": "claim.e02-competition-performance-dbml-alignment",
-      "work_id": "work.e02-competition-performance-dbml-alignment",
-      "definition_fingerprint": "sha256:46aa71b2454c7cd504ac9cec8f9833b8f3e4d44d73a5318c69818d3fec092a2e",
-      "status": "blocked",
-      "owner": "dertz569",
-      "branch": "feature/42-competition-performance-dbml-alignment",
-      "repository": "repository.github.root",
-      "paths": [
-        "proposals/dbml-redesign",
-        "scripts/validate-competition-dbml.mjs"
-      ],
-      "policy_ids": [],
-      "scenario_ids": [
-        "scenario.room.finish"
-      ],
-      "contract_ids": [],
-      "db_entities": [
-        "competition.*",
-        "performance.*"
-      ],
-      "migration_slots": [],
-      "ui_flows": [],
-      "dependency_majors": [],
-      "stable_ids": [
-        "capability.room.bot-comparison",
-        "quality.auditability",
-        "quality.reproducibility",
-        "scenario.room.finish"
-      ],
-      "root_pointer": false,
-      "starts_at": "2026-08-01T04:12:04.1183288Z",
-      "expires_at": "2026-08-03T04:12:03.9299304Z"
+      "starts_at": "2026-08-07T12:31:16.3162711Z",
+      "expires_at": "2026-08-08T12:31:16.2042676Z"
     }
   ]
 }
