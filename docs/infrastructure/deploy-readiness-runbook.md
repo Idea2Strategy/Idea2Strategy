@@ -120,15 +120,20 @@ Before requesting an AWS plan, record and review all of the following:
 - the existing `www.ideatostrategy.com` A record remains pinned to
   `121.254.178.253` during delegation; move it only in a separately reviewed
   CloudFront traffic cutover;
-- the SES domain identity is verified, all three DKIM records report `SUCCESS`,
-  and the approved sender is `no-reply@ideatostrategy.com`. The Core instance
-  role is the credential boundary; do not create SMTP or access keys.
+- the temporary Virginia (`us-east-1`) SES domain identity is verified, all
+  three Virginia DKIM records report `SUCCESS`, and production access is
+  enabled there. Preserve the existing Seoul (`ap-northeast-2`) identity and
+  DKIM records while AWS Support corrects the region approval. The approved
+  sender is `no-reply@ideatostrategy.com`. The Core instance role is the
+  credential boundary; do not create SMTP or access keys.
 
 Before enabling real customer email, run the credential-safe SES preflight:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-development-email-delivery-prerequisites.ps1 `
   -ExpectedAwsAccountId <12-digit-development-account> `
+  -ExpectedInfrastructureRegion ap-northeast-2 `
+  -ExpectedEmailRegion us-east-1 `
   -RequireProductionAccess
 ```
 
@@ -138,6 +143,10 @@ also be verified and production user flows are not release-ready. Request SES
 production access separately; Terraform deliberately cannot approve that
 account-level anti-abuse decision. The preflight prints only account/identity
 status and public mail configuration, never credentials or message contents.
+The application and data plane remain in Seoul; only the SES API endpoint is
+temporarily `us-east-1`. Move email delivery back to Seoul only after the
+Support correction is confirmed, Seoul production access and DKIM both pass
+this preflight, and a separately reviewed Terraform plan makes no DNS deletion.
 
 Stop if the account, region, commit, provider lockfile, backend, or protected product/contract fingerprint differs from the reviewed candidate.
 

@@ -8,6 +8,17 @@ provider "aws" {
   }
 }
 
+provider "aws" {
+  alias               = "email"
+  region              = var.email_region
+  profile             = var.aws_profile != "" ? var.aws_profile : null
+  allowed_account_ids = var.expected_aws_account_id != "" ? [var.expected_aws_account_id] : null
+
+  default_tags {
+    tags = local.common_tags
+  }
+}
+
 data "aws_caller_identity" "current" {}
 
 data "aws_availability_zones" "available" {

@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$AwsProfile = "idea2strategy-dev",
-    [string]$ExpectedRegion = "ap-northeast-2",
+    [string]$ExpectedInfrastructureRegion = "ap-northeast-2",
+    [string]$ExpectedEmailRegion = "us-east-1",
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^\d{12}$')]
     [string]$ExpectedAwsAccountId,
@@ -38,15 +39,15 @@ if ([string]$identity.Account -cne $ExpectedAwsAccountId) {
 }
 
 $configuredRegion = (& $aws.Source @profileArgs configure get region 2>$null) -join ""
-if ($LASTEXITCODE -ne 0 -or $configuredRegion.Trim() -cne $ExpectedRegion) {
-    throw "AWS profile region must be exactly $ExpectedRegion."
+if ($LASTEXITCODE -ne 0 -or $configuredRegion.Trim() -cne $ExpectedInfrastructureRegion) {
+    throw "AWS profile region must be exactly $ExpectedInfrastructureRegion."
 }
 if ($FromAddress -cne $FromAddress.ToLowerInvariant() -or
     -not $FromAddress.EndsWith("@$($DomainName.ToLowerInvariant())", [StringComparison]::Ordinal)) {
     throw "FromAddress must be a lowercase mailbox under DomainName."
 }
 
-$account = Invoke-AwsJson -Arguments @("sesv2", "get-account", "--region", $ExpectedRegion)
+$account = Invoke-AwsJson -Arguments @("sesv2", "get-account", "--region", $ExpectedEmailRegion)
 if (-not [bool]$account.SendingEnabled) {
     throw "SES account-level sending is disabled."
 }
@@ -56,7 +57,7 @@ if ($RequireProductionAccess -and -not [bool]$account.ProductionAccessEnabled) {
 
 $emailIdentity = Invoke-AwsJson -Arguments @(
     "sesv2", "get-email-identity",
-    "--region", $ExpectedRegion,
+    "--region", $ExpectedEmailRegion,
     "--email-identity", $DomainName
 )
 if (-not [bool]$emailIdentity.VerifiedForSendingStatus) {
@@ -68,7 +69,8 @@ if ([string]$emailIdentity.DkimAttributes.Status -cne "SUCCESS") {
 
 [pscustomobject]@{
     account_matches           = $true
-    region                    = $ExpectedRegion
+    infrastructure_region     = $ExpectedInfrastructureRegion
+    email_region              = $ExpectedEmailRegion
     domain                    = $DomainName
     from_address              = $FromAddress
     sending_enabled           = [bool]$account.SendingEnabled

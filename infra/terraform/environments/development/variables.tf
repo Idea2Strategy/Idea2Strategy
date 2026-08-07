@@ -4,6 +4,17 @@ variable "aws_region" {
   default     = "ap-northeast-2"
 }
 
+variable "email_region" {
+  description = "AWS region used only for Development transactional SES delivery."
+  type        = string
+  default     = "us-east-1"
+
+  validation {
+    condition     = var.email_region == "us-east-1"
+    error_message = "Development email delivery must remain in us-east-1 until the Seoul SES production-access correction is approved and a separate migration is reviewed."
+  }
+}
+
 variable "aws_profile" {
   description = "Local AWS CLI profile. CI can override this value."
   type        = string
