@@ -304,6 +304,7 @@ jobs:
 
   prepare-and-plan:
     needs: build
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: development-plan
@@ -668,7 +669,7 @@ jobs:
           Get-Content infra/terraform/environments/development/deployment.plan.txt >> $env:GITHUB_STEP_SUMMARY
 
   apply-reviewed-plan:
-    if: github.event.inputs.apply_reviewed_plan == 'true'
+    if: always() && needs.prepare-and-plan.result == 'success' && github.event.inputs.apply_reviewed_plan == 'true'
     needs: prepare-and-plan
     runs-on: ubuntu-latest
     timeout-minutes: 120
