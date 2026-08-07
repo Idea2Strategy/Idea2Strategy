@@ -86,8 +86,9 @@ the platform's virtual execution service.
   five-minute harness limit without reporting a failure. Ruff passes, and the changed modules pass
   mypy. Full-project mypy remains blocked by pre-existing errors exposed by the unpinned latest
   pandas stubs.
-- The refreshed central Flyway bundle and source-revision receipt must pass
-  `scripts/test-flyway-ci-bundle.ps1` on the final root commit.
+- The refreshed central Flyway bundle validates and applies all 53 migrations on a fresh
+  PostgreSQL 16 database; the second application reports no pending migration. The exact
+  source-revision receipt is verified by `scripts/test-flyway-ci-bundle.ps1`.
 
 These results verify the production backtest path in local integration environments; they do not
 prove that a production environment already has the commits, migration, credentials, provider
