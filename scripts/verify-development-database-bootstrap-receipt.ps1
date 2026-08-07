@@ -117,6 +117,16 @@ function Invoke-AwsJson([string[]]$Arguments) {
     return ([string]$capture.Output | ConvertFrom-Json)
 }
 
+function Test-RuntimeSecretVersionsCurrent(
+    [string[]]$ExpectedConsumers,
+    [object]$ReceiptSecretVersions,
+    [Collections.IDictionary]$CurrentSecretVersions
+) {
+    return (@($ExpectedConsumers | Where-Object {
+        [string]$ReceiptSecretVersions.$_ -cne [string]$CurrentSecretVersions[$_]
+    }).Count -eq 0)
+}
+
 function Get-VersionedReceipt([string]$ReceiptKey) {
     $receiptPath = [IO.Path]::GetTempFileName()
     try {
@@ -258,9 +268,10 @@ foreach ($consumer in $expectedConsumers) {
     $currentSecretVersions[$consumer] = [string]$currentVersions[0].Name
 }
 
-$secretVersionsCurrent = (($expectedConsumers | Where-Object {
-    [string]$receipt.secret_versions.$_ -cne [string]$currentSecretVersions[$_]
-}).Count -eq 0)
+$secretVersionsCurrent = Test-RuntimeSecretVersionsCurrent `
+    -ExpectedConsumers $expectedConsumers `
+    -ReceiptSecretVersions $receipt.secret_versions `
+    -CurrentSecretVersions $currentSecretVersions
 if (-not $secretVersionsCurrent) {
     if ($AllowMissingReceipt) {
         [pscustomobject]@{
