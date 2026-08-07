@@ -40,21 +40,44 @@ Basic user plausibly needs:
 | Instruments per section | 5 | Bounds fan-out per event; the ETF universe is 27 instruments total. |
 | Historical lookback | 60 completed bars | The largest period any published element requests (`SMA_60`, `HIGH_60`, `LOW_60`). Deriving the cap from the catalog keeps the two from drifting. |
 
-### Recommendation: stop silently discarding risk-lane input
+### Recommendation: retire the risk lane from the data model, not just from the toolbar
 
-The editor renders a risk lane, but `buildBasicSemanticDocument` drops every card on it, because no
-`RISK_POLICY` element exists in `basic-elements:2026-08-07` (the migration publishes twelve
-`CONDITION`, one `TRIGGER`, one `ACTION`, and no `RISK_POLICY`). A user can therefore configure risk
-rules that are silently absent from the released bot — a correctness defect, not a cosmetic one.
+No `RISK_POLICY` element exists in `basic-elements:2026-08-07` (the migration publishes twelve
+`CONDITION`, one `TRIGGER`, one `ACTION`), and `buildBasicSemanticDocument` drops every card on the
+risk lane.
 
-Two ways to close it. **Recommended: remove the risk lane from the Basic editor for v1**, because it
-is reversible, needs no migration, and cannot mislead anyone. The alternative — publishing a
-`BASIC_RISK_STOP` element in a new catalog version — is the better end state but requires deciding
-the stop semantics (trigger basis, whether it cancels open orders, interaction with the sell
-container) and a runtime implementation in trading-engine, so it should be its own reviewed unit.
-Note that the exit conditions already published (`BASIC_POSITION_RETURN`, `BASIC_PEAK_RETURN`,
-`BASIC_DRAWDOWN_FROM_PEAK`, `BASIC_HOLDING_PERIOD`) let a user express stop-loss and take-profit
-inside the sell container today, so removing the lane loses no capability in v1.
+This is **not** a live silent-data-loss path, and an earlier revision of this document overstated it.
+Two guards already exist: the editor offers only 매수/매도 when adding a card, so there is no way to
+create a risk card, and when a catalog client is present the validator raises a blocking issue
+(`위기관리 카드는 현재 공개된 실행 카탈로그에서 지원하지 않습니다`) that prevents save-and-launch.
+The silent drop survives only where no catalog client exists, which is the prototype and test path.
+
+What remains is dead surface with a sharp edge: `risk` is still a first-class side throughout the
+editor's state, clone, restore, render, duplicate and delete paths, so a document written by an older
+UI can still carry risk cards — and such a strategy is then permanently unlaunchable until the user
+finds and deletes cards the toolbar can no longer create.
+
+Recommended: **remove `risk` from the Basic editor's side model** and, in the same change, delete any
+risk cards encountered while restoring a legacy document, reporting what was removed. Publishing a
+`BASIC_RISK_STOP` element instead is the better end state but needs the stop semantics decided
+(trigger basis, whether it cancels open orders, how it interacts with the sell container) plus a
+trading-engine implementation, so it belongs in its own reviewed unit. No capability is lost in v1:
+`BASIC_POSITION_RETURN`, `BASIC_PEAK_RETURN`, `BASIC_DRAWDOWN_FROM_PEAK` and
+`BASIC_HOLDING_PERIOD` already express stop-loss, take-profit and time exits inside the sell
+container.
+
+### Recommendation: give `symbolLimits` a semantic home
+
+Per-symbol maximum-holding caps (`symbolLimits`) are collected by the editor and written **only** into
+`presentationDocument.basicEditor.snapshot`. They never reach the semantic document, so they are
+absent from the released bot and from validation, while looking to the user like a configured
+execution limit. This is the one genuine dual-source defect in the current editor: an
+execution-meaningful value living in the layout document.
+
+Recommended: express the cap as a parameter on the terminal `BASIC_EQUAL_ALLOCATION_ORDER` element
+(a new catalog version), because the cap constrains order sizing and belongs with the order step.
+Until that lands, the editor should not present the control as though it affects execution. Deciding
+this is part of this question because it changes the published catalog.
 
 ### Backtest support rules
 
@@ -168,7 +191,40 @@ strategy-page work does not stall waiting for a palette.
 
 ---
 
-## 6. Structural conflict: is there a "released strategy version" entity?
+## 6. Which document is authoritative when the editor reloads?
+
+Not one of the five questions, but it decides whether the answer to §1 is implementable, and the
+current code answers it by accident rather than by design.
+
+`DMD-010` and `DMD-030` make the split clear in one direction: presentation carries layout and must
+never affect execution meaning. They do not say which document **reconstructs the editor**, and today
+the answer is presentation, exclusively. The load path stores the fetched semantic document into a ref
+that is never read again, then rebuilds the whole canvas from
+`presentationDocument.basicEditor.snapshot`.
+
+That has a consequence worth deciding deliberately rather than inheriting: if the snapshot cannot be
+read — a future `version`, a shape change, a document written by any non-UI client — the editor
+presents an empty canvas for a strategy that is not empty, and the next save writes `groups: []` over
+the real semantic document. The immediate defect is being fixed in code by refusing to open an
+unreadable document instead of blanking it, but the structural question stands.
+
+Recommend affirming the current division explicitly rather than trying to eliminate it: **semantic is
+authoritative for execution, presentation is authoritative for editor reconstruction, and neither is
+derivable from the other.** The reason to affirm rather than unify is that the editor's display
+encodings are deliberately lossy — `>` and `↑` both compile to `GT`, and a label like
+`최근 20봉 평균 거래량 2배` compiles to `{period: 20, multiplier: 2}` — so semantic cannot regenerate
+the editor surface, and forcing it to would mean pushing display strings into execution meaning, which
+`DMD-010` forbids.
+
+What that affirmation obliges, and should be recorded with it:
+
+- Presentation must never be the only home of an execution-meaningful value (see the `symbolLimits`
+  recommendation in §1).
+- An unreadable presentation snapshot is a load failure, never an empty canvas.
+- The semantic document must remain sufficient to release and run a bot with no presentation input,
+  which is already true.
+
+## 7. Structural conflict: is there a "released strategy version" entity?
 
 Not one of the five questions, but it blocks the strategy pages more directly than any of them, and
 it is already resolved in code without being resolved in the specs.
