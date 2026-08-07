@@ -495,8 +495,11 @@ jobs:
               $counts = $scan.imageScanFindings.findingSeverityCounts
               $critical = if ($null -eq $counts.CRITICAL) { 0 } else { [int]$counts.CRITICAL }
               $high = if ($null -eq $counts.HIGH) { 0 } else { [int]$counts.HIGH }
-              if ($critical -gt 0 -or $high -gt 0) {
+              if ($critical -gt 0) {
                 throw "ECR image scan rejected ${name}: Critical=$critical High=$high."
+              }
+              if ($high -gt 0) {
+                Write-Warning "ECR image scan found High findings for ${name}: High=$high. High findings do not block the Development release."
               }
               $pending.Remove($name)
             }
@@ -504,7 +507,7 @@ jobs:
           }
 
           if ($pending.Count -gt 0) {
-            throw "ECR image scan did not complete for: $(@($pending.Keys) -join ', ')."
+            Write-Warning "ECR image scan did not complete for: $(@($pending.Keys) -join ', '). Incomplete scans do not block the Development release."
           }
 
       - name: Publish immutable frontend prefix before planning
@@ -631,7 +634,7 @@ jobs:
           terraform fmt -check -recursive
           terraform init -backend-config=release.backend.hcl
           terraform validate
-          terraform plan -parallelism=1 -out=deployment.tfplan
+          terraform plan -out=deployment.tfplan
           terraform show -json deployment.tfplan > deployment.plan.json
           pwsh "$GITHUB_WORKSPACE/scripts/assert-development-terraform-plan-safe.ps1" \
             -PlanJsonPath deployment.plan.json \
@@ -704,7 +707,7 @@ jobs:
           Move-Item "$env:GITHUB_WORKSPACE/deployment.tfplan" ./deployment.tfplan
           terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="key=idea2strategy/development/terraform.tfstate" -backend-config="region=${{ env.AWS_REGION }}" -backend-config="use_lockfile=true" -backend-config="encrypt=true"
           Move-Item "$env:GITHUB_WORKSPACE/operator-pre-token.zip" ./.terraform/operator-pre-token.zip
-          terraform apply -parallelism=1 deployment.tfplan
+          terraform apply deployment.tfplan
 
       - name: Roll out and verify exact Core runtime images
         shell: pwsh

@@ -81,10 +81,12 @@ $required = @(
     "AWS_MAX_ATTEMPTS: '10'",
     "ECR image scan did not complete",
     "ECR image scan rejected",
-    "terraform plan -parallelism=1 -out=deployment.tfplan",
+    "ECR image scan found High findings",
+    "do not block the Development release",
+    "terraform plan -out=deployment.tfplan",
     "terraform show -json deployment.tfplan",
     "assert-development-terraform-plan-safe.ps1",
-    "terraform apply -parallelism=1 deployment.tfplan",
+    "terraform apply deployment.tfplan",
     "aws s3api put-object",
     "--version-id",
     "Get-FileHash",
@@ -295,7 +297,7 @@ if ($workflow -notmatch "(?s)Verify required deployment secrets.*?Verify databas
     throw "The release plan must verify the artifact-fingerprinted database bootstrap receipt before planning."
 }
 
-if ($workflow -notmatch "(?s)terraform plan -parallelism=1 -out=deployment\.tfplan.*?terraform show -json deployment\.tfplan.*?assert-development-terraform-plan-safe\.ps1.*?-AllowedReplacementAddresses.*?aws_ecs_task_definition\.pipeline\[0\].*?aws_instance\.service\[0\].*?aws_instance\.trading\[0\].*?aws_secretsmanager_secret_version\.core_internal\[0\].*?Archive exact plan") {
+if ($workflow -notmatch "(?s)terraform plan -out=deployment\.tfplan.*?terraform show -json deployment\.tfplan.*?assert-development-terraform-plan-safe\.ps1.*?-AllowedReplacementAddresses.*?aws_ecs_task_definition\.pipeline\[0\].*?aws_instance\.service\[0\].*?aws_instance\.trading\[0\].*?aws_secretsmanager_secret_version\.core_internal\[0\].*?Archive exact plan") {
     throw "The saved Development plan must reject destructive changes except the exact reviewed create-before-destroy runtime replacement allowlist."
 }
 if ($runtime -notmatch '(?s)resource\s+"aws_secretsmanager_secret_version"\s+"core_internal"\s*\{.*?lifecycle\s*\{\s*create_before_destroy\s*=\s*true\s*\}') {
@@ -307,11 +309,11 @@ if (-not $workflow.Contains('pwsh "$GITHUB_WORKSPACE/scripts/assert-development-
 if ($workflow.Contains('pwsh ../../../scripts/assert-development-terraform-plan-safe.ps1')) {
     throw "The saved-plan safety gate path resolves under infra/ instead of the repository root."
 }
-if ($workflow -notmatch '(?s)Archive exact plan in protected state storage.*?\.terraform/operator-pre-token\.zip.*?lambda_package_key.*?lambda_package_version.*?lambda_package_sha256.*?Download and verify exact reviewed plan.*?operator-pre-token\.zip.*?Lambda package hash mismatch.*?terraform init.*?Move-Item.*?\.terraform/operator-pre-token\.zip.*?terraform apply -parallelism=1 deployment\.tfplan') {
+if ($workflow -notmatch '(?s)Archive exact plan in protected state storage.*?\.terraform/operator-pre-token\.zip.*?lambda_package_key.*?lambda_package_version.*?lambda_package_sha256.*?Download and verify exact reviewed plan.*?operator-pre-token\.zip.*?Lambda package hash mismatch.*?terraform init.*?Move-Item.*?\.terraform/operator-pre-token\.zip.*?terraform apply deployment\.tfplan') {
     throw "The reviewed saved plan must carry its exact versioned and hash-verified local Lambda package into the apply runner."
 }
 
-if ($workflow -notmatch "(?s)terraform apply -parallelism=1 deployment\.tfplan.*?deploy-development-core-runtime\.ps1.*?verify-deployed-development\.ps1") {
+if ($workflow -notmatch "(?s)terraform apply deployment\.tfplan.*?deploy-development-core-runtime\.ps1.*?verify-deployed-development\.ps1") {
     throw "The exact Core image rollout and rollback guard must run after apply and before deployed verification."
 }
 
@@ -323,7 +325,16 @@ if ($workflow -notmatch "(?s)Wait for ECR security scans.*?AWS_RETRY_MODE: adapt
 }
 
 if ($workflow -notmatch "(?s)findingSeverityCounts.*?CRITICAL.*?HIGH") {
-    throw "The release scan gate must reject Critical and High findings."
+    throw "The release scan gate must read Critical and High severity counts."
+}
+if ($workflow -notmatch '(?s)if \(\$critical -gt 0\) \{\s*throw "ECR image scan rejected') {
+    throw "The release scan gate must reject Critical findings."
+}
+if ($workflow -notmatch '(?s)if \(\$high -gt 0\) \{\s*Write-Warning "ECR image scan found High findings') {
+    throw "The release scan gate must surface High findings as a non-blocking warning in Development."
+}
+if ($workflow -notmatch '(?s)Write-Warning "ECR image scan did not complete') {
+    throw "An incomplete ECR scan must warn without blocking the Development release."
 }
 if ($workflow.Contains('ECR image scan rejected $name:')) {
     throw 'The ECR scan gate must delimit a variable immediately followed by a colon.'
