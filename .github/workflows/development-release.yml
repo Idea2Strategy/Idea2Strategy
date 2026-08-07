@@ -65,6 +65,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $terraformConfig = '${{ vars.TF_VARS_JSON }}' | ConvertFrom-Json -AsHashtable
+          if (-not $terraformConfig -or
+              -not $terraformConfig.ContainsKey('trading_market_data_feed') -or
+              [string]$terraformConfig.trading_market_data_feed -cne 'sip') {
+            throw 'TF_VARS_JSON must select the paid Alpaca SIP feed before database bootstrap.'
+          }
           $runtimeDatabaseName = if ($terraformConfig -and $terraformConfig.ContainsKey('runtime_database_name')) {
             [string]$terraformConfig.runtime_database_name
           } else {
