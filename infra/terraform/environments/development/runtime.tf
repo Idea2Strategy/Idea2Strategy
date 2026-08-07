@@ -16,10 +16,15 @@ resource "random_password" "identity_verification_hmac" {
   special = false
 }
 
-resource "random_password" "identity_session_hmac" {
+resource "random_password" "identity_refresh_token_hmac" {
   count   = local.enable_service_stack ? 1 : 0
   length  = 48
   special = false
+}
+
+moved {
+  from = random_password.identity_session_hmac
+  to   = random_password.identity_refresh_token_hmac
 }
 
 resource "random_password" "identity_customer_jwt_signing" {
@@ -62,7 +67,7 @@ resource "aws_secretsmanager_secret_version" "core_internal" {
     IDENTITY_EMAIL_ENCRYPTION_KEY     = base64encode(random_password.identity_email_encryption[0].result)
     IDENTITY_LOOKUP_HMAC_KEY          = base64encode(random_password.identity_lookup_hmac[0].result)
     IDENTITY_VERIFICATION_HMAC_KEY    = base64encode(random_password.identity_verification_hmac[0].result)
-    IDENTITY_SESSION_HMAC_KEY         = base64encode(random_password.identity_session_hmac[0].result)
+    IDENTITY_REFRESH_TOKEN_HMAC_KEY   = base64encode(random_password.identity_refresh_token_hmac[0].result)
     IDENTITY_CUSTOMER_JWT_SIGNING_KEY = base64encode(random_password.identity_customer_jwt_signing[0].result)
     OPERATOR_AUTH_CURRENT_HMAC_KEY    = base64encode(random_password.operator_subject_hmac[0].result)
   })
@@ -75,7 +80,7 @@ resource "aws_secretsmanager_secret_version" "core_internal" {
 resource "aws_secretsmanager_secret" "backtest_internal" {
   count                   = local.enable_service_stack ? 1 : 0
   name                    = "${local.name_prefix}/runtime/backtest-internal"
-  description             = "Generated session verification and result-ingestion credentials for Backtest runtimes."
+  description             = "Generated customer JWT verification and result-ingestion credentials for Backtest runtimes."
   recovery_window_in_days = 7
 
   lifecycle {
@@ -87,9 +92,9 @@ resource "aws_secretsmanager_secret_version" "backtest_internal" {
   count     = local.enable_service_stack ? 1 : 0
   secret_id = aws_secretsmanager_secret.backtest_internal[0].id
   secret_string = jsonencode({
-    BACKTEST_SESSION_HMAC_KEY_BASE64 = base64encode(random_password.identity_session_hmac[0].result)
-    BACKTEST_RESULT_INGEST_TOKEN     = random_password.backtest_result_ingest[0].result
-    BACKTEST_RESULT_PRINCIPAL_ID     = random_uuid.backtest_result_principal[0].result
+    CUSTOMER_JWT_SIGNING_KEY_BASE64 = base64encode(random_password.identity_customer_jwt_signing[0].result)
+    BACKTEST_RESULT_INGEST_TOKEN    = random_password.backtest_result_ingest[0].result
+    BACKTEST_RESULT_PRINCIPAL_ID    = random_uuid.backtest_result_principal[0].result
   })
 }
 

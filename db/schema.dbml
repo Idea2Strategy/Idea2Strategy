@@ -534,16 +534,16 @@ Table identity.accounts {
 Table identity.account_security_states {
   account_id uuid [pk]
   auth_epoch bigint [not null, default: 1]
-  sessions_revoked_before timestamptz
+  credentials_revoked_before timestamptz
   updated_at timestamptz [not null, default: `now()`]
 
   checks {
     `auth_epoch > 0` [name: 'account_security_auth_epoch_positive']
   }
 
-  Note: '계정당 정확히 하나인 인증 보안 현재 상태. 비밀번호 변경, 로그인 수단 교체, 계정 복구 또는 전체 로그아웃 시 auth_epoch를 증가시켜 이전 세션과 캐시를 일괄 무효화한다.'
+  Note: '계정당 정확히 하나인 인증 보안 현재 상태. 비밀번호 변경, 로그인 수단 교체, 계정 복구 또는 전체 로그아웃 시 auth_epoch를 증가시켜 이전 access JWT와 refresh token family를 일괄 무효화한다.'
 
-  Records (account_id, auth_epoch, sessions_revoked_before, updated_at) {
+  Records (account_id, auth_epoch, credentials_revoked_before, updated_at) {
     '00000000-0000-4000-8000-000000000001', 1, null, '2026-07-27T09:00:00+09:00'
   }
 }
@@ -983,19 +983,17 @@ Table identity.password_credentials {
   }
 }
 
-Table identity.sessions {
+Table identity.refresh_token_families {
   id uuid [pk, default: `gen_random_uuid()`]
   account_id uuid [not null]
   authenticated_by_login_identity_id uuid [not null]
   auth_epoch_at_issue bigint [not null]
   credential_version_at_issue bigint
-  token_digest varchar(128) [not null, unique]
+  current_token_digest varchar(128) [not null, unique]
   digest_key_version smallint [not null]
-  device_label varchar(120)
   issued_at timestamptz [not null, default: `now()`]
-  last_seen_at timestamptz [not null]
+  last_rotated_at timestamptz [not null]
   expires_at timestamptz [not null]
-  reauthenticated_at timestamptz
   revoked_at timestamptz
   revoke_reason_code varchar(80)
 
@@ -1005,14 +1003,15 @@ Table identity.sessions {
   }
 
   checks {
-    `auth_epoch_at_issue > 0` [name: 'session_auth_epoch_positive']
-    `credential_version_at_issue IS NULL OR credential_version_at_issue > 0` [name: 'session_credential_version_positive']
+    `auth_epoch_at_issue > 0` [name: 'refresh_token_family_auth_epoch_positive']
+    `credential_version_at_issue IS NULL OR credential_version_at_issue > 0` [name: 'refresh_token_family_credential_version_positive']
+    `last_rotated_at >= issued_at AND expires_at > last_rotated_at` [name: 'refresh_token_family_time_order_valid']
   }
 
-  Note: '서버 소유 불투명 세션. 발급 당시 로그인 ID와 auth_epoch를 고정하며 PASSWORD 세션은 credential_version도 고정한다. 현재 계정 보안 상태와 값이 다르면 세션은 무효다. 발급·회수는 PostgreSQL 소유이고 캐시는 조회만 가속하며 회수된 세션을 인가할 수 없다.'
+  Note: '회전형 refresh JWT 재사용 탐지를 위한 최소 서버 상태. 현재 토큰 digest와 발급 당시 보안 버전만 저장하며, 기기 세션 목록이나 동시 로그인 제한에는 사용하지 않는다.'
 
-  Records (id, account_id, authenticated_by_login_identity_id, auth_epoch_at_issue, credential_version_at_issue, token_digest, digest_key_version, device_label, issued_at, last_seen_at, expires_at, reauthenticated_at, revoked_at, revoke_reason_code) {
-    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'review-example', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T16:00:00+09:00', '2026-07-27T09:00:00+09:00', null, null
+  Records (id, account_id, authenticated_by_login_identity_id, auth_epoch_at_issue, credential_version_at_issue, current_token_digest, digest_key_version, issued_at, last_rotated_at, expires_at, revoked_at, revoke_reason_code) {
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-08-26T09:00:00+09:00', null, null
   }
 }
 
@@ -1429,7 +1428,7 @@ Table strategy.strategy_documents {
 
 Table strategy.strategy_edit_leases {
   strategy_id uuid [pk]
-  session_id uuid
+  account_id uuid
   delegated_credential_id uuid
   lease_token_digest varchar(128) [not null, unique]
   digest_key_version smallint [not null]
@@ -1442,14 +1441,14 @@ Table strategy.strategy_edit_leases {
   }
 
   checks {
-    `(session_id IS NOT NULL AND delegated_credential_id IS NULL) OR (session_id IS NULL AND delegated_credential_id IS NOT NULL)` [name: 'strategy_edit_lease_exactly_one_editor']
+    `(account_id IS NOT NULL AND delegated_credential_id IS NULL) OR (account_id IS NULL AND delegated_credential_id IS NOT NULL)` [name: 'strategy_edit_lease_exactly_one_editor']
     `digest_key_version > 0` [name: 'strategy_edit_lease_digest_key_version_positive']
     `heartbeat_at >= acquired_at AND expires_at > heartbeat_at` [name: 'strategy_edit_lease_time_order_valid']
   }
 
   Note: 'Allows exactly one active editor across the web, direct user CLI, and delegated external AI. Revoked or expired credentials invalidate the lease, and a stale edit_sequence or lease token rejects late saves.'
 
-  Records (strategy_id, session_id, delegated_credential_id, lease_token_digest, digest_key_version, acquired_at, heartbeat_at, expires_at) {
+  Records (strategy_id, account_id, delegated_credential_id, lease_token_digest, digest_key_version, acquired_at, heartbeat_at, expires_at) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:05:00+09:00'
   }
 }
@@ -5016,7 +5015,7 @@ Ref: identity.oidc_step_up_nonces.consumed_by_account_id > identity.accounts.id
 Ref: identity.login_identities.provider_id > identity.auth_providers.id
 Ref: identity.login_identities.account_id > identity.accounts.id
 Ref: identity.password_credentials.login_identity_id > identity.login_identities.id
-Ref: identity.sessions.(account_id, authenticated_by_login_identity_id) > identity.login_identities.(account_id, id)
+Ref: identity.refresh_token_families.(account_id, authenticated_by_login_identity_id) > identity.login_identities.(account_id, id)
 Ref: identity.account_consents.account_id > identity.accounts.id
 Ref: identity.account_consents.policy_document_id > identity.policy_documents.id
 Ref: identity.account_consents.supersedes_consent_id > identity.account_consents.id
@@ -5052,7 +5051,7 @@ Ref: identity.account_sanction_events.evidence_object_id > storage.objects.id
 Ref: strategy.strategies.owner_account_id > identity.accounts.id
 Ref: strategy.strategy_documents.strategy_id > strategy.strategies.id
 Ref: strategy.strategy_edit_leases.strategy_id > strategy.strategies.id
-Ref: strategy.strategy_edit_leases.session_id > identity.sessions.id
+Ref: strategy.strategy_edit_leases.account_id > identity.accounts.id
 Ref: strategy.strategy_edit_leases.delegated_credential_id > identity.delegated_credentials.id
 Ref: strategy.validation_runs.strategy_id > strategy.strategies.id
 Ref: strategy.validation_runs.requested_by_account_id > identity.accounts.id

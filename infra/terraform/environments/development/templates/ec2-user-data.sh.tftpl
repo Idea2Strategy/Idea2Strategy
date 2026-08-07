@@ -294,7 +294,7 @@ append_env_value "$runtime_secret_env" SPRING_DATASOURCE_PASSWORD "$db_password"
 append_env_value "$runtime_secret_env" SPRING_FLYWAY_ENABLED false
 %{ if runtime_role == "backtest-worker" ~}
 append_env_value "$runtime_secret_env" BACKTEST_DATABASE_URL "$backtest_database_url"
-append_json_field "$runtime_secret_env" BACKTEST_SESSION_HMAC_KEY_BASE64 "$backtest_internal_secret" BACKTEST_SESSION_HMAC_KEY_BASE64
+append_json_field "$runtime_secret_env" CUSTOMER_JWT_SIGNING_KEY_BASE64 "$backtest_internal_secret" CUSTOMER_JWT_SIGNING_KEY_BASE64
 append_json_field "$runtime_secret_env" BACKTEST_RESULT_INGEST_TOKEN "$backtest_internal_secret" BACKTEST_RESULT_INGEST_TOKEN
 append_json_field "$runtime_secret_env" BACKTEST_RESULT_PRINCIPAL_ID "$backtest_internal_secret" BACKTEST_RESULT_PRINCIPAL_ID
 %{ endif ~}
@@ -302,7 +302,7 @@ append_json_field "$runtime_secret_env" BACKTEST_RESULT_PRINCIPAL_ID "$backtest_
 append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY "$core_internal_secret" IDENTITY_EMAIL_ENCRYPTION_KEY
 append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_LOOKUP_HMAC_KEY "$core_internal_secret" IDENTITY_LOOKUP_HMAC_KEY
 append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY "$core_internal_secret" IDENTITY_VERIFICATION_HMAC_KEY
-append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_SESSION_HMAC_KEY "$core_internal_secret" IDENTITY_SESSION_HMAC_KEY
+append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY "$core_internal_secret" IDENTITY_REFRESH_TOKEN_HMAC_KEY
 append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY "$core_internal_secret" IDENTITY_CUSTOMER_JWT_SIGNING_KEY
 append_json_field "$runtime_secret_env" OPERATOR_AUTH_CURRENT_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_CURRENT_HMAC_KEY
 append_env_value "$runtime_secret_env" EMAIL_DELIVERY_ENABLED "$(ssm_value '${parameter_path}/email/enabled')"
@@ -355,7 +355,7 @@ backtest_secret_env=/etc/idea2strategy/backtest-secret.env
 append_env_value "$backtest_secret_env" AWS_REGION '${aws_region}'
 append_env_value "$backtest_secret_env" AWS_DEFAULT_REGION '${aws_region}'
 append_env_value "$backtest_secret_env" BACKTEST_DATABASE_URL "$backtest_database_url"
-append_json_field "$backtest_secret_env" BACKTEST_SESSION_HMAC_KEY_BASE64 "$backtest_internal_secret" BACKTEST_SESSION_HMAC_KEY_BASE64
+append_json_field "$backtest_secret_env" CUSTOMER_JWT_SIGNING_KEY_BASE64 "$backtest_internal_secret" CUSTOMER_JWT_SIGNING_KEY_BASE64
 append_json_field "$backtest_secret_env" BACKTEST_RESULT_INGEST_TOKEN "$backtest_internal_secret" BACKTEST_RESULT_INGEST_TOKEN
 append_json_field "$backtest_secret_env" BACKTEST_RESULT_PRINCIPAL_ID "$backtest_internal_secret" BACKTEST_RESULT_PRINCIPAL_ID
 chmod 0600 "$backtest_secret_env"
@@ -685,14 +685,14 @@ refresh_service_runtime_secrets() {
   refreshed_backtest_env="$(mktemp /etc/idea2strategy/.backtest-secret.env.XXXXXX)"
   trap 'rm -f "$refreshed_runtime_env" "$refreshed_batch_env" "$refreshed_backtest_env"' EXIT
 
-  grep -Ev '^(SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY|IDENTITY_CRYPTO_LOOKUP_HMAC_KEY|IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY|IDENTITY_CRYPTO_SESSION_HMAC_KEY|IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY|OPERATOR_AUTH_CURRENT_HMAC_KEY)=' \
+  grep -Ev '^(SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY|IDENTITY_CRYPTO_LOOKUP_HMAC_KEY|IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY|IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY|IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY|OPERATOR_AUTH_CURRENT_HMAC_KEY)=' \
     /etc/idea2strategy/runtime-secret.env >"$refreshed_runtime_env"
   append_json_field "$refreshed_runtime_env" SPRING_DATASOURCE_USERNAME "$core_database_secret" username
   append_json_field "$refreshed_runtime_env" SPRING_DATASOURCE_PASSWORD "$core_database_secret" password
   append_json_field "$refreshed_runtime_env" IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY "$core_internal_secret" IDENTITY_EMAIL_ENCRYPTION_KEY
   append_json_field "$refreshed_runtime_env" IDENTITY_CRYPTO_LOOKUP_HMAC_KEY "$core_internal_secret" IDENTITY_LOOKUP_HMAC_KEY
   append_json_field "$refreshed_runtime_env" IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY "$core_internal_secret" IDENTITY_VERIFICATION_HMAC_KEY
-  append_json_field "$refreshed_runtime_env" IDENTITY_CRYPTO_SESSION_HMAC_KEY "$core_internal_secret" IDENTITY_SESSION_HMAC_KEY
+  append_json_field "$refreshed_runtime_env" IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY "$core_internal_secret" IDENTITY_REFRESH_TOKEN_HMAC_KEY
   append_json_field "$refreshed_runtime_env" IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY "$core_internal_secret" IDENTITY_CUSTOMER_JWT_SIGNING_KEY
   append_json_field "$refreshed_runtime_env" OPERATOR_AUTH_CURRENT_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_CURRENT_HMAC_KEY
 
@@ -701,10 +701,10 @@ refresh_service_runtime_secrets() {
   append_json_field "$refreshed_batch_env" SPRING_DATASOURCE_USERNAME "$batch_database_secret" username
   append_json_field "$refreshed_batch_env" SPRING_DATASOURCE_PASSWORD "$batch_database_secret" password
 
-  grep -Ev '^(BACKTEST_DATABASE_URL|BACKTEST_SESSION_HMAC_KEY_BASE64|BACKTEST_RESULT_INGEST_TOKEN|BACKTEST_RESULT_PRINCIPAL_ID)=' \
+  grep -Ev '^(BACKTEST_DATABASE_URL|CUSTOMER_JWT_SIGNING_KEY_BASE64|BACKTEST_RESULT_INGEST_TOKEN|BACKTEST_RESULT_PRINCIPAL_ID)=' \
     /etc/idea2strategy/backtest-secret.env >"$refreshed_backtest_env"
   append_env_value "$refreshed_backtest_env" BACKTEST_DATABASE_URL "$backtest_database_url"
-  append_json_field "$refreshed_backtest_env" BACKTEST_SESSION_HMAC_KEY_BASE64 "$backtest_internal_secret" BACKTEST_SESSION_HMAC_KEY_BASE64
+  append_json_field "$refreshed_backtest_env" CUSTOMER_JWT_SIGNING_KEY_BASE64 "$backtest_internal_secret" CUSTOMER_JWT_SIGNING_KEY_BASE64
   append_json_field "$refreshed_backtest_env" BACKTEST_RESULT_INGEST_TOKEN "$backtest_internal_secret" BACKTEST_RESULT_INGEST_TOKEN
   append_json_field "$refreshed_backtest_env" BACKTEST_RESULT_PRINCIPAL_ID "$backtest_internal_secret" BACKTEST_RESULT_PRINCIPAL_ID
 
@@ -724,12 +724,12 @@ refresh_backtest_worker_runtime_secrets() {
   backtest_database_url="$(printf '%s' "$database_secret" | backtest_database_url_from_secret)"
   refreshed_runtime_env="$(mktemp /etc/idea2strategy/.runtime-secret.env.XXXXXX)"
   trap 'rm -f "$refreshed_runtime_env"' EXIT
-  grep -Ev '^(SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|BACKTEST_DATABASE_URL|BACKTEST_SESSION_HMAC_KEY_BASE64|BACKTEST_RESULT_INGEST_TOKEN|BACKTEST_RESULT_PRINCIPAL_ID)=' \
+  grep -Ev '^(SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|BACKTEST_DATABASE_URL|CUSTOMER_JWT_SIGNING_KEY_BASE64|BACKTEST_RESULT_INGEST_TOKEN|BACKTEST_RESULT_PRINCIPAL_ID)=' \
     /etc/idea2strategy/runtime-secret.env >"$refreshed_runtime_env"
   append_json_field "$refreshed_runtime_env" SPRING_DATASOURCE_USERNAME "$database_secret" username
   append_json_field "$refreshed_runtime_env" SPRING_DATASOURCE_PASSWORD "$database_secret" password
   append_env_value "$refreshed_runtime_env" BACKTEST_DATABASE_URL "$backtest_database_url"
-  append_json_field "$refreshed_runtime_env" BACKTEST_SESSION_HMAC_KEY_BASE64 "$backtest_internal_secret" BACKTEST_SESSION_HMAC_KEY_BASE64
+  append_json_field "$refreshed_runtime_env" CUSTOMER_JWT_SIGNING_KEY_BASE64 "$backtest_internal_secret" CUSTOMER_JWT_SIGNING_KEY_BASE64
   append_json_field "$refreshed_runtime_env" BACKTEST_RESULT_INGEST_TOKEN "$backtest_internal_secret" BACKTEST_RESULT_INGEST_TOKEN
   append_json_field "$refreshed_runtime_env" BACKTEST_RESULT_PRINCIPAL_ID "$backtest_internal_secret" BACKTEST_RESULT_PRINCIPAL_ID
   chmod 0600 "$refreshed_runtime_env"
