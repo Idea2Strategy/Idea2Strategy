@@ -3,7 +3,7 @@
 -- finalized 30m, 1h, 4h, and 1d candles.
 
 UPDATE strategy.element_catalog_versions
-SET retired_at = '2026-08-08T00:00:00+00'
+SET retired_at = '2026-08-07T15:00:00+00'
 WHERE id = '0f2a0000-0000-4000-8000-000000000001'
   AND retired_at IS NULL;
 
@@ -17,7 +17,7 @@ VALUES (
     'basic-elements:2026-08-08-live-bars',
     'alpaca-sip/v1',
     'sha256:30a8aa1db1ec89acd824d270df6df53f652f58ad75a7688f59efb20bf86b4301',
-    '2026-08-08T00:00:00+00');
+    '2026-08-07T15:00:00+00');
 
 INSERT INTO strategy.element_definitions (
     id, element_catalog_version_id, element_code, element_kind,
