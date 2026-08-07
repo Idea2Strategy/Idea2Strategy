@@ -63,6 +63,33 @@ foreach ($component in @('backend', 'backtest')) {
     }
 }
 
+# An invalid single-use ticket must reach the backend WebSocket handshake and be
+# rejected there. A CDN/proxy path that drops Upgrade headers returns a different
+# status, so this also proves the public CloudFront -> Nginx -> backend route.
+Add-Type -AssemblyName System.Net.Http
+$webSocketProbeClient = [System.Net.Http.HttpClient]::new()
+$webSocketProbe = [System.Net.Http.HttpRequestMessage]::new(
+    [System.Net.Http.HttpMethod]::Get,
+    "$serviceUrl/ws/v1/market-data/prices?ticket=invalid-deployment-smoke"
+)
+$webSocketProbe.Version = [Version]::new(1, 1)
+[void]$webSocketProbe.Headers.TryAddWithoutValidation('Connection', 'Upgrade')
+[void]$webSocketProbe.Headers.TryAddWithoutValidation('Upgrade', 'websocket')
+[void]$webSocketProbe.Headers.TryAddWithoutValidation('Sec-WebSocket-Version', '13')
+[void]$webSocketProbe.Headers.TryAddWithoutValidation('Sec-WebSocket-Key', 'aWRlYTJzdHJhdGVneTEyMw==')
+$webSocketProbeResponse = $null
+try {
+    $webSocketProbeResponse = $webSocketProbeClient.SendAsync($webSocketProbe).GetAwaiter().GetResult()
+    if ($webSocketProbeResponse.StatusCode -ne [System.Net.HttpStatusCode]::Unauthorized) {
+        throw "Public market-data WebSocket handshake returned $([int]$webSocketProbeResponse.StatusCode), expected 401 for an invalid ticket."
+    }
+}
+finally {
+    if ($null -ne $webSocketProbeResponse) { $webSocketProbeResponse.Dispose() }
+    $webSocketProbe.Dispose()
+    $webSocketProbeClient.Dispose()
+}
+
 $distributionId = [string]$outputs.cloudfront_distribution_id.value
 $distribution = Invoke-AwsJson -Arguments @('cloudfront', 'get-distribution', '--id', $distributionId)
 if ($distribution.Distribution.Status -cne 'Deployed' -or
@@ -210,6 +237,7 @@ foreach ($requiredLog in @('/idea2strategy/dev/core', '/idea2strategy/dev/tradin
     frontend = 'passed'
     backend_health = 'passed'
     backtest_health = 'passed'
+    market_data_websocket = 'passed'
     cloudfront_https = 'passed'
     frontend_s3 = 'passed'
     ssm = 'passed'

@@ -89,12 +89,13 @@ resource "aws_route53_record" "ses_dkim" {
 }
 
 resource "aws_route53_record" "ses_dkim_virginia" {
-  count   = local.enable_dns_foundation ? 3 : 0
-  zone_id = local.hosted_zone_id
-  name    = "${aws_ses_domain_dkim.virginia[0].dkim_tokens[count.index]}._domainkey.${var.domain_name}"
-  type    = "CNAME"
-  ttl     = 300
-  records = ["${aws_ses_domain_dkim.virginia[0].dkim_tokens[count.index]}.dkim.amazonses.com"]
+  count           = local.enable_dns_foundation ? 3 : 0
+  allow_overwrite = true
+  zone_id         = local.hosted_zone_id
+  name            = "${aws_ses_domain_dkim.virginia[0].dkim_tokens[count.index]}._domainkey.${var.domain_name}"
+  type            = "CNAME"
+  ttl             = 300
+  records         = ["${aws_ses_domain_dkim.virginia[0].dkim_tokens[count.index]}.dkim.amazonses.com"]
 
   lifecycle {
     prevent_destroy = true
