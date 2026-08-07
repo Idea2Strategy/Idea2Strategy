@@ -45,6 +45,20 @@ function Invoke-AwsJson([string[]]$Arguments) {
     return (($output -join "`n") | ConvertFrom-Json)
 }
 
+function Get-RuntimeInstanceStartAction(
+    [ValidateSet("core", "trading")][string]$RuntimeRole,
+    [string]$InstanceState
+) {
+    if ($RuntimeRole -cne "trading") { return "wait-running" }
+    switch -CaseSensitive ($InstanceState) {
+        "pending" { return "wait-running" }
+        "running" { return "wait-running" }
+        "stopping" { return "wait-stopped-then-start" }
+        "stopped" { return "start" }
+        default { throw "Trading instance entered an unsupported EC2 state: $InstanceState" }
+    }
+}
+
 function Invoke-SsmShellCommand {
     param(
         [Parameter(Mandatory = $true)][string]$Script,
@@ -112,6 +126,29 @@ try {
         Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
     } else {
         $env:AWS_PROFILE = $previousAwsProfile
+    }
+}
+
+if ($RuntimeRole -ceq "trading") {
+    $description = Invoke-AwsJson @("ec2", "describe-instances", "--instance-ids", $runtimeInstanceId)
+    $instances = @($description.Reservations | ForEach-Object { $_.Instances })
+    if ($instances.Count -ne 1 -or [string]$instances[0].InstanceId -cne $runtimeInstanceId) {
+        throw "Unable to resolve the exact Trading instance state before rollout."
+    }
+    $startAction = Get-RuntimeInstanceStartAction `
+        -RuntimeRole $RuntimeRole `
+        -InstanceState ([string]$instances[0].State.Name)
+    if ($startAction -ceq "wait-stopped-then-start") {
+        & $aws.Source ec2 wait instance-stopped --instance-ids $runtimeInstanceId @commonAwsArguments
+        if ($LASTEXITCODE -ne 0) { throw "Trading instance did not finish its scheduled initialization shutdown." }
+        $startAction = "start"
+    }
+    if ($startAction -ceq "start") {
+        $started = Invoke-AwsJson @("ec2", "start-instances", "--instance-ids", $runtimeInstanceId)
+        if (@($started.StartingInstances).Count -ne 1 -or
+            [string]$started.StartingInstances[0].InstanceId -cne $runtimeInstanceId) {
+            throw "AWS did not confirm the exact Trading instance start request."
+        }
     }
 }
 

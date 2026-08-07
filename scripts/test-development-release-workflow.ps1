@@ -335,6 +335,9 @@ foreach ($scriptPath in @($planGatePath, $receiptGatePath, $coreRolloutPath)) {
 
 $coreRollout = Get-Content -LiteralPath $coreRolloutPath -Raw
 foreach ($readinessBoundary in @(
+    'describe-instances',
+    'instance-stopped',
+    'start-instances',
     'ec2 wait instance-running',
     'describe-instance-information',
     'PingStatus',
@@ -352,6 +355,27 @@ foreach ($readinessBoundary in @(
 if ($coreRollout.IndexOf('CORE_HOST_READY') -gt $coreRollout.IndexOf('CORE_RUNTIME_ROLLED_OUT')) {
     throw "Core host readiness must complete before the runtime rollout command is constructed."
 }
+
+$coreRolloutTokens = $null
+$coreRolloutParseErrors = $null
+$coreRolloutAst = [Management.Automation.Language.Parser]::ParseInput($coreRollout, [ref]$coreRolloutTokens, [ref]$coreRolloutParseErrors)
+if (@($coreRolloutParseErrors).Count -ne 0) { throw "Core rollout must parse before its instance start policy can be tested." }
+$instanceStartActionAst = $coreRolloutAst.Find({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-RuntimeInstanceStartAction'
+    }, $true)
+if ($null -eq $instanceStartActionAst) { throw "Runtime instance start action policy is missing." }
+Invoke-Expression $instanceStartActionAst.Extent.Text
+if ((Get-RuntimeInstanceStartAction -RuntimeRole core -InstanceState running) -cne 'wait-running' -or
+    (Get-RuntimeInstanceStartAction -RuntimeRole trading -InstanceState pending) -cne 'wait-running' -or
+    (Get-RuntimeInstanceStartAction -RuntimeRole trading -InstanceState running) -cne 'wait-running' -or
+    (Get-RuntimeInstanceStartAction -RuntimeRole trading -InstanceState stopping) -cne 'wait-stopped-then-start' -or
+    (Get-RuntimeInstanceStartAction -RuntimeRole trading -InstanceState stopped) -cne 'start') {
+    throw "Trading rollout must start a schedule-controlled stopped instance without restarting a running instance."
+}
+$terminalStateRejected = $false
+try { Get-RuntimeInstanceStartAction -RuntimeRole trading -InstanceState terminated | Out-Null } catch { $terminalStateRejected = $true }
+if (-not $terminalStateRejected) { throw "Trading rollout must reject a terminal EC2 instance state." }
 
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ("idea2strategy-plan-gate-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $temporary | Out-Null
