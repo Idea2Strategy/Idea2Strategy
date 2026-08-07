@@ -636,7 +636,7 @@ jobs:
           pwsh "$GITHUB_WORKSPACE/scripts/assert-development-terraform-plan-safe.ps1" \
             -PlanJsonPath deployment.plan.json \
             -AllowedReplacementAddresses \
-              'aws_ecs_task_definition.pipeline[0];aws_instance.service[0];aws_instance.trading[0]'
+              'aws_ecs_task_definition.pipeline[0];aws_instance.service[0];aws_instance.trading[0];aws_secretsmanager_secret_version.core_internal[0]'
           terraform show -no-color deployment.tfplan > deployment.plan.txt
 
       - name: Archive exact plan in protected state storage

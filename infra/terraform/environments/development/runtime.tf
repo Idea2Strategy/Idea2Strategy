@@ -66,6 +66,10 @@ resource "aws_secretsmanager_secret_version" "core_internal" {
     IDENTITY_CUSTOMER_JWT_SIGNING_KEY = base64encode(random_password.identity_customer_jwt_signing[0].result)
     OPERATOR_AUTH_CURRENT_HMAC_KEY    = base64encode(random_password.operator_subject_hmac[0].result)
   })
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_secretsmanager_secret" "backtest_internal" {
