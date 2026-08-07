@@ -11,16 +11,20 @@ success response or result is synthesized by this suite.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import time
 import uuid
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from backtest_engine.attempt_coordinator import ResourceSample
+from backtest_engine.contracts import compute_compiled_plan_checksum
 from backtest_engine.persistence import (
     BacktestPersistence,
     RunLane,
@@ -34,13 +38,149 @@ from backtest_engine.worker import (
     WorkerConfig,
 )
 from d_integration_stack import ScriptedMonitor, build_stack, sql_all, sql_one
+from d_reproducibility_testkit import (
+    DATASET_MANIFEST_ID,
+    FIRST_BAR_START,
+    bar_rows,
+    compiled_plan,
+    dataset_manifest,
+    market_bars_parquet,
+    official_backtest_request,
+)
 from sqlalchemy import Engine, text
-from test_feature_outputs import Source, _parquet, _record
+from test_feature_outputs import INPUT_HASH, INSTRUMENT_ID, Source, _parquet, _record
 
 pytestmark = pytest.mark.docker
 
 LANES = (RunLane.BASIC, RunLane.CUSTOM, RunLane.COMPETITION)
 MATERIALIZATION_ID = uuid.UUID("00000000-0000-4000-8000-0000000000e1")
+RSI_30M_DEFINITION_ID = "4b1c6801-0259-5176-a857-0e5ea923d898"
+RSI_30M_DEFINITION_HASH = (
+    "363f534dc77c6af0ebfe58f35be4fd2aa208906b1eaa36b550b17e9acb8692e4"
+)
+RSI_30M_FEED_ID = uuid.UUID("57794d8c-2254-53e4-966e-44f97edd9e6a")
+RSI_30M_FEED_CODE = "FEATURE_RSI_14_30M_RSI_1_0_0"
+
+
+def _production_plan() -> dict[str, Any]:
+    plan = copy.deepcopy(compiled_plan())
+    plan["elementCatalogVersion"] = "basic-elements:2026-08-08"
+    requirement = plan["requiredFeatures"][0]
+    requirement.update(
+        {
+            "requirementId": "rsi-14-pt30m",
+            "featureId": RSI_30M_DEFINITION_ID,
+            "resolution": "PT30M",
+        }
+    )
+    plan["steps"] = [
+        {
+            "sequence": 1,
+            "operation": "RSI_CROSS",
+            "arguments": {
+                "resolution": "30m",
+                "direction": "UP",
+                "period": "14",
+                "threshold": "30",
+            },
+        },
+        {
+            "sequence": 2,
+            "operation": "EMIT_ORDER_CANDIDATE",
+            "arguments": {
+                "allocation": "EQUAL",
+                "orderType": "MARKET",
+                "timeInForce": "DAY",
+                "side": "BUY",
+                "orderPercent": "100",
+                "executionMode": "1회만",
+                "waitMode": "조건 재충족",
+                "waitInterval": "1",
+                "maxExecutions": "1",
+            },
+        },
+    ]
+    plan["planChecksum"] = compute_compiled_plan_checksum(plan)
+    return plan
+
+
+def _production_bar_starts() -> tuple[datetime, ...]:
+    next_session = FIRST_BAR_START + timedelta(days=1)
+    return tuple(
+        [FIRST_BAR_START + timedelta(minutes=30 * index) for index in range(13)]
+        + [next_session + timedelta(minutes=30 * index) for index in range(7)]
+    )
+
+
+def _production_market_data() -> tuple[bytes, dict[str, Any]]:
+    rows = bar_rows()
+    starts = _production_bar_starts()
+    for row, starts_at in zip(rows, starts, strict=True):
+        row["bar_start_at"] = starts_at
+        row["session_date_et"] = starts_at.date()
+    schema = pq.read_table(pa.BufferReader(market_bars_parquet())).schema
+    table = pa.Table.from_pylist(rows, schema=schema)
+    sink = pa.BufferOutputStream()
+    pq.write_table(
+        table,
+        sink,
+        compression="none",
+        use_dictionary=False,
+        write_statistics=True,
+        version="2.6",
+        data_page_version="2.0",
+        row_group_size=len(rows),
+    )
+    body = bytes(sink.getvalue().to_pybytes())
+    manifest = dataset_manifest(
+        hashlib.sha256(body).hexdigest(),
+        row_count=len(rows),
+        coverage_end=starts[-1] + timedelta(minutes=30),
+    )
+    return body, manifest
+
+
+def _production_feature_rows() -> list[dict[str, str]]:
+    starts = _production_bar_starts()
+    values = (
+        "0.00000000",
+        "68.18181818",
+        "70.45454545",
+        "72.72727273",
+        "75.00000000",
+        "77.27272727",
+    )
+    return [
+        {
+            "at": starts_at.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+            "value": value,
+        }
+        for starts_at, value in zip(starts[14:], values, strict=True)
+    ]
+
+
+def _production_feature_result_hash(rows: list[dict[str, str]]) -> str:
+    starts = _production_bar_starts()
+    payload = {
+        "definition_hash": RSI_30M_DEFINITION_HASH,
+        "input_dataset_set_hash": INPUT_HASH,
+        "instrument_id": INSTRUMENT_ID,
+        "period_end": (starts[-1] + timedelta(minutes=30))
+        .astimezone(UTC)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "period_start": starts[0].astimezone(UTC).isoformat().replace("+00:00", "Z"),
+        "result_schema_version": 1,
+        "rows": rows,
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _queues(sqs: Any) -> dict[RunLane, tuple[str, str]]:
@@ -225,7 +365,10 @@ def test_three_feature_lanes_reach_results_with_shared_retry_dedup_and_fail_clos
     tmp_path: Path,
 ) -> None:
     queues = _queues(sqs)
-    body = _parquet()
+    plan = _production_plan()
+    market_body, manifest = _production_market_data()
+    feature_rows = _production_feature_rows()
+    body = _parquet(feature_rows)
     s3.put_bucket_versioning(
         Bucket=bucket, VersioningConfiguration={"Status": "Enabled"}
     )
@@ -234,11 +377,20 @@ def test_three_feature_lanes_reach_results_with_shared_retry_dedup_and_fail_clos
     replacement = s3.put_object(Bucket=bucket, Key=key, Body=b"later-corrupt-revision")
     assert original["VersionId"] != replacement["VersionId"]
 
-    record = _record(body)
-    record["id"] = MATERIALIZATION_ID
-    # build_stack intentionally uses Backend's published fixture catalog id;
-    # bind the materialization to that exact compiled-plan requirement.
-    record["feature_definition_id"] = uuid.UUID("00000000-0000-4000-8000-000000000401")
+    record = _record(
+        body,
+        id=MATERIALIZATION_ID,
+        feature_definition_id=uuid.UUID(RSI_30M_DEFINITION_ID),
+        resolution="30m",
+        definition_hash=RSI_30M_DEFINITION_HASH,
+        period_start=_production_bar_starts()[0],
+        period_end=_production_bar_starts()[-1] + timedelta(minutes=30),
+        output_dataset_feed_id=RSI_30M_FEED_ID,
+        output_feed_code=RSI_30M_FEED_CODE,
+        output_feed_resolution="30m",
+        output_dataset_resolution="30m",
+        result_hash=_production_feature_result_hash(feature_rows),
+    )
     record["objects"] = (
         {
             **record["objects"][0],
@@ -263,11 +415,15 @@ def test_three_feature_lanes_reach_results_with_shared_retry_dedup_and_fail_clos
         bucket=bucket,
         root=tmp_path / "market-data",
         monitor=monitor,
+        plans={plan["planChecksum"]: plan},
+        manifests={DATASET_MANIFEST_ID: manifest},
+        request=official_backtest_request(plan=plan),
     )
+    stack.market_data.path.write_bytes(market_body)
     stack.handler._feature_materializations = Source({MATERIALIZATION_ID: record})
     stack.handler._feature_object_reader = S3VersionedFeatureObjectReader(s3)
 
-    accepted = stack.accept()
+    accepted = stack.accept(compiledPlan=plan)
     assert accepted.status_code == 202, accepted.text
     basic_run = uuid.UUID(accepted.json()["run"]["backtestRunId"])
     received = sqs.receive_message(
@@ -333,14 +489,14 @@ def test_three_feature_lanes_reach_results_with_shared_retry_dedup_and_fail_clos
     # Deliberately process out of producer order. CUSTOM is returned once by the
     # resource policy and then succeeds on its real redelivery.
     first = _poll_until_message(workers[RunLane.CUSTOM])
+    assert [item.disposition for item in first] == [MessageDisposition.RETURNED], [
+        item.reason_code for item in first
+    ]
     second = _poll_until_message(workers[RunLane.CUSTOM])
     basic = workers[RunLane.BASIC].poll_once()
     competition = workers[RunLane.COMPETITION].poll_once()
     duplicate = workers[RunLane.COMPETITION].poll_once()
 
-    assert [item.disposition for item in first] == [MessageDisposition.RETURNED], [
-        item.reason_code for item in first
-    ]
     assert [item.disposition for item in second] == [MessageDisposition.DELETED]
     assert [item.disposition for item in basic] == [MessageDisposition.DELETED]
     assert [item.disposition for item in competition] == [MessageDisposition.DELETED]

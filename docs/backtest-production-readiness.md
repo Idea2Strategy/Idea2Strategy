@@ -78,7 +78,10 @@ the platform's virtual execution service.
 - The root repository and every service submodule were fetched with pruning, and every working
   branch contains its latest fetched `origin/develop` commit.
 - Backend full Gradle and trading full Gradle suites pass. Backtest unit, contract, persistence,
-  lint, and type checks pass; the PostgreSQL and LocalStack official-release journey remains part
+  lint, and type checks pass. The root PostgreSQL 16 + LocalStack shared-runtime journey also
+  passes with an active-catalog `RSI_CROSS@30m` plan through BASIC, CUSTOM, and COMPETITION,
+  including retry, duplicate suppression, immutable feature-object binding, result persistence,
+  and fail-closed rejection of a changed object version. Deployment of that journey remains part
   of the release gate.
 - UI passes 547 Vitest cases and the production Vite build.
 - Data Pipeline's changed feature/migration path passes 75 tests plus 8 subtests, including a fresh
@@ -99,4 +102,6 @@ before claiming that every legacy repository test is green.
 
 Issue #248 must remain open while its authoritative comment still pins RSI to one `1m` identity.
 That clause is superseded only after a configured product authority approves the proposed
-four-resolution identity model and the deployed three-lane end-to-end gate passes.
+four-resolution identity model and the same three-lane end-to-end gate passes in the deployed
+environment. The local `30m` execution proof now passes; it is not evidence that the draft commits
+or migrations are deployed.

@@ -50,6 +50,17 @@ definition UUID cannot be paired with another resolution.
 - User cancellation retains the recommended terminal behavior: accepted queued/running
   cancellation ends as `CANCELLED`, is acknowledged, and is not sent to the DLQ.
 
+## Verification evidence
+
+- The runtime catalog and binder tests cover the exact definition/feed identities for all four
+  supported resolutions and reject cross-resolution substitution.
+- The root PostgreSQL 16 + LocalStack integration journey executes an active-catalog
+  `RSI_CROSS@30m` plan through BASIC, CUSTOM, and COMPETITION on one runtime. It proves retry,
+  duplicate suppression, result persistence, immutable versioned feature input, and fail-closed
+  rejection when the pinned feature object version is replaced.
+- The local proof does not replace the required deployed-environment run or product-authority
+  approval.
+
 ## Issue #248 impact
 
 The current authoritative comment on
