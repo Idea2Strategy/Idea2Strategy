@@ -10,6 +10,8 @@ $edge = Get-Content -LiteralPath (Join-Path $environmentRoot "edge.tf") -Raw
 $frontend = Get-Content -LiteralPath (Join-Path $environmentRoot "frontend.tf") -Raw
 $userData = Get-Content -LiteralPath (Join-Path $environmentRoot "templates/ec2-user-data.sh.tftpl") -Raw
 $variables = Get-Content -LiteralPath (Join-Path $environmentRoot "variables.tf") -Raw
+$providers = Get-Content -LiteralPath (Join-Path $environmentRoot "providers.tf") -Raw
+$tfvarsExample = Get-Content -LiteralPath (Join-Path $environmentRoot "terraform.tfvars.example") -Raw
 $compute = Get-Content -LiteralPath (Join-Path $environmentRoot "compute.tf") -Raw
 $preflight = Get-Content -LiteralPath (Join-Path $root "scripts/test-development-email-delivery-prerequisites.ps1") -Raw
 $runbook = Get-Content -LiteralPath (Join-Path $root "docs/infrastructure/deploy-readiness-runbook.md") -Raw
@@ -32,14 +34,23 @@ foreach ($required in @(
     'resource "aws_ses_domain_identity" "transactional"',
     'resource "aws_ses_domain_dkim" "transactional"',
     'resource "aws_ses_domain_identity_verification" "transactional"',
+    'resource "aws_ses_domain_identity" "virginia"',
+    'resource "aws_ses_domain_dkim" "virginia"',
+    'resource "aws_ses_domain_identity_verification" "virginia"',
     'resource "aws_route53_record" "ses_verification"',
     'resource "aws_route53_record" "ses_dkim"',
+    'resource "aws_route53_record" "ses_dkim_virginia"',
     'resource "aws_iam_role_policy" "service_email_delivery"',
+    'provider = aws.email',
     'ses:SendEmail',
     'ses:GetSuppressedDestination',
     'ses:FromAddress',
     'aws:RequestedRegion',
-    'aws_ses_domain_identity.transactional[0].arn'
+    'aws_ses_domain_identity.virginia[0].arn',
+    'aws_ses_domain_identity.transactional[0].verification_token',
+    'aws_ses_domain_identity.virginia[0].verification_token',
+    'values   = [var.email_region]',
+    'aws-region   = var.email_region'
 )) {
     if (-not $email.Contains($required)) {
         throw "Development SES infrastructure is missing: $required"
@@ -64,10 +75,23 @@ foreach ($required in @(
     }
 }
 
-foreach ($variable in @("transactional_email_from_address", "legacy_www_ipv4_address")) {
+foreach ($variable in @("email_region", "transactional_email_from_address", "legacy_www_ipv4_address")) {
     if (-not $variables.Contains(('variable "' + $variable + '"'))) {
         throw "Email/DNS deployment input is missing: $variable"
     }
+}
+
+foreach ($required in @('alias\s*=\s*"email"', 'region\s*=\s*var\.email_region')) {
+    if ($providers -notmatch $required) {
+        throw "Dedicated Virginia SES provider configuration is missing: $required"
+    }
+}
+
+if ($variables -notmatch '(?s)variable\s+"email_region"\s*\{.*?default\s*=\s*"us-east-1"') {
+    throw "Development email_region must default to us-east-1."
+}
+if ($tfvarsExample -notmatch '(?m)^email_region\s*=\s*"us-east-1"\s*$') {
+    throw "Terraform example must pin Development SES delivery to us-east-1."
 }
 
 foreach ($required in @(
@@ -89,6 +113,9 @@ foreach ($required in @(
     'VerifiedForSendingStatus',
     'DkimAttributes.Status',
     'RequireProductionAccess',
+    'ExpectedInfrastructureRegion',
+    'ExpectedEmailRegion',
+    '--region", $ExpectedEmailRegion',
     '$strictErrorPreference = $ErrorActionPreference'
 )) {
     if (-not $preflight.Contains($required)) {
@@ -105,6 +132,10 @@ foreach ($resource in @(
     @($email, "aws_ses_domain_identity_verification", "transactional"),
     @($email, "aws_ses_domain_dkim", "transactional"),
     @($email, "aws_route53_record", "ses_dkim"),
+    @($email, "aws_ses_domain_identity", "virginia"),
+    @($email, "aws_ses_domain_identity_verification", "virginia"),
+    @($email, "aws_ses_domain_dkim", "virginia"),
+    @($email, "aws_route53_record", "ses_dkim_virginia"),
     @($frontend, "aws_s3_bucket", "frontend"),
     @($frontend, "aws_s3_bucket_public_access_block", "frontend"),
     @($frontend, "aws_s3_bucket_ownership_controls", "frontend"),
@@ -132,6 +163,8 @@ foreach ($required in @(
     'SES sandbox',
     'DKIM',
     'test-development-email-delivery-prerequisites.ps1',
+    'us-east-1',
+    'ap-northeast-2',
     'www.ideatostrategy.com'
 )) {
     if (-not $runbook.Contains($required)) {

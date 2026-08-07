@@ -1,5 +1,6 @@
-aws_region  = "ap-northeast-2"
-aws_profile = "idea2strategy-terraform"
+aws_region   = "ap-northeast-2"
+email_region = "us-east-1"
+aws_profile  = "idea2strategy-terraform"
 expected_aws_account_id = "__AWS_ACCOUNT_ID__"
 
 # Use dns_foundation first and copy all DNS records without delegating. After

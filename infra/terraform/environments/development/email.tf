@@ -7,13 +7,26 @@ resource "aws_ses_domain_identity" "transactional" {
   }
 }
 
+resource "aws_ses_domain_identity" "virginia" {
+  provider = aws.email
+  count    = local.enable_dns_foundation ? 1 : 0
+  domain   = var.domain_name
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 resource "aws_route53_record" "ses_verification" {
   count   = local.enable_dns_foundation ? 1 : 0
   zone_id = local.hosted_zone_id
   name    = "_amazonses.${var.domain_name}"
   type    = "TXT"
   ttl     = 300
-  records = [aws_ses_domain_identity.transactional[0].verification_token]
+  records = [
+    aws_ses_domain_identity.transactional[0].verification_token,
+    aws_ses_domain_identity.virginia[0].verification_token,
+  ]
 
   lifecycle {
     prevent_destroy = true
@@ -31,9 +44,31 @@ resource "aws_ses_domain_identity_verification" "transactional" {
   depends_on = [aws_route53_record.ses_verification]
 }
 
+resource "aws_ses_domain_identity_verification" "virginia" {
+  provider = aws.email
+  count    = local.enable_public_edge ? 1 : 0
+  domain   = aws_ses_domain_identity.virginia[0].domain
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [aws_route53_record.ses_verification]
+}
+
 resource "aws_ses_domain_dkim" "transactional" {
   count  = local.enable_dns_foundation ? 1 : 0
   domain = aws_ses_domain_identity.transactional[0].domain
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_ses_domain_dkim" "virginia" {
+  provider = aws.email
+  count    = local.enable_dns_foundation ? 1 : 0
+  domain   = aws_ses_domain_identity.virginia[0].domain
 
   lifecycle {
     prevent_destroy = true
@@ -53,6 +88,19 @@ resource "aws_route53_record" "ses_dkim" {
   }
 }
 
+resource "aws_route53_record" "ses_dkim_virginia" {
+  count   = local.enable_dns_foundation ? 3 : 0
+  zone_id = local.hosted_zone_id
+  name    = "${aws_ses_domain_dkim.virginia[0].dkim_tokens[count.index]}._domainkey.${var.domain_name}"
+  type    = "CNAME"
+  ttl     = 300
+  records = ["${aws_ses_domain_dkim.virginia[0].dkim_tokens[count.index]}.dkim.amazonses.com"]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 data "aws_iam_policy_document" "service_email_delivery" {
   count = local.enable_service_stack ? 1 : 0
 
@@ -60,7 +108,7 @@ data "aws_iam_policy_document" "service_email_delivery" {
     sid       = "SendTransactionalEmailFromVerifiedIdentity"
     effect    = "Allow"
     actions   = ["ses:SendEmail"]
-    resources = [aws_ses_domain_identity.transactional[0].arn]
+    resources = [aws_ses_domain_identity.virginia[0].arn]
 
     condition {
       test     = "StringEquals"
@@ -78,7 +126,7 @@ data "aws_iam_policy_document" "service_email_delivery" {
     condition {
       test     = "StringEquals"
       variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
+      values   = [var.email_region]
     }
   }
 }
@@ -96,7 +144,7 @@ resource "aws_ssm_parameter" "email_runtime" {
     enabled      = local.enable_public_edge ? "true" : "false"
     provider     = "ses"
     from-address = var.transactional_email_from_address
-    aws-region   = var.aws_region
+    aws-region   = var.email_region
     base-url     = "https://${var.frontend_domain_name}"
   } : {}
 
