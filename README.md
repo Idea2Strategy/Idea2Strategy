@@ -25,6 +25,9 @@ Both remotes use `develop` as their default collaboration branch. `main` is rese
 
 Team members should follow [`docs/development-start-guide.md`](docs/development-start-guide.md) after the shared foundation is merged into `develop`. It covers clone/update, Claude Code onboarding, local startup, assigned-repository branching, tests, pull requests, and root submodule-pointer integration.
 
+The executable backtest catalog, cancellation behavior, supported resolutions, and release gates
+are recorded in [`docs/backtest-production-readiness.md`](docs/backtest-production-readiness.md).
+
 Claude Code automatically reads [`CLAUDE.md`](CLAUDE.md). After cloning or pulling, start Claude from the repository root and run `/start-work <A-F> <name> <GitHub-ID>`.
 
 ## Clone from GitHub with all submodules
