@@ -57,6 +57,10 @@ foreach ($required in @(
     }
 }
 
+if ($email -notmatch '(?s)resource\s+"aws_route53_record"\s+"ses_dkim_virginia"\s*\{(?:(?!\nresource\s+").)*?allow_overwrite\s*=\s*true') {
+    throw "Virginia SES DKIM records must adopt matching pre-existing Route53 records during the regional cutover."
+}
+
 if ($email.Contains('ses:SendRawEmail')) {
     throw "Core IAM must not grant unused raw-email delivery."
 }
