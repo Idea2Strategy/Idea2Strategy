@@ -17,9 +17,15 @@ on:
         required: true
         default: false
         type: boolean
+      force_rebuild_all_images:
+        description: Rebuild every runtime image instead of reusing unchanged images from the previous successful release
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 concurrency:
@@ -106,7 +112,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           submodules: recursive
 
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
@@ -116,26 +122,96 @@ jobs:
 
       - name: Build untrusted ARM64 runtime inputs without AWS credentials
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $tag = "rc-${{ github.sha }}-${{ github.run_id }}"
           $images = @(
-            @{ name='admin-mcp'; context='backend'; file='backend/apps/admin-mcp/Dockerfile' },
-            @{ name='backend-api'; context='backend'; file='backend/apps/backend-api/Dockerfile' },
-            @{ name='backend-batch'; context='backend'; file='backend/apps/backend-batch/Dockerfile' },
-            @{ name='backend-worker'; context='backend'; file='backend/apps/backend-worker/Dockerfile' },
-            @{ name='backtest-api'; context='backtest-engine'; file='backtest-engine/Dockerfile' },
-            @{ name='backtest-worker'; context='backtest-engine'; file='backtest-engine/Dockerfile' },
-            @{ name='market-gateway'; context='trading-engine'; file='trading-engine/apps/market-gateway/Dockerfile' },
-            @{ name='pipeline-worker'; context='data-pipeline'; file='data-pipeline/Dockerfile' },
-            @{ name='trading-worker'; context='trading-engine'; file='trading-engine/apps/trading-worker/Dockerfile' }
+            @{ name='admin-mcp'; service='backend'; context='backend'; file='backend/apps/admin-mcp/Dockerfile' },
+            @{ name='backend-api'; service='backend'; context='backend'; file='backend/apps/backend-api/Dockerfile' },
+            @{ name='backend-batch'; service='backend'; context='backend'; file='backend/apps/backend-batch/Dockerfile' },
+            @{ name='backend-worker'; service='backend'; context='backend'; file='backend/apps/backend-worker/Dockerfile' },
+            @{ name='backtest-api'; service='backtest-engine'; context='backtest-engine'; file='backtest-engine/Dockerfile' },
+            @{ name='backtest-worker'; service='backtest-engine'; context='backtest-engine'; file='backtest-engine/Dockerfile' },
+            @{ name='market-gateway'; service='trading-engine'; context='trading-engine'; file='trading-engine/apps/market-gateway/Dockerfile' },
+            @{ name='pipeline-worker'; service='data-pipeline'; context='data-pipeline'; file='data-pipeline/Dockerfile' },
+            @{ name='trading-worker'; service='trading-engine'; context='trading-engine'; file='trading-engine/apps/trading-worker/Dockerfile' }
           )
-          foreach ($image in $images) {
-            $target = "local/idea2strategy/$($image.name):$tag"
-            docker buildx build --platform linux/arm64 --load --tag $target --file $image.file $image.context
-            if ($LASTEXITCODE -ne 0) { throw "Image build failed: $($image.name)" }
+
+          $forceRebuild = '${{ github.event.inputs.force_rebuild_all_images }}' -ceq 'true'
+          $previousRun = $null
+          if (-not $forceRebuild) {
+            try {
+              $headers = @{
+                Accept = 'application/vnd.github+json'
+                Authorization = "Bearer $env:GITHUB_TOKEN"
+                'X-GitHub-Api-Version' = '2022-11-28'
+              }
+              $runsUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/development-release.yml/runs?branch=develop&event=workflow_dispatch&status=success&per_page=20"
+              $runs = Invoke-RestMethod -Uri $runsUri -Headers $headers
+              $previousRun = @($runs.workflow_runs | Where-Object { [string]$_.id -cne $env:GITHUB_RUN_ID }) | Select-Object -First 1
+            }
+            catch {
+              Write-Warning "Unable to resolve a previous successful Development release; all runtime images will be rebuilt. $($_.Exception.Message)"
+            }
           }
-          docker save ($images | ForEach-Object { "local/idea2strategy/$($_.name):$tag" }) -o "$env:RUNNER_TEMP/runtime-images.tar"
+
+          $previousSha = if ($null -eq $previousRun) { '' } else { [string]$previousRun.head_sha }
+          $previousReleaseTag = if ($null -eq $previousRun) { '' } else { "rc-$previousSha-$([string]$previousRun.id)" }
+          function Get-Gitlink([string]$Revision, [string]$Path) {
+            if ([string]::IsNullOrWhiteSpace($Revision)) { return '' }
+            $entry = [string](git ls-tree $Revision -- $Path)
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($entry)) { return '' }
+            $parts = $entry -split '\s+'
+            if ($parts.Count -lt 3 -or $parts[0] -cne '160000') { return '' }
+            return [string]$parts[2]
+          }
+
+          $builtTargets = [Collections.Generic.List[string]]::new()
+          $manifestImages = [Collections.Generic.List[object]]::new()
+          foreach ($image in $images) {
+            $currentSource = Get-Gitlink '${{ github.sha }}' $image.service
+            $previousSource = Get-Gitlink $previousSha $image.service
+            $mustBuild = $forceRebuild -or
+              [string]::IsNullOrWhiteSpace($previousReleaseTag) -or
+              [string]::IsNullOrWhiteSpace($currentSource) -or
+              $currentSource -cne $previousSource
+            $target = "local/idea2strategy/$($image.name):$tag"
+            if ($mustBuild) {
+              $cacheScope = "development-$($image.name)-arm64"
+              docker buildx build `
+                --platform linux/arm64 `
+                --cache-from "type=gha,scope=$cacheScope" `
+                --cache-to "type=gha,mode=max,scope=$cacheScope" `
+                --load --tag $target --file $image.file $image.context
+              if ($LASTEXITCODE -ne 0) { throw "Image build failed: $($image.name)" }
+              $builtTargets.Add($target)
+            }
+            else {
+              Write-Output "Skipping unchanged runtime image build: $($image.name) ($currentSource)"
+            }
+            $manifestImages.Add([ordered]@{
+              name = [string]$image.name
+              service = [string]$image.service
+              source_revision = $currentSource
+              built = [bool]$mustBuild
+              reuse_tag = if ($mustBuild) { '' } else { $previousReleaseTag }
+            })
+          }
+          if ($builtTargets.Count -gt 0) {
+            docker save --output "$env:RUNNER_TEMP/runtime-images.tar" @builtTargets
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to archive built runtime images.' }
+          }
+          else {
+            tar -cf "$env:RUNNER_TEMP/runtime-images.tar" --files-from /dev/null
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to create the empty runtime image archive.' }
+          }
+          [ordered]@{
+            current_release_tag = $tag
+            previous_release_tag = $previousReleaseTag
+            images = @($manifestImages)
+          } | ConvertTo-Json -Depth 5 -Compress | Set-Content -NoNewline "$env:RUNNER_TEMP/runtime-image-manifest.json"
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
@@ -215,6 +291,7 @@ jobs:
           name: development-${{ github.sha }}-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/runtime-images.tar
+            ${{ runner.temp }}/runtime-image-manifest.json
             ${{ runner.temp }}/frontend.tgz
           retention-days: 7
           overwrite: true
@@ -280,13 +357,65 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          docker load --input "$env:RUNNER_TEMP/release/runtime-images.tar"
+          $manifest = Get-Content "$env:RUNNER_TEMP/release/runtime-image-manifest.json" -Raw | ConvertFrom-Json
+          $builtImages = @($manifest.images | Where-Object { [bool]$_.built })
+          if ($builtImages.Count -gt 0) {
+            docker load --input "$env:RUNNER_TEMP/release/runtime-images.tar"
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to load built runtime images.' }
+          }
           $registry = '${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com'
           $tag = "rc-${{ github.sha }}-${{ github.run_id }}"
           aws ecr get-login-password | docker login --username AWS --password-stdin $registry
           $names = @('admin-mcp','backend-api','backend-batch','backend-worker','backtest-api','backtest-worker','market-gateway','pipeline-worker','trading-worker')
           $digests = @{}
           foreach ($name in $names) {
+            $manifestImage = @($manifest.images | Where-Object { [string]$_.name -ceq $name })
+            if ($manifestImage.Count -ne 1) { throw "Runtime image manifest entry is missing or duplicated: $name" }
+            $manifestImage = $manifestImage[0]
+            if (-not [bool]$manifestImage.built) {
+              $reuseTag = [string]$manifestImage.reuse_tag
+              $reuseDigest = [string](aws ecr describe-images `
+                --repository-name "idea2strategy-dev/$name" `
+                --image-ids "imageTag=$reuseTag" `
+                --query 'imageDetails[0].imageDigest' `
+                --output text 2>$null)
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($reuseDigest) -or $reuseDigest -ceq 'None') {
+                throw "No reusable runtime image exists; rerun with force_rebuild_all_images enabled: $name/$reuseTag"
+              }
+              if ($reuseDigest -notmatch '^sha256:[0-9a-f]{64}$') { throw "Reusable ECR digest is invalid: $name" }
+              $currentDigest = [string](aws ecr describe-images `
+                --repository-name "idea2strategy-dev/$name" `
+                --image-ids "imageTag=$tag" `
+                --query 'imageDetails[0].imageDigest' `
+                --output text 2>$null)
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($currentDigest) -or $currentDigest -ceq 'None') {
+                $manifestPath = "$env:RUNNER_TEMP/reuse-$name-manifest.json"
+                aws ecr batch-get-image `
+                  --repository-name "idea2strategy-dev/$name" `
+                  --image-ids "imageTag=$reuseTag" `
+                  --query 'images[0].imageManifest' `
+                  --output text | Set-Content -NoNewline $manifestPath
+                if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+                  throw "Unable to read the reusable ECR manifest: $name/$reuseTag"
+                }
+                aws ecr put-image `
+                  --repository-name "idea2strategy-dev/$name" `
+                  --image-tag $tag `
+                  --image-manifest "file://$manifestPath" | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "Unable to publish the reused immutable ECR tag: $name/$tag" }
+                $currentDigest = [string](aws ecr describe-images `
+                  --repository-name "idea2strategy-dev/$name" `
+                  --image-ids "imageTag=$tag" `
+                  --query 'imageDetails[0].imageDigest' `
+                  --output text)
+              }
+              if ($currentDigest -cne $reuseDigest) {
+                throw "Server-side reuse digest mismatch: $name/$tag"
+              }
+              Write-Output "Reusing unchanged runtime image: $name@$currentDigest"
+              $digests[$name] = $currentDigest
+              continue
+            }
             $source = "local/idea2strategy/${name}:$tag"
             $target = "$registry/idea2strategy-dev/${name}:$tag"
             $platform = docker image inspect $source --format '{{.Os}}/{{.Architecture}}'

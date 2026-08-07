@@ -56,10 +56,12 @@ if ($parsedPowerShellBlocks -ne 17) {
 
 $required = @(
     "workflow_dispatch:",
+    "force_rebuild_all_images:",
     "database_bootstrap_authorization:",
     "default: REUSE_EXISTING_RECEIPT",
     "BOOTSTRAP_DEVELOPMENT_DATABASE",
     "id-token: write",
+    "actions: read",
     "github.ref == 'refs/heads/develop'",
     "environment: development-plan",
     "environment: development",
@@ -124,7 +126,17 @@ $required = @(
     "-RequireRuntimeDatabaseSecrets",
     "-RequireAlpacaSecrets",
     "verify-deployed-development.ps1",
-    "github.event.inputs.apply_reviewed_plan == 'true'"
+    "github.event.inputs.apply_reviewed_plan == 'true'",
+    "api.github.com/repos/`$env:GITHUB_REPOSITORY/actions/workflows/development-release.yml/runs",
+    "runtime-image-manifest.json",
+    "`$cacheScope = `"development-`$(`$image.name)-arm64`"",
+    "--cache-from `"type=gha,scope=`$cacheScope`"",
+    "--cache-to `"type=gha,mode=max,scope=`$cacheScope`"",
+    "Reusing unchanged runtime image",
+    "aws ecr batch-get-image",
+    "aws ecr put-image",
+    "Server-side reuse digest mismatch",
+    "No reusable runtime image exists; rerun with force_rebuild_all_images enabled"
 )
 
 foreach ($token in $required) {

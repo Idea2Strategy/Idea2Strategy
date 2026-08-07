@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [develop]
   push:
-    branches: [develop]
+    branches: [develop, main]
 
 permissions:
   contents: read
@@ -46,6 +46,9 @@ jobs:
       - name: Validate manual Development release safety boundaries
         shell: pwsh
         run: ./scripts/test-development-release-workflow.ps1
+      - name: Validate fast Development CI scheduling
+        shell: pwsh
+        run: ./scripts/test-ci-scheduling.ps1
       - name: Validate immutable GitHub Action runtime pins
         shell: pwsh
         run: ./scripts/test-github-action-runtime-pins.ps1
@@ -93,8 +96,9 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
       - name: Install schema tooling
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Validate canonical DBML
         run: pnpm dbml:validate
       - name: Validate canonical COM A contracts
@@ -148,6 +152,7 @@ jobs:
         run: ./scripts/test-development-scoring-seed-integration.ps1
 
   three-lane-feature-e2e:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
