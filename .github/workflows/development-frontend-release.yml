@@ -1,0 +1,423 @@
+name: Development frontend release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_authorization:
+        description: Type DEPLOY_DEVELOPMENT_FRONTEND to build and publish the frontend pinned by develop
+        required: true
+        type: string
+      apply_reviewed_plan:
+        description: Apply the exact saved frontend plan after the Development environment approval
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: development-release
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Authorize exact Development frontend release
+        shell: pwsh
+        run: |
+          if ('${{ github.ref }}' -cne 'refs/heads/develop') {
+            throw 'The Development frontend release can run only from develop.'
+          }
+          if ('${{ github.event.inputs.release_authorization }}' -cne 'DEPLOY_DEVELOPMENT_FRONTEND') {
+            throw 'Frontend release authorization did not match DEPLOY_DEVELOPMENT_FRONTEND.'
+          }
+
+  build:
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Confirm exact root frontend pointer
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_ui="$(git rev-parse HEAD:ui)"
+          actual_ui="$(git -C ui rev-parse HEAD)"
+          test "$expected_ui" = "$actual_ui"
+          echo "root=$(git rev-parse HEAD)"
+          echo "ui=$actual_ui"
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Test and build same-origin frontend without AWS credentials
+        shell: bash
+        env:
+          VITE_OPERATOR_OIDC_ENABLED: 'true'
+          VITE_OPERATOR_OIDC_ISSUER: ${{ vars.OPERATOR_OIDC_ISSUER }}
+          VITE_OPERATOR_OIDC_AUTHORIZATION_ENDPOINT: ${{ vars.OPERATOR_OIDC_AUTHORIZATION_ENDPOINT }}
+          VITE_OPERATOR_OIDC_TOKEN_ENDPOINT: ${{ vars.OPERATOR_OIDC_TOKEN_ENDPOINT }}
+          VITE_OPERATOR_OIDC_END_SESSION_ENDPOINT: ${{ vars.OPERATOR_OIDC_END_SESSION_ENDPOINT }}
+          VITE_OPERATOR_OIDC_CLIENT_ID: ${{ vars.OPERATOR_OIDC_CLIENT_ID }}
+          VITE_OPERATOR_OIDC_AUDIENCE: ${{ vars.OPERATOR_OIDC_AUDIENCE }}
+          VITE_OPERATOR_OIDC_REDIRECT_URI: ${{ vars.OPERATOR_OIDC_REDIRECT_URI }}
+          VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI: ${{ vars.OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI }}
+          VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER: ${{ vars.OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER }}
+          VITE_OPERATOR_OIDC_SCOPES: ${{ vars.OPERATOR_OIDC_SCOPES }}
+          VITE_OPERATOR_OIDC_SIGNING_ALGORITHM: ${{ vars.OPERATOR_OIDC_SIGNING_ALGORITHM }}
+          VITE_OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID: ${{ vars.OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID }}
+          VITE_OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID: ${{ vars.OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID }}
+          VITE_GOOGLE_OAUTH_CLIENT_ID: ${{ vars.VITE_GOOGLE_OAUTH_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          required=(
+            VITE_OPERATOR_OIDC_ISSUER VITE_OPERATOR_OIDC_AUTHORIZATION_ENDPOINT
+            VITE_OPERATOR_OIDC_TOKEN_ENDPOINT VITE_OPERATOR_OIDC_CLIENT_ID
+            VITE_OPERATOR_OIDC_AUDIENCE VITE_OPERATOR_OIDC_REDIRECT_URI
+            VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI VITE_OPERATOR_OIDC_SCOPES
+            VITE_OPERATOR_OIDC_SIGNING_ALGORITHM VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER
+            VITE_OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID
+            VITE_OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then echo "OIDC build input is missing: $name" >&2; exit 1; fi
+          done
+          for endpoint in "$VITE_OPERATOR_OIDC_ISSUER" "$VITE_OPERATOR_OIDC_AUTHORIZATION_ENDPOINT" "$VITE_OPERATOR_OIDC_TOKEN_ENDPOINT"; do
+            if [[ "$endpoint" != https://* ]]; then echo 'OIDC endpoint must use HTTPS' >&2; exit 1; fi
+          done
+          if [[ -n "$VITE_OPERATOR_OIDC_END_SESSION_ENDPOINT" && "$VITE_OPERATOR_OIDC_END_SESSION_ENDPOINT" != https://* ]]; then
+            echo 'OIDC endpoint must use HTTPS' >&2
+            exit 1
+          fi
+          if [[ "$VITE_OPERATOR_OIDC_REDIRECT_URI" != https://*/operations/callback ]]; then
+            echo 'OIDC redirect URI must use the service origin' >&2
+            exit 1
+          fi
+          service_origin="${VITE_OPERATOR_OIDC_REDIRECT_URI%/operations/callback}"
+          if [[ "$VITE_OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI" != "$service_origin/operations/login" ]]; then
+            echo 'OIDC redirect URI must use the service origin' >&2
+            exit 1
+          fi
+          if [[ "$VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER" != 'post_logout_redirect_uri' && "$VITE_OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER" != 'logout_uri' ]]; then
+            echo 'OIDC logout redirect parameter is invalid' >&2
+            exit 1
+          fi
+          if [[ " $VITE_OPERATOR_OIDC_SCOPES " != *' openid '* ]]; then
+            echo 'OIDC scopes must include openid' >&2
+            exit 1
+          fi
+          uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          for permission_id in "$VITE_OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID" "$VITE_OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID"; do
+            if [[ ! "$permission_id" =~ $uuid ]]; then echo 'RBAC permission ID is invalid' >&2; exit 1; fi
+          done
+          cd ui
+          pnpm install --frozen-lockfile --prefer-offline
+          pnpm typecheck
+          pnpm exec vitest run
+          VITE_API_BASE_URL='' VITE_ADMIN_MCP_BASE_URL='' VITE_ENABLE_LOCAL_OPERATOR_HARNESS=false pnpm build
+          node scripts/assert-production-bundle.mjs
+
+      - name: Create immutable frontend release bundle
+        id: release
+        shell: pwsh
+        run: |
+          $releaseId = "${{ github.sha }}-${{ github.run_id }}"
+          tar -czf "$env:RUNNER_TEMP/frontend.tgz" -C ui/dist .
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to archive the frontend build.' }
+          "release_id=$releaseId" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: development-frontend-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/frontend.tgz
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: error
+
+  prepare-and-plan:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: development-plan
+    outputs:
+      plan_key: ${{ steps.archive.outputs.plan_key }}
+      plan_version: ${{ steps.archive.outputs.plan_version }}
+      plan_sha256: ${{ steps.archive.outputs.plan_sha256 }}
+      lambda_package_key: ${{ steps.archive.outputs.lambda_package_key }}
+      lambda_package_version: ${{ steps.archive.outputs.lambda_package_version }}
+      lambda_package_sha256: ${{ steps.archive.outputs.lambda_package_sha256 }}
+      release_id: ${{ needs.build.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          submodules: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: development-frontend-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/release
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify exact AWS account
+        shell: pwsh
+        run: |
+          $actual = aws sts get-caller-identity --query Account --output text
+          if ($LASTEXITCODE -ne 0 -or $actual -cne '${{ vars.AWS_ACCOUNT_ID }}') {
+            throw 'AWS account mismatch.'
+          }
+
+      - name: Publish immutable frontend prefix before planning
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bucket = "idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-frontend"
+          $release = '${{ needs.build.outputs.release_id }}'
+          $frontendRoot = Join-Path $env:RUNNER_TEMP 'frontend'
+          New-Item -ItemType Directory $frontendRoot -Force | Out-Null
+          tar -xzf "$env:RUNNER_TEMP/release/frontend.tgz" -C $frontendRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to extract the frontend build.' }
+
+          $frontendRoot = (Resolve-Path $frontendRoot).Path
+          $fingerprintLines = @(Get-ChildItem -LiteralPath $frontendRoot -Recurse -File | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($frontendRoot, $_.FullName).Replace('\', '/')
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$relative$([char]9)$hash"
+          } | Sort-Object -CaseSensitive)
+          if ($fingerprintLines.Count -eq 0 -or -not (Test-Path -LiteralPath "$frontendRoot/index.html" -PathType Leaf)) {
+            throw 'Frontend release bundle is incomplete.'
+          }
+          $fingerprintMaterial = ($fingerprintLines -join [Environment]::NewLine) + [Environment]::NewLine
+          $sha256 = [Security.Cryptography.SHA256]::Create()
+          try {
+            $contentFingerprint = ([BitConverter]::ToString($sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($fingerprintMaterial)))).Replace('-', '').ToLowerInvariant()
+          }
+          finally {
+            $sha256.Dispose()
+          }
+
+          $releaseMarkerKey = "_releases/$release/.release-content.sha256"
+          $markerPath = "$env:RUNNER_TEMP/frontend-release.sha256"
+          [IO.File]::WriteAllText($markerPath, "$contentFingerprint$([Environment]::NewLine)", [Text.UTF8Encoding]::new($false))
+          $listingJson = @(aws s3api list-objects-v2 --bucket $bucket --prefix $releaseMarkerKey --max-keys 1 --output json)
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the immutable frontend completion marker.' }
+          $listing = ($listingJson -join [Environment]::NewLine) | ConvertFrom-Json
+          $markerExists = $null -ne $listing.PSObject.Properties['Contents'] -and
+            @($listing.Contents | Where-Object { [string]$_.Key -ceq $releaseMarkerKey }).Count -eq 1
+          if ($markerExists) {
+            $existingMarkerPath = "$env:RUNNER_TEMP/existing-frontend-release.sha256"
+            aws s3api get-object --bucket $bucket --key $releaseMarkerKey $existingMarkerPath | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to read the immutable frontend completion marker.' }
+            if ((Get-Content -LiteralPath $existingMarkerPath -Raw).Trim() -cne $contentFingerprint) {
+              throw "Frontend release content fingerprint collision: $release"
+            }
+          }
+          else {
+            aws s3 sync "$frontendRoot" "s3://$bucket/_releases/$release/" --delete --cache-control 'public,max-age=31536000,immutable' --exclude 'index.html' --exclude '.release-content.sha256'
+            if ($LASTEXITCODE -ne 0) { throw 'Frontend asset sync failed.' }
+            aws s3 cp "$frontendRoot/index.html" "s3://$bucket/_releases/$release/index.html" --cache-control 'no-store' --content-type 'text/html'
+            if ($LASTEXITCODE -ne 0) { throw 'Frontend index publication failed.' }
+            aws s3 cp $markerPath "s3://$bucket/$releaseMarkerKey" --cache-control 'no-store' --content-type 'text/plain'
+            if ($LASTEXITCODE -ne 0) { throw 'Frontend completion marker publication failed.' }
+          }
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: Materialize current runtime and new frontend Terraform inputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $config = '${{ vars.TF_VARS_JSON }}' | ConvertFrom-Json -AsHashtable
+          if (-not $config -or $config.ContainsKey('password') -or $config.ContainsKey('secret')) {
+            throw 'TF_VARS_JSON must contain reviewed non-secret Terraform variables only.'
+          }
+          if (-not $config.ContainsKey('dns_delegation_verified') -or $config.dns_delegation_verified -ne $true) {
+            throw 'TF_VARS_JSON must carry independently reviewed public DNS delegation evidence.'
+          }
+          if ([string]$config.operator_auth_issuer -cne '${{ vars.OPERATOR_OIDC_ISSUER }}' -or
+              [string]$config.operator_auth_audience -cne '${{ vars.OPERATOR_OIDC_AUDIENCE }}') {
+            throw 'Frontend OIDC issuer/audience must exactly match the Terraform runtime inputs.'
+          }
+          if ([string]$config.operator_rbac_catalog_read_permission_id -cne '${{ vars.OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID }}' -or
+              [string]$config.operator_rbac_assignment_read_permission_id -cne '${{ vars.OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID }}') {
+            throw 'Frontend RBAC permission IDs must exactly match the Terraform runtime inputs.'
+          }
+          if ([string]$config.google_oauth_client_id -cne '${{ vars.VITE_GOOGLE_OAUTH_CLIENT_ID }}') {
+            throw 'Frontend Google OAuth client ID must exactly match the Terraform runtime input.'
+          }
+
+          $runtimeNames = @(
+            'admin-mcp', 'backend-api', 'backend-batch', 'backend-worker',
+            'backtest-api', 'backtest-worker', 'market-gateway',
+            'pipeline-worker', 'trading-worker'
+          )
+          $currentDigests = @{}
+          foreach ($name in $runtimeNames) {
+            $parameterName = "/idea2strategy/dev/deployment/images/$name"
+            $valueLines = @(aws ssm get-parameter --name $parameterName --query Parameter.Value --output text)
+            $value = ($valueLines -join [Environment]::NewLine).Trim()
+            if ($LASTEXITCODE -ne 0 -or $value -notmatch '@(?<digest>sha256:[0-9a-f]{64})$') {
+              throw "Current runtime image parameter is missing or invalid: $name"
+            }
+            $currentDigests[$name] = [string]$Matches['digest']
+          }
+
+          $config.aws_profile = ''
+          $config.aws_region = '${{ env.AWS_REGION }}'
+          $config.expected_aws_account_id = '${{ vars.AWS_ACCOUNT_ID }}'
+          $config.deployment_phase = 'full'
+          $config.enable_https = $true
+          $config.frontend_release_id = '${{ needs.build.outputs.release_id }}'
+          $config.container_image_digests = $currentDigests
+          $config | ConvertTo-Json -Depth 20 | Set-Content -NoNewline infra/terraform/environments/development/release.auto.tfvars.json
+
+          @(
+            'bucket       = "${{ vars.TF_STATE_BUCKET }}"',
+            'key          = "idea2strategy/development/terraform.tfstate"',
+            'region       = "${{ env.AWS_REGION }}"',
+            'use_lockfile = true',
+            'encrypt      = true'
+          ) | Set-Content infra/terraform/environments/development/release.backend.hcl
+
+      - name: Create saved frontend Terraform plan
+        working-directory: infra/terraform/environments/development
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform fmt -check -recursive
+          terraform init -backend-config=release.backend.hcl
+          terraform validate
+          terraform plan -out=frontend.tfplan
+          terraform show -json frontend.tfplan > frontend.plan.json
+          pwsh "$GITHUB_WORKSPACE/scripts/assert-development-frontend-plan-safe.ps1" \
+            -PlanJsonPath frontend.plan.json \
+            -ExpectedReleaseId '${{ needs.build.outputs.release_id }}'
+          terraform show -no-color frontend.tfplan > frontend.plan.txt
+
+      - name: Archive exact frontend plan in protected state storage
+        id: archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prefix = "idea2strategy/development/release-candidates/${{ github.run_id }}/frontend-${{ github.run_attempt }}"
+          $plan = 'infra/terraform/environments/development/frontend.tfplan'
+          $lambdaPackage = 'infra/terraform/environments/development/.terraform/operator-pre-token.zip'
+          if (-not (Test-Path -LiteralPath $lambdaPackage -PathType Leaf)) {
+            throw 'Terraform did not materialize the operator pre-token Lambda package.'
+          }
+          $planHash = (Get-FileHash -Algorithm SHA256 $plan).Hash.ToLowerInvariant()
+          $lambdaPackageHash = (Get-FileHash -Algorithm SHA256 $lambdaPackage).Hash.ToLowerInvariant()
+          $put = aws s3api put-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key "$prefix/frontend.tfplan" --body $plan --server-side-encryption AES256 --output json | ConvertFrom-Json
+          if ([string]::IsNullOrWhiteSpace([string]$put.VersionId)) { throw 'Versioned frontend plan publication failed.' }
+          $lambdaPut = aws s3api put-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key "$prefix/operator-pre-token.zip" --body $lambdaPackage --server-side-encryption AES256 --output json | ConvertFrom-Json
+          if ([string]::IsNullOrWhiteSpace([string]$lambdaPut.VersionId)) { throw 'Versioned Lambda package publication failed.' }
+          "plan_key=$prefix/frontend.tfplan" >> $env:GITHUB_OUTPUT
+          "plan_version=$($put.VersionId)" >> $env:GITHUB_OUTPUT
+          "plan_sha256=$planHash" >> $env:GITHUB_OUTPUT
+          "lambda_package_key=$prefix/operator-pre-token.zip" >> $env:GITHUB_OUTPUT
+          "lambda_package_version=$($lambdaPut.VersionId)" >> $env:GITHUB_OUTPUT
+          "lambda_package_sha256=$lambdaPackageHash" >> $env:GITHUB_OUTPUT
+          "### Development frontend plan awaiting apply approval" >> $env:GITHUB_STEP_SUMMARY
+          "* Root commit: ${{ github.sha }}" >> $env:GITHUB_STEP_SUMMARY
+          "* Frontend release: ${{ needs.build.outputs.release_id }}" >> $env:GITHUB_STEP_SUMMARY
+          "* Plan SHA-256: $planHash" >> $env:GITHUB_STEP_SUMMARY
+          "* Apply requested: ${{ github.event.inputs.apply_reviewed_plan }}" >> $env:GITHUB_STEP_SUMMARY
+          Get-Content infra/terraform/environments/development/frontend.plan.txt >> $env:GITHUB_STEP_SUMMARY
+
+  apply-reviewed-plan:
+    if: always() && needs.prepare-and-plan.result == 'success' && github.event.inputs.apply_reviewed_plan == 'true'
+    needs: prepare-and-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: development
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          submodules: false
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: Download and verify exact reviewed frontend plan
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          aws s3api get-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key '${{ needs.prepare-and-plan.outputs.plan_key }}' --version-id '${{ needs.prepare-and-plan.outputs.plan_version }}' frontend.tfplan | Out-Null
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash -Algorithm SHA256 frontend.tfplan).Hash.ToLowerInvariant() -cne '${{ needs.prepare-and-plan.outputs.plan_sha256 }}') {
+            throw 'Saved frontend plan hash mismatch.'
+          }
+          aws s3api get-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key '${{ needs.prepare-and-plan.outputs.lambda_package_key }}' --version-id '${{ needs.prepare-and-plan.outputs.lambda_package_version }}' operator-pre-token.zip | Out-Null
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash -Algorithm SHA256 operator-pre-token.zip).Hash.ToLowerInvariant() -cne '${{ needs.prepare-and-plan.outputs.lambda_package_sha256 }}') {
+            throw 'Saved Lambda package hash mismatch.'
+          }
+
+      - name: Apply only the reviewed frontend plan
+        working-directory: infra/terraform/environments/development
+        shell: pwsh
+        run: |
+          Move-Item "$env:GITHUB_WORKSPACE/frontend.tfplan" ./frontend.tfplan
+          terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="key=idea2strategy/development/terraform.tfstate" -backend-config="region=${{ env.AWS_REGION }}" -backend-config="use_lockfile=true" -backend-config="encrypt=true"
+          if ($LASTEXITCODE -ne 0) { throw 'Terraform initialization failed.' }
+          Move-Item "$env:GITHUB_WORKSPACE/operator-pre-token.zip" ./.terraform/operator-pre-token.zip
+          terraform apply frontend.tfplan
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend Terraform apply failed.' }
+
+      - name: Verify deployed frontend release
+        working-directory: infra/terraform/environments/development
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = '${{ needs.prepare-and-plan.outputs.release_id }}'
+          $parameterLines = @(aws ssm get-parameter --name '/idea2strategy/dev/deployment/frontend-release' --query Parameter.Value --output text)
+          if ($LASTEXITCODE -ne 0 -or ($parameterLines -join [Environment]::NewLine).Trim() -cne $release) {
+            throw 'Deployed frontend release parameter does not match the reviewed release.'
+          }
+          $distributionId = (terraform output -raw cloudfront_distribution_id).Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($distributionId)) {
+            throw 'CloudFront distribution output is missing.'
+          }
+          aws cloudfront wait distribution-deployed --id $distributionId
+          if ($LASTEXITCODE -ne 0) { throw 'CloudFront did not reach the deployed state.' }
+          $serviceUrl = (terraform output -raw service_url).TrimEnd('/')
+          if ($LASTEXITCODE -ne 0 -or $serviceUrl -notmatch '^https://') {
+            throw 'Development service URL is missing or insecure.'
+          }
+          $response = Invoke-WebRequest -Uri "$serviceUrl/?release=$release" -Headers @{ 'Cache-Control' = 'no-cache' } -UseBasicParsing
+          if ([int]$response.StatusCode -ne 200) {
+            throw 'The deployed frontend did not return HTTP 200.'
+          }
+          "Verified immutable frontend release: $release" >> $env:GITHUB_STEP_SUMMARY
