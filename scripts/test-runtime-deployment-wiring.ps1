@@ -79,6 +79,7 @@ foreach ($atomicSecretFile in @(
 }
 foreach ($refreshedSecret in @(
     'IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY',
+    'IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY',
     'OPERATOR_AUTH_CURRENT_HMAC_KEY',
     'BACKTEST_SESSION_HMAC_KEY_BASE64',
     'BACKTEST_RESULT_INGEST_TOKEN',
@@ -219,6 +220,7 @@ foreach ($required in @(
     'resource "aws_secretsmanager_secret" "backtest_internal"',
     'resource "aws_secretsmanager_secret_version" "backtest_internal"',
     'resource "random_password" "identity_email_encryption"',
+    'resource "random_password" "identity_customer_jwt_signing"',
     'resource "random_password" "backtest_result_ingest"',
     'prevent_destroy = true'
 )) {
