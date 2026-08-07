@@ -32,7 +32,7 @@ function New-RandomSecret {
     return [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "A").Replace("/", "B")
 }
 
-# backend-api registers its customer identity surface only when all four
+# backend-api registers its customer identity surface only when all five
 # identity.crypto keys are present (fail-closed, root #266), so both a fresh
 # bootstrap and an existing .env.docker created before the keys were added
 # must end up carrying generated values.
@@ -40,7 +40,8 @@ $identityCryptoKeys = @(
     "IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY",
     "IDENTITY_CRYPTO_LOOKUP_HMAC_KEY",
     "IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY",
-    "IDENTITY_CRYPTO_SESSION_HMAC_KEY"
+    "IDENTITY_CRYPTO_SESSION_HMAC_KEY",
+    "IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY"
 )
 $backtestLocalSecrets = @("BACKTEST_RESULT_INGEST_TOKEN")
 

@@ -16,12 +16,14 @@ x-spring-environment: &spring-environment
   S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
   S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
   # backend-api registers the customer identity surface (signup/login/session)
-  # only when all four keys are present (fail-closed, root #266). dev.ps1
+  # only when all five keys are present (fail-closed, root #266). dev.ps1
   # generates and backfills them into .env.docker.
   IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY: ${IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY}
   IDENTITY_CRYPTO_LOOKUP_HMAC_KEY: ${IDENTITY_CRYPTO_LOOKUP_HMAC_KEY}
   IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY: ${IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY}
   IDENTITY_CRYPTO_SESSION_HMAC_KEY: ${IDENTITY_CRYPTO_SESSION_HMAC_KEY}
+  IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY: ${IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY}
+  IDENTITY_JWT_REFRESH_COOKIE_SECURE: ${IDENTITY_JWT_REFRESH_COOKIE_SECURE:-false}
   IDENTITY_OIDC_ENABLED: ${IDENTITY_OIDC_ENABLED:-false}
   IDENTITY_OIDC_PROVIDERS_GOOGLE_ISSUER: https://accounts.google.com
   IDENTITY_OIDC_PROVIDERS_GOOGLE_JWKS_URI: https://www.googleapis.com/oauth2/v3/certs
