@@ -63,3 +63,22 @@ Production startup remains fail-closed when the Flyway catalog migration, Postgr
 dataset feed resolution, object hashes, queue configuration, authentication, or service health
 checks are unavailable. This feature does not connect to a real brokerage account; trading remains
 the platform's virtual execution service.
+
+## Verification snapshot (2026-08-08)
+
+- The root repository and every service submodule include their latest fetched `origin/develop`
+  commit, and the isolated verification worktrees are clean.
+- Backend and trading full Gradle suites pass. Backtest unit, contract, persistence, lint, and type
+  checks pass; the PostgreSQL and LocalStack official-release journey passes all 10 cases.
+- UI passes 547 Vitest cases and the production Vite build.
+- The data pipeline passes 1,086 non-legacy tests plus 71 subtests, and a dedicated PostgreSQL,
+  LocalStack S3, and LocalStack SQS verification passes 82 tests plus 6 subtests.
+- The central Flyway bundle applies and validates all 52 migrations on a fresh PostgreSQL 16
+  database, and a second application reports no pending migrations.
+
+These results verify the production backtest path in local integration environments; they do not
+prove that a production environment already has the commits, migration, credentials, provider
+rights, or historical dataset coverage. One unused legacy D90 Redis ingestion adapter still mirrors
+the previous trading stream shape and is excluded from the data-pipeline production-path suite. It
+is not instantiated by the historical-data or backtest runtime, but should be retired or realigned
+before claiming that every legacy repository test is green.
