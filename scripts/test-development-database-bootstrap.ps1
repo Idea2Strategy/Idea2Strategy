@@ -96,6 +96,35 @@ if ((Get-AwsFailureCategory 'An error occurred (NoSuchKey) when calling GetObjec
     throw "AWS receipt failures must distinguish missing objects from authorization and transient failures."
 }
 
+$secretVersionValidatorAst = $receiptAst.Find({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-RuntimeSecretVersionsCurrent'
+    }, $true)
+if ($null -eq $secretVersionValidatorAst) { throw "Runtime secret version validator is missing." }
+Invoke-Expression $secretVersionValidatorAst.Extent.Text
+$expectedSecretConsumers = @('backend', 'backtest', 'batch', 'pipeline', 'trading')
+$receiptSecretVersions = [pscustomobject]@{
+    backend = 'backend-v1'
+    backtest = 'backtest-v1'
+    batch = 'batch-v1'
+    pipeline = 'pipeline-v1'
+    trading = 'trading-v1'
+}
+$currentSecretVersions = [ordered]@{
+    backend = 'backend-v1'
+    backtest = 'backtest-v1'
+    batch = 'batch-v1'
+    pipeline = 'pipeline-v1'
+    trading = 'trading-v1'
+}
+if (-not (Test-RuntimeSecretVersionsCurrent $expectedSecretConsumers $receiptSecretVersions $currentSecretVersions)) {
+    throw "Matching runtime secret versions must remain valid when the mismatch pipeline is empty."
+}
+$currentSecretVersions.trading = 'trading-v2'
+if (Test-RuntimeSecretVersionsCurrent $expectedSecretConsumers $receiptSecretVersions $currentSecretVersions) {
+    throw "A stale runtime secret version must invalidate the database bootstrap receipt."
+}
+
 $orchestratorTokens = $null
 $orchestratorParseErrors = $null
 $orchestratorAst = [Management.Automation.Language.Parser]::ParseInput($orchestrator, [ref]$orchestratorTokens, [ref]$orchestratorParseErrors)
