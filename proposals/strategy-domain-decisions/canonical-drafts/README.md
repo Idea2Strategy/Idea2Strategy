@@ -72,6 +72,9 @@ Then §5, which unblocks screen work without deciding any visual; then §8, whic
 already does; then §1 and §2, which are the two that carry real recommendations and deserve the most
 scrutiny — particularly §1's numeric limits, which are judgement calls rather than transcriptions.
 
-§7 stays open until its design question is answered. Its one decision-free part, implementing the
-`backtest-unavailable` state that `ui.strategy.authoring` already requires, needs no canonical write
-and can proceed as ordinary work.
+§7 stays open until its design question is answered. Implementing the `backtest-unavailable` state
+that `ui.strategy.authoring` already requires needs no canonical write — but it must not be wired to
+today's signal. Every strategy currently collects a feed-unavailable warning because the element
+contracts name a feed the publication model does not define, so a state derived from that signal would
+tell every user their strategy cannot be backtested when the actual fault is the catalog's token. The
+state is decision-free; its input is not. Build it once §7 settles what the input is.
