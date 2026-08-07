@@ -336,7 +336,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."password_reset_request
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."policy_documents" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."recovery_code_sets" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."recovery_codes" TO idea2strategy_backend;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."sessions" TO idea2strategy_backend;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."refresh_token_families" TO idea2strategy_backend;
 GRANT SELECT ON TABLE "market_data"."corporate_actions" TO idea2strategy_backend;
 GRANT SELECT ON TABLE "market_data"."dataset_lineage" TO idea2strategy_backend;
 GRANT SELECT ON TABLE "market_data"."dataset_manifests" TO idea2strategy_backend;
@@ -525,7 +525,7 @@ GRANT SELECT ON TABLE "identity"."password_reset_requests" TO idea2strategy_batc
 GRANT SELECT ON TABLE "identity"."policy_documents" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."recovery_code_sets" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."recovery_codes" TO idea2strategy_batch;
-GRANT SELECT ON TABLE "identity"."sessions" TO idea2strategy_batch;
+GRANT SELECT ON TABLE "identity"."refresh_token_families" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "market_data"."corporate_actions" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "market_data"."dataset_lineage" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "market_data"."dataset_manifests" TO idea2strategy_batch;

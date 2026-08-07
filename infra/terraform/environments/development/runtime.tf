@@ -62,7 +62,7 @@ resource "aws_secretsmanager_secret_version" "core_internal" {
     IDENTITY_EMAIL_ENCRYPTION_KEY     = base64encode(random_password.identity_email_encryption[0].result)
     IDENTITY_LOOKUP_HMAC_KEY          = base64encode(random_password.identity_lookup_hmac[0].result)
     IDENTITY_VERIFICATION_HMAC_KEY    = base64encode(random_password.identity_verification_hmac[0].result)
-    IDENTITY_SESSION_HMAC_KEY         = base64encode(random_password.identity_session_hmac[0].result)
+    IDENTITY_REFRESH_TOKEN_HMAC_KEY   = base64encode(random_password.identity_session_hmac[0].result)
     IDENTITY_CUSTOMER_JWT_SIGNING_KEY = base64encode(random_password.identity_customer_jwt_signing[0].result)
     OPERATOR_AUTH_CURRENT_HMAC_KEY    = base64encode(random_password.operator_subject_hmac[0].result)
   })
