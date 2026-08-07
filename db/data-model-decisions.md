@@ -641,6 +641,20 @@ Idea2Strategy는 사용자가 시각적으로 만든 결정론적 전략을 서�
   - `bot.strategy_instruments`의 기본키를 `(strategy_id, instrument_id)`로 단순화하고 `selection_role`을 제거한다.
   - 향후 Universe 기능은 고정 구성과 시점별 동적 구성 중 제품 의미를 먼저 결정한 뒤 새 제안·마이그레이션·백테스트 재현성 검증으로 도입한다.
 
+### DMD-032 — 편집기 재적재 시 정본 문서와 실행 의미 단독 소유
+
+- 상태: 확정된 DBML 재설계 입력, 제품 정본 조정 전 제안
+- 사용자 선택: 2026-08-07 `proposals/strategy-domain-decisions` §6 승인
+- 배경: DMD-010과 DMD-030은 presentation이 실행 의미를 바꾸지 못한다는 방향만 정했고, **어느 문서가 편집기를 복원하는가**는 정하지 않았다. 구현은 presentation만으로 캔버스를 복원하고 조회한 `semantic_document`는 한 번도 읽지 않는다.
+- 결정:
+  - `semantic_document`는 실행의 정본이고 `presentation_document`는 편집기 복원의 정본이다. 두 문서는 서로에서 유도할 수 없다.
+  - 통합하지 않는 이유는 편집기 표시 인코딩이 의도적으로 비가역이기 때문이다. 비교 연산자 `>`와 방향 `↑`가 같은 `GT`로 컴파일되고 `최근 20봉 평균 거래량 2배` 같은 표시 문자열이 `{period, multiplier}`로 축약된다. semantic에서 화면 표현을 재생성하려면 표시 문자열을 실행 의미에 넣어야 하므로 DMD-010에 위배된다.
+  - presentation은 실행 의미를 가진 값의 **유일한 저장소가 될 수 없다.** 그런 값은 semantic에 대응 표현을 가져야 한다.
+  - 해석할 수 없는 presentation 스냅샷은 **빈 캔버스가 아니라 적재 실패**다. 빈 캔버스로 열면 다음 저장이 실제 `semantic_document`를 빈 그룹 목록으로 덮어써 전략이 소실된다.
+  - `semantic_document`만으로 봇을 출시하고 실행할 수 있어야 하며 presentation 입력을 요구하지 않는다.
+- DBML 반영: 컬럼 변경 없음. `strategy.strategy_documents`의 두 문서 역할 서술을 위 문장으로 정리한다.
+- 미해결 위반 1건: 종목별 최대 보유 한도(`symbolLimits`)가 presentation에만 존재해 출시된 봇에 반영되지 않는다. 주문 요소 매개변수로 올리는 것이 권고이며 카탈로그 버전 변경이 필요하므로 `question.strategy.catalog`에 속한다.
+
 ## 범위 축소 감사
 
 사용자의 요청에 따라 프로젝트에서 참여 방식이나 별도 실행 이력을 명시하지 않은 선제 설계와 중복 조회 구조를 DBML에서 제거했다. 핵심 제품 기능과 공식 무결성에 필요한 테이블은 개수가 많더라도 유지한다.
