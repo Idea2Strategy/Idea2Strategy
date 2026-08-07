@@ -572,3 +572,5 @@ $remoteEncoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($remot
 if ($LASTEXITCODE -ne 0) { throw "The remote Core rollout program has invalid Bash syntax." }
 
 Write-Host "Development release workflow policy checks passed."
+
+& (Join-Path $PSScriptRoot "test-development-frontend-release-workflow.ps1")
