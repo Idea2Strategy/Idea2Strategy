@@ -96,6 +96,10 @@ resource "aws_secretsmanager_secret_version" "backtest_internal" {
     BACKTEST_RESULT_INGEST_TOKEN    = random_password.backtest_result_ingest[0].result
     BACKTEST_RESULT_PRINCIPAL_ID    = random_uuid.backtest_result_principal[0].result
   })
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "terraform_data" "runtime_artifact_guard" {
