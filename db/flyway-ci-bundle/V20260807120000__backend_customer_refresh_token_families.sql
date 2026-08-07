@@ -15,7 +15,8 @@ CREATE TABLE identity.refresh_token_families (
     CONSTRAINT refresh_token_family_credential_version_positive
         CHECK (credential_version_at_issue IS NULL OR credential_version_at_issue > 0),
     CONSTRAINT refresh_token_family_digest_key_version_positive CHECK (digest_key_version > 0),
-    CONSTRAINT refresh_token_family_time_order_valid CHECK (expires_at > issued_at),
+    CONSTRAINT refresh_token_family_time_order_valid
+        CHECK (last_rotated_at >= issued_at AND expires_at > last_rotated_at),
     CONSTRAINT refresh_token_family_login_identity_fk
         FOREIGN KEY (account_id, authenticated_by_login_identity_id)
         REFERENCES identity.login_identities (account_id, id)
@@ -77,7 +78,10 @@ ALTER TABLE strategy.strategy_edit_leases
 
 DROP TABLE identity.sessions;
 
+ALTER TABLE identity.account_security_states
+    RENAME COLUMN sessions_revoked_before TO credentials_revoked_before;
+
 COMMENT ON TABLE identity.refresh_token_families IS
     'Minimal server state for rotating refresh JWT reuse detection. It is not a device session registry and has no concurrent-login policy.';
 COMMENT ON TABLE strategy.strategy_edit_leases IS
-    'Allows exactly one active editor. Customer leases are account-owned and independently protected by the lease token; authentication sessions are not editor identities.';
+    'Allows exactly one active editor. Customer leases are account-owned and independently protected by the lease token; refresh token families are not editor identities.';

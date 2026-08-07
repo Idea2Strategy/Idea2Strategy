@@ -534,16 +534,16 @@ Table identity.accounts {
 Table identity.account_security_states {
   account_id uuid [pk]
   auth_epoch bigint [not null, default: 1]
-  sessions_revoked_before timestamptz
+  credentials_revoked_before timestamptz
   updated_at timestamptz [not null, default: `now()`]
 
   checks {
     `auth_epoch > 0` [name: 'account_security_auth_epoch_positive']
   }
 
-  Note: '계정당 정확히 하나인 인증 보안 현재 상태. 비밀번호 변경, 로그인 수단 교체, 계정 복구 또는 전체 로그아웃 시 auth_epoch를 증가시켜 이전 세션과 캐시를 일괄 무효화한다.'
+  Note: '계정당 정확히 하나인 인증 보안 현재 상태. 비밀번호 변경, 로그인 수단 교체, 계정 복구 또는 전체 로그아웃 시 auth_epoch를 증가시켜 이전 access JWT와 refresh token family를 일괄 무효화한다.'
 
-  Records (account_id, auth_epoch, sessions_revoked_before, updated_at) {
+  Records (account_id, auth_epoch, credentials_revoked_before, updated_at) {
     '00000000-0000-4000-8000-000000000001', 1, null, '2026-07-27T09:00:00+09:00'
   }
 }
@@ -1008,7 +1008,7 @@ Table identity.refresh_token_families {
     `last_rotated_at >= issued_at AND expires_at > last_rotated_at` [name: 'refresh_token_family_time_order_valid']
   }
 
-  Note: '서버 소유 불투명 세션. 발급 당시 로그인 ID와 auth_epoch를 고정하며 PASSWORD 세션은 credential_version도 고정한다. 현재 계정 보안 상태와 값이 다르면 세션은 무효다. 발급·회수는 PostgreSQL 소유이고 캐시는 조회만 가속하며 회수된 세션을 인가할 수 없다.'
+  Note: '회전형 refresh JWT 재사용 탐지를 위한 최소 서버 상태. 현재 토큰 digest와 발급 당시 보안 버전만 저장하며, 기기 세션 목록이나 동시 로그인 제한에는 사용하지 않는다.'
 
   Records (id, account_id, authenticated_by_login_identity_id, auth_epoch_at_issue, credential_version_at_issue, current_token_digest, digest_key_version, issued_at, last_rotated_at, expires_at, revoked_at, revoke_reason_code) {
     '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 1, 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-08-26T09:00:00+09:00', null, null

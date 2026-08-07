@@ -132,7 +132,7 @@ Idea2Strategy는 사용자가 시각적으로 만든 결정론적 전략을 서�
   - PASSWORD 로그인은 해당 계정의 단일 확인 이메일을 사용하며 별도 `account_email_id`를 중복 저장하지 않음
   - `identity.auth_providers`로 PASSWORD와 OIDC 제공자 설정을 분리
   - 소셜 제공자 subject는 이메일과 분리된 `provider_subject_hmac`으로 식별
-  - `identity.sessions.authenticated_by_login_identity_id`로 세션을 발급한 로그인 수단 기록
+  - `identity.refresh_token_families.authenticated_by_login_identity_id`로 refresh JWT family를 발급한 로그인 수단 기록
   - `identity.password_reset_requests`로 확인 이메일 기반 단일 사용 복구 요청의 만료·검증·소비 상태 기록
 
 ### DMD-004 — PostgreSQL 기본 식별자

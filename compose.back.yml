@@ -15,13 +15,13 @@ x-spring-environment: &spring-environment
   S3_REGION: ${S3_REGION:-ap-northeast-2}
   S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
   S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
-  # backend-api registers the customer identity surface (signup/login/session)
+  # backend-api registers the customer identity surface (signup/login/token refresh)
   # only when all five keys are present (fail-closed, root #266). dev.ps1
   # generates and backfills them into .env.docker.
   IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY: ${IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY}
   IDENTITY_CRYPTO_LOOKUP_HMAC_KEY: ${IDENTITY_CRYPTO_LOOKUP_HMAC_KEY}
   IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY: ${IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY}
-  IDENTITY_CRYPTO_SESSION_HMAC_KEY: ${IDENTITY_CRYPTO_SESSION_HMAC_KEY}
+  IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY: ${IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY}
   IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY: ${IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY}
   IDENTITY_JWT_REFRESH_COOKIE_SECURE: ${IDENTITY_JWT_REFRESH_COOKIE_SECURE:-false}
   IDENTITY_OIDC_ENABLED: ${IDENTITY_OIDC_ENABLED:-false}
@@ -48,9 +48,9 @@ x-backtest-environment: &backtest-environment
   BACKTEST_RESULTS_PREFIX: backtest-results
   BACKTEST_EXECUTION_POLICY_FILE: /runtime-policy/execution-policy.json
   BACKTEST_RESULT_INGEST_TOKEN: ${BACKTEST_RESULT_INGEST_TOKEN}
-  # The backend decodes this same standard-Base64 key. dev.ps1 generates an
+  # The backend decodes this same customer JWT signing key. dev.ps1 generates an
   # unpadded 32-byte value, so the single trailing '=' restores its wire form.
-  BACKTEST_SESSION_HMAC_KEY_BASE64: ${IDENTITY_CRYPTO_SESSION_HMAC_KEY}=
+  CUSTOMER_JWT_SIGNING_KEY_BASE64: ${IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY}=
   BACKTEST_RESULT_PRINCIPAL_ID: 00000000-0000-4000-8000-000000000266
   CUSTOMER_JWT_ISSUER: https://ideatostrategy.com
   CUSTOMER_JWT_ACCESS_AUDIENCE: idea2strategy-api
