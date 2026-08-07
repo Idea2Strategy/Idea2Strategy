@@ -40,6 +40,24 @@ Basic user plausibly needs:
 | Instruments per section | 5 | Bounds fan-out per event; the ETF universe is 27 instruments total. |
 | Historical lookback | 60 completed bars | The largest period any published element requests (`SMA_60`, `HIGH_60`, `LOW_60`). Deriving the cap from the catalog keeps the two from drifting. |
 
+### Recommendation: record the four bar periods, because the editor had nine
+
+The selectable bar periods are **30분, 1시간, 4시간, 일봉**. This is not a recommendation — it was
+stated by the domain owner and is being recorded here because nothing in `specs/` or `contracts/`
+pins it, and the editor had drifted badly as a result: it offered nine periods (1·3·5·15·30분,
+1·4시간, 일, 주) and defaulted every new partition to 1분봉, a period the product does not have.
+
+The reason drift was easy is a layering ambiguity worth writing down with the set, because the same
+number means two different things:
+
+- **One-minute bars are the aggregation source and the fill basis.** The trading worker builds all
+  four periods from 1m series; an order becomes fillable from the next valid 1m bar after the signal
+  bar closes; every element's execution contract requires the `ADJUSTED_BAR@1m` feed. All correct.
+- **They are not a selectable condition resolution.** Nothing in the four-period set is sub-30-minute.
+
+Recommend recording both halves together, so a future reader cannot conclude from the `1m` feed
+requirement that 1분봉 is a strategy resolution.
+
 ### Recommendation: retire the risk lane from the data model, not just from the toolbar
 
 No `RISK_POLICY` element exists in `basic-elements:2026-08-07` (the migration publishes twelve
@@ -224,7 +242,82 @@ What that affirmation obliges, and should be recorded with it:
 - The semantic document must remain sufficient to release and run a bot with no presentation input,
   which is already true.
 
-## 7. Structural conflict: is there a "released strategy version" entity?
+## 7. The backtest coverage check asks the wrong question in the wrong place
+
+Replacing the hardcoded empty coverage with a real query fixed a lie, but it did not fix the design.
+The check is structurally misplaced, and the evidence for that is already in the approved sources.
+
+### It puts a time-varying answer inside a deterministic record
+
+`strategy.validation_runs` describes itself as *"Deterministic validation of one exact mutable Strategy
+document state"*, and a run is pinned by `(requested_edit_sequence, semantic_hash,
+element_catalog_version_id)`. Every other thing it checks really is a function of that tuple: does the
+document parse, do the elements exist in the catalog, are the parameters well-typed, is the flow a
+sequential chain, do the ports match, is the container allowed.
+
+Data coverage is not. It is infrastructure state that changes with time and with what the pipeline has
+published, and **it is not part of the pin**. So a stored run can carry a coverage conclusion that was
+false the moment after it was written, with nothing about the strategy having changed. Release then
+re-checks `status == VALID` plus the hash and sequence — never coverage — so it can proceed on a run
+whose backtest findings are stale in either direction.
+
+### It duplicates a check that a stronger contract already performs
+
+`contract.backtest.execution.v1` already requires that a run be accepted *"only after every referenced
+release, policy, period, and manifest"* resolves, pins an immutable dataset manifest and every feature
+materialization into the run, and fails closed on *"missing, changed, unavailable, or hash-mismatched
+inputs"* with pinned artifacts and **no substitutes**.
+
+That is the same question — can our data serve this strategy? — asked at the moment it matters, against
+pinned artifacts, by the component that owns the answer. The copy inside strategy validation is
+redundant, unpinned, and weaker. It is the redundant copy that is non-deterministic.
+
+### It reports in a shape the approved UI contract does not use
+
+`ui.strategy.authoring` lists `backtest-unavailable` as a **required state**, and
+`scenario.strategy.release` says unsupported backtest blocks either prevent release or return an
+explicit `backtest-unavailable` without substitution. So the product already decided this is a state.
+
+The implementation instead emits `BACKTEST_FEED_UNAVAILABLE` as one `WARNING` among warnings, and the
+UI implements no `backtest-unavailable` state at all — the string does not exist in the frontend. A
+state the user must act on was flattened into a line item they learn to scroll past.
+
+The severity mapping shows the same confusion: `BACKTEST_FEATURE_UNKNOWN` blocks while
+`BACKTEST_FEED_UNAVAILABLE` only warns, although both mean the strategy cannot be backtested. The
+distinction they encode is whose fault it is, not what it costs the user.
+
+### Recommended redesign
+
+Split the one question into two, asked at different times, and keep each where it can be answered
+correctly.
+
+**Validation keeps only what is deterministic.** Document well-formedness as today, plus the
+strategy's *own* data requirements — the `BACKTEST_FEED_REQUIRED` and `BACKTEST_FEATURE_REQUIRED`
+informational findings. Those are derived from catalog contracts, so they are a pure function of the
+pinned tuple and belong in a pinned record. `BACKTEST_FEED_UNAVAILABLE` and
+`BACKTEST_FEATURE_UNAVAILABLE` leave validation entirely.
+
+**Supportability is resolved where it is pinned.** When a release or a backtest is requested, the
+requirements recorded by validation are matched against the manifest and materializations that
+`contract.backtest.execution.v1` already pins into that request. A shortfall produces the
+`backtest-unavailable` state, carrying which feed or feature is missing.
+
+**`backtest-unavailable` becomes a real state.** Implementing it is not a new product decision — it is
+an approved required state that was never built. It should be visible on the strategy and on the
+released bot, and it must not block release, because the approved scenario allows release with an
+explicit `backtest-unavailable` rather than a substitution.
+
+What this buys: validation runs become honestly deterministic and stay valid as long as their pin
+holds; the availability answer is computed once, against pinned artifacts, by the owner of those
+artifacts; and the user gets one clear state instead of a warning that fires on every block of every
+strategy and blocks nothing.
+
+Note the immediate symptom is not caused by this design and will not be fixed by it. No feed row with
+`data_kind = 'ADJUSTED_BAR'` has ever been seeded, so every Basic element's required feed is genuinely
+unavailable today. Publishing that feed is a data-pipeline unit of work and a prerequisite for any
+version of this check telling the truth.
+
+## 8. Structural conflict: is there a "released strategy version" entity?
 
 Not one of the five questions, but it blocks the strategy pages more directly than any of them, and
 it is already resolved in code without being resolved in the specs.
@@ -262,5 +355,11 @@ Because the governance gate reports `unknown`, none of the above may be written 
    here.
 
 Recommended order, cheapest and least contested first: §3 (recording a decision already made), §5
-(unblocking UI work without deciding visuals), §6 (adopting what the code already does), §1 (the
-catalog and its limits), §2 (precision, after splitting margin and borrow cost out).
+(unblocking UI work without deciding visuals), §6 (affirming the document split), §8 (adopting what
+the code already does), §1 (the catalog, its limits and its resolutions), §7 (moving the backtest
+supportability check), §2 (precision, after splitting margin and borrow cost out).
+
+Two items in §7 need no decision and can proceed as ordinary work once the split is agreed:
+implementing the `backtest-unavailable` state, which `ui.strategy.authoring` already requires and the
+frontend never built, and publishing an `ADJUSTED_BAR` feed, without which no version of that check
+can tell the truth.
