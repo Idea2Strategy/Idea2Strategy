@@ -8,6 +8,7 @@ if (-not (Test-Path -LiteralPath $workflowPath)) {
 
 $workflow = Get-Content -LiteralPath $workflowPath -Raw
 $ciIdentity = Get-Content -LiteralPath (Join-Path $PSScriptRoot "../infra/terraform/ci-identity/main.tf") -Raw
+$runtime = Get-Content -LiteralPath (Join-Path $PSScriptRoot "../infra/terraform/environments/development/runtime.tf") -Raw
 
 # Parse every inline PowerShell program, not only selected string boundaries.
 # GitHub expressions are substituted before parsing because the runner expands
@@ -294,8 +295,11 @@ if ($workflow -notmatch "(?s)Verify required deployment secrets.*?Verify databas
     throw "The release plan must verify the artifact-fingerprinted database bootstrap receipt before planning."
 }
 
-if ($workflow -notmatch "(?s)terraform plan -parallelism=1 -out=deployment\.tfplan.*?terraform show -json deployment\.tfplan.*?assert-development-terraform-plan-safe\.ps1.*?-AllowedReplacementAddresses.*?aws_ecs_task_definition\.pipeline\[0\].*?aws_instance\.service\[0\].*?aws_instance\.trading\[0\].*?Archive exact plan") {
+if ($workflow -notmatch "(?s)terraform plan -parallelism=1 -out=deployment\.tfplan.*?terraform show -json deployment\.tfplan.*?assert-development-terraform-plan-safe\.ps1.*?-AllowedReplacementAddresses.*?aws_ecs_task_definition\.pipeline\[0\].*?aws_instance\.service\[0\].*?aws_instance\.trading\[0\].*?aws_secretsmanager_secret_version\.core_internal\[0\].*?Archive exact plan") {
     throw "The saved Development plan must reject destructive changes except the exact reviewed create-before-destroy runtime replacement allowlist."
+}
+if ($runtime -notmatch '(?s)resource\s+"aws_secretsmanager_secret_version"\s+"core_internal"\s*\{.*?lifecycle\s*\{\s*create_before_destroy\s*=\s*true\s*\}') {
+    throw "The Core internal secret must publish its replacement version before retiring the current version."
 }
 if (-not $workflow.Contains('pwsh "$GITHUB_WORKSPACE/scripts/assert-development-terraform-plan-safe.ps1"')) {
     throw "The saved-plan safety gate must resolve its script from the GitHub workspace root."
@@ -393,6 +397,9 @@ try {
     $unexplainedReplacementPlan = Join-Path $temporary "unexplained-replacement.json"
     $wrongTypeReplacementPlan = Join-Path $temporary "wrong-type-replacement.json"
     $identityDriftReplacementPlan = Join-Path $temporary "identity-drift-replacement.json"
+    $secretReplacementPlan = Join-Path $temporary "secret-replacement.json"
+    $secretDestroyFirstReplacementPlan = Join-Path $temporary "secret-destroy-first-replacement.json"
+    $secretIdentityDriftReplacementPlan = Join-Path $temporary "secret-identity-drift-replacement.json"
     $deposedDeletePlan = Join-Path $temporary "deposed-delete.json"
     $orphanDeposedDeletePlan = Join-Path $temporary "orphan-deposed-delete.json"
     $currentDeletePlan = Join-Path $temporary "current-delete.json"
@@ -404,6 +411,9 @@ try {
     '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","change":{"actions":["create","delete"],"before":{"id":"i-old","instance_type":"t4g.medium","subnet_id":"subnet-a"},"after":{"instance_type":"t4g.medium","subnet_id":"subnet-a"}}}]}' | Set-Content -NoNewline $unexplainedReplacementPlan
     '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_s3_bucket","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"],"before":{"id":"bucket"},"after":{}}}]}' | Set-Content -NoNewline $wrongTypeReplacementPlan
     '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"],"before":{"id":"i-old","instance_type":"t4g.medium","subnet_id":"subnet-a","iam_instance_profile":"profile-a","associate_public_ip_address":true,"vpc_security_group_ids":["sg-a"]},"after":{"instance_type":"m7g.large","subnet_id":"subnet-b","iam_instance_profile":"profile-b","associate_public_ip_address":false,"vpc_security_group_ids":["sg-b"]}}}]}' | Set-Content -NoNewline $identityDriftReplacementPlan
+    '{"resource_changes":[{"address":"aws_secretsmanager_secret_version.core_internal[0]","mode":"managed","type":"aws_secretsmanager_secret_version","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"],"before":{"id":"arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:core|old","secret_id":"arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:core"},"after":{"secret_id":"arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:core"}}}]}' | Set-Content -NoNewline $secretReplacementPlan
+    '{"resource_changes":[{"address":"aws_secretsmanager_secret_version.core_internal[0]","mode":"managed","type":"aws_secretsmanager_secret_version","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["delete","create"],"before":{"id":"arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:core|old","secret_id":"arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:core"},"after":{"secret_id":"arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:core"}}}]}' | Set-Content -NoNewline $secretDestroyFirstReplacementPlan
+    '{"resource_changes":[{"address":"aws_secretsmanager_secret_version.core_internal[0]","mode":"managed","type":"aws_secretsmanager_secret_version","provider_name":"registry.terraform.io/hashicorp/aws","action_reason":"replace_because_cannot_update","change":{"actions":["create","delete"],"before":{"id":"arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:core|old","secret_id":"arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:core"},"after":{"secret_id":"arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:other"}}}]}' | Set-Content -NoNewline $secretIdentityDriftReplacementPlan
     '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","change":{"actions":["no-op"],"before":{"id":"i-current"},"after":{"id":"i-current"}}},{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","deposed":"deadbeef","change":{"actions":["delete"],"before":{"id":"i-old"},"after":null}}]}' | Set-Content -NoNewline $deposedDeletePlan
     '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","deposed":"deadbeef","change":{"actions":["delete"],"before":{"id":"i-old"},"after":null}}]}' | Set-Content -NoNewline $orphanDeposedDeletePlan
     '{"resource_changes":[{"address":"aws_instance.service[0]","mode":"managed","type":"aws_instance","provider_name":"registry.terraform.io/hashicorp/aws","change":{"actions":["delete"],"before":{"id":"i-current"},"after":null}}]}' | Set-Content -NoNewline $currentDeletePlan
@@ -425,6 +435,26 @@ try {
         [int]$allowedReplacement.allowed_replacement_count -ne 1 -or
         [int]$allowedReplacement.delete_or_replace_count -ne 0) {
         throw "The exact create-before-destroy replacement allowlist was not enforced."
+    }
+    $allowedSecretReplacement = & $planGatePath `
+        -PlanJsonPath $secretReplacementPlan `
+        -AllowedReplacementAddresses 'aws_secretsmanager_secret_version.core_internal[0]' |
+        ConvertFrom-Json
+    if ($allowedSecretReplacement.status -cne "passed" -or
+        [int]$allowedSecretReplacement.allowed_replacement_count -ne 1 -or
+        [int]$allowedSecretReplacement.delete_or_replace_count -ne 0) {
+        throw "The exact create-before-destroy Core secret version replacement was not accepted."
+    }
+    foreach ($unsafeSecretPlan in @($secretDestroyFirstReplacementPlan, $secretIdentityDriftReplacementPlan)) {
+        $rejected = $false
+        try {
+            & $planGatePath `
+                -PlanJsonPath $unsafeSecretPlan `
+                -AllowedReplacementAddresses 'aws_secretsmanager_secret_version.core_internal[0]' |
+                Out-Null
+        }
+        catch { $rejected = $true }
+        if (-not $rejected) { throw "An unsafe Core secret version replacement was accepted: $unsafeSecretPlan" }
     }
     $allowedDeposedDelete = & $planGatePath `
         -PlanJsonPath $deposedDeletePlan `

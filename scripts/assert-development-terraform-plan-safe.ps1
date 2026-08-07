@@ -32,6 +32,10 @@ $reviewedReplacementPolicies = @{
         )
         required_after = @{ associate_public_ip_address = $true }
     }
+    "aws_secretsmanager_secret_version.core_internal[0]" = @{
+        type = "aws_secretsmanager_secret_version"
+        stable_fields = @("secret_id")
+    }
 }
 $allowedAddresses = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $configuredAllowedAddresses = if ([string]::IsNullOrWhiteSpace($AllowedReplacementAddresses)) {
