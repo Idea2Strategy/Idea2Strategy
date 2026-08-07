@@ -255,6 +255,12 @@ if ($sipGuardIndex -lt 0 -or $databaseBootstrapIndex -lt 0 -or $sipGuardIndex -g
 if ($workflow -notmatch '(?s)bootstrap-database:.*?timeout-minutes:\s*75.*?build:') {
     throw "Database bootstrap job timeout must cover EC2, SSM, migration, credential staging, and cleanup budgets."
 }
+if ($workflow -notmatch "(?m)^  prepare-and-plan:\r?\n    needs: build\r?\n    if: always\(\) && needs\.build\.result == 'success'$") {
+    throw "A skipped reusable-receipt bootstrap must not skip the successful prepare-and-plan job."
+}
+if ($workflow -notmatch "(?m)^  apply-reviewed-plan:\r?\n    if: always\(\) && needs\.prepare-and-plan\.result == 'success' && github\.event\.inputs\.apply_reviewed_plan == 'true'\r?\n    needs: prepare-and-plan$") {
+    throw "A skipped reusable-receipt bootstrap must not skip the requested apply job after a successful plan."
+}
 
 if ($workflow -match "(?s)bootstrap-database:.*?terraform -chdir=infra/terraform/environments/development init.*?build:") {
     throw "Database bootstrap must discover the applied AWS boundary without requiring the next release's Terraform state schema."
