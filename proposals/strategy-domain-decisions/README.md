@@ -51,9 +51,13 @@ The reason drift was easy is a layering ambiguity worth writing down with the se
 number means two different things:
 
 - **One-minute bars are the aggregation source and the fill basis.** The trading worker builds all
-  four periods from 1m series; an order becomes fillable from the next valid 1m bar after the signal
-  bar closes; every element's execution contract requires the `ADJUSTED_BAR@1m` feed. All correct.
+  four periods from 1m series, and an order becomes fillable from the next valid 1m bar after the
+  signal bar closes. Both correct.
 - **They are not a selectable condition resolution.** Nothing in the four-period set is sub-30-minute.
+
+The element contracts' `ADJUSTED_BAR@1m` requirement is a third thing and, as §7 now records, it is
+wrong on both components: adjusted bars are published only at `30m`, and the pipeline deliberately
+declares no adjusted 1-minute dataset at all.
 
 Recommend recording both halves together, so a future reader cannot conclude from the `1m` feed
 requirement that 1분봉 is a strategy resolution.
@@ -100,8 +104,9 @@ this is part of this question because it changes the published catalog.
 ### Backtest support rules
 
 Every non-terminal element declares required feed `ADJUSTED_BAR @ 1m`, and terminal elements declare
-none. Recommend recording exactly that as the rule, so backtest capability is derived from the
-catalog rather than maintained separately.
+none. **Do not record that as the rule** — an earlier revision of this document recommended exactly
+that, and §7 now shows the requirement is wrong on both components. Deciding the correct expression
+belongs to this question, because it changes the published catalog.
 
 ---
 
@@ -312,10 +317,45 @@ holds; the availability answer is computed once, against pinned artifacts, by th
 artifacts; and the user gets one clear state instead of a warning that fires on every block of every
 strategy and blocks nothing.
 
-Note the immediate symptom is not caused by this design and will not be fixed by it. No feed row with
-`data_kind = 'ADJUSTED_BAR'` has ever been seeded, so every Basic element's required feed is genuinely
-unavailable today. Publishing that feed is a data-pipeline unit of work and a prerequisite for any
-version of this check telling the truth.
+### The required feed itself is wrong, and cannot be satisfied by seeding one
+
+An earlier revision of this document said the symptom would be fixed by publishing an `ADJUSTED_BAR`
+feed. That was wrong, and the correction matters more than the redesign above, because it means no
+amount of pipeline work makes the current check pass.
+
+`ADJUSTED_BAR` is not a `data_kind` anywhere in the publication model. It is a **feature-definition
+input-series label**, and the code that introduced it says so in as many words — the backtest engine's
+own docstring reads *"B's document does not carry this. It comes from this build's feature definition,
+which declares that RSI is defined on corporate-action-adjusted bars."* Its canonical home is a
+single-valued Java enum, `OfficialFeature.FeatureDataKind`, plus in-memory conformance series labels.
+It appears in zero files under `specs/`, `contracts/`, or `docs/`.
+
+What the publication model actually uses:
+
+- The pipeline writes `data_kind = 'BARS'` for every bar feed. `contract.data.market-data-publication.v1`
+  confirms that vocabulary from the other direction, saying of the internal feature feed that
+  *"it is never an Alpaca BAR/BARS feed."*
+- "Adjusted" is not a `data_kind` at all. It is `dataset_manifests.data_layer = 'ADJUSTED'`, a separate
+  column.
+- The corporate-action regeneration path **refuses** an adjusted feed whose `data_kind` differs from its
+  raw source feed. Seeding `data_kind = 'ADJUSTED_BAR'` would therefore break regeneration.
+- Adjusted bars exist only at `30m`. The pipeline deliberately declares no adjusted 1-minute dataset,
+  on the recorded grounds that nothing would fill it.
+
+So the `1m` half is unsatisfiable too — and note it disagrees with the four bar periods in §1, whose
+shortest is 30분. Those two facts line up: adjusted data is published at 30m and the shortest strategy
+resolution is 30분.
+
+Renaming the token to `BARS` is **not** the fix either. The availability query projects
+`feeds.data_kind` and `manifests.resolution` and discards `manifests.data_layer`, which is the only
+column that separates raw from adjusted. Renaming would make the check pass while silently accepting
+raw bars for a feature whose definition states that raw bars are not substitutable.
+
+Recommend deciding this together with §7's split, because it is the same question: a `(feed, resolution)`
+string pair cannot express what a backtest actually needs, and
+`contract.backtest.execution.v1` already resolves inputs by pinned dataset manifest id rather than by
+any feed-and-resolution pair. Moving the check onto pinned artifacts removes the need to name a feed in
+the element catalog at all.
 
 ## 8. Structural conflict: is there a "released strategy version" entity?
 
@@ -359,7 +399,11 @@ Recommended order, cheapest and least contested first: §3 (recording a decision
 the code already does), §1 (the catalog, its limits and its resolutions), §7 (moving the backtest
 supportability check), §2 (precision, after splitting margin and borrow cost out).
 
-Two items in §7 need no decision and can proceed as ordinary work once the split is agreed:
-implementing the `backtest-unavailable` state, which `ui.strategy.authoring` already requires and the
-frontend never built, and publishing an `ADJUSTED_BAR` feed, without which no version of that check
-can tell the truth.
+One item in §7 needs no decision and can proceed as ordinary work: implementing the
+`backtest-unavailable` state, which `ui.strategy.authoring` already requires and the frontend never
+built.
+
+Everything else in §7 does need the decision, including the required-feed expression. An earlier
+revision listed "publish an `ADJUSTED_BAR` feed" here as decision-free work; that recommendation is
+withdrawn, because such a feed contradicts the publication model and would break corporate-action
+regeneration.
