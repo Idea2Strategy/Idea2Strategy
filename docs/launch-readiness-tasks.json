@@ -1,0 +1,241 @@
+{
+  "$comment": [
+    "출시 준비 작업 원장 — scripts/launch-status.ps1 이 읽는다.",
+    "",
+    "왜 이 파일이 있는가: 담당자가 '지금 내 차례인가'를 사람 판단으로 알아내야 하면 반드시 틀린다.",
+    "각 작업에 의존성과 기계가 검사할 수 있는 완료 조건을 적어두면 상태를 손으로 관리하지 않아도 된다.",
+    "완료 여부는 검사 결과에서 나오므로 누가 체크박스를 켜는 것을 잊어도 틀리지 않는다.",
+    "",
+    "kind:  repo = 이 저장소 파일만 보고 판정(어디서나 결정적) | db = DATABASE_URL 필요 | manual = evidence 파일 존재로 판정",
+    "check: PowerShell 식. repository 를 작업 디렉터리로 하여 실행되며 부작용이 없어야 한다.",
+    "서술과 근거는 docs/launch-readiness-plan.md 의 같은 절 번호에 있다.",
+    "JSON 인 이유: PowerShell 5.1 에 YAML 파서가 없다. 손으로 파싱하면 조용히 틀린다."
+  ],
+  "schema_version": 1,
+  "plan": "docs/launch-readiness-plan.md",
+  "owners": {
+    "kcrmin": {
+      "repositories": [".", "backend"],
+      "exclusive_paths": ["db/schema.dbml", "compose.back.yml", "compose.front.yml"]
+    },
+    "pjy008008": { "repositories": ["data-pipeline", "trading-engine"] },
+    "hjcud": { "repositories": ["backtest-engine", "ui"] }
+  },
+  "out_of_scope": ["B09", "B10", "B13", "C15", "F06"],
+  "tasks": [
+    {
+      "id": "2.1",
+      "title": "로컬 조합에 TRADING_* 배선 — 트레이딩 워커가 시장 이벤트를 소비하게 한다",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": [],
+      "kind": "repo",
+      "check": "Select-String -Path compose.back.yml -Pattern 'TRADING_MARKET_EVENTS_REDIS_URI' -Quiet",
+      "blocks_reason": "이게 없으면 로컬에서 라이브 경로가 아예 돌지 않아 INT03·INT06을 시작할 수 없다."
+    },
+    {
+      "id": "2.2",
+      "title": "방·운영자 큐와 플래그 — INT04·INT05 선행",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": ["2.1"],
+      "kind": "repo",
+      "check": "(Select-String -Path infra/docker/localstack/ready.d/10-create-queues.sh -Pattern 'room-ledger-opened' -Quiet) -and (Select-String -Path compose.back.yml -Pattern 'ROOM_LEDGER_OPENED_QUEUE_URL' -Quiet)",
+      "blocks_reason": "큐를 먼저 만들지 않고 플래그만 켜면 기동이 깨진다."
+    },
+    {
+      "id": "2.3",
+      "title": "조합 기동 순서를 개발 가이드에 명시 (코드 변경 없음)",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": [],
+      "kind": "repo",
+      "check": "Select-String -Path docs/development-start-guide.md -Pattern 'WithBackend' -Quiet"
+    },
+    {
+      "id": "2.4",
+      "title": "30분봉 포함 4종 시장 데이터를 data-pipeline 정본 경로로 적재",
+      "owner": "pjy008008",
+      "repository": "data-pipeline",
+      "depends_on": [],
+      "kind": "db",
+      "check": "(Invoke-CanonicalQuery \"select count(distinct resolution) from market_data.dataset_manifests where status='AVAILABLE' and resolution in ('30m','1h','4h','1d')\") -eq 4",
+      "blocks_reason": "30분봉이 UI 기본 시계다. 없으면 기본값으로 만든 전략이 백테스트되지 않는다."
+    },
+    {
+      "id": "2.5",
+      "title": "지표(feature) 백필 실행 — 네 해상도 전부",
+      "owner": "pjy008008",
+      "repository": "data-pipeline",
+      "depends_on": ["2.4"],
+      "kind": "db",
+      "check": "(Invoke-CanonicalQuery \"select count(distinct d.resolution) from market_data.feature_materializations m join market_data.feature_definitions d on d.id = m.feature_definition_id where m.status='SUCCEEDED'\") -eq 4",
+      "blocks_reason": "지표 값이 없으면 RSI 전략은 빈 시계열을 읽는다."
+    },
+    {
+      "id": "2.6",
+      "title": "AWS 릴리스 후보에서 enable_backtest_outbox_relay = true",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": [],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/2.6-outbox-relay.md",
+      "blocks_reason": "false 이면 AWS에서 전략을 출시해도 자동 백테스트 요청이 큐로 나가지 않는다."
+    },
+    {
+      "id": "3.1",
+      "title": "재기동이 SCHEDULE 주기 위상을 바꾸지 않게 한다 (제품 판단 선행)",
+      "owner": "pjy008008",
+      "repository": "trading-engine",
+      "depends_on": ["2.1"],
+      "kind": "repo",
+      "check": "Select-String -Path apps/trading-worker/src/test/java/com/idea2strategy/trading/worker/runtime/*.java -Pattern 'tradingDayIndexSurvivesARestart' -Quiet",
+      "blocks_reason": "INT06(재기동)이 이걸 고치지 않으면 정직하게 통과할 수 없다. 완료 표식은 tradingDayIndexSurvivesARestart 라는 이름의 테스트다 — 재기동 후에도 같은 봇의 schedule.tradingDayIndex 가 연속이고 같은 기간 백테스트 값과 일치함을 단언해야 한다. 'tradingDayIndex' 를 그냥 찾으면 기존 테스트에 걸려 오탐이 난다."
+    },
+    {
+      "id": "3.3",
+      "title": "UI 정리 — stale package name, 죽은 productionEmptyData",
+      "owner": "hjcud",
+      "repository": "ui",
+      "depends_on": [],
+      "kind": "repo",
+      "check": "-not (Select-String -Path package.json -Pattern 'ui-prototypes' -Quiet)"
+    },
+    {
+      "id": "6",
+      "title": "SLO 목표 결정 — question.operations.slo → decision",
+      "owner": "hjcud",
+      "repository": ".",
+      "depends_on": [],
+      "kind": "repo",
+      "check": "Test-Path specs/product/decisions/decision.operations.slo.md",
+      "blocks_reason": "목표치가 없으면 INT07 합격 판정이 불가능하고 INT11도 닫히지 않는다. 보호 경로 변경이므로 권한자 지시를 PR 본문에 인용해야 한다."
+    },
+    {
+      "id": "INT02",
+      "title": "최초 DB 구축·migration rehearsal",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": ["2.3"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT02.md"
+    },
+    {
+      "id": "INT01",
+      "title": "계약 호환성 전체 검증",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": ["INT02"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT01.md"
+    },
+    {
+      "id": "INT03",
+      "title": "전체 사용자 E2E — 가입부터 주문·체결·중단까지",
+      "owner": "hjcud",
+      "repository": ".",
+      "depends_on": ["2.1", "2.4", "2.5"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT03.md"
+    },
+    {
+      "id": "INT04",
+      "title": "전체 방 E2E — 백테스트 결과가 방 점수에 섞이지 않는지 포함",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": ["2.2"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT04.md"
+    },
+    {
+      "id": "INT05",
+      "title": "운영자 E2E (AWS에서 수행)",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": ["2.2"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT05.md"
+    },
+    {
+      "id": "INT06",
+      "title": "장애·재기동·중복 전달 시험",
+      "owner": "pjy008008",
+      "repository": ".",
+      "depends_on": ["2.1", "3.1"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT06.md"
+    },
+    {
+      "id": "INT07",
+      "title": "성능·용량 시험",
+      "owner": "pjy008008",
+      "repository": ".",
+      "depends_on": ["6", "INT03"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT07.md"
+    },
+    {
+      "id": "INT09",
+      "title": "백업·복구·원장 대사",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": ["INT02"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT09.md"
+    },
+    {
+      "id": "INT10",
+      "title": "UI 계약 연결 — 화면 전수 스위프(성과 카피 포함)",
+      "owner": "hjcud",
+      "repository": "ui",
+      "depends_on": ["2.1"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT10.md"
+    },
+    {
+      "id": "A90",
+      "title": "전체 서비스 인증·감사 통합",
+      "owner": "kcrmin",
+      "repository": "backend",
+      "depends_on": ["INT01"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/A90.md"
+    },
+    {
+      "id": "A91",
+      "title": "배포·복구·릴리스 파이프라인",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": ["INT02", "INT09"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/A91.md"
+    },
+    {
+      "id": "INT08",
+      "title": "보안·개인정보·법적 표현 검토 — 잔여 3건",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": ["INT10", "A90"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT08.md"
+    },
+    {
+      "id": "INT11",
+      "title": "릴리스 후보 고정",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": ["INT01", "INT02", "INT03", "INT04", "INT05", "INT06", "INT07", "INT08", "INT09", "INT10", "A90", "A91"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT11.md"
+    },
+    {
+      "id": "INT12",
+      "title": "v1.0 릴리스",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": ["INT11"],
+      "kind": "manual",
+      "evidence": ".harness/local/evidence/INT12.md"
+    }
+  ]
+}

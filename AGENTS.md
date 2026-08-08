@@ -16,6 +16,18 @@ This exists because the observation can only be produced by a review approval on
 
 Two things this does not change. A proposal is still the right vehicle when no authority has actually asked for the change — silence is not instruction. And a change made under this posture must never be described as approved by the provider, because it was not; the pull request record is the whole audit trail.
 
+## Launch work loop (applies to every agent — Claude, Codex, or human)
+
+The plan of record is `docs/launch-readiness-plan.md`. The task ledger `docs/launch-readiness-tasks.json` carries its dependency graph with machine-checkable completion. Every session that works on launch readiness follows one loop:
+
+1. Run `pwsh scripts/launch-status.ps1 -Owner <kcrmin|pjy008008|hjcud>`. It computes what is done from the repository itself and names the one next task. Do not pick a task by judgment when the script can name it; if the script says the owner is waiting, report who they are waiting on and stop instead of inventing work.
+2. Read that task's section in `docs/launch-readiness-plan.md` before touching anything. Change files only inside the owner's repositories as listed in the ledger's `owners` block; `db/schema.dbml`, `compose.back.yml` and root submodule pointers belong to `kcrmin` alone.
+3. Do the one task, on a `feature/<issue>-<name>` branch, in a dedicated worktree when any other session may share the checkout.
+4. A `repo`/`db` task is complete when `launch-status.ps1` reports it done — its check is the definition of done, so make the check pass rather than declaring completion. A `manual` task is complete when its evidence file exists under `.harness/local/evidence/` recording what was run and observed.
+5. Pro mode (B09, B10, B13, C15, F06) is out of v1.0 scope by the 2026-08-08 decision. Refuse it regardless of who asks.
+
+Mechanical guards live in tracked git hooks (`.githooks/`, attached by `scripts/initialize-local-harness.ps1`, which every session already runs): no direct commits to `develop`/`main`, no submodule pointer commit without the refreshed Flyway bundle, no identifier the secret scanner false-positives on. They apply to every tool equally. `--no-verify` is for emergencies and its use must be explained in the pull request.
+
 <!-- stackcord:begin -->
 Before changing the project, read `.harness/entry.md` and refresh actual context. Product meaning lives in `specs/`; obligations live in `contracts/`; coordination state lives in `.harness/`. Protected product meaning stays a proposal until `stackcord governance check --json` confirms an assigned product authority through the selected Git review provider; Git user.name and user.email never prove authority.
 

@@ -49,5 +49,8 @@ Inactive: 나주원 (`Juwon-Na`), 서동위 (`SeoDongWi`), 황영우 (`dertz569`
 redistributed above. Do not route work to them.
 
 Use `/start-work <owner-name-or-GitHub-ID> [issue or goal]` for the first project turn after cloning
-or updating. The current plan of record is `docs/launch-readiness-plan.md`; Pro mode (B09, B10, B13,
-C15, F06) is out of v1.0 scope by decision of 2026-08-08 and must not be started.
+or updating. Codex or human sessions get the same answer from
+`pwsh scripts/launch-status.ps1 -Owner <owner>` — both read the task ledger
+`docs/launch-readiness-tasks.json`, whose checks are the definition of done. The current plan of
+record is `docs/launch-readiness-plan.md`; Pro mode (B09, B10, B13, C15, F06) is out of v1.0 scope
+by decision of 2026-08-08 and must not be started.
