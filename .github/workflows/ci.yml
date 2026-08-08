@@ -105,6 +105,8 @@ jobs:
         run: pnpm dbml:validate:com-a-canonical
       - name: Validate release adoption contracts and registry
         run: pnpm contract:validate:release-adoption
+      - name: Validate every registered contract exhaustively
+        run: pnpm contract:validate:registry
       - name: Validate A12 account lifecycle contract
         run: pnpm dbml:validate:a12
       - name: Test dbdiagram export preparation
