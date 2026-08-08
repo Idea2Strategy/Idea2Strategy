@@ -66,6 +66,15 @@ issuer, subject, Cognito 토큰, HMAC 키, 계산한 다이제스트, 데이터�
 - CI 로그, Terraform state
 - 공유 드라이브
 
+**이 작업을 요청한 사람에게도 보내지 않는다.** `kcrmin` 도 포함이다. 아래
+"끝나면 알려줄 것" 세 줄에 비밀값이 필요한 항목이 하나도 없다 — 이어지는 작업은
+`proposals/.../catalog.json` 에 이미 있는 값과 Terraform 변수만 쓴다. 그러니 키를
+전달해야 할 상황이 생기면 그건 절차를 잘못 읽은 것이므로 멈추고 물어보는 편이 맞다.
+
+키가 한 번 채팅이나 메일에 나오면 그 시점에 유출이다. 되돌리는 방법은
+`random_password.operator_subject_hmac` 을 재생성해 시크릿을 갱신하고 부트스트랩을 다시
+하는 것뿐이므로, 애초에 내보내지 않는 것이 훨씬 싸다.
+
 명령 자체는 manifest·자격증명·다이제스트·actor 를 출력하지 않도록 만들어져 있다
 (`backend/apps/idea2strategy-cli/README.md`). 사람이 실수로 붙여넣는 것만 막으면 된다.
 
