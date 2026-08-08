@@ -196,6 +196,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 up -With
 
 ### 2.4 [P2] 시장 데이터 적재 경로가 둘이고, 실제로 쓴 쪽이 제품 기본 시간대를 버린다
 
+> **완료 (2026-08-08).** AWS 실측 — `dataset_manifests` 가 30m 750, 1h 749, 4h 749, 1d 749 로
+> 네 해상도 모두 `AVAILABLE`. 증거: `docs/evidence/2.4-aws-state.md` 의 마지막 절.
+> 2.5 와 같은 이유로 완료 판정을 `manual` 로 옮겼다.
+
 **상태: 확인됨. 비즈니스 로직 충돌.**
 
 제품이 선언한 전략 시간대는 **30m·1h·4h·1d 네 개**이며 **UI 기본값은 30분봉**이다.
@@ -228,6 +232,12 @@ WHERE status='AVAILABLE' GROUP BY resolution ORDER BY resolution;
 네 해상도 모두 0보다 크고, 30m의 커버리지 시작이 다른 셋과 같다.
 
 ### 2.5 [P2] 지표(feature) 시계열이 단 하나도 만들어진 적이 없다
+
+> **완료 (2026-08-08).** `pjy008008` 이 AWS 에서 수행했고 루트가 조회로 확인했다 —
+> 2,900건 전부 `SUCCEEDED`, 결과 해시 2,900/2,900, 해상도별 725건(30m·1h·4h·1d), 고유 종목 725.
+> 증거: `docs/evidence/2.5-aws-feature-backfill.md`. **재실행 금지** — 이유는 그 문서에 있다.
+> 완료 판정을 `manual` 로 바꾼 이유도 같다: 정본 DB 가 VPC 안이라 `launch-status.ps1` 의
+> 로컬 `sql-equals` 는 정본이 아닌 곳을 보고 있었다.
 
 **상태: 확인됨.** root `#248`이 이 카드다.
 
