@@ -161,7 +161,7 @@
         "expected": 4,
         "sql": "select count(distinct d.resolution) from market_data.feature_materializations m join market_data.feature_definitions d on d.id = m.feature_definition_id where m.status='SUCCEEDED'"
       },
-      "blocks_reason": "feature_materializations 가 로컬과 AWS 양쪽에서 0 이다 — RSI 전략의 실질 차단 요인이며 종목 725개 × 네 해상도의 백필이 남아 있다. **선행이 하나 있다**: AWS RDS 의 feature_definitions 가 1개다(로컬은 마이그레이션 적용 후 5개). 즉 AWS 가 최신 마이그레이션을 받지 않았고, V20260808120100__pipeline_seed_production_rsi_timeframes.sql 이 적용돼 프로덕션 4종 정의가 생긴 뒤에야 백필이 의미를 갖는다."
+      "blocks_reason": "feature_materializations 가 0 이다 — RSI 전략의 실질 차단 요인이며 백필이 남아 있다. **선행 조건은 이미 충족돼 있다**(docs/evidence/INT02-aws.md): 정본 런타임 DB idea2strategy_runtime 에 53개 마이그레이션이 적용돼 있어 프로덕션 RSI 정의 4종을 만드는 V20260808120100 이 포함된다. 앞서 '마이그레이션 미적용'이라고 적은 것은 8/5 market-catalog 영수증의 레거시 DB(idea2strategy) 수치를 본 오독이었다. 남은 것은 백필 실행 자체다 — 종목 625개 × 네 해상도."
     },
     {
       "id": "2.6",
