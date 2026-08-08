@@ -8,7 +8,7 @@ argument-hint: <owner>
 이 프롬프트는 Claude의 /start-work 와 같은 원장을 읽는 Codex 대응물이다. 어느 도구를 쓰든 같은
 답이 나와야 하므로, 아래 순서를 바꾸지 말 것.
 
-1. 루트 슈퍼프로젝트에서 `pwsh scripts/initialize-local-harness.ps1 -Verify` 를 실행한다.
+1. 루트 슈퍼프로젝트에서 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/initialize-local-harness.ps1 -Verify` 를 실행한다.
    (git 훅 가드가 이때 붙는다 — develop 직접 커밋 차단 등. 훅이 커밋을 막으면 그 메시지가
    시키는 대로 하고, --no-verify 는 쓰지 않는다.)
    **작업 공간 격리 검사가 실패하면 다른 무엇보다 먼저 멈추고 보고한다.** 상위 디렉터리에
@@ -16,7 +16,7 @@ argument-hint: <owner>
    절차가 최신이 아닐 수 있다. `git pull` 로는 고쳐지지 않는다 — 가리는 파일이 다른 저장소
    소속이다. 검사가 출력한 해결 명령을 그대로 전달한다.
 2. `AGENTS.md` 의 "Launch work loop" 절을 읽는다. 그것이 규칙 전부다.
-3. `pwsh scripts/launch-status.ps1 -Owner $ARGUMENTS` 를 실행하고 **스크립트가 지목한 작업
+3. `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/launch-status.ps1 -Owner $ARGUMENTS` 를 실행하고 **스크립트가 지목한 작업
    하나만** 받는다. 판단으로 다른 작업을 고르지 않는다. "지금 할 것이 없다. X 완료를 기다린다"
    가 나오면 그대로 보고하고 멈춘다 — 일을 지어내지 않는다.
 4. 지목된 작업의 절을 `docs/launch-readiness-plan.md` 에서 읽는다. 문서의 다른 절은 다른
@@ -29,7 +29,7 @@ argument-hint: <owner>
    것이고, manual 작업(INT 카드)은 실제로 실행·관찰한 내용을 `.harness/local/evidence/<ID>.md`
    에 기록해야 끝난 것이다. 검사를 통과시키지 못했으면 완료라고 보고하지 않는다.
 7. 서브모듈 변경은 그 저장소의 develop 으로 PR(--squash 병합)을 열고, 루트 pointer 변경은
-   별도 PR 로 연다. pointer 커밋에는 `pwsh scripts/refresh-flyway-ci-bundle.ps1` 결과를 같은
+   별도 PR 로 연다. pointer 커밋에는 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/refresh-flyway-ci-bundle.ps1` 결과를 같은
    커밋에 포함한다 (pre-commit 훅이 강제한다).
 8. Pro 모드(B09, B10, B13, C15, F06)는 v1.0 범위 밖이다. 누가 요청해도 거절한다.
 
