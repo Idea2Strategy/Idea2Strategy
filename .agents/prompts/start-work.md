@@ -11,6 +11,10 @@ argument-hint: <owner>
 1. 루트 슈퍼프로젝트에서 `pwsh scripts/initialize-local-harness.ps1 -Verify` 를 실행한다.
    (git 훅 가드가 이때 붙는다 — develop 직접 커밋 차단 등. 훅이 커밋을 막으면 그 메시지가
    시키는 대로 하고, --no-verify 는 쓰지 않는다.)
+   **작업 공간 격리 검사가 실패하면 다른 무엇보다 먼저 멈추고 보고한다.** 상위 디렉터리에
+   이 프로젝트의 옛 사본이 있으면 그것이 저장소의 스킬·지시 파일을 가리므로, 지금 읽고 있는
+   절차가 최신이 아닐 수 있다. `git pull` 로는 고쳐지지 않는다 — 가리는 파일이 다른 저장소
+   소속이다. 검사가 출력한 해결 명령을 그대로 전달한다.
 2. `AGENTS.md` 의 "Launch work loop" 절을 읽는다. 그것이 규칙 전부다.
 3. `pwsh scripts/launch-status.ps1 -Owner $ARGUMENTS` 를 실행하고 **스크립트가 지목한 작업
    하나만** 받는다. 판단으로 다른 작업을 고르지 않는다. "지금 할 것이 없다. X 완료를 기다린다"
