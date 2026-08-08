@@ -28,11 +28,26 @@
 
 ## Team ownership
 
-- A: 나주원 (`Juwon-Na`) — 계정·운영
-- B: 손현준 (`hjcud`) — 전략·봇
-- C: 박준유 (`pjy008008`) — 시장·평가
-- D: 서동위 (`SeoDongWi`) — 데이터·백테스트
-- E: 황영우 (`dertz569`) — 방·성과
-- F: 민경철 (`kcrmin`) — 거래·원장
+Three active contributors as of 2026-08-08. **Ownership is by repository**, because that is what
+keeps two people out of one file. The A–F area letters still label issues and epics, so each owner
+inherits whole areas rather than parts of them.
 
-Use `/start-work <A-F> <name> <GitHub-ID> [issue or goal]` for the first project turn after cloning or updating.
+| Owner | Repositories they may change | Areas inherited |
+| --- | --- | --- |
+| 민경철 (`kcrmin`) | root superproject (`compose*.yml`, `infra/`, `scripts/`, `db/`, submodule pointers) + `backend/` | A 계정·운영, B 전략·봇(backend), E 방·성과 |
+| 박준유 (`pjy008008`) | `data-pipeline/` + `trading-engine/` | C 시장·평가, D 데이터(수집·기업행사), F 거래·원장 |
+| 손현준 (`hjcud`) | `backtest-engine/` + `ui/` | D 백테스트, 전 영역의 UI |
+
+Area D is split by repository on purpose: `data-pipeline` and `backtest-engine` are separate
+repositories, so the split creates no file contention. Name the repository, not the letter, when the
+two disagree.
+
+`db/schema.dbml`, `compose.back.yml` and root submodule pointers are changed by `kcrmin` only.
+Anyone else who needs one asks. These are the three places where concurrent work actually collided.
+
+Inactive: 나주원 (`Juwon-Na`), 서동위 (`SeoDongWi`), 황영우 (`dertz569`). Their areas are
+redistributed above. Do not route work to them.
+
+Use `/start-work <owner-name-or-GitHub-ID> [issue or goal]` for the first project turn after cloning
+or updating. The current plan of record is `docs/launch-readiness-plan.md`; Pro mode (B09, B10, B13,
+C15, F06) is out of v1.0 scope by decision of 2026-08-08 and must not be started.

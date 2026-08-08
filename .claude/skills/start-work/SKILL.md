@@ -1,7 +1,7 @@
 ---
 name: start-work
-description: Restore Idea2Strategy repository context and identify one dependency-ready task for the named team member after clone or pull.
-argument-hint: <A-F> <name> <GitHub-ID> [issue-number-or-goal]
+description: Restore Idea2Strategy repository context and identify one dependency-ready task for the named contributor after clone or pull.
+argument-hint: <name-or-GitHub-ID> [issue-number-or-goal]
 disable-model-invocation: true
 ---
 
@@ -15,17 +15,18 @@ Perform an orientation pass only. Do not implement, create or switch branches, p
 
 1. Find the root Git superproject. If the session started inside a submodule, move only the command working directory to the root for inspection.
 2. Run `scripts/initialize-local-harness.ps1 -Verify` from the root.
-3. Read `AGENTS.md`, `.harness/entry.md`, `docs/collaboration-policy.md`, `docs/development-start-guide.md`, `docs/backend-team-allocation.md`, and the relevant section of `docs/backend-implementation-master-checklist.md`.
+3. Read `AGENTS.md`, `.harness/entry.md`, `docs/collaboration-policy.md`, `docs/development-start-guide.md`, `docs/backend-team-allocation.md` §0, and **`docs/launch-readiness-plan.md`**. The launch readiness plan is the current plan of record: take the next task from it, and use `docs/backend-implementation-master-checklist.md` only for the A90/A91 and INT01~INT12 wording it references.
 4. Run `stackcord status --json`, `git status --short --branch`, and `git submodule status`. Inspect the target submodule's branch, upstream, and dirty state without changing them.
-5. Match the supplied letter, name, and GitHub ID against the committed team ownership table. If they conflict, stop and report the mismatch.
+5. Resolve the contributor against `docs/backend-team-allocation.md` §0, which assigns **repositories** rather than A–F letters. Three contributors are active: `kcrmin` (root + `backend`), `pjy008008` (`data-pipeline`, `trading-engine`), `hjcud` (`backtest-engine`, `ui`). If the contributor is one of the inactive names, or a supplied A–F letter disagrees with the repository table, say so and continue using the repository table — it wins.
 6. If an issue number or URL was supplied and an authenticated task provider is available, refresh that live issue and its prerequisites. Never treat a cached issue snapshot as live. If no provider is available, clearly say that live assignment state is unverified.
-7. Identify exactly one task that belongs to the contributor, has satisfied hard prerequisites, and can be completed as one reviewable child issue in one repository. Do not select a protected canonical change without the required authority.
+7. Identify exactly one task that belongs to the contributor, has satisfied hard prerequisites, and can be completed as one reviewable unit in one repository. Prefer the lowest-numbered unstarted task in the contributor's sections of the launch readiness plan, because that plan is already ordered by dependency. Refuse anything in the Pro scope (B09, B10, B13, C15, F06) — it is out of v1.0. Do not select a protected canonical change without the required authority.
 8. Respond briefly with:
    - confirmed repository and submodule state;
-   - the contributor's ownership area;
-   - the one recommended next child issue or checklist unit;
+   - the repositories this contributor may change, and the ones they may not;
+   - the one recommended next task, cited by its section number in the launch readiness plan;
    - target repository, expected branch name, prerequisites, acceptance evidence, and first test;
-   - any blocker that must be resolved before implementation.
+   - any blocker that must be resolved before implementation;
+   - whether a dedicated worktree is needed. If the target submodule is not at the root gitlink, or another session may share this checkout, say to create one — concurrent sessions share one HEAD and will hijack each other's branches.
 9. End by telling the contributor they can say `해줘` to implement that one unit. Implementation must happen in the target repository's feature branch and later go through a pull request to that repository's `develop` branch.
 
 Do not ask again about decisions already settled in approved specifications or contracts. Ask only when a genuinely unresolved choice changes product behavior or the safe Git path.
