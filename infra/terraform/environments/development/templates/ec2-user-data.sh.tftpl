@@ -376,6 +376,11 @@ append_env_value "$batch_secret_env" EMAIL_DELIVERY_FROM_ADDRESS "$(ssm_value '$
 append_env_value "$batch_secret_env" EMAIL_DELIVERY_AWS_REGION "$(ssm_value '${parameter_path}/email/aws-region')"
 append_env_value "$batch_secret_env" EMAIL_DELIVERY_BASE_URL "$(ssm_value '${parameter_path}/email/base-url')"
 append_env_value "$batch_secret_env" IDEA2STRATEGY_BATCH_DEADLINE_ENABLED true
+# backend-batch fails to start without this. SesNotificationEmailConfiguration reads
+# identity.crypto.email-encryption-key with no default, so the context refresh is cancelled
+# before any scheduled job runs. The batch reads identity.accounts to address notifications,
+# which is why it needs the same email-encryption key backend-api uses.
+append_json_field "$batch_secret_env" IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY "$core_internal_secret" IDENTITY_EMAIL_ENCRYPTION_KEY
 chmod 0600 "$batch_secret_env"
 unset batch_db_secret
 %{ endif ~}
@@ -697,10 +702,11 @@ refresh_service_runtime_secrets() {
   append_json_field "$refreshed_runtime_env" IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY "$core_internal_secret" IDENTITY_CUSTOMER_JWT_SIGNING_KEY
   append_json_field "$refreshed_runtime_env" OPERATOR_AUTH_CURRENT_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_CURRENT_HMAC_KEY
 
-  grep -Ev '^(SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD)=' \
+  grep -Ev '^(SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY)=' \
     /etc/idea2strategy/batch-secret.env >"$refreshed_batch_env"
   append_json_field "$refreshed_batch_env" SPRING_DATASOURCE_USERNAME "$batch_database_secret" username
   append_json_field "$refreshed_batch_env" SPRING_DATASOURCE_PASSWORD "$batch_database_secret" password
+  append_json_field "$refreshed_batch_env" IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY "$core_internal_secret" IDENTITY_EMAIL_ENCRYPTION_KEY
 
   grep -Ev '^(BACKTEST_DATABASE_URL|CUSTOMER_JWT_SIGNING_KEY_BASE64|BACKTEST_RESULT_INGEST_TOKEN|BACKTEST_RESULT_PRINCIPAL_ID)=' \
     /etc/idea2strategy/backtest-secret.env >"$refreshed_backtest_env"

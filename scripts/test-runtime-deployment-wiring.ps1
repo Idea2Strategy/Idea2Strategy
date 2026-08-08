@@ -315,6 +315,25 @@ foreach ($required in @(
         throw "Deadline batch production input is missing: $required"
     }
 }
+# The email delivery inputs above are not enough on their own. backend-batch addresses its
+# notifications by decrypting identity.accounts, so SesNotificationEmailConfiguration reads
+# identity.crypto.email-encryption-key with no default. Without it the Spring context refresh is
+# cancelled and every scheduled job — including the room schedule transition that moves a room out
+# of DRAFT — silently never runs. Assert both the first-boot build and the credential refresh.
+foreach ($required in @(
+    'append_json_field "$batch_secret_env" IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY "$core_internal_secret" IDENTITY_EMAIL_ENCRYPTION_KEY',
+    'append_json_field "$refreshed_batch_env" IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY "$core_internal_secret" IDENTITY_EMAIL_ENCRYPTION_KEY'
+)) {
+    if (-not $userData.Contains($required)) {
+        throw "backend-batch cannot start without this identity crypto input: $required"
+    }
+}
+# The refresh rewrites the file by filtering the keys it re-appends. If the filter does not drop
+# the previous value first, the refreshed file carries the key twice and the last write wins by
+# accident rather than by intent.
+if ($userData -notmatch [regex]::Escape("grep -Ev '^(SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY)='")) {
+    throw "The batch credential refresh must drop IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY before re-appending it."
+}
 foreach ($required in @(
     'var.operator_rbac_grant_permission_id',
     'var.operator_rbac_revoke_permission_id',
