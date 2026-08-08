@@ -3,7 +3,7 @@ param(
     [string]$TerraformRoot = "infra/terraform/environments/development",
     [string]$AwsProfile = "idea2strategy-terraform",
     [string]$AwsRegion = "ap-northeast-2",
-    [ValidateSet("core", "trading")][string]$RuntimeRole = "core",
+    [ValidateSet("core", "trading", "backtest-worker")][string]$RuntimeRole = "core",
     [ValidateRange(60, 1800)][int]$ReadinessTimeoutSeconds = 900,
     [ValidateRange(60, 1800)][int]$RolloutTimeoutSeconds = 900
 )
@@ -17,12 +17,23 @@ $terraform = Get-Command terraform -ErrorAction SilentlyContinue
 $aws = Get-Command aws -ErrorAction SilentlyContinue
 if ($null -eq $terraform) { throw "Terraform 1.15.x is required." }
 if ($null -eq $aws) { throw "AWS CLI v2 is required." }
-$runtimeLabel = if ($RuntimeRole -ceq "trading") { "Trading" } else { "Core" }
-$terraformOutputName = if ($RuntimeRole -ceq "trading") { "trading_instance_id" } else { "service_instance_id" }
-$runtimeServices = if ($RuntimeRole -ceq "trading") {
-    @("market-gateway", "trading-worker")
-} else {
-    @("backend-api", "backend-worker", "backtest-api")
+$runtimeLabel = switch -CaseSensitive ($RuntimeRole) {
+    "trading" { "Trading" }
+    "backtest-worker" { "Backtest worker" }
+    default { "Core" }
+}
+# The backtest worker is deliberately absent here. It runs in a desired-zero Auto Scaling group that
+# a queue-depth alarm wakes and that scales itself back to zero when idle, so there is no stable
+# instance for Terraform to output. Its instance is resolved from the group instead.
+$terraformOutputName = switch -CaseSensitive ($RuntimeRole) {
+    "trading" { "trading_instance_id" }
+    "backtest-worker" { $null }
+    default { "service_instance_id" }
+}
+$runtimeServices = switch -CaseSensitive ($RuntimeRole) {
+    "trading" { @("market-gateway", "trading-worker") }
+    "backtest-worker" { @("backtest-worker") }
+    default { @("backend-api", "backend-worker", "backtest-api") }
 }
 $runtimeServiceWords = $runtimeServices -join " "
 $hostReadyMarker = "$($RuntimeRole.ToUpperInvariant())_HOST_READY"
@@ -46,9 +57,12 @@ function Invoke-AwsJson([string[]]$Arguments) {
 }
 
 function Get-RuntimeInstanceStartAction(
-    [ValidateSet("core", "trading")][string]$RuntimeRole,
+    [ValidateSet("core", "trading", "backtest-worker")][string]$RuntimeRole,
     [string]$InstanceState
 ) {
+    # Only trading is stopped and started on a schedule. Core and the backtest worker are either
+    # already running or, for the backtest worker, absent — and an absent instance returns before this
+    # is reached, so there is no instance to start here.
     if ($RuntimeRole -cne "trading") { return "wait-running" }
     switch -CaseSensitive ($InstanceState) {
         "pending" { return "wait-running" }
@@ -57,6 +71,51 @@ function Get-RuntimeInstanceStartAction(
         "stopped" { return "start" }
         default { throw "Trading instance entered an unsupported EC2 state: $InstanceState" }
     }
+}
+
+function Resolve-BacktestWorkerInstanceId {
+    <#
+        Returns the InService instance of the backtest Auto Scaling group, or $null when the group is
+        empty.
+
+        An empty group is the ordinary resting state, not a failure. The group is desired-zero and a
+        queue-depth alarm scales it to exactly one; when it is idle it scales itself back to zero. A
+        group at zero therefore needs no rollout at all, because the next wake-up boots from the
+        launch template and resolves image digests from SSM at that moment.
+
+        What this exists to catch is the other case: an instance that stays up across a release. That
+        instance keeps whatever digest it resolved when it booted, and nothing else in the release
+        touches it. Ours stayed up for more than five hours across two releases, which is how
+        backtest-engine d0d6392 reached ECR without ever reaching the worker (root #454).
+    #>
+    $asgName = (Invoke-AwsJson @(
+            "ssm", "get-parameter",
+            "--name", "/idea2strategy/dev/backtest/asg-name"
+        )).Parameter.Value
+    if ([string]::IsNullOrWhiteSpace($asgName)) {
+        throw "Unable to resolve the backtest Auto Scaling group name from SSM."
+    }
+    $group = (Invoke-AwsJson @(
+            "autoscaling", "describe-auto-scaling-groups",
+            "--auto-scaling-group-names", $asgName
+        )).AutoScalingGroups
+    if (@($group).Count -ne 1) {
+        throw "Unable to resolve exactly one backtest Auto Scaling group named $asgName."
+    }
+    $inService = @($group[0].Instances | Where-Object { [string]$_.LifecycleState -ceq "InService" })
+    if ($inService.Count -eq 0) {
+        return $null
+    }
+    if ($inService.Count -gt 1) {
+        # max_size is 1. More than one InService instance means the group is mid-change, and rolling
+        # out to an arbitrary one of them would leave the other on a stale digest.
+        throw "The backtest Auto Scaling group reports $($inService.Count) InService instances; expected at most one."
+    }
+    $instanceId = [string]$inService[0].InstanceId
+    if ($instanceId -notmatch '^i-[0-9a-f]+$') {
+        throw "The backtest Auto Scaling group returned a malformed instance id: $instanceId"
+    }
+    return $instanceId
 }
 
 function Invoke-SsmShellCommand {
@@ -117,9 +176,13 @@ try {
     } else {
         Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
     }
-    $runtimeInstanceId = (& $terraform.Source "-chdir=$terraformDirectory" output -raw $terraformOutputName).Trim()
-    if ($LASTEXITCODE -ne 0 -or $runtimeInstanceId -notmatch '^i-[0-9a-f]+$') {
-        throw "Unable to resolve the exact $runtimeLabel instance from applied Terraform state."
+    if ($RuntimeRole -ceq "backtest-worker") {
+        $runtimeInstanceId = Resolve-BacktestWorkerInstanceId
+    } else {
+        $runtimeInstanceId = (& $terraform.Source "-chdir=$terraformDirectory" output -raw $terraformOutputName).Trim()
+        if ($LASTEXITCODE -ne 0 -or $runtimeInstanceId -notmatch '^i-[0-9a-f]+$') {
+            throw "Unable to resolve the exact $runtimeLabel instance from applied Terraform state."
+        }
     }
 } finally {
     if ($null -eq $previousAwsProfile) {
@@ -127,6 +190,22 @@ try {
     } else {
         $env:AWS_PROFILE = $previousAwsProfile
     }
+}
+
+if ($RuntimeRole -ceq "backtest-worker" -and $null -eq $runtimeInstanceId) {
+    # Nothing to roll out, and that is a pass rather than a skip we are glossing over: the group is at
+    # its resting capacity of zero, so the next queue-depth alarm boots an instance that resolves the
+    # current digests from SSM at boot. Emitting the marker keeps this indistinguishable from a
+    # successful rollout to callers while still saying plainly that no instance was touched.
+    [pscustomobject]@{
+        status        = "no-running-instance"
+        runtime_role  = $RuntimeRole
+        rolled_out_to = $null
+        detail        = "The backtest Auto Scaling group has no InService instance. A desired-zero " +
+        "group needs no rollout; the next wake-up boots from the launch template and resolves the " +
+        "current image digests from SSM."
+    } | ConvertTo-Json -Compress
+    exit 0
 }
 
 if ($RuntimeRole -ceq "trading") {
