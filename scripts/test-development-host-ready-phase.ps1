@@ -27,6 +27,7 @@ $frontend = Read-Terraform "frontend.tf"
 $edge = Read-Terraform "edge.tf"
 $email = Read-Terraform "email.tf"
 $userData = Get-Content -LiteralPath (Join-Path $environmentRoot "templates/ec2-user-data.sh.tftpl") -Raw
+$coreDeploy = Get-Content -LiteralPath (Join-Path $root "scripts/deploy-development-core-runtime.ps1") -Raw
 $runbook = Get-Content -LiteralPath (Join-Path $root "docs/infrastructure/deploy-readiness-runbook.md") -Raw
 
 foreach ($required in @(
@@ -37,6 +38,23 @@ foreach ($required in @(
 )) {
     if (-not $all.Contains($required)) {
         throw "Host-ready phase boundary is missing: $required"
+    }
+}
+
+if ($userData -notmatch '(?s)systemctl daemon-reload\s+systemctl start idea2strategy-origin-cert\.service\s+systemctl enable --now idea2strategy-origin-cert\.timer') {
+    throw "Core public-origin bootstrap must synchronously configure Nginx and TLS before it enables the renewal timer."
+}
+
+foreach ($required in @(
+    'test -s /etc/nginx/conf.d/idea2strategy-origin.conf',
+    'test "$(systemctl show -p Result --value idea2strategy-origin-cert.service)" = success',
+    'systemctl is-enabled --quiet idea2strategy-origin-cert.timer',
+    'systemctl is-active --quiet nginx',
+    'nginx -t',
+    'ss -H -ltn sport = :443'
+)) {
+    if (-not $coreDeploy.Contains($required)) {
+        throw "Core host readiness does not prove the public origin is serving TLS: $required"
     }
 }
 

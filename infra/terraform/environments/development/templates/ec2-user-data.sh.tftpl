@@ -962,11 +962,10 @@ systemctl enable --now idea2strategy-runtime-health.timer
 systemctl start idea2strategy-runtime.service
 %{ endif ~}
 
-touch /opt/idea2strategy/bootstrap-complete
-
 %{ if runtime_role == "trading" ~}
 # A newly created Trading host is initialized but not left running. EventBridge
 # Scheduler starts it for the next market window; systemd then starts both runtimes.
+touch /opt/idea2strategy/bootstrap-complete
 shutdown -h now
 %{ endif ~}
 
@@ -1061,5 +1060,10 @@ WantedBy=timers.target
 UNIT
 
 systemctl daemon-reload
+systemctl start idea2strategy-origin-cert.service
 systemctl enable --now idea2strategy-origin-cert.timer
+%{ endif ~}
+
+%{ if runtime_role != "trading" ~}
+touch /opt/idea2strategy/bootstrap-complete
 %{ endif ~}

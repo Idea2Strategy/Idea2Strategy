@@ -172,6 +172,18 @@ while ([DateTimeOffset]::UtcNow -lt $ssmDeadline) {
 if (-not $ssmOnline) { throw "$runtimeLabel instance did not become SSM Online within the readiness timeout." }
 
 $cloudInitTimeout = [Math]::Max(60, $ReadinessTimeoutSeconds - 60)
+$coreOriginReadiness = if ($RuntimeRole -ceq "core") {
+@'
+test -s /etc/nginx/conf.d/idea2strategy-origin.conf
+test "$(systemctl show -p Result --value idea2strategy-origin-cert.service)" = success
+systemctl is-enabled --quiet idea2strategy-origin-cert.timer
+systemctl is-active --quiet nginx
+nginx -t
+ss -H -ltn sport = :443 | grep -q LISTEN
+'@
+} else {
+    ""
+}
 $readinessScript = @'
 set -euo pipefail
 timeout __CLOUD_INIT_TIMEOUT__ cloud-init status --wait
@@ -180,10 +192,11 @@ test -s /opt/idea2strategy/compose.yaml
 test -x /usr/local/sbin/idea2strategy-runtime-start
 systemctl is-enabled --quiet idea2strategy-runtime.service
 systemctl is-active --quiet idea2strategy-runtime.service
+__CORE_ORIGIN_READINESS__
 cd /opt/idea2strategy
 docker compose --project-name idea2strategy config --quiet
 echo CORE_HOST_READY
-'@.Replace('__CLOUD_INIT_TIMEOUT__', [string]$cloudInitTimeout).Replace('CORE_HOST_READY', $hostReadyMarker)
+'@.Replace('__CLOUD_INIT_TIMEOUT__', [string]$cloudInitTimeout).Replace('__CORE_ORIGIN_READINESS__', $coreOriginReadiness).Replace('CORE_HOST_READY', $hostReadyMarker)
 
 $readinessCommandId = Invoke-SsmShellCommand `
     -Script $readinessScript `
