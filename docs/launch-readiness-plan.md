@@ -394,6 +394,72 @@ python scripts/validate_d_contract_parity.py    # 0 problem(s)
 
 ---
 
+### 3.5 [P1] 운영자 풀 MFA 가 OPTIONAL 로 드리프트되어 있다 — 출시 전 복구 (A92)
+
+**담당 `kcrmin` · 저장소 root · INT11 이 이것을 기다린다.**
+
+#### 무엇을 했고 왜 했나
+
+2026-08-08, Cognito 운영자 풀(`ap-northeast-2_xxeN2Ej7A`)의 `MfaConfiguration` 을
+**`ON` → `OPTIONAL`** 로 임시 변경했다.
+
+막힌 지점이 이랬다. 풀이 `ON` 이면 Cognito 가 `SOFTWARE_TOKEN_MFA` 챌린지를 주는데, 그 계정에
+**등록된 TOTP 기기가 없어 어떤 코드도 통하지 않았다.** managed login 은 등록 화면(QR)을 주지
+않았고, 사용자는 QR 을 한 번도 보지 못했다고 확인했다.
+
+빠져나갈 길이 좁았다.
+
+| 방법 | 왜 안 되나 |
+| --- | --- |
+| `AssociateSoftwareToken` 을 챌린지 Session 으로 | `MFA_SETUP` Session 이나 액세스 토큰만 받는다. `SOFTWARE_TOKEN_MFA` Session 은 `Invalid session` |
+| TOTP 기기 삭제 | **그런 API 가 없다** |
+| `AdminSetUserMFAPreference` 로 비활성 | 선호만 바꾼다. 검증된 토큰은 남는다(실행했으나 상태 무변화) |
+| 사용자 삭제·재생성 | `sub` 가 바뀌고 운영자 레코드가 `HMAC(issuer+sub)` 로 묶여 있어 **부트스트랩 재실행**을 요구한다 |
+
+그래서 풀을 `OPTIONAL` 로 내려 챌린지를 건너뛰고 액세스 토큰을 얻을 수 있게 했다. 그 토큰이
+있으면 `AssociateSoftwareToken` 이 동작한다.
+
+#### 왜 그냥 두면 안 되나
+
+**Terraform 이 `ON` 을 소유한다.** 다음 `apply` 가 `OPTIONAL` 을 되돌리고, 기기가 없으면 그
+순간 같은 잠금이 재발한다. 즉 이 드리프트는 방치하면 사라지는 것이 아니라 **릴리스마다
+되살아난다.**
+
+그리고 지금 상태에서는 backend 가 여전히 MFA 보증 클레임을 요구한다
+(`OPERATOR_AUTH_ALLOWED_MFA_CLAIM_VALUES=cognito:mfa-required`). pre-token lambda 가 그 클레임을
+trigger source 만 보고 무조건 붙이므로(`index.mjs:27`), **MFA 를 수행하지 않은 토큰도 통과한다.**
+운영자 접근이 MFA 로 보호된다는 전제가 지금은 참이 아니다.
+
+#### 할 일 (2분)
+
+액세스 토큰을 얻은 뒤 세 명령이면 끝난다.
+
+```bash
+aws cognito-idp associate-software-token --region ap-northeast-2 --access-token '<AccessToken>'
+# SecretCode 를 인증 앱에 수동 입력 -> 6자리
+aws cognito-idp verify-software-token --region ap-northeast-2 --access-token '<AccessToken>' --user-code <6자리>
+aws cognito-idp set-user-mfa-preference --region ap-northeast-2 --access-token '<AccessToken>'   --software-token-mfa-settings Enabled=true,PreferredMfa=true
+```
+
+그다음 풀을 되돌린다.
+
+```bash
+aws cognito-idp set-user-pool-mfa-config --user-pool-id ap-northeast-2_xxeN2Ej7A   --mfa-configuration ON --software-token-mfa-configuration Enabled=true --region ap-northeast-2
+```
+
+#### 완료 판정
+
+`docs/evidence/A92.md` 에 다음을 기록한다 — 풀이 `ON` 이고, `UserMFASettingList` 에
+`SOFTWARE_TOKEN_MFA` 가 있고, MFA 코드를 요구하는 로그인이 실제로 통과한다.
+
+#### 함께 남는 별도 항목
+
+`ALLOW_USER_PASSWORD_AUTH` 를 앱 클라이언트에 임시로 켰다. Terraform 이 소유하므로 다음 apply
+가 제거하지만, 그때까지 비밀번호 직접 인증이 열려 있다. 그리고 pre-token lambda 의 MFA 클레임
+무조건 부여는 INT08 항목이다 — 두 가지 모두 A92 를 닫을 때 함께 확인한다.
+
+---
+
 ## 4. 이번에 고친 것 (참고 — 재작업 금지)
 
 전부 병합됨. 각 항목에 해당 `develop`에서 실패하는 테스트가 붙어 있다.
