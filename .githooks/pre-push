@@ -1,0 +1,31 @@
+#!/bin/sh
+# Local guard: the root CI flyway-integration job fails whenever a backend/
+# backtest/trading/data-pipeline gitlink moves without a refreshed
+# db/flyway-ci-bundle. Compare the pinned bundle revisions against the
+# gitlinks in HEAD before pushing, instead of 2 minutes into CI.
+root="$(git rev-parse --show-toplevel)"
+metadata="$root/db/flyway-ci-bundle/source-revisions.json"
+[ -f "$metadata" ] || exit 0
+
+fail=0
+check_pin() {
+    path="$1"; key="$2"
+    gitlink=$(git -C "$root" ls-tree HEAD -- "$path" | awk '$1=="160000"{print $3}')
+    [ -n "$gitlink" ] || return 0
+    pinned=$(sed -n "s/.*\"$key\": \"\([0-9a-f]\{40\}\)\".*/\1/p" "$metadata")
+    if [ -n "$pinned" ] && [ "$pinned" != "$gitlink" ]; then
+        echo "pre-push: pinned flyway bundle $key ($pinned) != root gitlink for $path ($gitlink)" >&2
+        fail=1
+    fi
+}
+check_pin backend backend_gitlink
+check_pin backtest-engine backtest_gitlink
+check_pin trading-engine trading_gitlink
+check_pin data-pipeline data_pipeline_gitlink
+
+if [ "$fail" -ne 0 ]; then
+    echo "" >&2
+    echo "pre-push: the flyway-integration CI job will fail with this push." >&2
+    echo "Run scripts/refresh-flyway-ci-bundle.ps1 and commit db/flyway-ci-bundle together with the gitlink change." >&2
+    exit 1
+fi

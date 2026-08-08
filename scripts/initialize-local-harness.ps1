@@ -224,10 +224,36 @@ if ($Verify) {
   Test-Layout
 }
 
+# 추적되는 git 훅을 이 체크아웃에 붙인다. AGENTS.md 가 모든 작업 전에 이 스크립트를
+# 실행하라고 요구하므로, 가드가 설치되는 지점으로 여기가 맞다 — 도구가 섞여 있어
+# (Claude·Codex) 편집기 훅에 의존할 수 없고 git 훅은 모두에게 걸린다.
+#
+# 실제 git 작업 트리에서만 시도하고 절대 던지지 않는다. 이 스크립트는 git 저장소가
+# 아닌 임시 샌드박스에서도 실행된다(scripts/test-local-harness.ps1). 훅을 붙이지
+# 못하는 것이 로컬 하니스 초기화를 실패시킬 이유는 아니다.
+# 확인하는 경로와 설정하는 경로를 같게 둔다. install-git-hooks.ps1 은 자기 스크립트가
+# 속한 저장소를 대상으로 하므로, -RepositoryRoot 로 넘어온 샌드박스가 아니라 그 저장소를
+# 확인해야 한다. 아니면 샌드박스를 검사하고 실제 저장소를 고치는 일이 된다.
+$hooksPath = 'skipped'
+try {
+  $scriptRepository = Split-Path -Parent $PSScriptRoot
+  $insideWorkTree = & git -C $scriptRepository rev-parse --is-inside-work-tree 2>$null
+  if ($LASTEXITCODE -eq 0 -and "$insideWorkTree".Trim() -eq 'true') {
+    $installer = Join-Path $PSScriptRoot 'install-git-hooks.ps1'
+    if (Test-Path -LiteralPath $installer -PathType Leaf) {
+      & $installer | Out-Null
+      $hooksPath = '.githooks'
+    }
+  }
+} catch {
+  $hooksPath = "failed: $($_.Exception.Message)"
+}
+
 [pscustomobject]@{
   repository = $resolvedRoot
   local_root = '.harness/local'
   migrated_files = $migratedFiles
   verified = [bool]$Verify
+  git_hooks = $hooksPath
   status = 'passed'
 } | ConvertTo-Json -Compress
