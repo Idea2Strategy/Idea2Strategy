@@ -17,6 +17,16 @@ resource "aws_secretsmanager_secret_version" "cloudfront_origin_header" {
   secret_string = random_password.cloudfront_origin_header[0].result
 }
 
+resource "aws_secretsmanager_secret" "core_origin_certificate" {
+  count                   = local.enable_public_edge ? 1 : 0
+  name                    = "${local.name_prefix}/edge/origin-certificate"
+  description             = "Runtime-renewed TLS certificate bundle for the replaceable Development Core origin."
+  recovery_window_in_days = 30
+  tags                    = local.common_tags
+
+  lifecycle { prevent_destroy = true }
+}
+
 data "aws_secretsmanager_secret" "alpaca_api_key" {
   count = local.enable_service_stack ? 1 : 0
   name  = var.alpaca_api_key_secret_name
