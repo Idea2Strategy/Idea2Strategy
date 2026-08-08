@@ -207,6 +207,17 @@ foreach ($token in @('$env:AWS_PROFILE = $AwsProfile', 'Remove-Item Env:AWS_PROF
         throw "The deployed verifier must propagate and restore the selected AWS profile for Terraform: $token"
     }
 }
+foreach ($token in @(
+    '[int]$PublicProbeTimeoutSeconds = 300',
+    'function Invoke-PublicProbeWithRetry',
+    'Start-Sleep -Seconds $PublicProbeIntervalSeconds',
+    'TryAddWithoutValidation(''Origin'', $serviceUrl)',
+    '-Label ''market-data WebSocket handshake'''
+)) {
+    if (-not $deployedVerifier.Contains($token)) {
+        throw "Public post-deploy verification must tolerate bounded CloudFront propagation: $token"
+    }
+}
 
 foreach ($forbidden in @("aws-access-key-id", "aws-secret-access-key", "terraform apply -auto-approve", "docker build --platform linux/amd64", "application/vnd.oci.image.index.v1+json", "aws ecr start-image-scan", "idea2strategy-development", "create-invalidation", "s3 sync `"s3://`$env:FRONTEND_BUCKET/_releases")) {
     if ($workflow.Contains($forbidden)) {
