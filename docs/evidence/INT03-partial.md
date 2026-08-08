@@ -6,7 +6,9 @@ Environment: AWS Development (`ap-northeast-2`, account `418553863687`)
 
 Initial journey revision: `6ec540eb32aff6150a187a0a58c8515f3717b380`
 
-Latest deployed revision verified: `b31b9b8d16078c915d130f730bfc210c7618e755`
+Latest fully verified release before the current investigation: `b31b9b8d16078c915d130f730bfc210c7618e755`
+
+Current root under investigation: `23855a7913a130671441e48db55f0e31b9a421d0`
 
 This is partial evidence only. It deliberately does not create `docs/evidence/INT03.md`, because an
 automatic backtest has not completed and the personal bot run, order/fill, and stop sequence has not
@@ -95,6 +97,28 @@ while `PostgresRequestReceiptStore` reads `operations.outbox_messages` and write
 [Idea2Strategy-backend #245](https://github.com/Idea2Strategy/Idea2Strategy-backend/issues/245),
 assigned to `kcrmin`.
 
+Backend #245 was then fixed by backend PR #246 and root PR #446. Development release run
+[31277100544](https://github.com/Idea2Strategy/Idea2Strategy/actions/runs/31277100544) applied the
+refreshed Flyway bundle. A pre-existing backtest worker had started before the runtime database
+secret was rotated and failed password authentication with its embedded URL. The tracked
+`idea2strategy-runtime.service` restart path reloaded Secrets Manager state, recreated the worker
+container, and a connection-only `select 1` check succeeded without exposing the URL or secret.
+
+A fresh RSI release made after that refresh produced strategy
+`0450e1c4-c068-45a7-85a2-90add8f74cc3`, validation
+`3b8c6e55-8eac-4f9e-a2d9-266e65859919`, bot
+`9c155d0f-2602-3681-973a-562ca806dd05`, and run
+`030f0465-307c-35eb-8ea3-c0756956e1fe`. Request intake passed and five durable attempts were
+created, proving the operations-outbox ACL blocker was removed. All five attempts immediately
+ended `FAILED` with `terminal_reason_code=RETRY_RELEASED`; the run remained `QUEUED` and the job
+reached the BASIC execution DLQ. This is a distinct post-intake execution failure, not a recurrence
+of #245.
+
+At the user's direction, all further automatic-backtest mutations are paused while `kcrmin`
+investigates the exact failure and assigns the fix owner. No further release/run, worker or ASG
+operation, DLQ receive/delete/redrive, or automatic-backtest deployment is permitted during that
+pause. The existing DLQ message was not deleted or redriven.
+
 ## Personal bot execution observations
 
 The RSI bot preflight returned `ready=false` with:
@@ -111,21 +135,25 @@ returned 409. Orders, fills, and judgment logs all remained empty.
 
 The missing product-path watermarks were tracked as
 [Idea2Strategy-data-pipeline #57](https://github.com/Idea2Strategy/Idea2Strategy-data-pipeline/issues/57),
-and the code and Development schedule are now deployed. However, a post-deployment read-only query
-still observed five active `30m` feeds and zero qualifying watermark rows. The EventBridge schedule
-runs at `23:30 UTC` on weekdays; the deployment completed on Saturday UTC, so the first ordinary
-scheduled opportunity is Monday `23:30 UTC` (Tuesday `08:30 KST`). Until that run publishes a
-watermark, personal bot preflight is expected to remain `DATA_NOT_READY`. No schedule was invoked
-manually and no watermark or other product state was inserted.
+and the code and Development schedule are now deployed. `pjy008008` invoked the exact ECS Fargate
+target and official `--publish-manifest-watermarks` command once, rather than inserting product
+state. The task exited 0 and reported 16 active feeds with 13 advanced. A subsequent read-only query
+observed 13 watermark rows and qualifying watermarks for four of five active `30m` feeds, including
+the `RSI_14/30m` feature feed.
+
+The inherited acceptance check then called
+`GET /api/v1/bots/456b1a35-ca12-397d-b4d4-5e181d73174b/preflight` through the public customer API.
+It returned HTTP 200 with `ready=true` and `issues=[]`. This proves the original `DATA_NOT_READY`
+condition was removed without a DB insert, fabricated watermark, or temporary grant. The result was
+recorded on data-pipeline #57 and that issue was closed again.
 
 ## Resume criteria
 
-Resume INT03 after the remaining runtime prerequisite and scheduled data publication are complete:
+Resume INT03 after `kcrmin` identifies the post-intake execution failure and its fix owner, and the
+user lifts the automatic-backtest pause:
 
-1. backend #245 grants the backtest runtime only the operations-outbox privileges required by request
-   intake, refreshes the root Flyway bundle, and deploys it;
-2. the official weekday EventBridge run creates and advances the active feed watermark;
-3. create a fresh RSI release rather than redriving any previous request;
-4. verify the automatic backtest reaches `COMPLETED` and record its result hash and order/fill evidence;
-5. verify personal bot preflight, run, judgment, virtual order/fill, and stop in order;
-6. only then replace this partial record with `docs/evidence/INT03.md`.
+1. apply and deploy the assigned post-intake execution fix without redriving prior DLQ evidence;
+2. create one fresh RSI release through the public customer flow;
+3. verify the automatic backtest reaches `COMPLETED` and record its result hash and order/fill evidence;
+4. verify personal bot run, judgment, virtual order/fill, and stop in order (preflight already passes);
+5. only then replace this partial record with `docs/evidence/INT03.md`.
