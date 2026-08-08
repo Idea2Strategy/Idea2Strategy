@@ -101,13 +101,16 @@ foreach ($publicEdgeBoundary in @(
 foreach ($required in @(
     'configure_public_origin                     = local.enable_public_edge',
     'origin_header_secret_arn                    = try(aws_secretsmanager_secret.cloudfront_origin_header[0].arn, "")',
-    'origin_certificate_secret_arn               = try(aws_secretsmanager_secret.core_origin_certificate[0].arn, "")',
+    'origin_certificate_secret_name              = "${local.name_prefix}/edge/origin-certificate"',
     'runtime_role == "service" && configure_public_origin'
 )) {
     if (-not ((Contains-NormalizedWhitespace $compute $required) -or
         (Contains-NormalizedWhitespace $userData $required))) {
         throw "Pre-delegation Core bootstrap boundary is missing: $required"
     }
+}
+if ($compute.Contains('origin_certificate_secret_arn') -or $userData.Contains('origin_certificate_secret_arn')) {
+    throw "Core user-data must not depend on the apply-time-only certificate secret ARN."
 }
 
 foreach ($required in @(
