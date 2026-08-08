@@ -34,6 +34,30 @@ Server-side reuse digest mismatch
 `arm64` 대상이 섞이면 두 값이 원래 다르다. 다른 하나는 이전 성공 릴리스 이후 ECR 수명주기
 정책이 태그를 지워 승계 대상이 사라진 경우다. 로그만으로는 갈라내지 못했다.
 
+## 2026-08-08 재현 — 이미지 이름이 나왔다
+
+`force_rebuild_all_images=false` 로 올린 실행
+[31258805821](https://github.com/Idea2Strategy/Idea2Strategy/actions/runs/31258805821) 에서
+같은 실패가 재현되었고, 이번에는 어느 이미지인지 로그가 말한다.
+
+```
+Exception: .../ps1:56
+  56 |  throw "Server-side reuse digest mismatch: $name/$tag"
+     | Server-side reuse digest mismatch:
+     | admin-mcp/rc-1010b5b7bcc2f7b24cb93bf03fda8755f72c9485-31258805821
+```
+
+같은 실행에서 `backtest-api`·`backtest-worker` 는 `Loaded image:` 까지 통과했고 ECR 로그인도
+성공했다. 즉 자격증명·네트워크 문제가 아니고, **재사용 판정 자체**가 어긋난다.
+
+`admin-mcp` 가 아홉 이미지 중 알파벳 첫 번째이므로 "admin-mcp 만의 문제" 라고 단정할 수는 없다 —
+첫 번째에서 멈췄을 뿐일 수 있다. 다만 조사 시작점이 하나로 좁혀졌다: `admin-mcp` 의 기대 digest
+와 관찰 digest 를 그 지점에서 찍어 보는 것이 §다음에 할 것 1번의 가장 짧은 형태다.
+
+**재현이 두 번 모두 재사용 경로에서만 났다**는 것도 확인되었다. `force_rebuild_all_images=true`
+로 올린 실행은 통과한다(31250145271, 31257037186). 그러므로 결함 범위는 재사용 판정에 한정되고
+소스나 빌드에는 없다.
+
 ## 왜 회피책으로 끝내면 안 되는가
 
 매번 전체 재빌드는 릴리스 한 번을 15분 이상 늘린다. 그것만이면 감수할 수 있다. 문제는
