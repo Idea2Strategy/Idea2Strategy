@@ -121,19 +121,91 @@ INT08 의 F-2 문구가 요구하는 것은 "B~F API·worker 가 동일 인증 �
 
 ---
 
-# Outbox·감사 계약 — 관찰만 기록한다
+# Outbox 계약 — 데이터베이스에 중앙화되어 있다 (해소)
 
-`outbox_messages` 에 쓰는 어댑터가 여덟 곳 이상, `audit_events` 에 쓰는 곳이 열 곳 이상이다.
-공용 컴포넌트 하나를 지나지 않고 각 도메인 어댑터가 직접 insert 한다.
+앞 판에서 "여러 곳에서 쓴다" 는 관찰만 적고 판정을 미뤘다. 이제 확인했다.
 
-**그 자체를 결함으로 보지 않는다.** 필수 컬럼은 테이블의 NOT NULL 과 CHECK 제약이 강제하므로,
-컬럼을 빠뜨린 insert 는 런타임에 실패한다(로컬에서 `operations.outbox_messages` 의 제약 6개를
-직접 확인했다 — 상태별 claim/dead-letter/published 정합성, 금액 부호, replay 계보).
+## 어떻게 중앙화되는가
 
-남는 위험은 **의미의 불일치**다 — `payload_hash` 를 서로 다르게 계산하거나 `idempotency_key`
-형식이 다른 경우. 이것은 제약이 잡지 못하고 기계적으로도 판별되지 않는다. 각 어댑터를 읽어
-비교해야 하며, 이 카드를 닫기 전에 해야 할 일로 남긴다. 지금 단정할 수 있는 것은 "여러 곳에서
-쓴다" 는 사실뿐이고, 그것이 위반이라고 주장하지 않는다.
+`operations.outbox_messages` 에 `BEFORE INSERT` 트리거가 있다.
+
+```
+prepare_outbox_envelope_before_insert
+```
+
+```sql
+IF NEW.payload_hash IS NULL THEN
+    NEW.payload_hash := encode(sha256(convert_to(NEW.payload_document::text, 'UTF8')), 'hex');
+END IF;
+IF NEW.producer_idempotency_key IS NULL THEN
+    NEW.producer_idempotency_key := NEW.idempotency_key;
+END IF;
+```
+
+두 컬럼은 NOT NULL 이고 기본값이 없다. 그런데 어댑터 대부분이 그것을 insert 목록에 넣지 않는다 —
+트리거가 채운다. 로컬에서 두 컬럼을 생략한 insert 를 실제로 넣어 확인했다(`INSERT 0 1`, 프로브
+삭제).
+
+**그래서 16개 어댑터가 각자 insert 해도 봉투는 한 곳에서 만들어진다.** A90 이 물은 "같은 Outbox
+계약을 쓰는가" 의 답이다.
+
+## 예외 둘은 정당하다
+
+`payload_hash` 를 명시하는 곳은 `TransactionalOutboxStore` 의 **replay** insert 하나다. 원본
+해시를 승계해야 하므로 새로 계산하면 안 된다(`original_message_id` 가 함께 있다).
+
+`RoomEvaluationStartJooqAdapter` 와 `BacktestRequestOutboxStore` 는 `producer_idempotency_key`
+만 명시한다 — 트리거 기본값과 다른 값이 필요한 경우이고, 해시는 여전히 트리거가 만든다.
+
+## 내가 틀렸던 가설을 기록한다
+
+여섯 어댑터에 `MessageDigest` 가 있어 "생산자마다 해시를 다르게 계산한다" 고 의심했다. 근거도
+있었다 — `jsonb` 가 텍스트를 정규화하므로 Java 가 원문을 해시하면 값이 갈린다. 실제로 갈린다.
+
+```
+DB(jsonb 정규화)  {"a": 2, "b": 1}  → 21501dba…
+Java(원문)        {"b": 1, "a":2}   → 4d56a2c3…
+```
+
+**그러나 그 `MessageDigest` 들은 payload_hash 를 만들지 않는다.** idempotency key 를 만든다 —
+예: `"notification:" + sha256(accountId + "|" + typeCode + …)`. `TransactionalOutboxStore` 의
+`sha256` 은 replay 의 `requestHash` 용이다.
+
+가설은 **지지되지 않았다.** 없는 위험을 적지 않기 위해 결론을 뒤집었고, 왜 의심했는지는 남긴다 —
+`jsonb` 정규화 문제를 진짜로 만나는 사람에게 위 두 값이 유용하다.
+
+## 해시가 실제로 동작에 쓰인다 — 그래서 일치가 중요했다
+
+장식이 아니다. `NotificationEventConsumer:33` 이 불일치를 거부 조건으로 쓴다.
+
+```java
+|| !source.payloadHash().equals(request.sourceEventHash())
+```
+
+`TransactionalOutboxStore` 도 저장된 값과 비교한다(`:299`, `:311`). 소비자 쪽 trading-engine 은
+`select message.payload_hash` 로 **읽어서 수령증에 넣는다** — 재계산하지 않는다
+(`StrategyBotOutboxPoller:53`, `RoomEvaluationAccountOpenPoller:56`).
+
+값을 만드는 곳이 하나이고 나머지는 읽거나 비교한다. 계약이 성립한다.
+
+# 감사(audit) 계약 — 구조가 다르다. 판정 보류
+
+`operations.audit_events` 에는 **채우는 트리거가 없다.** 있는 둘은 가드다.
+
+```
+guard_operator_rbac_audit_before_change
+guard_operator_bootstrap_audit_before_change
+```
+
+필수 필드(`actor_type`, `actor_id`, `action_type`, `target_domain`, `target_id`, `reason_code`,
+`correlation_id`, `idempotency_key`, `occurred_at`)가 **전부 기본값 없이 NOT NULL** 이다. 각
+어댑터가 직접 채운다. 빠뜨리면 런타임에 실패하므로 누락은 없지만, **같은 종류의 사건에 같은
+`action_type`·`reason_code` 를 쓰는지**는 제약이 강제하지 않는다.
+
+그것이 감사 쪽의 실제 위험이다 — 열 곳 이상이 직접 쓰고 어휘의 일관성은 사람만 판별한다.
+Outbox 처럼 한 곳에서 만들어지지 않으므로 **여기는 판정하지 않는다.** 남은 일: `action_type` 과
+`reason_code` 의 값 분포를 뽑아 같은 사건이 다른 이름을 쓰지 않는지 본다. 그 조회는 감사 행이
+쌓인 뒤(INT03·INT05 수행 후)에 의미가 있다.
 
 ---
 
@@ -144,12 +216,16 @@ INT08 의 F-2 문구가 요구하는 것은 "B~F API·worker 가 동일 인증 �
 | F-1 admin-mcp 전략 노출 전수 | **해소** — 전략 스키마에 닿는 경로 없음 |
 | F-2 가드 이름 정합성 (Terraform ↔ Java) | 확인 |
 | F-2 조건부 빈 구조 | 확인 — 권한 없으면 가드가 생성되지 않음 |
-| F-2 배포 환경 전수 | **남음** — `enable_operator_auth` 적용 후 |
-| Outbox·감사 계약의 의미 일치 | **남음** — 어댑터별 해시·키 형식 비교 |
+| F-2 미인증 접근 전수 거부 | 확인 — `docs/evidence/INT05-partial.md` (13/13, 서비스 7/7) |
+| F-2 인증된 경로의 권한 거부(403) 전수 | **남음** — 운영자 토큰 필요 |
+| **Outbox 계약 일치** | **해소** — 봉투를 DB 트리거가 한 곳에서 만든다 |
+| 감사 어휘 일관성 | **남음** — 감사 행이 쌓인 뒤 값 분포 조회 |
 
-## 경철님이 해야 하는 것
+## 이 카드를 닫는 조건
 
-배포가 끝나면 [operations/login](https://ideatostrategy.com/operations/login) 에서 **TOTP 등록**을
-완료해야 한다. 2026-08-08 21:51 기준 Cognito 의 `UserMFASettingList` 가 비어 있어 아직 등록되지
-않았다(비밀번호 설정은 완료 — `UserStatus: CONFIRMED`). 등록 없이는 F-2 의 3·4 항목과 INT05 를
-수행할 토큰을 얻을 수 없다.
+남은 둘이다. 하나는 유효한 운영자 토큰으로 각 엔드포인트의 403 을 전수 확인하는 것이고, 다른
+하나는 `action_type`·`reason_code` 분포를 보는 것이다. 둘 다 **행위가 먼저 일어나야** 하므로
+INT03·INT05 수행과 함께 처리한다.
+
+토큰은 자격증명이므로 에이전트가 그것으로 API 를 호출하지 않는다. 사용자가 운영자 화면에서
+조작하고, 그 결과를 `operations.audit_events` 에서 확인하는 방식이 이 카드의 마지막 절차다.
