@@ -15,13 +15,36 @@
   "plan": "docs/launch-readiness-plan.md",
   "owners": {
     "kcrmin": {
-      "repositories": [".", "backend"],
-      "exclusive_paths": ["db/schema.dbml", "compose.back.yml", "compose.front.yml"]
+      "repositories": [
+        ".",
+        "backend"
+      ],
+      "exclusive_paths": [
+        "db/schema.dbml",
+        "compose.back.yml",
+        "compose.front.yml"
+      ]
     },
-    "pjy008008": { "repositories": ["data-pipeline", "trading-engine"] },
-    "hjcud": { "repositories": ["backtest-engine", "ui"] }
+    "pjy008008": {
+      "repositories": [
+        "data-pipeline",
+        "trading-engine"
+      ]
+    },
+    "hjcud": {
+      "repositories": [
+        "backtest-engine",
+        "ui"
+      ]
+    }
   },
-  "out_of_scope": ["B09", "B10", "B13", "C15", "F06"],
+  "out_of_scope": [
+    "B09",
+    "B10",
+    "B13",
+    "C15",
+    "F06"
+  ],
   "tasks": [
     {
       "id": "2.1",
@@ -34,11 +57,23 @@
       "blocks_reason": "이게 없으면 로컬에서 라이브 경로가 아예 돌지 않아 INT03·INT06을 시작할 수 없다."
     },
     {
+      "id": "2.1b",
+      "title": "market-gateway 로컬 배선 — 생산자 없이는 2.1의 소비자도 무의미하다",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": [],
+      "kind": "repo",
+      "check": "Select-String -Path compose.back.yml -Pattern 'MARKET_GATEWAY_REDIS_URI' -Quiet",
+      "blocks_reason": "게이트웨이가 발행하지 않으면 워커가 소비할 이벤트가 없다. Alpaca 키는 .env.docker로만 주입하고 커밋하지 않는다. instruments.json 생성 SQL은 scripts/aws/development-database-bootstrap.sh:529 참조."
+    },
+    {
       "id": "2.2",
       "title": "방·운영자 큐와 플래그 — INT04·INT05 선행",
       "owner": "kcrmin",
       "repository": ".",
-      "depends_on": ["2.1"],
+      "depends_on": [
+        "2.1"
+      ],
       "kind": "repo",
       "check": "(Select-String -Path infra/docker/localstack/ready.d/10-create-queues.sh -Pattern 'room-ledger-opened' -Quiet) -and (Select-String -Path compose.back.yml -Pattern 'ROOM_LEDGER_OPENED_QUEUE_URL' -Quiet)",
       "blocks_reason": "큐를 먼저 만들지 않고 플래그만 켜면 기동이 깨진다."
@@ -67,7 +102,9 @@
       "title": "지표(feature) 백필 실행 — 네 해상도 전부",
       "owner": "pjy008008",
       "repository": "data-pipeline",
-      "depends_on": ["2.4"],
+      "depends_on": [
+        "2.4"
+      ],
       "kind": "db",
       "check": "(Invoke-CanonicalQuery \"select count(distinct d.resolution) from market_data.feature_materializations m join market_data.feature_definitions d on d.id = m.feature_definition_id where m.status='SUCCEEDED'\") -eq 4",
       "blocks_reason": "지표 값이 없으면 RSI 전략은 빈 시계열을 읽는다."
@@ -87,7 +124,9 @@
       "title": "재기동이 SCHEDULE 주기 위상을 바꾸지 않게 한다 (제품 판단 선행)",
       "owner": "pjy008008",
       "repository": "trading-engine",
-      "depends_on": ["2.1"],
+      "depends_on": [
+        "2.1"
+      ],
       "kind": "repo",
       "check": "Select-String -Path apps/trading-worker/src/test/java/com/idea2strategy/trading/worker/runtime/*.java -Pattern 'tradingDayIndexSurvivesARestart' -Quiet",
       "blocks_reason": "INT06(재기동)이 이걸 고치지 않으면 정직하게 통과할 수 없다. 완료 표식은 tradingDayIndexSurvivesARestart 라는 이름의 테스트다 — 재기동 후에도 같은 봇의 schedule.tradingDayIndex 가 연속이고 같은 기간 백테스트 값과 일치함을 단언해야 한다. 'tradingDayIndex' 를 그냥 찾으면 기존 테스트에 걸려 오탐이 난다."
@@ -116,7 +155,9 @@
       "title": "최초 DB 구축·migration rehearsal",
       "owner": "kcrmin",
       "repository": ".",
-      "depends_on": ["2.3"],
+      "depends_on": [
+        "2.3"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT02.md"
     },
@@ -125,7 +166,9 @@
       "title": "계약 호환성 전체 검증",
       "owner": "kcrmin",
       "repository": ".",
-      "depends_on": ["INT02"],
+      "depends_on": [
+        "INT02"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT01.md"
     },
@@ -134,7 +177,12 @@
       "title": "전체 사용자 E2E — 가입부터 주문·체결·중단까지",
       "owner": "hjcud",
       "repository": ".",
-      "depends_on": ["2.1", "2.4", "2.5"],
+      "depends_on": [
+        "2.1",
+        "2.1b",
+        "2.4",
+        "2.5"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT03.md"
     },
@@ -143,7 +191,9 @@
       "title": "전체 방 E2E — 백테스트 결과가 방 점수에 섞이지 않는지 포함",
       "owner": "kcrmin",
       "repository": ".",
-      "depends_on": ["2.2"],
+      "depends_on": [
+        "2.2"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT04.md"
     },
@@ -152,7 +202,9 @@
       "title": "운영자 E2E (AWS에서 수행)",
       "owner": "kcrmin",
       "repository": ".",
-      "depends_on": ["2.2"],
+      "depends_on": [
+        "2.2"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT05.md"
     },
@@ -161,7 +213,11 @@
       "title": "장애·재기동·중복 전달 시험",
       "owner": "pjy008008",
       "repository": ".",
-      "depends_on": ["2.1", "3.1"],
+      "depends_on": [
+        "2.1",
+        "2.1b",
+        "3.1"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT06.md"
     },
@@ -170,7 +226,10 @@
       "title": "성능·용량 시험",
       "owner": "pjy008008",
       "repository": ".",
-      "depends_on": ["6", "INT03"],
+      "depends_on": [
+        "6",
+        "INT03"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT07.md"
     },
@@ -179,7 +238,9 @@
       "title": "백업·복구·원장 대사",
       "owner": "kcrmin",
       "repository": ".",
-      "depends_on": ["INT02"],
+      "depends_on": [
+        "INT02"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT09.md"
     },
@@ -188,7 +249,9 @@
       "title": "UI 계약 연결 — 화면 전수 스위프(성과 카피 포함)",
       "owner": "hjcud",
       "repository": "ui",
-      "depends_on": ["2.1"],
+      "depends_on": [
+        "2.1"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT10.md"
     },
@@ -197,7 +260,9 @@
       "title": "전체 서비스 인증·감사 통합",
       "owner": "kcrmin",
       "repository": "backend",
-      "depends_on": ["INT01"],
+      "depends_on": [
+        "INT01"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/A90.md"
     },
@@ -206,7 +271,10 @@
       "title": "배포·복구·릴리스 파이프라인",
       "owner": "kcrmin",
       "repository": ".",
-      "depends_on": ["INT02", "INT09"],
+      "depends_on": [
+        "INT02",
+        "INT09"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/A91.md"
     },
@@ -215,7 +283,10 @@
       "title": "보안·개인정보·법적 표현 검토 — 잔여 3건",
       "owner": "kcrmin",
       "repository": ".",
-      "depends_on": ["INT10", "A90"],
+      "depends_on": [
+        "INT10",
+        "A90"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT08.md"
     },
@@ -224,7 +295,20 @@
       "title": "릴리스 후보 고정",
       "owner": "kcrmin",
       "repository": ".",
-      "depends_on": ["INT01", "INT02", "INT03", "INT04", "INT05", "INT06", "INT07", "INT08", "INT09", "INT10", "A90", "A91"],
+      "depends_on": [
+        "INT01",
+        "INT02",
+        "INT03",
+        "INT04",
+        "INT05",
+        "INT06",
+        "INT07",
+        "INT08",
+        "INT09",
+        "INT10",
+        "A90",
+        "A91"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT11.md"
     },
@@ -233,7 +317,9 @@
       "title": "v1.0 릴리스",
       "owner": "kcrmin",
       "repository": ".",
-      "depends_on": ["INT11"],
+      "depends_on": [
+        "INT11"
+      ],
       "kind": "manual",
       "evidence": ".harness/local/evidence/INT12.md"
     }

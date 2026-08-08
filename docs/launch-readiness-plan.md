@@ -109,6 +109,38 @@ docker compose -f compose.back.yml --profile apps logs trading-worker | grep -i 
 ```
 market-gateway가 이벤트를 흘릴 때 워커 로그에 소비 흔적이 남고, `trading.evaluation_runs`에 행이 생긴다.
 
+### 2.1b [P1] 생산자 쪽도 죽어 있다 — market-gateway가 로컬에서 아무것도 발행하지 않는다
+
+**상태: 확인됨 (2차 감사에서 발견 — 2.1만 고치면 소비자는 살아나지만 흘러올 이벤트가 없다).**
+
+게이트웨이의 Alpaca→Redis 발행 경로는 `market-gateway.redis-uri`가 설정될 때만 활성화되고, 자격증명·종목 매핑·권리 증빙이 없으면 fail-closed로 기동을 거부한다.
+근거: `trading-engine/apps/market-gateway/src/main/resources/application.yaml:10-13` (전부 주석 처리된 기본값), `compose.back.yml:270-284`의 `market-gateway` 서비스는 `*spring-environment`만 받고 `MARKET_GATEWAY_*`·`ALPACA_*`가 하나도 없다.
+
+AWS는 완전하다 (`ec2-user-data.sh.tftpl:564-576`). 로컬 대응이 필요한 것:
+
+| 환경변수 | 로컬 값 | 비고 |
+| --- | --- | --- |
+| `MARKET_GATEWAY_REDIS_URI` | `redis://redis:6379` | TLS 아님 |
+| `MARKET_GATEWAY_REDIS_KEY_PREFIX` | `i2s` | 2.1의 워커 prefix와 반드시 동일 |
+| `MARKET_GATEWAY_ALPACA_FEED` | `sip` | |
+| `ALPACA_API_KEY` / `ALPACA_API_SECRET` | `.env.docker` 로 주입 | **커밋 금지.** 추후 교체 예정이어도 저장소에 넣지 않는다 |
+| `MARKET_GATEWAY_INSTRUMENT_MAPPING_PATH` | `/etc/market-gateway/instruments.json` | 아래에서 생성해 volume 마운트 |
+| `MARKET_GATEWAY_RIGHTS_EVIDENCE_PATH` | `/etc/market-gateway/alpaca-sip-rights.json` | 동일 |
+| `MARKET_GATEWAY_MATERIALIZATION_RECEIPT_PATH` | `/etc/market-gateway/materialization.properties` | 동일 |
+
+**파일 3개의 출처 (AWS와 같은 방법으로 만든다):**
+- `instruments.json` — DB 시장 카탈로그에서 symbol→instrument id 매핑을 뽑는다. 정확한 SQL과 검증(≥500 종목, 심볼/UUID 형식)은 `scripts/aws/development-database-bootstrap.sh:529-548`에 있다 — 그대로 로컬 postgres에 돌리면 된다. **선행: 시장 카탈로그가 시드되어 있어야 한다** (`scripts/invoke-development-market-catalog-bootstrap.ps1` 경로 확인). 종목이 500개 미만이면 게이트웨이가 기동을 거부한다(`minimum-instrument-count: 500`).
+- `alpaca-sip-rights.json` — 같은 스크립트의 바로 아래 블록이 생성 방법이다. 권리 결정은 `specs/product/decisions/decision.data.providers-alpaca-sip.md`.
+- `materialization.properties` — `scripts/deploy-development-core-runtime.ps1`이 AWS에서 만드는 수령증. 로컬 형식은 그 스크립트에서 확인.
+
+**할 일:** 위 env를 `compose.back.yml`의 `market-gateway`에 추가하고, 파일 3개를 생성하는 로컬 스크립트(또는 dev.ps1 단계)를 만들어 volume으로 마운트한다.
+
+**완료 조건:**
+```bash
+docker compose -f compose.back.yml --profile apps logs market-gateway | grep -iE "publish|candle"
+```
+정규장 중 실행 시 30분 경계마다 `MARKET_EVALUATION_READY`가 Redis에 발행되고, 그 직후 2.1의 완료 조건(워커 소비)이 함께 성립한다. 장외 시간에는 게이트웨이가 정상 기동만 해도 완료로 본다 — 발행은 세션이 열려야 생긴다.
+
 ### 2.2 [P1] 로컬 조합에 방(room)·운영자 경로가 꺼져 있다
 
 **상태: 확인됨.**
@@ -376,8 +408,8 @@ v1.0.0 이전이므로 `AGENTS.md`의 pre-v1.0 자세에 따라 권한자 지시
 pwsh scripts/launch-status.ps1 -Owner hjcud     # kcrmin | pjy008008 | hjcud
 ```
 
-**세션을 시작하는 법 (Claude·Codex 동일):**
-1. Claude Code라면 `/start-work hjcud`. Codex나 사람이면 위 스크립트를 직접 실행한다. 어느 쪽이든 같은 원장을 읽으므로 같은 답이 나온다.
+**세션을 시작하는 법 (Claude·Codex 동일 — 둘 다 슬래시 한 줄):**
+1. Claude Code: `/start-work hjcud`. **Codex: 똑같이 `/start-work hjcud`** — `initialize-local-harness.ps1`이 추적되는 `.agents/prompts/start-work.md`를 `~/.codex/prompts/`에 설치해 두므로 Codex에서도 커스텀 프롬프트로 뜬다. (한 번이라도 하니스 초기화를 돌린 기계라면 이미 설치돼 있다.) 사람이 직접 하려면 위 스크립트를 실행한다. 세 경로 모두 같은 원장을 읽으므로 같은 답이 나온다.
 2. 스크립트가 지목한 작업의 절을 이 문서에서 읽고, `해줘`(또는 해당 절 번호를 프롬프트에) — **문서 전체를 넣지 않는다.** 남의 리포지터리 지시가 3분의 2다.
 3. 완료 판정은 스크립트가 한다. `repo`/`db` 작업은 검사가 통과해야 끝난 것이고, `manual` 작업(INT 카드)은 `.harness/local/evidence/<ID>.md`에 무엇을 실행해 무엇을 관찰했는지 적어야 끝난 것이다. **검사를 통과시키는 것이 완료의 정의다** — 체크박스를 켜는 게 아니다.
 4. 다 하면 스크립트를 다시 돌린다. 다음 작업이 나오거나, 누구를 기다리는지 나온다.
