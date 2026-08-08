@@ -119,6 +119,47 @@ investigates the exact failure and assigns the fix owner. No further release/run
 operation, DLQ receive/delete/redrive, or automatic-backtest deployment is permitted during that
 pause. The existing DLQ message was not deleted or redriven.
 
+### One authorized diagnostic reproduction after retry-reason deployment
+
+Root PR #452 deployed backtest-engine `d0d6392d88a841cc8ff1d02bc438c5a21fe817f4` in Development
+release run [31281669723](https://github.com/Idea2Strategy/Idea2Strategy/actions/runs/31281669723).
+That revision preserves a retry handler's reason in `backtest.run_attempts.failure_code` and enables
+the worker's INFO/error logging. `scripts/verify-deployed-development.ps1` passed against AWS account
+`418553863687` before the reproduction.
+
+After `kcrmin` requested exactly one `hjcud` reproduction, one new customer journey used the public
+signup, email verification, login, strategy save, validation, and release APIs. Credentials and the
+verification token were generated ephemerally and were not written to this repository or command
+output. The accepted release used the already-published launch inputs named above and produced:
+
+| Artifact | ID / observation |
+| --- | --- |
+| Account | `08664ea6-012a-48d6-b2b1-00495a405cdf` |
+| Strategy | `6a25d5fb-6426-40e2-b679-2223be5558b9` |
+| Validation | `a1cc1e79-fb85-4d6d-908d-0587acddb88f` = `VALID` |
+| Bot | `8918215c-d8bf-35c7-ba91-be8ba4feadf6` |
+| Official run | `cfca9ae2-58a4-34e4-82f3-d0f2316761cc` |
+| Attempts | 1 through 5 all `FAILED`, each with `failure_code=HANDLER_ERROR:ProgrammingError` |
+
+The observability change worked: the five durable attempt rows now name the handler exception, and
+the `/idea2strategy/dev/backtest` CloudWatch log names the exact failing dependency. Every attempt
+failed while `PostgresCompiledPlanRepository.by_checksum` executed:
+
+```sql
+SELECT plan_document
+  FROM bot.launch_contract_plans
+ WHERE plan_checksum = :checksum
+```
+
+PostgreSQL rejected it with `InsufficientPrivilege: permission denied for schema bot`. The
+Development `idea2strategy_backtest` runtime therefore needs the narrow read grant required for the
+published immutable launch plan; the failure occurs before simulation begins. This is a new runtime
+ACL gap after the already-fixed `operations` schema intake grant, not a recurrence of that defect.
+
+No second release or run was created. No worker restart, ASG change, DLQ receive/delete/redrive,
+additional release, or permanent deployment was performed after this observation. The diagnostic
+run was left in place as evidence.
+
 ## Personal bot execution observations
 
 The RSI bot preflight returned `ready=false` with:
@@ -149,10 +190,11 @@ recorded on data-pipeline #57 and that issue was closed again.
 
 ## Resume criteria
 
-Resume INT03 after `kcrmin` identifies the post-intake execution failure and its fix owner, and the
-user lifts the automatic-backtest pause:
+Resume INT03 after `kcrmin` grants the backtest runtime only the `bot.launch_contract_plans` read
+access required by the deployed repository, refreshes the central Flyway bundle, deploys that fix,
+and explicitly lifts the automatic-backtest pause:
 
-1. apply and deploy the assigned post-intake execution fix without redriving prior DLQ evidence;
+1. apply and deploy the narrow `bot` schema/table read grant without redriving prior DLQ evidence;
 2. create one fresh RSI release through the public customer flow;
 3. verify the automatic backtest reaches `COMPLETED` and record its result hash and order/fill evidence;
 4. verify personal bot run, judgment, virtual order/fill, and stop in order (preflight already passes);
