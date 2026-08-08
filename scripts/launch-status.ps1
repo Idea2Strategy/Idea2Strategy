@@ -174,4 +174,26 @@ foreach ($who in @('kcrmin', 'pjy008008', 'hjcud')) {
 }
 Write-Host ''
 Write-Host 'DATABASE_URL 이 없으면 데이터 관련 작업(2.4·2.5)은 [?] 로 남는다. 조합을 띄우고 다시 실행한다.' -ForegroundColor DarkGray
+
+# 한 담당자로 좁혀 실행했고 할 일이 있으면, 그 작업을 지시하는 프롬프트를 그대로 찍어 준다.
+# `/start-work` 슬래시 명령은 도구와 버전에 따라 없을 수 있다(Claude 는 저장소의
+# .claude/skills 를, Codex 는 사용자 홈의 프롬프트를 읽고, 둘 다 설치가 선행되어야 한다).
+# 이 출력은 아무 설치도 요구하지 않으므로 어느 도구에서든 붙여넣기만 하면 된다.
+if ($Owner) {
+    $ready = @($ordered | Where-Object { $_.owner -eq $Owner -and $_.status -in @('ready', 'ready-unverified') })
+    if ($ready.Count -gt 0) {
+        $task = $ready[0]
+        Write-Host ''
+        Write-Host '─────────── 아래를 그대로 복사해 에이전트에 붙여넣는다 (설치 불필요) ───────────' -ForegroundColor Cyan
+        Write-Host ''
+        Write-Host "docs/launch-readiness-plan.md 의 §$($task.id) 를 수행해줘. 담당자는 $Owner 다."
+        Write-Host ''
+        Write-Host 'AGENTS.md 의 "Launch work loop" 절을 먼저 읽고 그대로 따른다. 내 소유'
+        Write-Host "리포지터리($($task.repository)) 밖의 파일은 수정하지 않는다. feature 브랜치에서"
+        Write-Host '작업하고 해당 develop 으로 PR 을 연다. 완료 판정은'
+        Write-Host "pwsh scripts/launch-status.ps1 -Owner $Owner 가 §$($task.id) 를 [x] 로 보고할 때다."
+        Write-Host ''
+        Write-Host '────────────────────────────────────────────────────────────────────────────' -ForegroundColor Cyan
+    }
+}
 Write-Host ''
