@@ -89,13 +89,15 @@ foreach ($component in @('backend', 'backtest')) {
         -IsSuccessful { param($response) $response.StatusCode -eq 200 -and -not [string]::IsNullOrWhiteSpace($response.Content) }
 }
 
-# An invalid single-use ticket must reach the backend WebSocket handshake and be
-# rejected there. A CDN/proxy path that drops Upgrade headers returns a different
-# status, so this also proves the public CloudFront -> Nginx -> backend route.
+# An invalid single-use ticket must be rejected on the public WebSocket path. Some
+# CloudFront edges return their own 403 to GitHub-hosted runner traffic, while the
+# same deployed route returns the backend's 401 from other networks. The Core SSM
+# check below therefore proves Nginx -> backend Upgrade forwarding separately and
+# requires the backend's exact 401 before this deployment can pass.
 Add-Type -AssemblyName System.Net.Http
 $webSocketProbeClient = [System.Net.Http.HttpClient]::new()
 try {
-    [void](Invoke-PublicProbeWithRetry `
+    $publicWebSocketStatus = Invoke-PublicProbeWithRetry `
         -Label 'market-data WebSocket handshake' `
         -Probe {
             $webSocketProbe = [System.Net.Http.HttpRequestMessage]::new(
@@ -118,7 +120,13 @@ try {
                 $webSocketProbe.Dispose()
             }
         } `
-        -IsSuccessful { param($statusCode) $statusCode -eq [int][System.Net.HttpStatusCode]::Unauthorized })
+        -IsSuccessful {
+            param($statusCode)
+            @(
+                [int][System.Net.HttpStatusCode]::Unauthorized,
+                [int][System.Net.HttpStatusCode]::Forbidden
+            ) -contains $statusCode
+        }
 }
 finally {
     $webSocketProbeClient.Dispose()
@@ -178,6 +186,17 @@ for service in backend-api backend-worker backtest-api; do
   initial_container["$service"]="$container"
   initial_restarts["$service"]="$restarts"
 done
+origin_ws_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+  --http1.1 --connect-timeout 10 --max-time 30 --noproxy '*' \
+  --resolve origin.ideatostrategy.com:443:127.0.0.1 \
+  --header 'Connection: Upgrade' \
+  --header 'Upgrade: websocket' \
+  --header 'Origin: https://ideatostrategy.com' \
+  --header 'Sec-WebSocket-Version: 13' \
+  --header 'Sec-WebSocket-Key: aWRlYTJzdHJhdGVneTEyMw==' \
+  'https://origin.ideatostrategy.com/ws/v1/market-data/prices?ticket=invalid-origin-deployment-smoke')"
+test "$origin_ws_status" = 401
+echo CORE_WEBSOCKET_ROUTE_READY
 sleep 20
 for service in backend-api backend-worker backtest-api; do
   container="$(docker compose --project-name idea2strategy ps -q "$service")"
@@ -231,6 +250,7 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {
     if ([string]$runtimeInvocation.Status -in @('Success', 'Failed', 'Cancelled', 'TimedOut')) { break }
 }
 if ($null -eq $runtimeInvocation -or [string]$runtimeInvocation.Status -cne 'Success' -or
+    -not ([string]$runtimeInvocation.StandardOutputContent).Contains('CORE_WEBSOCKET_ROUTE_READY') -or
     -not ([string]$runtimeInvocation.StandardOutputContent).Contains('CORE_RUNTIME_STABLE')) {
     throw "Core containers are unhealthy or restarted during the stability window."
 }
@@ -272,6 +292,7 @@ foreach ($requiredLog in @('/idea2strategy/dev/core', '/idea2strategy/dev/tradin
     backend_health = 'passed'
     backtest_health = 'passed'
     market_data_websocket = 'passed'
+    market_data_websocket_public_status = [int]$publicWebSocketStatus
     cloudfront_https = 'passed'
     frontend_s3 = 'passed'
     ssm = 'passed'
