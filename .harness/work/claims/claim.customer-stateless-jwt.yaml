@@ -1,0 +1,43 @@
+schema_version: 1
+id: claim.customer-stateless-jwt
+work_id: work.customer-stateless-jwt
+owner: hjcud
+branch: feature/customer-stateless-jwt
+repository: repository.github.backend,repository.github.backtest,repository.github.root,repository.github.ui
+paths:
+    - backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/identity/**
+    - backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/identity/**
+    - backend/apps/backend-batch/src/main/java/com/idea2strategy/backend/batch/**
+    - backend/db-migration/src/main/resources/db/migration/**
+    - backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/identity/**
+    - backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/strategy/**
+    - backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/identity/**
+    - backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/strategy/**
+    - backtest-engine/src/backtest_engine/production.py
+    - backtest-engine/tests/**
+    - db/schema.dbml
+    - infra/terraform/environments/development/**
+    - ui/e2e/**
+    - ui/src/**/*.test.ts*
+    - ui/src/api/account.ts
+    - ui/src/components/AccountApiPanels.tsx
+    - ui/src/lib/session.ts
+policy_ids: []
+scenario_ids:
+    - scenario.account.sanction
+contract_ids: []
+db_entities:
+    - identity.account_security_states
+    - identity.authentication_events
+    - identity.sessions
+    - strategy.strategy_edit_leases
+migration_slots:
+    - flyway.20260807120000.backend.stateless-customer-jwt
+ui_flows: []
+dependency_majors: []
+stable_ids:
+    - quality.auditability
+    - quality.failure-safety
+root_pointer: true
+starts_at: 2026-08-07T12:31:16.3162711Z
+expires_at: 2026-08-08T12:31:16.2042676Z

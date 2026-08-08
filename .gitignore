@@ -138,7 +138,6 @@ $RECYCLE.BIN/
 
 # Idea2Strategy local harness: keep only the shared skeleton.
 .harness/local/**
-!.harness/local/
-!.harness/local/README.md
-!.harness/local/**/
-!.harness/local/**/.gitkeep
+
+# Generated local reports and review artifacts.
+outputs/

@@ -1,0 +1,97 @@
+schema_version: 1
+id: work.customer-stateless-jwt
+readiness: ready
+title: Replace server-owned customer sessions with stateless JWT credentials
+outcome: Customer authentication uses signed access and refresh JWTs without persisted per-device sessions or concurrent-session limits, while account security changes still invalidate credentials and strategy edit leases remain isolated from authentication state.
+acceptance:
+    - id: acceptance.account-revocation
+      given: Customer JWTs exist for an account
+      when: The password changes, recovery completes, a sanction is applied, the account closes, or logout-all is requested
+      then: The account auth epoch advances and subsequent backend refresh or authorization rejects the old JWT claims
+      failure: A security-sensitive account transition leaves old refresh JWTs usable
+    - id: acceptance.compatible-rollout
+      given: Backend, UI, backtest, database, and development deployment are released in dependency order
+      when: The JWT claim and endpoint transition is deployed
+      then: Invalid JWTs return 401, the UI refreshes after idle time, backtest verifies the new claim set locally, and the session table is dropped only after its foreign key dependency is migrated
+      failure: A mixed-version deployment causes login loss, a schema failure, or an authorization bypass
+    - id: acceptance.edit-lease-decoupling
+      given: An authenticated customer edits a strategy
+      when: The customer acquires, heartbeats, saves with, or releases an edit lease
+      then: The lease is bound to the owning account and its independent secret rather than an identity session foreign key
+      failure: Dropping identity.sessions breaks edit locking or lets another account use the lease
+    - id: acceptance.stateless-login-refresh
+      given: An active verified customer authenticates and later refreshes
+      when: Password or trusted OIDC authentication succeeds and the refresh JWT is valid
+      then: The backend issues short-lived access JWTs and a 30-day HttpOnly refresh JWT without inserting, reading, or rotating identity.sessions rows
+      failure: Authentication depends on a persisted session, enforces a device count, or a refresh JWT survives an account security epoch change
+refs:
+    - quality.auditability
+    - quality.failure-safety
+workspaces:
+    - workspace.backend
+    - workspace.backtest-engine
+    - workspace.root
+    - workspace.ui
+scope:
+    repositories:
+        - repository.github.backend
+        - repository.github.backtest
+        - repository.github.root
+        - repository.github.ui
+    paths:
+        - backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/identity/**
+        - backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/identity/**
+        - backend/apps/backend-batch/src/main/java/com/idea2strategy/backend/batch/**
+        - backend/db-migration/src/main/resources/db/migration/**
+        - backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/identity/**
+        - backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/strategy/**
+        - backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/identity/**
+        - backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/strategy/**
+        - backtest-engine/src/backtest_engine/production.py
+        - backtest-engine/tests/**
+        - db/schema.dbml
+        - infra/terraform/environments/development/**
+        - ui/e2e/**
+        - ui/src/**/*.test.ts*
+        - ui/src/api/account.ts
+        - ui/src/components/AccountApiPanels.tsx
+        - ui/src/lib/session.ts
+    policy_ids: []
+    scenario_ids:
+        - scenario.account.sanction
+    contract_ids: []
+    db_entities:
+        - identity.account_security_states
+        - identity.authentication_events
+        - identity.sessions
+        - strategy.strategy_edit_leases
+    migration_slots:
+        - flyway.20260807120000.backend.stateless-customer-jwt
+    ui_flows: []
+    dependency_majors: []
+    root_pointers:
+        - workspace.backend
+        - workspace.backtest-engine
+        - workspace.ui
+dependencies:
+    - work.customer-jwt-google-oauth-proposal
+merge_order:
+    - workspace.backend
+    - workspace.backtest-engine
+    - workspace.ui
+    - workspace.root
+first_failing_test: A password login and refresh succeed without any identity.sessions table while an auth-epoch mismatch is rejected and a strategy edit lease remains usable across access-token refresh.
+evidence:
+    kinds:
+        - backend-api-integration
+        - backend-unit
+        - backtest-unit
+        - flyway-postgresql
+        - identity-postgresql
+        - root-deployment-wiring
+        - ui-unit
+    integration_required: true
+    user_validation: true
+    migration_required: true
+    rollback_required: true
+fingerprint: sha256:2d745e05c5b8fb577b03fe49564a679b6541362bf2c403367720e0900c19662c
