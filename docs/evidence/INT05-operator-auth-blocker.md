@@ -199,3 +199,73 @@ pre-token lambda 가 오류 없이 119회 돌았다는 것은 **토큰이 실제
 마지막 항목이 이 문서에서 가장 중요한 경고다. 운영자 계정 레코드가 `sub` 에 묶여 있으므로
 Cognito 사용자를 지우고 다시 만드는 것은 부트스트랩 재실행을 포함한다. 다른 방법이 모두
 막힌 뒤에만 고른다.
+
+---
+
+# 2026-08-08 확정 — MFA 보증 클레임이 실제 MFA 없이 발급된다
+
+앞 절에서 "가능성" 으로 적은 것이 **실측으로 확인되었다.** 추측이 아니다.
+
+## 관찰
+
+풀 MFA 를 `OPTIONAL` 로 내린 상태에서 `USER_PASSWORD_AUTH` 로 로그인했다. **MFA 챌린지가 없었고
+MFA 를 수행하지 않았다.** 그런데 돌아온 액세스 토큰의 클레임에 이것이 들어 있다.
+
+```
+"https://ideatostrategy.com/claims/mfa": "cognito:mfa-required"
+"scope": "aws.cognito.signin.user.admin"
+"auth_time": 1786198649
+```
+
+같은 토큰의 `ChallengeParameters` 는 비어 있고 `AuthenticationResult` 가 바로 반환되었다 — 즉
+어떤 챌린지도 거치지 않았다.
+
+## 왜 이렇게 되는가
+
+`infra/terraform/environments/development/lambda/operator-pre-token/index.mjs` 가 허용된 trigger
+source 이면 **조건 없이** 클레임을 붙인다.
+
+```javascript
+claimsToAddOrOverride: {
+  aud: clientId,
+  [ASSURANCE_CLAIM]: "cognito:mfa-required",
+}
+```
+
+`event` 어디에도 "이 인증이 MFA 를 거쳤는가" 를 보지 않는다. 허용 목록에
+`TokenGeneration_Authentication` 이 있으므로, MFA 없는 비밀번호 인증도 그 경로를 탄다.
+
+## 결과 — 방어가 이름만 남는다
+
+backend 는 `OPERATOR_AUTH_ALLOWED_MFA_CLAIM_VALUES=cognito:mfa-required` 로 MFA 보증을 요구한다.
+그런데 그 클레임이 **MFA 수행과 무관하게 항상 붙으므로**, 이 검사는 어떤 토큰도 걸러내지 못한다.
+`operator_auth_maximum_mfa_age`(기본 PT10M)도 같은 이유로 의미를 잃는다 — 없었던 MFA 의 나이를
+재는 것이다.
+
+풀을 `ON` 으로 되돌리면 Cognito 가 MFA 를 강제하므로 실질 위험은 줄지만, **backend 쪽 검사가
+그것을 확인하는 것은 아니다.** Cognito 설정이 유일한 방어선이 되고, 설정 하나가 바뀌면(예: A92
+같은 드리프트) 애플리케이션은 아무것도 눈치채지 못한다.
+
+## 고치는 방향
+
+lambda 가 실제 MFA 여부를 보고 클레임을 붙여야 한다. Cognito 의 pre-token-generation 이벤트에는
+그 정보가 직접 오지 않으므로 두 가지 중 하나다.
+
+1. **`amr` 를 쓴다.** Cognito 가 발급하는 토큰의 `amr` 에는 MFA 를 수행한 경우
+   `mfa`·`swk`·`software_token_mfa` 등이 들어간다. lambda 가 클레임을 만들지 말고, backend 가
+   `operator_auth_allowed_amr_values` 로 **Cognito 가 스스로 채운 `amr`** 를 검사하게 한다.
+   이 저장소에는 그 변수가 이미 있다(`variables.tf:479`, 현재 기본값 `[]`).
+2. **lambda 가 판별한다.** `event.request` 의 정보로 MFA 여부를 확인할 수 있는 경우에만 클레임을
+   붙이고, 아니면 붙이지 않는다. 그리고 `triggerSource` 를 로깅해 감사 가능하게 한다.
+
+**1번이 낫다.** 클레임을 우리가 만들지 않고 IdP 가 채운 값을 쓰면, 애플리케이션의 검사가 실제
+인증 사실에 묶인다. 지금 구조는 우리가 만든 클레임을 우리가 검사하는 자기 참조다.
+
+## 어느 카드에 속하나
+
+**INT08(보안·개인정보·법적 표현 검토).** 그 문서의 "권한 우회" 축에 해당하며, A90 이 아니다 —
+A90 은 "같은 인증 주체·RBAC 를 쓰는가" 이고 이것은 "그 인증이 주장하는 보증이 참인가" 다.
+
+A92(풀 MFA 복구)를 닫을 때 함께 확인해야 한다. 풀을 `ON` 으로 되돌리는 것만으로는 이 결함이
+해소되지 않는다 — 그것은 Cognito 가 MFA 를 강제하게 하는 것이고, backend 의 검사가 유효해지는
+것은 아니다.
