@@ -167,6 +167,8 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: backtest-engine/pyproject.toml
+      - name: Verify contract fixture parity between owners and consumers
+        run: python scripts/validate_d_contract_parity.py
       - name: Install the exact backtest runtime and integration dependencies
         run: python -m pip install --disable-pip-version-check -e './backtest-engine[test]'
       - name: Prove BASIC, CUSTOM and COMPETITION on one shared runtime
