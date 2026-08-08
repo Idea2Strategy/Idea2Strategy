@@ -186,12 +186,18 @@ for service in backend-api backend-worker backtest-api; do
   initial_container["$service"]="$container"
   initial_restarts["$service"]="$restarts"
 done
+origin_header_secret="$(aws secretsmanager get-secret-value \
+  --region '__AWS_REGION__' \
+  --secret-id 'idea2strategy-dev/edge/origin-header' \
+  --query SecretString \
+  --output text)"
 origin_ws_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
   --http1.1 --connect-timeout 10 --max-time 30 --noproxy '*' \
   --resolve origin.ideatostrategy.com:443:127.0.0.1 \
   --header 'Connection: Upgrade' \
   --header 'Upgrade: websocket' \
   --header 'Origin: https://ideatostrategy.com' \
+  --header "X-Idea2Strategy-Origin-Verify: $origin_header_secret" \
   --header 'Sec-WebSocket-Version: 13' \
   --header 'Sec-WebSocket-Key: aWRlYTJzdHJhdGVneTEyMw==' \
   'https://origin.ideatostrategy.com/ws/v1/market-data/prices?ticket=invalid-origin-deployment-smoke')"
@@ -249,9 +255,14 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {
     }
     if ([string]$runtimeInvocation.Status -in @('Success', 'Failed', 'Cancelled', 'TimedOut')) { break }
 }
-if ($null -eq $runtimeInvocation -or [string]$runtimeInvocation.Status -cne 'Success' -or
-    -not ([string]$runtimeInvocation.StandardOutputContent).Contains('CORE_WEBSOCKET_ROUTE_READY') -or
-    -not ([string]$runtimeInvocation.StandardOutputContent).Contains('CORE_RUNTIME_STABLE')) {
+if ($null -eq $runtimeInvocation -or [string]$runtimeInvocation.Status -cne 'Success') {
+    throw "Core runtime SSM verification did not succeed."
+}
+$runtimeOutput = [string]$runtimeInvocation.StandardOutputContent
+if (-not $runtimeOutput.Contains('CORE_WEBSOCKET_ROUTE_READY')) {
+    throw "Core Nginx-to-backend WebSocket route did not reject the invalid ticket with 401."
+}
+if (-not $runtimeOutput.Contains('CORE_RUNTIME_STABLE')) {
     throw "Core containers are unhealthy or restarted during the stability window."
 }
 

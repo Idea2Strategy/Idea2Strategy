@@ -215,6 +215,8 @@ foreach ($token in @(
     '-Label ''market-data WebSocket handshake''',
     '[System.Net.HttpStatusCode]::Forbidden',
     '--resolve origin.ideatostrategy.com:443:127.0.0.1',
+    'idea2strategy-dev/edge/origin-header',
+    'X-Idea2Strategy-Origin-Verify:',
     'CORE_WEBSOCKET_ROUTE_READY'
 )) {
     if (-not $deployedVerifier.Contains($token)) {
