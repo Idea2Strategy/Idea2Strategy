@@ -28,6 +28,8 @@ The plan of record is `docs/launch-readiness-plan.md`. The task ledger `docs/lau
 
 Mechanical guards live in tracked git hooks (`.githooks/`, attached by `scripts/initialize-local-harness.ps1`, which every session already runs): no direct commits to `develop`/`main`, no submodule pointer commit without the refreshed Flyway bundle, no identifier the secret scanner false-positives on. They apply to every tool equally. `--no-verify` is for emergencies and its use must be explained in the pull request.
 
+The same script runs `scripts/verify-workspace-isolation.ps1`. **A finding there stops work until it is resolved.** It means a stale copy of this project sits above the checkout, shadowing the repository's own skills and instruction files — which is how a session ends up following a procedure from dozens of commits ago while believing it is current. `git pull` cannot repair it, because the shadowing files belong to a different repository, so the check reports the exact path and the command that removes it.
+
 <!-- stackcord:begin -->
 Before changing the project, read `.harness/entry.md` and refresh actual context. Product meaning lives in `specs/`; obligations live in `contracts/`; coordination state lives in `.harness/`. Protected product meaning stays a proposal until `stackcord governance check --json` confirms an assigned product authority through the selected Git review provider; Git user.name and user.email never prove authority.
 

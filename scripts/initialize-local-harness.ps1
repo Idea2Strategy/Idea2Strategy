@@ -224,6 +224,22 @@ if ($Verify) {
   Test-Layout
 }
 
+# 상위 디렉터리의 사본이 이 체크아웃을 가리는지 검사한다. 2026-08-08 에 정확히 이 일이
+# 일어났다 — 옛 클론의 스킬·CLAUDE.md 가 정본을 가려 낡은 절차가 실행됐고, 가리는 파일이
+# 다른 저장소 소속이라 git pull 로는 고칠 수 없었다. 여기서 던지지는 않는다(샌드박스와
+# 별개 클론 배치가 정상인 경우가 있다). 대신 결과를 남기고 화면에 크게 알린다. 에이전트
+# 진입점(/start-work, .agents/prompts/start-work.md)은 이 실패를 정지 조건으로 취급한다.
+$workspaceIsolation = 'skipped'
+try {
+  $isolation = Join-Path $PSScriptRoot 'verify-workspace-isolation.ps1'
+  if (Test-Path -LiteralPath $isolation -PathType Leaf) {
+    & $isolation | Out-Host
+    $workspaceIsolation = if ($LASTEXITCODE -eq 0) { 'passed' } else { 'failed' }
+  }
+} catch {
+  $workspaceIsolation = "failed: $($_.Exception.Message)"
+}
+
 # 추적되는 git 훅을 이 체크아웃에 붙인다. AGENTS.md 가 모든 작업 전에 이 스크립트를
 # 실행하라고 요구하므로, 가드가 설치되는 지점으로 여기가 맞다 — 도구가 섞여 있어
 # (Claude·Codex) 편집기 훅에 의존할 수 없고 git 훅은 모두에게 걸린다.
