@@ -242,12 +242,47 @@
       "blocks_reason": "부분 진행이 docs/evidence/INT02-partial.md 에 기록돼 있다: 빈 PostgreSQL 에 53개 마이그레이션 적용(테이블 179, 2회차 pending 0), 런타임 권한 계약 통과, 부트스트랩 경계 계약 통과, backend 897 테스트 skip 0 실패 0. 남은 세 가지가 있어 카드는 열어 둔다 — (1) 직전 release snapshot 위에서의 마이그레이션(v1.0 전이라 스냅샷 정의부터 필요), (2) rollback 절차(적용된 마이그레이션은 불변이므로 스냅샷 복원 절차이며 문서·스크립트가 아직 없다), (3) AWS RDS 에서의 실제 리허설. 이 셋이 끝나면 파일명을 docs/evidence/INT02.md 로 바꿔 카드를 닫는다."
     },
     {
+      "id": "3.4",
+      "title": "backtest-engine 의 official-backtest-request fixture 를 소유자와 일치시킨다",
+      "owner": "hjcud",
+      "repository": "backtest-engine",
+      "depends_on": [],
+      "kind": "repo",
+      "check": {
+        "kind": "all",
+        "checks": [
+          {
+            "kind": "file-contains",
+            "path": "tests/fixtures/contracts/strategy-bot/v1/official-backtest-request.valid.json",
+            "pattern": "requestHash"
+          },
+          {
+            "kind": "file-contains",
+            "path": "tests/fixtures/contracts/strategy-bot/v1/official-backtest-request.valid.json",
+            "pattern": "featureMaterializations"
+          },
+          {
+            "kind": "file-contains",
+            "path": "tests/fixtures/contracts/strategy-bot/v1/official-backtest-request.valid.json",
+            "pattern": "expectedDatasetHash"
+          },
+          {
+            "kind": "file-contains",
+            "path": "tests/fixtures/contracts/strategy-bot/v1/official-backtest-request.valid.json",
+            "pattern": "executionPolicyVersion"
+          }
+        ]
+      },
+      "blocks_reason": "scripts/validate_d_contract_parity.py 가 소유자(backend)와 소비자(backtest-engine) 사본의 바이트 일치를 요구하는데, 소비자 사본이 runId·lane·aggregateSequence·expectedDatasetHash·periodStart·periodEnd·executionPolicyVersion·featureMaterializations·requestHash 아홉 필드를 빠뜨리고 있다. 그래서 backtest-engine 은 backend 가 결코 보내지 않는 축소된 메시지로 시험하고, 필수 필드 누락을 잡지 못한다. INT01 이 이것 때문에 닫히지 않는다. 고친 뒤 루트가 이 검증기를 CI 에 붙인다."
+    },
+    {
       "id": "INT01",
       "title": "계약 호환성 전체 검증",
       "owner": "kcrmin",
       "repository": ".",
       "depends_on": [
-        "INT02"
+        "INT02",
+        "3.4"
       ],
       "kind": "manual",
       "evidence": "docs/evidence/INT01.md"

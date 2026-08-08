@@ -18,6 +18,7 @@
     "proposal:validate:corporate-action-approval": "node --test proposals/corporate-action-approval/validate-contract.test.mjs",
     "contract:validate:corporate-action-approval": "node --test scripts/validate-corporate-action-approval-canonical.test.mjs",
     "contract:validate:release-adoption": "node --test scripts/validate-release-protected-contracts.test.mjs",
+    "contract:validate:registry": "node --test scripts/validate-contract-registry.test.mjs",
     "dbdiagram": "dbdiagram"
   },
   "devDependencies": {
