@@ -104,55 +104,45 @@
       "expires_at": "2026-08-09T07:17:40.2107068Z"
     },
     {
-      "id": "claim.customer-stateless-jwt",
-      "work_id": "work.customer-stateless-jwt",
-      "definition_fingerprint": "sha256:2d745e05c5b8fb577b03fe49564a679b6541362bf2c403367720e0900c19662c",
+      "id": "claim.int03-active-feed-watermarks-pjy008008",
+      "work_id": "work.int03-active-feed-watermarks",
+      "definition_fingerprint": "sha256:7afa23207e36114a57486dc6d661e7c85648e3ce46187be33257b01cbc5919c6",
       "status": "in_progress",
-      "owner": "hjcud",
-      "branch": "feature/customer-stateless-jwt",
-      "repository": "repository.github.backend,repository.github.backtest,repository.github.root,repository.github.ui",
+      "owner": "pjy008008",
+      "branch": "fix/int03-active-feed-watermarks",
+      "repository": "idea2strategy.data-pipeline,idea2strategy.platform",
       "paths": [
-        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/identity/**",
-        "backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/identity/**",
-        "backend/apps/backend-batch/src/main/java/com/idea2strategy/backend/batch/**",
-        "backend/db-migration/src/main/resources/db/migration/**",
-        "backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/identity/**",
-        "backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/strategy/**",
-        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/identity/**",
-        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/strategy/**",
-        "backtest-engine/src/backtest_engine/production.py",
-        "backtest-engine/tests/**",
-        "db/schema.dbml",
-        "infra/terraform/environments/development/**",
-        "ui/e2e/**",
-        "ui/src/**/*.test.ts*",
-        "ui/src/api/account.ts",
-        "ui/src/components/AccountApiPanels.tsx",
-        "ui/src/lib/session.ts"
+        "data-pipeline/apps/pipeline_worker/**",
+        "data-pipeline/idea2strategy-market-loader/**",
+        "data-pipeline/market_pipeline_lib/**",
+        "data-pipeline/tests/**",
+        "docs/infrastructure/**market**",
+        "infra/terraform/environments/development/pipeline.tf",
+        "scripts/**market**"
       ],
-      "policy_ids": [],
+      "policy_ids": [
+        "policy.market.us-only"
+      ],
       "scenario_ids": [
-        "scenario.account.sanction"
+        "scenario.bot.evaluate"
       ],
       "contract_ids": [],
       "db_entities": [
-        "identity.account_security_states",
-        "identity.authentication_events",
-        "identity.sessions",
-        "strategy.strategy_edit_leases"
+        "market_data.feeds",
+        "market_data.stream_watermarks"
       ],
-      "migration_slots": [
-        "flyway.20260807120000.backend.stateless-customer-jwt"
-      ],
+      "migration_slots": [],
       "ui_flows": [],
       "dependency_majors": [],
       "stable_ids": [
-        "quality.auditability",
-        "quality.failure-safety"
+        "decision.data.hybrid",
+        "quality.failure-safety",
+        "quality.reproducibility",
+        "technology.need.market-data"
       ],
       "root_pointer": true,
-      "starts_at": "2026-08-07T12:31:16.3162711Z",
-      "expires_at": "2026-08-08T12:31:16.2042676Z"
+      "starts_at": "2026-08-08T18:13:20.7528077Z",
+      "expires_at": "2026-08-09T18:13:20.6158776Z"
     }
   ]
 }
