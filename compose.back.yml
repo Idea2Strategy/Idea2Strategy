@@ -262,6 +262,17 @@ services:
         {"OFFICIAL_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/backtest-basic-request",
         "CUSTOM_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/backtest-custom-request",
         "COMPETITION_BACKTEST_REQUESTED":"http://localstack:4566/000000000000/backtest-competition-request"}}}}
+      # The remaining relay routes stay as environment variables, which application.yaml
+      # already reads. A Spring map merges by key across property sources, so these join
+      # the three above rather than replacing them, and OutboxRelayConfiguration skips any
+      # route whose URL is blank -- which is exactly how these sat unnoticed until now.
+      ROOM_LEDGER_OPEN_REQUEST_QUEUE_URL: http://localstack:4566/000000000000/room-ledger-open-request
+      ROOM_LEDGER_OPENED_QUEUE_URL: http://localstack:4566/000000000000/room-ledger-opened
+      ROOM_LEDGER_REJECTED_QUEUE_URL: http://localstack:4566/000000000000/room-ledger-rejected
+      CORPORATE_ACTION_APPROVAL_QUEUE_URL: http://localstack:4566/000000000000/corporate-action-approval
+      # The result consumer applies the ledger outcome back onto the room. It refuses to
+      # start unless both result URLs are present, so the two go together with this flag.
+      ROOM_LEDGER_RESULT_CONSUMER_ENABLED: "true"
     depends_on:
       flyway: {condition: service_completed_successfully}
       localstack: {condition: service_healthy}
@@ -329,6 +340,10 @@ services:
       TRADING_MARKET_EVENTS_REDIS_URI: redis://redis:6379
       TRADING_MARKET_EVENTS_REDIS_KEY_PREFIX: ${MARKET_EVENT_KEY_PREFIX:-i2s}
       TRADING_MARKET_EVENTS_CONSUMER_NAME: ${TRADING_CONSUMER_NAME:-trading-worker-local-1}
+      # Opens the ledger account a room participant needs. The poller reads pending
+      # requests from the shared outbox table rather than from a queue, so this flag is
+      # all it needs; the results it writes are relayed by backend-worker above.
+      TRADING_ROOM_ACCOUNT_OPEN_ENABLED: "true"
     depends_on:
       flyway: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
