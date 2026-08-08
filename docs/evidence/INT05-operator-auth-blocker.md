@@ -101,3 +101,10 @@ manifest 를 Git·Terraform state·CI 로그·이슈 댓글·PR 산출물에 두
 `local_path` 가 정확히 `alpaca-sip-rights.json` 이기를 요구한다. TF_VARS_JSON 의 iex 값은
 tfvars 에 쓰이기 전에 교체되는 죽은 값이다. 기록해 두는 이유는, 다음에 같은 로그를 읽는
 사람이 같은 오판을 반복하지 않게 하기 위해서다.
+
+## 인수인계 문서
+
+위 5단계 중 ①②(Cognito 운영자 생성, 일회성 `operator bootstrap`)는 자격증명을 다루므로
+사람이 수행한다. 그 두 단계만 떼어 그대로 따라할 수 있게 쓴 것이
+`docs/operator-auth-enablement-handoff.md` 다. 이 파일은 왜 막혔는지를, 그 파일은 무엇을
+하는지를 담는다.
