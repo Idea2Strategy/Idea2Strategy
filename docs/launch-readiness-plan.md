@@ -188,7 +188,7 @@ docker compose -f compose.back.yml --profile apps logs market-gateway | grep -iE
 ```bash
 # 조합을 띄우기 전에 항상
 git submodule update --init --recursive     # 포인터와 정확히 일치시킴
-pwsh scripts/dev.ps1 up -WithBackend        # -WithBackend 없으면 앱이 안 뜬다
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 up -WithBackend        # -WithBackend 없으면 앱이 안 뜬다
 ```
 자기 브랜치 작업 중이라 포인터와 다르다면, 조합 검증은 **포인터 기준의 별도 워크트리**에서 한다. 같은 체크아웃에서 브랜치를 옮겨가며 하면 다른 세션과 HEAD를 다투게 된다.
 
@@ -405,7 +405,7 @@ v1.0.0 이전이므로 `AGENTS.md`의 pre-v1.0 자세에 따라 권한자 지시
 
 ```bash
 # 지금 내가 할 수 있는 것 하나를 알려준다
-pwsh scripts/launch-status.ps1 -Owner hjcud     # kcrmin | pjy008008 | hjcud
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/launch-status.ps1 -Owner hjcud     # kcrmin | pjy008008 | hjcud
 ```
 
 **세션을 시작하는 법 — 위 스크립트 한 줄이 정식 경로다.**
@@ -449,14 +449,14 @@ cd data-pipeline && python -m pytest tests -m "not integration"
 cd ui && npm run typecheck && npx vitest run
 
 # 루트
-pwsh scripts/initialize-local-harness.ps1 -Verify
-pwsh scripts/verify-collaboration-policy.ps1
-pwsh scripts/refresh-flyway-ci-bundle.ps1         # gitlink 옮긴 커밋마다
-pwsh scripts/test-flyway-ci-bundle.ps1            # Docker 필요
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/initialize-local-harness.ps1 -Verify
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-collaboration-policy.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/refresh-flyway-ci-bundle.ps1         # gitlink 옮긴 커밋마다
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-flyway-ci-bundle.ps1            # Docker 필요
 
 # 조합
-pwsh scripts/dev.ps1 up
-pwsh scripts/verify-deployed-development.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 up
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deployed-development.ps1
 ```
 
 Docker Desktop이 꺼져 있으면 backend 271건과 `test-flyway-ci-bundle.ps1`이 조용히 skip/실패한다. **통합 검증 전에 Docker를 먼저 켠다.**

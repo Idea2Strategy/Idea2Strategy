@@ -1,15 +1,16 @@
 {
   "$comment": [
-    "출시 준비 작업 원장 — scripts/launch-status.ps1 이 읽는다.",
+    "출시 준비 작업 원장 — scripts/launch-status.mjs (정식) 와 scripts/launch-status.ps1 이 읽는다.",
     "",
     "왜 이 파일이 있는가: 담당자가 '지금 내 차례인가'를 사람 판단으로 알아내야 하면 반드시 틀린다.",
     "각 작업에 의존성과 기계가 검사할 수 있는 완료 조건을 적어두면 상태를 손으로 관리하지 않아도 된다.",
     "완료 여부는 검사 결과에서 나오므로 누가 체크박스를 켜는 것을 잊어도 틀리지 않는다.",
     "",
-    "kind:  repo = 이 저장소 파일만 보고 판정(어디서나 결정적) | db = DATABASE_URL 필요 | manual = evidence 파일 존재로 판정",
-    "check: PowerShell 식. repository 를 작업 디렉터리로 하여 실행되며 부작용이 없어야 한다.",
-    "서술과 근거는 docs/launch-readiness-plan.md 의 같은 절 번호에 있다.",
-    "JSON 인 이유: PowerShell 5.1 에 YAML 파서가 없다. 손으로 파싱하면 조용히 틀린다."
+    "kind:  repo = 저장소 파일만 보고 판정 | db = DATABASE_URL 필요 | manual = evidence 파일 존재로 판정",
+    "check: 선언적 형태다. 특정 셸의 코드가 아니므로 Node·PowerShell·다른 무엇이든 같은 판정을 낸다.",
+    "       file-contains | file-not-contains | file-exists | glob-contains | sql-equals | all",
+    "       path/glob 은 그 작업의 repository 를 기준으로 한 상대 경로다.",
+    "서술과 근거는 docs/launch-readiness-plan.md 의 같은 절 번호에 있다."
   ],
   "schema_version": 1,
   "plan": "docs/launch-readiness-plan.md",
@@ -53,7 +54,11 @@
       "repository": ".",
       "depends_on": [],
       "kind": "repo",
-      "check": "Select-String -Path compose.back.yml -Pattern 'TRADING_MARKET_EVENTS_REDIS_URI' -Quiet",
+      "check": {
+        "kind": "file-contains",
+        "path": "compose.back.yml",
+        "pattern": "TRADING_MARKET_EVENTS_REDIS_URI"
+      },
       "blocks_reason": "이게 없으면 로컬에서 라이브 경로가 아예 돌지 않아 INT03·INT06을 시작할 수 없다."
     },
     {
@@ -63,7 +68,11 @@
       "repository": ".",
       "depends_on": [],
       "kind": "repo",
-      "check": "Select-String -Path compose.back.yml -Pattern 'MARKET_GATEWAY_REDIS_URI' -Quiet",
+      "check": {
+        "kind": "file-contains",
+        "path": "compose.back.yml",
+        "pattern": "MARKET_GATEWAY_REDIS_URI"
+      },
       "blocks_reason": "게이트웨이가 발행하지 않으면 워커가 소비할 이벤트가 없다. Alpaca 키는 .env.docker로만 주입하고 커밋하지 않는다. instruments.json 생성 SQL은 scripts/aws/development-database-bootstrap.sh:529 참조."
     },
     {
@@ -75,7 +84,21 @@
         "2.1"
       ],
       "kind": "repo",
-      "check": "(Select-String -Path infra/docker/localstack/ready.d/10-create-queues.sh -Pattern 'room-ledger-opened' -Quiet) -and (Select-String -Path compose.back.yml -Pattern 'ROOM_LEDGER_OPENED_QUEUE_URL' -Quiet)",
+      "check": {
+        "kind": "all",
+        "checks": [
+          {
+            "kind": "file-contains",
+            "path": "infra/docker/localstack/ready.d/10-create-queues.sh",
+            "pattern": "room-ledger-opened"
+          },
+          {
+            "kind": "file-contains",
+            "path": "compose.back.yml",
+            "pattern": "ROOM_LEDGER_OPENED_QUEUE_URL"
+          }
+        ]
+      },
       "blocks_reason": "큐를 먼저 만들지 않고 플래그만 켜면 기동이 깨진다."
     },
     {
@@ -85,7 +108,11 @@
       "repository": ".",
       "depends_on": [],
       "kind": "repo",
-      "check": "Select-String -Path docs/development-start-guide.md -Pattern 'WithBackend' -Quiet"
+      "check": {
+        "kind": "file-contains",
+        "path": "docs/development-start-guide.md",
+        "pattern": "WithBackend"
+      }
     },
     {
       "id": "2.4",
@@ -94,7 +121,11 @@
       "repository": "data-pipeline",
       "depends_on": [],
       "kind": "db",
-      "check": "(Invoke-CanonicalQuery \"select count(distinct resolution) from market_data.dataset_manifests where status='AVAILABLE' and resolution in ('30m','1h','4h','1d')\") -eq 4",
+      "check": {
+        "kind": "sql-equals",
+        "expected": 4,
+        "sql": "select count(distinct resolution) from market_data.dataset_manifests where status='AVAILABLE' and resolution in ('30m','1h','4h','1d')"
+      },
       "blocks_reason": "30분봉이 UI 기본 시계다. 없으면 기본값으로 만든 전략이 백테스트되지 않는다."
     },
     {
@@ -106,7 +137,11 @@
         "2.4"
       ],
       "kind": "db",
-      "check": "(Invoke-CanonicalQuery \"select count(distinct d.resolution) from market_data.feature_materializations m join market_data.feature_definitions d on d.id = m.feature_definition_id where m.status='SUCCEEDED'\") -eq 4",
+      "check": {
+        "kind": "sql-equals",
+        "expected": 4,
+        "sql": "select count(distinct d.resolution) from market_data.feature_materializations m join market_data.feature_definitions d on d.id = m.feature_definition_id where m.status='SUCCEEDED'"
+      },
       "blocks_reason": "지표 값이 없으면 RSI 전략은 빈 시계열을 읽는다."
     },
     {
@@ -128,7 +163,11 @@
         "2.1"
       ],
       "kind": "repo",
-      "check": "Select-String -Path apps/trading-worker/src/test/java/com/idea2strategy/trading/worker/runtime/*.java -Pattern 'tradingDayIndexSurvivesARestart' -Quiet",
+      "check": {
+        "kind": "glob-contains",
+        "glob": "apps/trading-worker/src/test/java/com/idea2strategy/trading/worker/runtime/*.java",
+        "pattern": "tradingDayIndexSurvivesARestart"
+      },
       "blocks_reason": "INT06(재기동)이 이걸 고치지 않으면 정직하게 통과할 수 없다. 완료 표식은 tradingDayIndexSurvivesARestart 라는 이름의 테스트다 — 재기동 후에도 같은 봇의 schedule.tradingDayIndex 가 연속이고 같은 기간 백테스트 값과 일치함을 단언해야 한다. 'tradingDayIndex' 를 그냥 찾으면 기존 테스트에 걸려 오탐이 난다."
     },
     {
@@ -138,7 +177,11 @@
       "repository": "ui",
       "depends_on": [],
       "kind": "repo",
-      "check": "-not (Select-String -Path package.json -Pattern 'ui-prototypes' -Quiet)"
+      "check": {
+        "kind": "file-not-contains",
+        "path": "package.json",
+        "pattern": "ui-prototypes"
+      }
     },
     {
       "id": "6",
@@ -147,7 +190,10 @@
       "repository": ".",
       "depends_on": [],
       "kind": "repo",
-      "check": "Test-Path specs/product/decisions/decision.operations.slo.md",
+      "check": {
+        "kind": "file-exists",
+        "path": "specs/product/decisions/decision.operations.slo.md"
+      },
       "blocks_reason": "목표치가 없으면 INT07 합격 판정이 불가능하고 INT11도 닫히지 않는다. 보호 경로 변경이므로 권한자 지시를 PR 본문에 인용해야 한다."
     },
     {

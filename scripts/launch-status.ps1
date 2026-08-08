@@ -50,7 +50,7 @@ function Read-Ledger([string]$Path) {
             repository    = if ($item.repository) { [string]$item.repository } else { '.' }
             depends_on    = @($item.depends_on)
             kind          = if ($item.kind) { [string]$item.kind } else { 'manual' }
-            check         = if ($item.PSObject.Properties.Name -contains 'check') { [string]$item.check } else { '' }
+            check         = if ($item.PSObject.Properties.Name -contains 'check') { $item.check } else { $null }
             evidence      = if ($item.PSObject.Properties.Name -contains 'evidence') { [string]$item.evidence } else { '' }
             blocks_reason = if ($item.PSObject.Properties.Name -contains 'blocks_reason') { [string]$item.blocks_reason } else { '' }
         }
@@ -76,28 +76,68 @@ function Invoke-CanonicalQuery([string]$Sql) {
     return $text
 }
 
-function Test-TaskComplete($Task) {
-    switch ($Task.kind) {
-        'manual' {
-            if ([string]::IsNullOrWhiteSpace($Task.evidence)) { return $null }
-            return (Test-Path -LiteralPath (Join-Path $root $Task.evidence))
+# 원장의 검사는 선언적이다. 특정 셸의 코드를 실행하지 않으므로 다른 실행기가 같은 판정을
+# 낼 수 있고, 원장 내용이 곧 실행 코드가 되는 위험도 없다.
+# 판정할 수 없으면 $false 가 아니라 $null 을 돌려준다 — 모르는 것을 끝났다고 말하는 쪽이
+# 훨씬 비싸다.
+function Test-Check($Check, [string]$Base) {
+    if ($null -eq $Check) { return $null }
+    $kind = [string]$Check.kind
+
+    if ($kind -eq 'all') {
+        $verdict = $true
+        foreach ($inner in @($Check.checks)) {
+            $one = Test-Check $inner $Base
+            if ($null -eq $one) { return $null }
+            if (-not $one) { $verdict = $false }
         }
-        default {
-            if ([string]::IsNullOrWhiteSpace($Task.check)) { return $null }
-            $repoRoot = if ($Task.repository -eq '.') { $root } else { Join-Path $root $Task.repository }
-            if (-not (Test-Path -LiteralPath $repoRoot)) { return $null }
-            Push-Location $repoRoot
-            try {
-                $result = Invoke-Expression $Task.check
-                if ($null -eq $result) { return $null }
-                return [bool]$result
-            } catch {
-                # 검사 자체가 실패하면 모르는 것이다. done 으로 넘기지 않는다.
-                return $null
-            } finally {
-                Pop-Location
+        return $verdict
+    }
+
+    if ($kind -eq 'sql-equals') {
+        $value = Invoke-CanonicalQuery ([string]$Check.sql)
+        if ($null -eq $value) { return $null }
+        return ([string]$value -eq [string]$Check.expected)
+    }
+
+    if ($kind -eq 'glob-contains') {
+        $matched = @(Get-ChildItem -Path (Join-Path $Base ([string]$Check.glob)) -File -ErrorAction SilentlyContinue)
+        if ($matched.Count -eq 0) { return $false }
+        foreach ($file in $matched) {
+            if (Select-String -LiteralPath $file.FullName -Pattern ([string]$Check.pattern) -SimpleMatch -Quiet) {
+                return $true
             }
         }
+        return $false
+    }
+
+    $path = Join-Path $Base ([string]$Check.path)
+    switch ($kind) {
+        'file-exists' { return (Test-Path -LiteralPath $path) }
+        'file-contains' {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+            return [bool](Select-String -LiteralPath $path -Pattern ([string]$Check.pattern) -SimpleMatch -Quiet)
+        }
+        'file-not-contains' {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+            return -not (Select-String -LiteralPath $path -Pattern ([string]$Check.pattern) -SimpleMatch -Quiet)
+        }
+        default { return $null }
+    }
+}
+
+function Test-TaskComplete($Task) {
+    if ($Task.kind -eq 'manual') {
+        if ([string]::IsNullOrWhiteSpace($Task.evidence)) { return $null }
+        return (Test-Path -LiteralPath (Join-Path $root $Task.evidence))
+    }
+    if ($null -eq $Task.check) { return $null }
+    $repoRoot = if ($Task.repository -eq '.') { $root } else { Join-Path $root $Task.repository }
+    if (-not (Test-Path -LiteralPath $repoRoot)) { return $null }
+    try {
+        return Test-Check $Task.check $repoRoot
+    } catch {
+        return $null
     }
 }
 
@@ -191,7 +231,8 @@ if ($Owner) {
         Write-Host 'AGENTS.md 의 "Launch work loop" 절을 먼저 읽고 그대로 따른다. 내 소유'
         Write-Host "리포지터리($($task.repository)) 밖의 파일은 수정하지 않는다. feature 브랜치에서"
         Write-Host '작업하고 해당 develop 으로 PR 을 연다. 완료 판정은'
-        Write-Host "pwsh scripts/launch-status.ps1 -Owner $Owner 가 §$($task.id) 를 [x] 로 보고할 때다."
+        Write-Host "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/launch-status.ps1"
+        Write-Host "-Owner $Owner 가 §$($task.id) 를 [x] 로 보고할 때다."
         Write-Host ''
         Write-Host '────────────────────────────────────────────────────────────────────────────' -ForegroundColor Cyan
     }
