@@ -73,6 +73,37 @@
       "expires_at": "2026-08-14T16:35:35.3390992Z"
     },
     {
+      "id": "claim.customer-auth-email-flow-backend-pjy008008",
+      "work_id": "work.customer-auth-email-flow",
+      "definition_fingerprint": "sha256:c85784a9a2fed7fbcfbe26172d2ac2a9ccbae1d27bdaa8edb4a0e9d560956f92",
+      "status": "in_progress",
+      "owner": "pjy008008",
+      "branch": "fix/customer-auth-email-flow-backend",
+      "repository": "idea2strategy.backend,idea2strategy.platform,idea2strategy.ui",
+      "paths": [
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/identity/**",
+        "backend/apps/backend-api/src/test/java/com/idea2strategy/backend/api/identity/**",
+        "backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/identity/**",
+        "backend/modules/backend-application/src/test/java/com/idea2strategy/backend/application/identity/**",
+        "ui/src/**"
+      ],
+      "policy_ids": [],
+      "scenario_ids": [],
+      "contract_ids": [],
+      "db_entities": [],
+      "migration_slots": [],
+      "ui_flows": [],
+      "dependency_majors": [],
+      "stable_ids": [
+        "quality.accessibility",
+        "quality.failure-safety",
+        "ui.baseline.signal-studio"
+      ],
+      "root_pointer": true,
+      "starts_at": "2026-08-08T07:17:40.3898284Z",
+      "expires_at": "2026-08-09T07:17:40.2107068Z"
+    },
+    {
       "id": "claim.customer-stateless-jwt",
       "work_id": "work.customer-stateless-jwt",
       "definition_fingerprint": "sha256:2d745e05c5b8fb577b03fe49564a679b6541362bf2c403367720e0900c19662c",
