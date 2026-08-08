@@ -26,7 +26,7 @@ argument-hint: <owner>
 5. `feature/<이슈>-<이름>` 브랜치에서 작업한다. 다른 세션이 같은 체크아웃을 쓸 수 있으면
    워크트리를 만든다: `git worktree add ../worktrees/<이름> develop`
 6. 완료의 정의는 원장의 검사다. repo/db 작업은 `launch-status.ps1` 이 done 이라고 말해야 끝난
-   것이고, manual 작업(INT 카드)은 실제로 실행·관찰한 내용을 `.harness/local/evidence/<ID>.md`
+   것이고, manual 작업(INT 카드)은 실제로 실행·관찰한 내용을 `docs/evidence/<ID>.md`
    에 기록해야 끝난 것이다. 검사를 통과시키지 못했으면 완료라고 보고하지 않는다.
 7. 서브모듈 변경은 그 저장소의 develop 으로 PR(--squash 병합)을 열고, 루트 pointer 변경은
    별도 PR 로 연다. pointer 커밋에는 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/refresh-flyway-ci-bundle.ps1` 결과를 같은

@@ -418,7 +418,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/launch-status.ps
 
 어느 경로든 같은 원장(`docs/launch-readiness-tasks.json`)을 읽으므로 답이 갈릴 수 없다.
 2. 스크립트가 지목한 작업의 절을 이 문서에서 읽고, `해줘`(또는 해당 절 번호를 프롬프트에) — **문서 전체를 넣지 않는다.** 남의 리포지터리 지시가 3분의 2다.
-3. 완료 판정은 스크립트가 한다. `repo`/`db` 작업은 검사가 통과해야 끝난 것이고, `manual` 작업(INT 카드)은 `.harness/local/evidence/<ID>.md`에 무엇을 실행해 무엇을 관찰했는지 적어야 끝난 것이다. **검사를 통과시키는 것이 완료의 정의다** — 체크박스를 켜는 게 아니다.
+3. 완료 판정은 스크립트가 한다. `repo`/`db` 작업은 검사가 통과해야 끝난 것이고, `manual` 작업(INT 카드)은 `docs/evidence/<ID>.md`에 무엇을 실행해 무엇을 관찰했는지 적어야 끝난 것이다. **검사를 통과시키는 것이 완료의 정의다** — 체크박스를 켜는 게 아니다.
 4. 다 하면 스크립트를 다시 돌린다. 다음 작업이 나오거나, 누구를 기다리는지 나온다.
 
 **지켜지는 규칙은 훅이 강제한다 (기억할 필요 없음).** `scripts/initialize-local-harness.ps1`이 추적되는 `.githooks/`를 이 체크아웃에 붙이므로, Claude든 Codex든 사람이든 동일하게:

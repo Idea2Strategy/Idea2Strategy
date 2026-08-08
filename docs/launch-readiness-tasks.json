@@ -170,7 +170,7 @@
       "repository": ".",
       "depends_on": [],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/2.6-outbox-relay.md",
+      "evidence": "docs/evidence/2.6-outbox-relay.md",
       "blocks_reason": "false 이면 AWS에서 전략을 출시해도 자동 백테스트 요청이 큐로 나가지 않는다."
     },
     {
@@ -224,7 +224,7 @@
         "2.3"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT02.md"
+      "evidence": "docs/evidence/INT02.md"
     },
     {
       "id": "INT01",
@@ -235,7 +235,7 @@
         "INT02"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT01.md"
+      "evidence": "docs/evidence/INT01.md"
     },
     {
       "id": "INT03",
@@ -249,7 +249,7 @@
         "2.5"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT03.md"
+      "evidence": "docs/evidence/INT03.md"
     },
     {
       "id": "INT04",
@@ -260,7 +260,7 @@
         "2.2"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT04.md"
+      "evidence": "docs/evidence/INT04.md"
     },
     {
       "id": "INT05",
@@ -271,7 +271,7 @@
         "2.2"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT05.md"
+      "evidence": "docs/evidence/INT05.md"
     },
     {
       "id": "INT06",
@@ -284,7 +284,7 @@
         "3.1"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT06.md"
+      "evidence": "docs/evidence/INT06.md"
     },
     {
       "id": "INT07",
@@ -296,7 +296,7 @@
         "INT03"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT07.md"
+      "evidence": "docs/evidence/INT07.md"
     },
     {
       "id": "INT09",
@@ -307,7 +307,7 @@
         "INT02"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT09.md"
+      "evidence": "docs/evidence/INT09.md"
     },
     {
       "id": "INT10",
@@ -318,7 +318,7 @@
         "2.1"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT10.md"
+      "evidence": "docs/evidence/INT10.md"
     },
     {
       "id": "A90",
@@ -329,7 +329,7 @@
         "INT01"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/A90.md"
+      "evidence": "docs/evidence/A90.md"
     },
     {
       "id": "A91",
@@ -341,7 +341,7 @@
         "INT09"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/A91.md"
+      "evidence": "docs/evidence/A91.md"
     },
     {
       "id": "INT08",
@@ -353,7 +353,7 @@
         "A90"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT08.md"
+      "evidence": "docs/evidence/INT08.md"
     },
     {
       "id": "INT11",
@@ -375,7 +375,7 @@
         "A91"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT11.md"
+      "evidence": "docs/evidence/INT11.md"
     },
     {
       "id": "INT12",
@@ -386,7 +386,7 @@
         "INT11"
       ],
       "kind": "manual",
-      "evidence": ".harness/local/evidence/INT12.md"
+      "evidence": "docs/evidence/INT12.md"
     }
   ]
 }
