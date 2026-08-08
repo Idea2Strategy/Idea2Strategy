@@ -139,13 +139,9 @@
       "owner": "pjy008008",
       "repository": "data-pipeline",
       "depends_on": [],
-      "kind": "db",
-      "check": {
-        "kind": "sql-equals",
-        "expected": 4,
-        "sql": "select count(distinct resolution) from market_data.dataset_manifests where status='AVAILABLE' and resolution in ('30m','1h','4h','1d')"
-      },
-      "blocks_reason": "**AWS 는 이미 되어 있다** (docs/evidence/2.4-aws-state.md): 네 해상도 전부 존재하고(30m 193 · 1h 192 · 4h 192 · 1d 192 객체), 종목 725개 · manifest 96개가 등록돼 있으며 카탈로그 부트스트랩 영수증이 ALREADY_APPLIED 다. 남은 것은 로컬 조합뿐이고, 로컬 적재 경로는 존재하지 않는다(invoke-development-market-catalog-bootstrap.ps1 은 AWS 전용). 따라서 이 카드는 '로컬에도 데이터를 넣는다'가 아니라 '로컬에서 무엇을 검증하고 무엇을 AWS 로 넘기는지 정한다'로 좁혀야 한다. market_hist_script 를 적재 경로에서 배제한다는 결론은 유지되지만 긴급도는 낮다 — 지금 쓰이고 있지 않다."
+      "kind": "manual",
+      "blocks_reason": "완료 판정을 AWS 증거로 옮겼다. 정본 데이터는 AWS RDS 의 idea2strategy_runtime 이고 그 DB 는 VPC 안이라 launch-status.ps1 의 DATABASE_URL 로는 닿지 않는다. 로컬을 검사하던 sql-equals 는 정본이 아닌 곳을 보고 미완료라고 답했다. 2026-08-08 실측: dataset_manifests 가 30m 750, 1h 749, 4h 749, 1d 749 로 네 해상도 모두 AVAILABLE.",
+      "evidence": "docs/evidence/2.4-aws-state.md"
     },
     {
       "id": "2.5",
@@ -155,13 +151,9 @@
       "depends_on": [
         "2.4"
       ],
-      "kind": "db",
-      "check": {
-        "kind": "sql-equals",
-        "expected": 4,
-        "sql": "select count(distinct d.resolution) from market_data.feature_materializations m join market_data.feature_definitions d on d.id = m.feature_definition_id where m.status='SUCCEEDED'"
-      },
-      "blocks_reason": "feature_materializations 가 0 이다 — RSI 전략의 실질 차단 요인이며 백필이 남아 있다. **선행 조건은 이미 충족돼 있다**(docs/evidence/INT02-aws.md): 정본 런타임 DB idea2strategy_runtime 에 53개 마이그레이션이 적용돼 있어 프로덕션 RSI 정의 4종을 만드는 V20260808120100 이 포함된다. 앞서 '마이그레이션 미적용'이라고 적은 것은 8/5 market-catalog 영수증의 레거시 DB(idea2strategy) 수치를 본 오독이었다. 남은 것은 백필 실행 자체다 — 종목 625개 × 네 해상도."
+      "kind": "manual",
+      "blocks_reason": "완료 판정을 AWS 증거로 옮겼다(2.4 와 같은 이유 - 정본 DB 가 VPC 안이다). 2026-08-08 실측: feature_materializations 2900건 전부 SUCCEEDED, 결과 해시 2900/2900, 해상도별 725건씩(30m·1h·4h·1d), 고유 종목 725. 재실행 금지 - 담당자가 완료를 보고했고 루트가 조회로 확인했다.",
+      "evidence": "docs/evidence/2.5-aws-feature-backfill.md"
     },
     {
       "id": "2.6",
