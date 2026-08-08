@@ -59,6 +59,14 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Deployment runtime wiring checks failed."
     }
+
+    # Derives what backend-batch must be given from the batch source itself, so a newly added
+    # mandatory @Value is caught instead of waiting for the container to exit 1 unobserved. Prints
+    # that it skipped when the backend submodule is absent, which is the case in root CI.
+    & (Join-Path $PSScriptRoot "test-batch-runtime-properties.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "backend-batch mandatory runtime properties are not supplied by the development host."
+    }
 } finally {
     Pop-Location
 }
