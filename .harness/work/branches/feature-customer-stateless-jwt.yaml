@@ -1,0 +1,5 @@
+schema_version: 1
+work_id: work.customer-stateless-jwt
+claim_id: claim.customer-stateless-jwt
+branch: feature/customer-stateless-jwt
+baseline: pending-context-refresh
