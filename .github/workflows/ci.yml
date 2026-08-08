@@ -77,6 +77,9 @@ jobs:
       - name: Validate one-shot Development market catalog bootstrap boundaries
         shell: pwsh
         run: ./scripts/test-development-market-catalog-bootstrap.ps1
+      - name: Validate Development active-feed watermark wiring
+        shell: pwsh
+        run: ./scripts/test-development-pipeline-watermarks.ps1
       - name: Parse the market catalog host bootstrap
         shell: bash
         run: bash -n scripts/aws/development-market-catalog-bootstrap.sh

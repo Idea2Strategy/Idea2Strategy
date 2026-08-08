@@ -421,6 +421,12 @@ resource "aws_cloudwatch_event_target" "pipeline" {
   rule     = aws_cloudwatch_event_rule.pipeline[0].name
   arn      = aws_ecs_cluster.pipeline[0].arn
   role_arn = aws_iam_role.pipeline_events[0].arn
+  input = jsonencode({
+    containerOverrides = [{
+      name    = "pipeline-worker"
+      command = ["--publish-manifest-watermarks"]
+    }]
+  })
 
   ecs_target {
     task_definition_arn = aws_ecs_task_definition.pipeline[0].arn
