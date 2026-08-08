@@ -4,7 +4,9 @@ Date: 2026-08-09 KST
 
 Environment: AWS Development (`ap-northeast-2`, account `418553863687`)
 
-Root revision tested: `6ec540eb32aff6150a187a0a58c8515f3717b380`
+Initial journey revision: `6ec540eb32aff6150a187a0a58c8515f3717b380`
+
+Latest deployed revision verified: `b31b9b8d16078c915d130f730bfc210c7618e755`
 
 This is partial evidence only. It deliberately does not create `docs/evidence/INT03.md`, because an
 automatic backtest has not completed and the personal bot run, order/fill, and stop sequence has not
@@ -21,6 +23,13 @@ jobs successfully. The service host then reported backend image digest
 `sha256:5a8e8c5dc4d0d6dae9fea2dfc5073a63fbfdf628bb9600a9eddb4f35fc09c774`, started at
 `2026-08-08T17:20:37Z`. The release permission failure recorded by the previous revision of this file
 is therefore fixed and deployed.
+
+Backend #243, data-pipeline #57/#58, and root pointer/wiring PRs #444/#445 were subsequently merged.
+Development release run
+[31273180619](https://github.com/Idea2Strategy/Idea2Strategy/actions/runs/31273180619) completed
+successfully for root `b31b9b8d16078c915d130f730bfc210c7618e755`. A fresh
+`scripts/verify-deployed-development.ps1` run passed the frontend, backend, backtest, SSM, Core,
+RDS, Valkey, queue, and CloudWatch checks against that deployment.
 
 The published launch inputs used by the journey were:
 
@@ -66,9 +75,25 @@ The worker then rejected two distinct contract defects before any attempt began:
    `request.runId()`, while the official message identity and the backtest transport validator use
    `request.botId()`.
 
-The second defect is tracked as
+The second defect was tracked as
 [Idea2Strategy-backend #243](https://github.com/Idea2Strategy/Idea2Strategy-backend/issues/243),
-assigned to `kcrmin`. Poison messages were inspected without deletion and were not redriven.
+and its fix is now deployed. Poison messages were inspected without deletion and were not redriven.
+
+After that deployment, a fresh RSI release produced run
+`4071b877-1aaf-36b7-b473-df559881a45c`. Its corrected request reached the BASIC request queue and
+was received by the healthy worker, but the run remained `QUEUED` with `attempt_count=0`. The worker
+log showed that request claiming failed while reading `operations.outbox_messages`:
+
+```text
+psycopg.errors.InsufficientPrivilege: permission denied for schema operations
+backtest request intake poll failed; retrying
+```
+
+The deployed `idea2strategy_backtest` role has no `operations` schema usage or table privileges,
+while `PostgresRequestReceiptStore` reads `operations.outbox_messages` and writes
+`operations.outbox_consumer_receipts`. This new runtime ACL defect is tracked as
+[Idea2Strategy-backend #245](https://github.com/Idea2Strategy/Idea2Strategy-backend/issues/245),
+assigned to `kcrmin`.
 
 ## Personal bot execution observations
 
@@ -84,17 +109,23 @@ feature's `30m` resolution, zero qualifying `market_data.stream_watermarks` rows
 ingestion timestamp. `POST /api/v1/bots/456b1a35-ca12-397d-b4d4-5e181d73174b/run` consequently
 returned 409. Orders, fills, and judgment logs all remained empty.
 
-The missing product-path watermarks are tracked as
+The missing product-path watermarks were tracked as
 [Idea2Strategy-data-pipeline #57](https://github.com/Idea2Strategy/Idea2Strategy-data-pipeline/issues/57),
-assigned to `pjy008008`. No watermark or other product state was inserted manually.
+and the code and Development schedule are now deployed. However, a post-deployment read-only query
+still observed five active `30m` feeds and zero qualifying watermark rows. The EventBridge schedule
+runs at `23:30 UTC` on weekdays; the deployment completed on Saturday UTC, so the first ordinary
+scheduled opportunity is Monday `23:30 UTC` (Tuesday `08:30 KST`). Until that run publishes a
+watermark, personal bot preflight is expected to remain `DATA_NOT_READY`. No schedule was invoked
+manually and no watermark or other product state was inserted.
 
 ## Resume criteria
 
-Resume INT03 after both owner fixes are merged and deployed:
+Resume INT03 after the remaining runtime prerequisite and scheduled data publication are complete:
 
-1. backend #243 publishes the BASIC official request transport aggregate as the payload `botId`;
-2. data-pipeline #57 makes the official ingestion path create and advance active feed watermarks;
-3. create a fresh RSI release rather than redriving either poison request;
+1. backend #245 grants the backtest runtime only the operations-outbox privileges required by request
+   intake, refreshes the root Flyway bundle, and deploys it;
+2. the official weekday EventBridge run creates and advances the active feed watermark;
+3. create a fresh RSI release rather than redriving any previous request;
 4. verify the automatic backtest reaches `COMPLETED` and record its result hash and order/fill evidence;
 5. verify personal bot preflight, run, judgment, virtual order/fill, and stop in order;
 6. only then replace this partial record with `docs/evidence/INT03.md`.
