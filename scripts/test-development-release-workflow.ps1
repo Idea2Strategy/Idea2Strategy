@@ -212,7 +212,10 @@ foreach ($token in @(
     'function Invoke-PublicProbeWithRetry',
     'Start-Sleep -Seconds $PublicProbeIntervalSeconds',
     'TryAddWithoutValidation(''Origin'', $serviceUrl)',
-    '-Label ''market-data WebSocket handshake'''
+    '-Label ''market-data WebSocket handshake''',
+    '[System.Net.HttpStatusCode]::Forbidden',
+    '--resolve origin.ideatostrategy.com:443:127.0.0.1',
+    'CORE_WEBSOCKET_ROUTE_READY'
 )) {
     if (-not $deployedVerifier.Contains($token)) {
         throw "Public post-deploy verification must tolerate bounded CloudFront propagation: $token"
