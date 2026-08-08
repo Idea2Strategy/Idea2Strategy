@@ -141,6 +141,19 @@ competition_leaderboard_result_source_guard | deferrable=true | initdeferred=fal
 오늘 `data-pipeline` 이 그 경로를 여덟 번 고쳤다(#48~#55). 백필이 돌면 이 문서를 이어
 `docs/evidence/INT04.md` 로 닫는다.
 
+### 갱신 (2026-08-08 저녁) — 이 선행은 해소되었고, 그 자리에서 다른 벽을 만났다
+
+지표 백필은 완료되었다(`docs/evidence/2.5-aws-feature-backfill.md`, 2,900건). backend #241 도
+해소되어 공식 릴리스가 201 을 반환하므로 봇도 만들 수 있다. 그래서 위 표의 "봇이 필요하다" 는
+더 이상 막는 것이 아니다.
+
+**그다음이 막힌다.** 방이 `DRAFT` 에서 나오지 못한다 — 전이를 수행하는 `backend-batch` 가 기동하지
+못했고(루트 PR #441 에서 고침), 기동한 뒤에는 `idea2strategy_batch` 역할이 `competition.rooms` 에
+`UPDATE` 가 없어 거부된다. 넘긴 곳은 trading-engine #153 이다.
+
+관찰과 근거는 `docs/evidence/INT04-batch-blocker.md` 에 있다. **이 문서를 닫는 순서가 바뀌었으니
+그쪽을 먼저 읽는다.**
+
 ## 정리
 
 이 시험이 만든 방(`287c762e-5dfb-4895-8897-f8a9e825f8a5`)과 계정은 Development 에 남겨 둔다 —
