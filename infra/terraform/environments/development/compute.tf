@@ -19,7 +19,7 @@ resource "aws_instance" "service" {
     configure_public_origin                     = local.enable_public_edge
     origin_domain_name                          = var.origin_domain_name
     origin_header_secret_arn                    = try(aws_secretsmanager_secret.cloudfront_origin_header[0].arn, "")
-    origin_certificate_secret_arn               = try(aws_secretsmanager_secret.core_origin_certificate[0].arn, "")
+    origin_certificate_secret_name              = "${local.name_prefix}/edge/origin-certificate"
     backend_port                                = 8080
     database_host                               = aws_db_instance.this.address
     database_name                               = var.runtime_database_name
@@ -140,7 +140,7 @@ resource "aws_instance" "trading" {
     configure_public_origin                     = false
     origin_domain_name                          = ""
     origin_header_secret_arn                    = ""
-    origin_certificate_secret_arn               = ""
+    origin_certificate_secret_name              = ""
     backend_port                                = 0
     database_host                               = aws_db_instance.this.address
     database_name                               = var.runtime_database_name
@@ -275,7 +275,7 @@ resource "aws_launch_template" "backtest" {
     configure_public_origin                     = false
     origin_domain_name                          = ""
     origin_header_secret_arn                    = ""
-    origin_certificate_secret_arn               = ""
+    origin_certificate_secret_name              = ""
     backend_port                                = 0
     database_host                               = aws_db_instance.this.address
     database_name                               = var.runtime_database_name

@@ -982,7 +982,7 @@ install -d -m 0700 "$certificate_root"
 
 if aws secretsmanager get-secret-value \
     --region '${aws_region}' \
-    --secret-id '${origin_certificate_secret_arn}' \
+    --secret-id '${origin_certificate_secret_name}' \
     --query SecretString \
     --output text >"$certificate_bundle" 2>/dev/null && \
   jq -e '(.fullchain | type == "string" and length > 0) and (.privkey | type == "string" and length > 0)' \
@@ -1020,7 +1020,7 @@ if test "$certificate_is_reusable" != true; then
     '{fullchain: $fullchain, privkey: $privkey}' >"$certificate_bundle"
   aws secretsmanager put-secret-value \
     --region '${aws_region}' \
-    --secret-id '${origin_certificate_secret_arn}' \
+    --secret-id '${origin_certificate_secret_name}' \
     --secret-string "file://$certificate_bundle" >/dev/null
 fi
 
