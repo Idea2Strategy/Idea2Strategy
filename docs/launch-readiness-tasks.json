@@ -174,6 +174,20 @@
       "blocks_reason": "false 이면 AWS에서 전략을 출시해도 자동 백테스트 요청이 큐로 나가지 않는다."
     },
     {
+      "id": "2.7",
+      "title": "data-pipeline 의 vendored central-migration fixture 에서 자기 기여 파일 제거",
+      "owner": "pjy008008",
+      "repository": "data-pipeline",
+      "depends_on": [],
+      "kind": "repo",
+      "check": {
+        "kind": "file-not-contains",
+        "path": "db/migration-contributions/fixtures/central-migration.sha256",
+        "pattern": "pipeline_seed_production_rsi_timeframes"
+      },
+      "blocks_reason": "integration 표식 테스트 105건이 이것 하나로 error 가 된다: conftest 의 _cross_check 가 'vendored copy has migrations the central bundle does not' 로 실패한다. fixture 가 backend 중앙 세트(42개)가 아니라 조립된 번들에서 갱신돼 data-pipeline 자기 기여인 V20260808120100__pipeline_seed_production_rsi_timeframes.sql 이 섞였다. 그 파일과 central-migration.sha256 의 해당 줄을 지우면 된다 — backtest-engine 에서 같은 결함을 root #70 으로 이미 고쳤으니 그 커밋이 참고가 된다. Docker 없이는 이 테스트들이 아예 skip 되어 보이지 않았다."
+    },
+    {
       "id": "3.1",
       "title": "재기동이 SCHEDULE 주기 위상을 바꾸지 않게 한다 (제품 판단 선행)",
       "owner": "pjy008008",
@@ -224,7 +238,8 @@
         "2.3"
       ],
       "kind": "manual",
-      "evidence": "docs/evidence/INT02.md"
+      "evidence": "docs/evidence/INT02.md",
+      "blocks_reason": "부분 진행이 docs/evidence/INT02-partial.md 에 기록돼 있다: 빈 PostgreSQL 에 53개 마이그레이션 적용(테이블 179, 2회차 pending 0), 런타임 권한 계약 통과, 부트스트랩 경계 계약 통과, backend 897 테스트 skip 0 실패 0. 남은 세 가지가 있어 카드는 열어 둔다 — (1) 직전 release snapshot 위에서의 마이그레이션(v1.0 전이라 스냅샷 정의부터 필요), (2) rollback 절차(적용된 마이그레이션은 불변이므로 스냅샷 복원 절차이며 문서·스크립트가 아직 없다), (3) AWS RDS 에서의 실제 리허설. 이 셋이 끝나면 파일명을 docs/evidence/INT02.md 로 바꿔 카드를 닫는다."
     },
     {
       "id": "INT01",
