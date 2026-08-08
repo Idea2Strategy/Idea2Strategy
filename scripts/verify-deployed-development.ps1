@@ -3,7 +3,9 @@ param(
     [string]$TerraformRoot = "infra/terraform/environments/development",
     [string]$AwsProfile = "idea2strategy-terraform",
     [string]$AwsRegion = "ap-northeast-2",
-    [Parameter(Mandatory = $true)][ValidatePattern('^\d{12}$')][string]$ExpectedAwsAccountId
+    [Parameter(Mandatory = $true)][ValidatePattern('^\d{12}$')][string]$ExpectedAwsAccountId,
+    [ValidateRange(30, 600)][int]$PublicProbeTimeoutSeconds = 300,
+    [ValidateRange(1, 30)][int]$PublicProbeIntervalSeconds = 5
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +27,30 @@ function Invoke-AwsJson([string[]]$Arguments) {
     $result = & $awsExecutable @Arguments @awsCommonArguments
     if ($LASTEXITCODE -ne 0) { throw "AWS read-only verification failed." }
     return $result | ConvertFrom-Json
+}
+
+function Invoke-PublicProbeWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][scriptblock]$Probe,
+        [Parameter(Mandatory = $true)][scriptblock]$IsSuccessful
+    )
+
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($PublicProbeTimeoutSeconds)
+    $lastFailure = 'probe did not run'
+    while ($true) {
+        try {
+            $result = & $Probe
+            if (& $IsSuccessful $result) { return $result }
+            $lastFailure = "unexpected result '$result'"
+        }
+        catch {
+            $lastFailure = $_.Exception.Message
+        }
+        if ([DateTimeOffset]::UtcNow -ge $deadline) { break }
+        Start-Sleep -Seconds $PublicProbeIntervalSeconds
+    }
+    throw "$Label did not become ready within $PublicProbeTimeoutSeconds seconds. Last failure: $lastFailure"
 }
 
 $caller = Invoke-AwsJson -Arguments @('sts', 'get-caller-identity')
@@ -52,15 +78,15 @@ if ([string]$outputs.aws_account_id.value -cne $ExpectedAwsAccountId) { throw "T
 $serviceUrl = ([string]$outputs.service_url.value).TrimEnd('/')
 if ($serviceUrl -notmatch '^https://') { throw "Applied service URL is not HTTPS." }
 
-$frontend = Invoke-WebRequest -Uri "$serviceUrl/" -Method Get -TimeoutSec 30 -MaximumRedirection 3 -UseBasicParsing
-if ($frontend.StatusCode -ne 200 -or [string]::IsNullOrWhiteSpace($frontend.Content)) {
-    throw "Frontend did not return a non-empty HTTP 200 response."
-}
+$frontend = Invoke-PublicProbeWithRetry `
+    -Label 'frontend' `
+    -Probe { Invoke-WebRequest -Uri "$serviceUrl/" -Method Get -TimeoutSec 30 -MaximumRedirection 3 -UseBasicParsing } `
+    -IsSuccessful { param($response) $response.StatusCode -eq 200 -and -not [string]::IsNullOrWhiteSpace($response.Content) }
 foreach ($component in @('backend', 'backtest')) {
-    $health = Invoke-WebRequest -Uri "$serviceUrl/api/healthz/$component" -Method Get -TimeoutSec 30 -UseBasicParsing
-    if ($health.StatusCode -ne 200 -or [string]::IsNullOrWhiteSpace($health.Content)) {
-        throw "$component health check failed."
-    }
+    $health = Invoke-PublicProbeWithRetry `
+        -Label "$component health" `
+        -Probe { Invoke-WebRequest -Uri "$serviceUrl/api/healthz/$component" -Method Get -TimeoutSec 30 -UseBasicParsing } `
+        -IsSuccessful { param($response) $response.StatusCode -eq 200 -and -not [string]::IsNullOrWhiteSpace($response.Content) }
 }
 
 # An invalid single-use ticket must reach the backend WebSocket handshake and be
@@ -68,25 +94,33 @@ foreach ($component in @('backend', 'backtest')) {
 # status, so this also proves the public CloudFront -> Nginx -> backend route.
 Add-Type -AssemblyName System.Net.Http
 $webSocketProbeClient = [System.Net.Http.HttpClient]::new()
-$webSocketProbe = [System.Net.Http.HttpRequestMessage]::new(
-    [System.Net.Http.HttpMethod]::Get,
-    "$serviceUrl/ws/v1/market-data/prices?ticket=invalid-deployment-smoke"
-)
-$webSocketProbe.Version = [Version]::new(1, 1)
-[void]$webSocketProbe.Headers.TryAddWithoutValidation('Connection', 'Upgrade')
-[void]$webSocketProbe.Headers.TryAddWithoutValidation('Upgrade', 'websocket')
-[void]$webSocketProbe.Headers.TryAddWithoutValidation('Sec-WebSocket-Version', '13')
-[void]$webSocketProbe.Headers.TryAddWithoutValidation('Sec-WebSocket-Key', 'aWRlYTJzdHJhdGVneTEyMw==')
-$webSocketProbeResponse = $null
 try {
-    $webSocketProbeResponse = $webSocketProbeClient.SendAsync($webSocketProbe).GetAwaiter().GetResult()
-    if ($webSocketProbeResponse.StatusCode -ne [System.Net.HttpStatusCode]::Unauthorized) {
-        throw "Public market-data WebSocket handshake returned $([int]$webSocketProbeResponse.StatusCode), expected 401 for an invalid ticket."
-    }
+    [void](Invoke-PublicProbeWithRetry `
+        -Label 'market-data WebSocket handshake' `
+        -Probe {
+            $webSocketProbe = [System.Net.Http.HttpRequestMessage]::new(
+                [System.Net.Http.HttpMethod]::Get,
+                "$serviceUrl/ws/v1/market-data/prices?ticket=invalid-deployment-smoke"
+            )
+            $webSocketProbe.Version = [Version]::new(1, 1)
+            [void]$webSocketProbe.Headers.TryAddWithoutValidation('Connection', 'Upgrade')
+            [void]$webSocketProbe.Headers.TryAddWithoutValidation('Upgrade', 'websocket')
+            [void]$webSocketProbe.Headers.TryAddWithoutValidation('Origin', $serviceUrl)
+            [void]$webSocketProbe.Headers.TryAddWithoutValidation('Sec-WebSocket-Version', '13')
+            [void]$webSocketProbe.Headers.TryAddWithoutValidation('Sec-WebSocket-Key', 'aWRlYTJzdHJhdGVneTEyMw==')
+            $webSocketProbeResponse = $null
+            try {
+                $webSocketProbeResponse = $webSocketProbeClient.SendAsync($webSocketProbe).GetAwaiter().GetResult()
+                return [int]$webSocketProbeResponse.StatusCode
+            }
+            finally {
+                if ($null -ne $webSocketProbeResponse) { $webSocketProbeResponse.Dispose() }
+                $webSocketProbe.Dispose()
+            }
+        } `
+        -IsSuccessful { param($statusCode) $statusCode -eq [int][System.Net.HttpStatusCode]::Unauthorized })
 }
 finally {
-    if ($null -ne $webSocketProbeResponse) { $webSocketProbeResponse.Dispose() }
-    $webSocketProbe.Dispose()
     $webSocketProbeClient.Dispose()
 }
 
