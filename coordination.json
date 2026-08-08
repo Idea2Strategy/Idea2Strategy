@@ -2,6 +2,77 @@
   "schema_version": 1,
   "claims": [
     {
+      "id": "claim.account-settings-experience",
+      "work_id": "work.complete-product-flows",
+      "definition_fingerprint": "sha256:a1183ce220310142ff3bc20d626496bc983ca5fa7c9e81a11f2168e106af2603",
+      "status": "in_progress",
+      "owner": "local",
+      "branch": "fix/account-settings-experience",
+      "repository": "idea2strategy.platform",
+      "paths": [
+        ".github/workflows/**",
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/backtest/**",
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/botcontrol/**",
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/competition/**",
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/dashboard/**",
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/identity/**",
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/notification/**",
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/operatorrbac/**",
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/strategy/**",
+        "backend/apps/backend-api/src/main/java/com/idea2strategy/backend/api/usercase/**",
+        "backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/dashboard/**",
+        "backend/modules/backend-application/src/main/java/com/idea2strategy/backend/application/strategy/**",
+        "backend/modules/backend-persistence/src/main/java/com/idea2strategy/backend/persistence/dashboard/**",
+        "backtest-engine/src/backtest_engine/**",
+        "infra/terraform/environments/development/**",
+        "trading-engine/apps/market-gateway/**",
+        "ui/e2e/**",
+        "ui/src/**"
+      ],
+      "policy_ids": [
+        "policy.comparison.bots-only",
+        "policy.execution.server-only",
+        "policy.privacy.strategy-private",
+        "policy.strategy.immutable-release"
+      ],
+      "scenario_ids": [
+        "scenario.account.sanction",
+        "scenario.bot.evaluate",
+        "scenario.room.finish",
+        "scenario.strategy.release"
+      ],
+      "contract_ids": [
+        "contract.operations.operator-rbac.v1",
+        "contract.operations.user-case.v1"
+      ],
+      "db_entities": [],
+      "migration_slots": [],
+      "ui_flows": [
+        "ui.backtest.results",
+        "ui.bot.operations",
+        "ui.operator.work",
+        "ui.room.lifecycle",
+        "ui.strategy.authoring"
+      ],
+      "dependency_majors": [],
+      "stable_ids": [
+        "journey.backtest.review",
+        "journey.bot.operate",
+        "journey.operator.administer",
+        "journey.room.compare",
+        "journey.strategy.author",
+        "ui.backtest.results",
+        "ui.baseline.signal-studio",
+        "ui.bot.operations",
+        "ui.operator.work",
+        "ui.room.lifecycle",
+        "ui.strategy.authoring"
+      ],
+      "root_pointer": true,
+      "starts_at": "2026-08-08T20:41:09.8571998Z",
+      "expires_at": "2026-08-09T20:41:09.7228422Z"
+    },
+    {
       "id": "claim.backtest-production-completion",
       "work_id": "work.backtest-production-completion",
       "definition_fingerprint": "sha256:c30c9b92df39c58636d9b8842b5d56815ca00c963a14b94f51973c0c03ec0493",
