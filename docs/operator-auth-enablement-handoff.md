@@ -1,11 +1,11 @@
-# 운영자 인증 켜기 — 자격증명 담당자 인수인계
+# 운영자 인증 켜기 — 실행 절차
 
-INT05(운영자 E2E)를 하려면 먼저 배포된 환경에서 운영자 인증이 켜져야 한다. 그 과정에
-**사람만 할 수 있는 두 단계**가 있고, 이 문서는 그 두 단계만 다룬다. 나머지는 이 문서를 받은
-사람이 "끝났다"고 알려주면 `kcrmin` 세션이 이어서 처리한다.
+**독자는 명령을 직접 치는 사람(`kcrmin`)이다.** 다른 사람에게 보내는 문서가 아니다. 발급·준비를
+요청할 때 보낼 것은 `docs/operator-auth-provisioning-request.md` 다.
 
-받는 사람에게 필요한 것: AWS Development 계정(`418553863687`, `ap-northeast-2`) 접근 권한과
-MFA. 코드 지식은 필요 없다.
+INT05(운영자 E2E)를 하려면 먼저 배포된 환경에서 운영자 인증이 켜져야 한다. 이 문서는 그 중
+자격증명을 손에 들고 해야 하는 부분 — Cognito 운영자 계정과 일회성 `operator bootstrap` —
+을 순서대로 적는다.
 
 ## 왜 사람이 해야 하는가
 
@@ -66,14 +66,12 @@ issuer, subject, Cognito 토큰, HMAC 키, 계산한 다이제스트, 데이터�
 - CI 로그, Terraform state
 - 공유 드라이브
 
-**이 작업을 요청한 사람에게도 보내지 않는다.** `kcrmin` 도 포함이다. 아래
-"끝나면 알려줄 것" 세 줄에 비밀값이 필요한 항목이 하나도 없다 — 이어지는 작업은
-`proposals/.../catalog.json` 에 이미 있는 값과 Terraform 변수만 쓴다. 그러니 키를
-전달해야 할 상황이 생기면 그건 절차를 잘못 읽은 것이므로 멈추고 물어보는 편이 맞다.
-
-키가 한 번 채팅이나 메일에 나오면 그 시점에 유출이다. 되돌리는 방법은
+**누구에게도 보내지 않는다.** 팀원에게도, 나중에 참고하려고 메모 앱에도. 키가 한 번
+채팅이나 메일에 나오면 그 시점에 유출이고, 되돌리는 방법은
 `random_password.operator_subject_hmac` 을 재생성해 시크릿을 갱신하고 부트스트랩을 다시
-하는 것뿐이므로, 애초에 내보내지 않는 것이 훨씬 싸다.
+하는 것뿐이다. 애초에 내보내지 않는 것이 훨씬 싸다.
+
+값은 이 셸 세션 안에서만 살아 있으면 된다. 다음 단계로 넘길 것이 아무것도 없다.
 
 명령 자체는 manifest·자격증명·다이제스트·actor 를 출력하지 않도록 만들어져 있다
 (`backend/apps/idea2strategy-cli/README.md`). 사람이 실수로 붙여넣는 것만 막으면 된다.
@@ -110,10 +108,15 @@ python -c "import uuid;[print(uuid.uuid4()) for _ in range(5)]"
 (`infra/terraform/environments/development/templates/ec2-user-data.sh.tftpl:329` 에
 `OPERATOR_AUTH_CURRENT_HMAC_KEY_VERSION=1`).
 
-`0` 으로 두면 부트스트랩은 성공하지만 backend 가 버전 1로 조회하므로 운영자 로그인이 매칭에
-실패한다. 오류 메시지가 원인을 알려주지 않는 종류의 실패다.
+`0` 으로 두면 데이터베이스가 거부한다 —
+`V20260802232000__backend_operator_trust.sql:48` 의
+`CONSTRAINT operator_bootstrap_key_version_positive CHECK (external_identity_key_version > 0)`
+가 있다. 즉 조용히 잘못되지 않고 그 자리에서 실패한다. 다만 왜 실패했는지 짐작하며 시간을
+쓰지 않도록 미리 적어 둔다.
 
-**`"externalIdentityKeyVersion": 1` 로 바꾼다.**
+**`"externalIdentityKeyVersion": 1` 로 바꾼다.** 배포되는 값과 같아야 한다. `2` 이상을
+넣으면 제약은 통과하지만 backend 가 버전 1로 조회하므로 로그인이 매칭에 실패한다 — 이쪽이
+조용한 실패다.
 
 (참고: backend CLI 의 통합 시험도 `externalIdentityKeyVersion: 1` 을 쓴다. 템플릿의 `0` 이
 잘못된 값이다. 이 불일치는 별도로 고칠 예정이다.)
@@ -219,16 +222,16 @@ idea2strategy operator bootstrap \
 
 ---
 
-# 끝나면 알려줄 것
+# 끝나면 기록할 것
 
-이 세 줄만 알려주면 된다. **어떤 비밀값도 포함하지 않는다.**
+증거로 남길 것은 세 줄이고, **어떤 비밀값도 포함하지 않는다.** 그대로
+`docs/evidence/INT05.md` 의 재료가 된다.
 
-1. Cognito 운영자 계정 생성 완료 — MFA 등록 여부(예/아니오)
-2. `operator bootstrap` 종료 코드 (`0` 이면 성공) 와 `{"ok":true,...}` 응답의
-   `command` 필드
-3. `externalIdentityKeyVersion` 에 최종적으로 넣은 값 (`1` 이어야 한다)
+1. Cognito 운영자 계정 생성 완료 — MFA 등록 여부
+2. `operator bootstrap` 종료 코드(`0` 이면 성공)와 `{"ok":true,...}` 응답의 `command` 필드
+3. `externalIdentityKeyVersion` 에 최종적으로 넣은 값 (`1`)
 
-받으면 `kcrmin` 세션이 이어서 한다.
+그다음 남은 작업은 자격증명이 없으므로 에이전트가 한다.
 
 - `vars.TF_VARS_JSON` 에 `operator_rbac_catalog_version`, 나머지 RBAC·케이스·제재 권한
   UUID 15개, MFA 보증 설정을 넣고 `enable_operator_auth` 를 `true` 로 바꾼다.
