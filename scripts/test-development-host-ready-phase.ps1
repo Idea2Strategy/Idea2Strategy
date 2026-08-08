@@ -101,11 +101,46 @@ foreach ($publicEdgeBoundary in @(
 foreach ($required in @(
     'configure_public_origin                     = local.enable_public_edge',
     'origin_header_secret_arn                    = try(aws_secretsmanager_secret.cloudfront_origin_header[0].arn, "")',
+    'origin_certificate_secret_arn               = try(aws_secretsmanager_secret.core_origin_certificate[0].arn, "")',
     'runtime_role == "service" && configure_public_origin'
 )) {
     if (-not ((Contains-NormalizedWhitespace $compute $required) -or
         (Contains-NormalizedWhitespace $userData $required))) {
         throw "Pre-delegation Core bootstrap boundary is missing: $required"
+    }
+}
+
+foreach ($required in @(
+    'resource "aws_secretsmanager_secret" "core_origin_certificate"',
+    'name                    = "${local.name_prefix}/edge/origin-certificate"',
+    'recovery_window_in_days = 30',
+    'prevent_destroy = true'
+)) {
+    if (-not $security.Contains($required)) {
+        throw "Persistent Core origin certificate boundary is missing: $required"
+    }
+}
+if ($security.Contains('resource "aws_secretsmanager_secret_version" "core_origin_certificate"')) {
+    throw "Terraform must not own the runtime-renewed Core origin certificate value."
+}
+foreach ($required in @(
+    'secretsmanager:GetSecretValue',
+    'secretsmanager:PutSecretValue',
+    'aws_secretsmanager_secret.core_origin_certificate[0].arn'
+)) {
+    if (-not $iam.Contains($required)) {
+        throw "Core certificate persistence IAM boundary is missing: $required"
+    }
+}
+foreach ($required in @(
+    'openssl x509 -checkend 2592000 -noout',
+    '--domain ''tls.${origin_domain_name}''',
+    '--secret-string "file://$certificate_bundle"',
+    '/etc/idea2strategy/origin-tls/fullchain.pem',
+    '/etc/idea2strategy/origin-tls/privkey.pem'
+)) {
+    if (-not $userData.Contains($required)) {
+        throw "Core certificate restore/renewal boundary is missing: $required"
     }
 }
 

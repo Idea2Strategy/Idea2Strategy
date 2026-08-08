@@ -432,6 +432,14 @@ data "aws_iam_policy_document" "service_origin_tls" {
     actions   = ["secretsmanager:GetSecretValue"]
     resources = [aws_secretsmanager_secret.cloudfront_origin_header[0].arn]
   }
+  statement {
+    actions = [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:PutSecretValue"
+    ]
+    resources = [aws_secretsmanager_secret.core_origin_certificate[0].arn]
+  }
 }
 
 resource "aws_iam_role_policy" "service_origin_tls" {
