@@ -124,3 +124,155 @@ POST /api/v1/operations/rbac/assignments/revocations
 | 모든 운영자 서비스가 인증 강제 | 통과 — 7/7 |
 | 인증이 필터가 아니라 핸들러에 있음 | **기록** — 정보 노출은 없으나 순서가 뒤집힘 |
 | 인증된 경로·권한 거부·감사 기록 | **남음** |
+
+---
+
+# 2026-08-08 추가 — 인증된 운영자의 권한 읽기와 감사 기록을 실증했다
+
+앞 절은 미인증 거부만 다뤘다. 이제 **긍정 경로**를 확인했다.
+
+## 방법
+
+운영자가 `https://ideatostrategy.com/operations/login` 에서 MFA 로 로그인한 뒤 두 화면을 열었다.
+루트는 조작 **전에 기준선을 찍고** 조작 **후에 다시 조회**해 차이를 비교했다. 에이전트가 토큰으로
+API 를 호출한 것이 아니다 — 사용자가 화면을 조작하고 루트는 데이터베이스만 읽었다.
+
+## 관찰
+
+### 감사 행이 늘었고 새 유형이 나타났다
+
+| | 기준선 | 조작 후 |
+| --- | --- | --- |
+| `operations.audit_events` 총계 | 24 | **29** |
+
+```
+OPERATOR_RBAC_READ_CATALOG | 3건 | 최근 2026-08-08 15:12:31Z   ← 새로 생김
+OPERATOR_RBAC_READ_SELF    | 25건
+OPERATOR_BOOTSTRAP         | 1건
+```
+
+기준선에는 `OPERATOR_RBAC_READ_CATALOG` 가 **없었다.** 카탈로그 화면을 연 행위가 그 유형을
+만들었다.
+
+감사 행의 형태도 확인했다.
+
+```
+actor_type=OPERATOR  action_type=OPERATOR_RBAC_READ_SELF
+target_domain=OPERATOR_RBAC  reason_code=OPERATOR_SELF_READ
+```
+
+### 화면이 보여준 값과 데이터베이스가 일치한다
+
+| 항목 | 화면 | DB |
+| --- | --- | --- |
+| 역할 | 2개 (`DEVELOPMENT_ROOT_OPERATOR`, `DEVELOPMENT_OPERATIONS_OPERATOR`) | `rbac_catalog_roles = 2` |
+| 본인 유효 역할 | 1개 (`DEVELOPMENT_ROOT_OPERATOR`) | `operator_accounts = 1` |
+| 본인 유효 권한 | 19개 | `rbac_catalog_permissions = 19` |
+| 역할–권한 매핑 | — | 36건 |
+
+19개는 부트스트랩이 심은 카탈로그와 같은 수다. 36 = root 역할이 19개 전부 + operations 역할이
+17개(RBAC grant·revoke 제외) — 제안서가 기술한 구조와 맞는다.
+
+### 세션 갱신도 감사에 남는다
+
+`OPERATOR_RBAC_READ_SELF` 가 **4~5분 간격**으로 쌓인다(14:48 → 14:52 → 14:57 → 15:01 → 15:06 →
+15:11). 액세스 토큰 수명이 5분(`identity.jwt.access-lifetime:PT5M`)이므로, 화면이 열려 있는 동안
+갱신마다 자기 권한을 다시 읽고 그것이 기록되는 것이다.
+
+**부수 효과를 적어 둔다.** 운영자 화면을 열어 두면 감사 테이블이 시간당 약 12행씩 증가한다.
+보존 기간이 180일(`decision.operations.slo`)이므로 용량 자체는 문제가 아니지만, 감사 로그를
+사람이 읽을 때 이 주기적 행이 실제 조작을 묻을 수 있다. INT09(원장 대사)나 감사 검토 절차에서
+`OPERATOR_RBAC_READ_SELF` 를 걸러내는 것을 고려한다.
+
+## 이것으로 확인된 것
+
+| 항목 | 상태 |
+| --- | --- |
+| 인증된 운영자가 권한 기반 읽기를 수행할 수 있다 | 통과 |
+| 그 읽기가 감사에 기록된다 | 통과 — 새 `action_type` 이 생겼다 |
+| 화면 값이 정본 데이터와 일치한다 | 통과 — 역할 2·권한 19·매핑 36 |
+| 부트스트랩이 심은 카탈로그가 실제로 쓰인다 | 통과 |
+
+## 여전히 남은 것 — 403 전수
+
+권한이 **없는** 토큰이 403 을 받는지는 확인하지 못했다. 이 계정은 `DEVELOPMENT_ROOT_OPERATOR` 로
+19개 권한을 모두 가지므로 거부될 동작이 없다.
+
+필요한 것은 **`DEVELOPMENT_OPERATIONS_OPERATOR` 역할의 두 번째 운영자**다. 그 역할에는 RBAC
+grant·revoke 가 없으므로, 그 계정으로 grant 를 시도하면 403 이 나야 한다. 계정 생성은 에이전트가
+하지 않으므로 담당자 판단으로 남긴다.
+
+**하지 말아야 할 것을 기록해 둔다.** 지금 계정의 root 역할을 회수해 403 을 만들려 하면 안 된다 —
+그 역할에 `OPERATOR_RBAC_GRANT`·`REVOKE` 가 포함되므로 회수하는 순간 되돌릴 권한도 사라진다.
+복구에 부트스트랩 재실행이 필요할 수 있다.
+
+---
+
+# 2026-08-08 미결 — MFA 나이 한도가 실효하는지 기록으로 판별할 수 없다
+
+## 배포된 설정
+
+```
+OPERATOR_AUTH_MAXIMUM_MFA_AGE=PT10M
+OPERATOR_AUTH_MAXIMUM_TOKEN_AGE=PT5M
+OPERATOR_RBAC_CATALOG_READ_MFA_REQUIRED=true
+OPERATOR_RBAC_ASSIGNMENT_READ_MFA_REQUIRED=true
+OPERATOR_AUTH_ALLOWED_AMR_VALUES=          ← 비어 있음. amr 검사는 동작하지 않는다
+OPERATOR_AUTH_ALLOWED_ACR_VALUES=          ← 비어 있음
+```
+
+MFA 보증 검사는 커스텀 클레임 하나에만 걸려 있고, 그 클레임은 pre-token lambda 가 **무조건**
+붙인다(이 문서 위쪽 §2026-08-08 확정 참조).
+
+## 관찰
+
+`operations.audit_events` 의 오늘 전체 타임라인.
+
+```
+13:46:51 … 4~5분 간격 … 15:15:39     OPERATOR_RBAC_READ_SELF (끊김 없이 성공)
+15:11:12 / 15:11:49 / 15:12:31       OPERATOR_RBAC_READ_CATALOG
+span = 89분
+```
+
+`MFA_REQUIRED=true` 인 읽기가 **첫 기록으로부터 85분 뒤에도 성공했다.** 10분 한도만 보면 실패해야
+한다.
+
+## 그런데 단정할 수 없다 — 그리고 그것이 결함이다
+
+`audit_events` 에 **`auth_time` 도, MFA 나이도, 보증의 근거도 기록되지 않는다.** 그래서 위 89분이
+하나의 세션인지, 중간에 재인증이 있었는지를 **기록만으로 판별할 수 없다.**
+
+backend 로그에도 거부 흔적이 없다. `/idea2strategy/dev/core` 를 최근 3시간
+`OPERATOR_MFA`·`MFA_STALE`·`stale`·`OPERATOR_AUTH`·`AuthenticationRejected`·
+`OperatorAuthorizationException`·`UNAUTHENTICATED` 로 검색해 **전부 0건**이었다
+(`403` 매치 4건은 `/health` 200 응답의 오탐).
+
+즉 거부가 일어나지 않았거나, **일어났어도 아무 곳에 남지 않는다.** 둘을 구분할 수 없다.
+
+**이것이 INT08 항목이다.** 운영자 행위가 신선한 MFA 에 근거했는지를 사후에 검증할 방법이 없다면,
+`operator_auth_maximum_mfa_age` 로 세운 정책은 감사 대상이 아니다. 정책이 있다는 것과 정책이
+지켜졌음을 보일 수 있다는 것은 다르다.
+
+담당자는 "아까 확인했을 때는 일정 시간 경과 후 확인이 불가능한 상태로 바뀌었다" 고 보고했다.
+그것이 MFA 나이 거부였는지, 아니면 배포 전의 잠금(§2026-08-08 후속 의 TOTP 등록 문제)이었는지는
+**기록으로 구분되지 않는다.** 추측하지 않고 미결로 둔다.
+
+## 이것을 확정할 시험
+
+두 번째 운영자가 필요 없다 — 거부되어야 하는 동작을 시간으로 만든다.
+
+1. 운영자 화면 탭을 **완전히 닫는다.** 열려 있으면 4~5분 주기 갱신이 세션을 계속 신선하게 한다
+   (위 타임라인의 규칙적 간격이 그 갱신이다).
+2. 15분 이상 기다린다.
+3. 다시 열어 RBAC 카탈로그를 조회한다.
+
+**재인증을 요구하거나 실패하면** 한도가 동작한다 — 거부 경로가 실증된다.
+**그냥 보이면** 한도가 무력하고, 위쪽에 확정한 MFA 보증 클레임 결함과 같은 뿌리다.
+
+## 고치는 방향 — 두 가지가 함께 간다
+
+1. **`operator_auth_allowed_amr_values` 를 채운다.** 지금 비어 있어 amr 검사가 꺼져 있다.
+   Cognito 가 스스로 채우는 `amr` 을 검사하면 우리가 만든 클레임을 우리가 검사하는 자기 참조가
+   해소된다.
+2. **감사에 보증 근거를 남긴다.** 최소한 `auth_time` 과 판정에 쓴 MFA 나이를 기록한다. 그러면
+   위 89분 같은 질문이 다음에는 기록으로 답해진다.
