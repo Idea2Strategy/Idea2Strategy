@@ -108,3 +108,94 @@ tfvars 에 쓰이기 전에 교체되는 죽은 값이다. 기록해 두는 이�
 사람이 수행한다. 그 두 단계만 떼어 그대로 따라할 수 있게 쓴 것이
 `docs/operator-auth-enablement-handoff.md` 다. 이 파일은 왜 막혔는지를, 그 파일은 무엇을
 하는지를 담는다.
+
+---
+
+# 2026-08-08 후속 — 인증은 켜졌고, 이제 막는 것은 TOTP 등록이다
+
+## 켜진 것
+
+릴리스 [31259186323](https://github.com/Idea2Strategy/Idea2Strategy/actions/runs/31259186323)
+적용으로 운영자 인증이 배포되었다. core 인스턴스가 `i-03bb3f4a492227874` 로 교체되었고
+(13:36:50Z 기동), 컨테이너에서 확인한 값이다.
+
+```
+OPERATOR_AUTH_ENABLED=true
+OPERATOR_RBAC_READ_ENABLED=true
+OPERATOR_RBAC_CATALOG_VERSION=development-operator-rbac-v1
+OPERATOR_AUTH_MFA_CLAIM_NAME=https://ideatostrategy.com/claims/mfa
+OPERATOR_AUTH_ALLOWED_MFA_CLAIM_VALUES=cognito:mfa-required
+IDEA2STRATEGY_OPERATOR_*_PERMISSION_ID 15개
+```
+
+`/api/v1/operations/cases` 가 404 에서 400 으로 바뀌었다 — 컨트롤러가 등록되었다는 뜻이다.
+
+부트스트랩도 끝났다. `operator bootstrap` 이 `{"ok":true,"replayed":false}` 로 RBAC 카탈로그
+(권한 19개·역할 2개)와 최초 운영자 계정을 심었고, 심은 `catalogVersion` 과 배포된
+`OPERATOR_RBAC_CATALOG_VERSION` 이 같다.
+
+## 그런데 로그인을 완료할 수 없다
+
+Cognito 사용자는 존재하고 비밀번호도 설정되었다(`UserStatus: CONFIRMED`). 그러나 **TOTP 기기가
+등록되어 있지 않다.**
+
+```
+UserMFASettingList : (비어 있음)
+PreferredMfaSetting: (없음)
+UserLastModifiedDate: 2026-08-08T21:51:40+09:00   ← 이후 변동 없음
+```
+
+로그인하면 managed login 이 **"To complete sign-in, enter the code from your authenticator app"**
+를 보여준다. 등록 화면(QR)이 아니라 **인증 화면**이다. 사용자는 QR 을 한 번도 본 적이 없다고
+확인했다. 없는 기기의 코드를 요구하므로 어떤 값도 통하지 않는다.
+
+## 배제한 것들
+
+추측을 줄이려고 하나씩 확인했다.
+
+**MFA 선호가 잘못 남아 있는 것이 아니다.** `admin-set-user-mfa-preference` 로
+`software-token-mfa-settings Enabled=false` 를 적용했다(종료코드 0). 그런데 `UserMFASettingList`
+와 `UserLastModifiedDate` 가 **변하지 않았다** — 되돌릴 상태가 애초에 없었다는 뜻이다.
+
+**classic hosted UI 의 TOTP 미지원이 아니다.** 처음에 그렇게 의심했으나
+`describe-user-pool-domain` 이 `ManagedLoginVersion: 2` 를 돌려준다. managed login 은 TOTP 등록을
+지원한다. 이 가설은 틀렸다.
+
+**프론트가 등록을 가로채는 것이 아니다.** `ui/src` 에 `MFA_SETUP`·`associateSoftwareToken`·
+`verifySoftwareToken`·`SOFTWARE_TOKEN_MFA` 가 하나도 없다. 프론트는 OAuth code flow 로 위임만
+한다. 따라서 등록 단계는 Cognito 쪽 책임이다.
+
+**pre-token lambda 가 던져서 흐름이 끊긴 것이 아니다.** `/aws/lambda/idea2strategy-dev-operator-pre-token`
+에 최근 3시간 119개 이벤트가 있고 **오류가 하나도 없다**(전부 START/END/REPORT).
+
+**CloudTrail 은 답을 주지 못한다.** `AssociateSoftwareToken`·`VerifySoftwareToken`·`InitiateAuth`
+조회가 모두 0건인데, Cognito 의 사용자 인증 API 는 CloudTrail 에 기록되지 않는다. 0건은
+"일어나지 않았다" 가 아니라 **"알 수 없다"** 다.
+
+## lambda 가 성공한다는 사실이 별개 문제에 증거를 더한다
+
+pre-token lambda 가 오류 없이 119회 돌았다는 것은 **토큰이 실제로 발급되고 있다**는 뜻이다.
+그 lambda 의 허용 trigger 목록에 `TokenGeneration_NewPasswordChallenge` 가 있고, 그 지점은
+**MFA 보다 앞선 토큰 발급 지점**이다. 그리고 lambda 는 trigger source 를 보지 않고
+`cognito:mfa-required` 를 무조건 붙인다(`index.mjs:27`).
+
+즉 21:51 의 비밀번호 강제 변경 시점에 발급된 토큰이 **MFA 를 수행하지 않은 채 MFA 보증
+클레임을 달고 나왔을 가능성**이 있다. lambda 가 event 를 로깅하지 않아 어느 trigger source
+였는지는 단정할 수 없다 — 그래서 "가능성" 이라고 쓴다. 확인 방법은 lambda 에
+`triggerSource` 로깅을 한 줄 추가하는 것이고, 그것 자체가 INT08 이 요구하는 감사 가시성이다.
+
+**이것은 INT08(보안·개인정보 검토) 항목이다.** MFA 보증이 실제 MFA 수행과 분리되어 있다면,
+`operator_auth_allowed_mfa_claim_values` 로 세운 방어가 이름만 남는다.
+
+## 남은 선택지
+
+| 방법 | 비용 | 비고 |
+| --- | --- | --- |
+| 시크릿 창에서 재시도 | 없음 | 이전 세션이 챌린지 상태를 붙들고 있을 가능성. 먼저 시도 중 |
+| 프론트에 등록 단계 구현 | `ui` 변경 | `AssociateSoftwareToken`/`VerifySoftwareToken`. `hjcud` 소유 |
+| API 로 직접 등록 | **불가(에이전트)** | 세션이 필요하고 세션은 SRP = 비밀번호를 요구한다 |
+| 사용자 삭제·재생성 | **높음** | `sub` 가 바뀌면 `HMAC(issuer+sub)` 가 어긋나 **부트스트랩을 다시 해야 한다** |
+
+마지막 항목이 이 문서에서 가장 중요한 경고다. 운영자 계정 레코드가 `sub` 에 묶여 있으므로
+Cognito 사용자를 지우고 다시 만드는 것은 부트스트랩 재실행을 포함한다. 다른 방법이 모두
+막힌 뒤에만 고른다.
