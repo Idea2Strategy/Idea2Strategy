@@ -329,6 +329,71 @@ UI는 실제로 프로덕션 배선이 되어 있고 정직하다. `mockData`는
 
 ---
 
+### 3.4 [P1] backtest-engine의 `official-backtest-request` fixture가 소유자와 어긋난다
+
+**담당 `hjcud` · 저장소 `backtest-engine` · INT01이 이것을 기다린다.**
+
+#### 무엇이 어긋났나
+
+`scripts/validate_d_contract_parity.py`는 계약 fixture의 **소유자 사본과 소비자 사본이 바이트
+단위로 같을 것**을 요구한다. 소유자는 backend다.
+
+```
+FAIL  strategy-bot.v1 fixtures (B -> backtest-engine):
+      official-backtest-request.valid.json differs from its owner
+  backtest-engine/tests/fixtures/contracts/strategy-bot/v1/official-backtest-request.valid.json
+  backend/modules/backend-messaging/src/main/resources/contracts/strategy-bot/v1/official-backtest-request.valid.json
+```
+
+소비자 사본에 **아홉 필드가 없다.**
+
+| 없는 필드 | 무엇인가 |
+| --- | --- |
+| `runId` | 실행 식별자 |
+| `lane` | 레인(`BASIC` 등) |
+| `aggregateSequence` | 집계 순번 |
+| `expectedDatasetHash` | 고정된 데이터셋 해시 |
+| `periodStart`, `periodEnd` | 백테스트 기간 |
+| `executionPolicyVersion` | 체결 정책 버전 |
+| `featureMaterializations` | 고정된 지표 결과 해시 목록 |
+| `requestHash` | 요청 전체 해시 |
+
+#### 왜 P1인가
+
+**backtest-engine이 backend가 결코 보내지 않는 메시지로 시험하고 있다.** 축소된 페이로드를
+유효하다고 받아들이므로, 필수 필드가 빠져 들어와도 잡지 못한다. 빠진 필드의 성격이 더 나쁘다 —
+`expectedDatasetHash`, `featureMaterializations`, `executionPolicyVersion`, `requestHash`는
+백테스트 결과를 재현 가능하게 고정하는 값들이다. 그것들을 보지 않는 소비자는 **다른 데이터로
+계산한 결과를 같은 요청의 결과로 받아들일 수 있다.**
+
+이 크기의 드리프트가 살아남은 이유는 단순하다. **그 검증기를 아무도 돌리지 않는다** —
+`.github/workflows/`와 `package.json` 어디에도 호출하는 곳이 없다.
+
+#### 할 일
+
+1. `backend/modules/backend-messaging/src/main/resources/contracts/strategy-bot/v1/official-backtest-request.valid.json`
+   을 소비자 위치로 **그대로 복사**한다. 소유자가 정본이므로 내용을 손으로 맞추지 않는다.
+2. 그 fixture를 읽는 backtest-engine 테스트가 새 필드를 요구하도록 고친다. 여기서 실패가
+   나면 그것이 이 카드의 진짜 내용이다 — 소비자가 그 필드들을 실제로 쓰지 않고 있었다는 뜻이다.
+3. 같은 디렉터리의 나머지 5개 fixture는 이미 일치한다(검증기가 `5 file(s) identical`로
+   보고한다). 건드리지 않는다.
+
+#### 완료 판정
+
+```bash
+python scripts/validate_d_contract_parity.py    # 0 problem(s)
+```
+
+원장 검사는 소비자 fixture에 `requestHash`, `featureMaterializations`, `expectedDatasetHash`,
+`executionPolicyVersion`이 있는지를 본다.
+
+#### 이것이 끝나면 루트가 할 일 (`kcrmin`)
+
+`validate_d_contract_parity.py`를 CI에 붙인다. 지금 붙이면 develop이 전원에게 빨개지므로 이
+수정 뒤에 넣는다. 그때 INT01도 닫힌다.
+
+---
+
 ## 4. 이번에 고친 것 (참고 — 재작업 금지)
 
 전부 병합됨. 각 항목에 해당 `develop`에서 실패하는 테스트가 붙어 있다.
@@ -363,7 +428,7 @@ UI는 실제로 프로덕션 배선이 되어 있고 정직하다. `mockData`는
 | 카드 | 담당 | 선행 | 비고 |
 | --- | --- | --- | --- |
 | INT02 최초 DB 구축·migration rehearsal | P1 | §2.3 | 빈 DB + 직전 스냅샷 양쪽. `scripts/aws/development-database-bootstrap.sh`가 커밋된 `db/flyway-ci-bundle`을 다이제스트 검증 후 적용한다 — 이 경로를 리허설한다 |
-| INT01 계약 호환성 | P1 | INT02 | provider·consumer 버전·fixture 전수 |
+| INT01 계약 호환성 | P1 | INT02, §3.4 | provider·consumer 버전·fixture 전수. 전수 검사는 `pnpm contract:validate:registry`가 하고 CI에 붙어 있다. `scripts/validate_d_contract_parity.py`가 §3.4의 드리프트를 잡으므로 그것이 고쳐진 뒤 닫힌다 |
 | INT03 전체 사용자 E2E | P3 | §2.1 §2.4 §2.5 | 가입→전략→검증→출시→자동 백테스트→봇 실행→주문·체결→중단. **§2.5가 안 끝나면 RSI 전략에서 반드시 실패한다** |
 | INT04 전체 방 E2E | P1 | §2.2 | 백테스트 결과가 방 점수에 섞이지 않는지 포함 |
 | INT05 운영자 E2E | P1 | §2.2 | 운영자 OIDC·SES는 로컬에서 안 되므로 **AWS에서**. 시작 전 AWS 상태 2건 확인: SES가 아직 sandbox(PENDING)면 검증 메일이 안 나가고, Cognito 운영자 풀에 사용자 0명이면 로그인할 운영자가 없다(2026-08-06 기준 둘 다 미해결이었다) |
