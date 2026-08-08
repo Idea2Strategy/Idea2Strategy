@@ -406,6 +406,16 @@
       "evidence": "docs/evidence/INT08.md"
     },
     {
+      "id": "A92",
+      "title": "운영자 풀 MFA 를 ON 으로 복구 (현재 OPTIONAL 로 드리프트)",
+      "owner": "kcrmin",
+      "repository": ".",
+      "depends_on": [],
+      "kind": "manual",
+      "evidence": "docs/evidence/A92.md",
+      "blocks_reason": "2026-08-08, Cognito 운영자 풀의 MfaConfiguration 을 ON 에서 OPTIONAL 로 임시 변경했다. 이유: 풀이 SOFTWARE_TOKEN_MFA 챌린지를 주는데 등록된 TOTP 기기가 없어 로그인이 불가능했고, TOTP 기기를 지우는 API 가 존재하지 않으며, 사용자 삭제·재생성은 sub 를 바꿔 운영자 부트스트랩 재실행을 요구한다. Terraform 은 ON 을 소유하므로 다음 apply 가 되돌리고 그때 같은 잠금이 재발한다. 닫는 조건: TOTP 기기를 등록(associate-software-token + verify-software-token + set-user-mfa-preference)하고 풀을 ON 으로 되돌린 뒤, MFA 를 요구하는 로그인이 통과하는 것을 확인한다. INT11 은 이것이 닫히기 전에 정직하게 닫히지 않는다 - 운영자 접근이 MFA 로 보호된다는 전제가 그때까지 참이 아니다."
+    },
+    {
       "id": "INT11",
       "title": "릴리스 후보 고정",
       "owner": "kcrmin",
@@ -422,7 +432,8 @@
         "INT09",
         "INT10",
         "A90",
-        "A91"
+        "A91",
+        "A92"
       ],
       "kind": "manual",
       "evidence": "docs/evidence/INT11.md"
