@@ -126,8 +126,30 @@ SELECT count(*) FROM information_schema.tables
 SELECT max(installed_on) FROM flyway_schema_history;        -- 복원 시점과 맞는가
 ```
 
-런타임 롤이 복원본에도 있는지 확인한다. 스냅샷은 롤을 포함하지만, 시크릿의 비밀번호가 그
-사이 회전되었다면 접속이 실패한다.
+### 3b. 런타임 자격증명을 복원본에 맞춘다 — 건너뛰면 여기서 막힌다
+
+**스냅샷은 롤을 포함하지만 비밀번호는 스냅샷 시점의 것이다.** 그리고
+`scripts/aws/development-database-bootstrap.sh` 는 실행할 때마다 런타임 롤 비밀번호를
+회전시킨다. 그러므로 **부트스트랩보다 앞서 뜬 스냅샷은 현재 Secrets Manager 값으로 접속되지
+않는다.** 데이터는 온전한데 어느 런타임도 붙지 못하는 상태가 된다.
+
+2026-08-08 드릴에서 실제로 그랬다. 같은 자격증명이 라이브에는 붙고 복원본에는 거부됐다.
+
+```
+-- restored --  FATAL: password authentication failed for user "idea2strategy_backend_runtime"
+-- live    --  1
+```
+
+스냅샷은 `2026-08-07T18:04Z`, 런타임 시크릿 다섯 개의 마지막 변경은 모두
+`2026-08-08T02:28Z` 였다. 자세한 내용은 `docs/evidence/INT09-restore-drill.md`.
+
+**할 일:** 마스터 자격증명으로 복원본에 접속해 런타임 롤 다섯 개의 비밀번호를 현재 시크릿 값과
+맞춘다. **손으로 `ALTER ROLE` 하지 않는다** — 부트스트랩 스크립트의 런타임 자격증명 단계를
+복원본에 겨누면 롤 목록과 권한까지 같은 방식으로 맞춰진다.
+
+마스터 시크릿은 애플리케이션 EC2 롤이 읽을 수 없다(설계대로다). 이 단계는 사람이 수행한다.
+
+맞춘 뒤 롤이 실제로 붙는지 확인한다.
 
 ```sql
 SELECT rolname FROM pg_roles WHERE rolcanlogin AND rolname LIKE 'idea2strategy%' ORDER BY rolname;
@@ -157,7 +179,10 @@ aws ssm put-parameter --name /idea2strategy/dev/database/host \
 
 ## 이 절차의 상태
 
-**문서로만 존재하고 실제 복원은 수행하지 않았다.** 복원은 새 RDS 인스턴스를 만드는 일이라
+**절차는 문서로 존재하고, 복원의 앞부분은 2026-08-08 에 실제로 수행했다.**
+백업 실측·스냅샷 복원(8분)·복원본 접속 시도까지 돌렸고, 3b 단계가 필요하다는 것이 그 드릴의
+결과다. 원장 대사와 엔드포인트 전환은 아직 수행하지 않았다 —
+`docs/evidence/INT09-restore-drill.md` 가 무엇이 통과했고 무엇이 막혔는지 항목별로 적는다. 복원은 새 RDS 인스턴스를 만드는 일이라
 비용과 시간이 들고, 실제 드릴은 INT09(백업·복구·원장 대사) 의 몫이다. INT02 는 이 절차가
 존재하고 각 단계의 전제가 확인되었음을 요구한다 — 위 표의 설정값은 모두 트래킹되는 Terraform
 소스에서 읽은 것이다.
