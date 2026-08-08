@@ -124,3 +124,84 @@ POST /api/v1/operations/rbac/assignments/revocations
 | 모든 운영자 서비스가 인증 강제 | 통과 — 7/7 |
 | 인증이 필터가 아니라 핸들러에 있음 | **기록** — 정보 노출은 없으나 순서가 뒤집힘 |
 | 인증된 경로·권한 거부·감사 기록 | **남음** |
+
+---
+
+# 2026-08-08 추가 — 인증된 운영자의 권한 읽기와 감사 기록을 실증했다
+
+앞 절은 미인증 거부만 다뤘다. 이제 **긍정 경로**를 확인했다.
+
+## 방법
+
+운영자가 `https://ideatostrategy.com/operations/login` 에서 MFA 로 로그인한 뒤 두 화면을 열었다.
+루트는 조작 **전에 기준선을 찍고** 조작 **후에 다시 조회**해 차이를 비교했다. 에이전트가 토큰으로
+API 를 호출한 것이 아니다 — 사용자가 화면을 조작하고 루트는 데이터베이스만 읽었다.
+
+## 관찰
+
+### 감사 행이 늘었고 새 유형이 나타났다
+
+| | 기준선 | 조작 후 |
+| --- | --- | --- |
+| `operations.audit_events` 총계 | 24 | **29** |
+
+```
+OPERATOR_RBAC_READ_CATALOG | 3건 | 최근 2026-08-08 15:12:31Z   ← 새로 생김
+OPERATOR_RBAC_READ_SELF    | 25건
+OPERATOR_BOOTSTRAP         | 1건
+```
+
+기준선에는 `OPERATOR_RBAC_READ_CATALOG` 가 **없었다.** 카탈로그 화면을 연 행위가 그 유형을
+만들었다.
+
+감사 행의 형태도 확인했다.
+
+```
+actor_type=OPERATOR  action_type=OPERATOR_RBAC_READ_SELF
+target_domain=OPERATOR_RBAC  reason_code=OPERATOR_SELF_READ
+```
+
+### 화면이 보여준 값과 데이터베이스가 일치한다
+
+| 항목 | 화면 | DB |
+| --- | --- | --- |
+| 역할 | 2개 (`DEVELOPMENT_ROOT_OPERATOR`, `DEVELOPMENT_OPERATIONS_OPERATOR`) | `rbac_catalog_roles = 2` |
+| 본인 유효 역할 | 1개 (`DEVELOPMENT_ROOT_OPERATOR`) | `operator_accounts = 1` |
+| 본인 유효 권한 | 19개 | `rbac_catalog_permissions = 19` |
+| 역할–권한 매핑 | — | 36건 |
+
+19개는 부트스트랩이 심은 카탈로그와 같은 수다. 36 = root 역할이 19개 전부 + operations 역할이
+17개(RBAC grant·revoke 제외) — 제안서가 기술한 구조와 맞는다.
+
+### 세션 갱신도 감사에 남는다
+
+`OPERATOR_RBAC_READ_SELF` 가 **4~5분 간격**으로 쌓인다(14:48 → 14:52 → 14:57 → 15:01 → 15:06 →
+15:11). 액세스 토큰 수명이 5분(`identity.jwt.access-lifetime:PT5M`)이므로, 화면이 열려 있는 동안
+갱신마다 자기 권한을 다시 읽고 그것이 기록되는 것이다.
+
+**부수 효과를 적어 둔다.** 운영자 화면을 열어 두면 감사 테이블이 시간당 약 12행씩 증가한다.
+보존 기간이 180일(`decision.operations.slo`)이므로 용량 자체는 문제가 아니지만, 감사 로그를
+사람이 읽을 때 이 주기적 행이 실제 조작을 묻을 수 있다. INT09(원장 대사)나 감사 검토 절차에서
+`OPERATOR_RBAC_READ_SELF` 를 걸러내는 것을 고려한다.
+
+## 이것으로 확인된 것
+
+| 항목 | 상태 |
+| --- | --- |
+| 인증된 운영자가 권한 기반 읽기를 수행할 수 있다 | 통과 |
+| 그 읽기가 감사에 기록된다 | 통과 — 새 `action_type` 이 생겼다 |
+| 화면 값이 정본 데이터와 일치한다 | 통과 — 역할 2·권한 19·매핑 36 |
+| 부트스트랩이 심은 카탈로그가 실제로 쓰인다 | 통과 |
+
+## 여전히 남은 것 — 403 전수
+
+권한이 **없는** 토큰이 403 을 받는지는 확인하지 못했다. 이 계정은 `DEVELOPMENT_ROOT_OPERATOR` 로
+19개 권한을 모두 가지므로 거부될 동작이 없다.
+
+필요한 것은 **`DEVELOPMENT_OPERATIONS_OPERATOR` 역할의 두 번째 운영자**다. 그 역할에는 RBAC
+grant·revoke 가 없으므로, 그 계정으로 grant 를 시도하면 403 이 나야 한다. 계정 생성은 에이전트가
+하지 않으므로 담당자 판단으로 남긴다.
+
+**하지 말아야 할 것을 기록해 둔다.** 지금 계정의 root 역할을 회수해 403 을 만들려 하면 안 된다 —
+그 역할에 `OPERATOR_RBAC_GRANT`·`REVOKE` 가 포함되므로 회수하는 순간 되돌릴 권한도 사라진다.
+복구에 부트스트랩 재실행이 필요할 수 있다.
