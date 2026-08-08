@@ -277,7 +277,33 @@ services:
         SERVICE_DIR: trading-engine
         APP_PROJECT: apps:market-gateway
         APP_OUTPUT: apps/market-gateway
-    environment: *spring-environment
+    environment:
+      <<: *spring-environment
+      # The Alpaca -> Redis publishing path activates only when redis-uri is set
+      # (MarketGatewayConfiguration is @ConditionalOnProperty on it), and then fails
+      # closed without credentials, the instrument mapping, and rights evidence. With
+      # none of this the gateway started and published nothing, so the worker below had
+      # an empty stream to consume and no bot could ever evaluate locally. These mirror
+      # the AWS host values in
+      # infra/terraform/environments/development/templates/ec2-user-data.sh.tftpl:568-576,
+      # with plain redis:// because the local broker has no TLS.
+      MARKET_GATEWAY_REDIS_URI: redis://redis:6379
+      MARKET_GATEWAY_REDIS_KEY_PREFIX: ${MARKET_EVENT_KEY_PREFIX:-i2s}
+      MARKET_GATEWAY_ALPACA_FEED: ${ALPACA_FEED:-sip}
+      MARKET_GATEWAY_MINIMUM_INSTRUMENT_COUNT: "500"
+      MARKET_GATEWAY_INSTRUMENT_MAPPING_PATH: /etc/market-gateway/instruments.json
+      MARKET_GATEWAY_RIGHTS_EVIDENCE_PATH: /etc/market-gateway/alpaca-sip-rights.json
+      MARKET_GATEWAY_MATERIALIZATION_RECEIPT_PATH: /etc/market-gateway/materialization.properties
+      # Credentials come from .env.docker and are never committed. Without them the
+      # gateway refuses to start, which is the intended posture.
+      ALPACA_API_KEY: ${ALPACA_API_KEY}
+      ALPACA_API_SECRET: ${ALPACA_API_SECRET}
+    volumes:
+      # scripts/prepare-local-market-gateway.ps1 writes these three, the local
+      # counterpart of what development-database-bootstrap.sh materializes for AWS. The
+      # receipt records each file's SHA-256 against the container path, so the mount
+      # point has to match MARKET_GATEWAY_*_PATH above exactly.
+      - ./.harness/local/market-gateway:/etc/market-gateway:ro
     depends_on:
       redis: {condition: service_healthy}
     networks: [development]
@@ -292,7 +318,17 @@ services:
         SERVICE_DIR: trading-engine
         APP_PROJECT: apps:trading-worker
         APP_OUTPUT: apps/trading-worker
-    environment: *spring-environment
+    environment:
+      <<: *spring-environment
+      # MarketEventTransportConfiguration is @ConditionalOnProperty on
+      # trading.market-events.redis-uri with no matchIfMissing, so without this the
+      # transport bean is never created: the worker started cleanly and consumed zero
+      # market events, which meant no evaluation, no order candidates and no fills. That
+      # is why INT03 never passed locally. AWS sets these at
+      # templates/ec2-user-data.sh.tftpl:578-580; the prefix must match the gateway's.
+      TRADING_MARKET_EVENTS_REDIS_URI: redis://redis:6379
+      TRADING_MARKET_EVENTS_REDIS_KEY_PREFIX: ${MARKET_EVENT_KEY_PREFIX:-i2s}
+      TRADING_MARKET_EVENTS_CONSUMER_NAME: ${TRADING_CONSUMER_NAME:-trading-worker-local-1}
     depends_on:
       flyway: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
