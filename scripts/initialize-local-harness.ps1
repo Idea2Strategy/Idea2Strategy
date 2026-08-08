@@ -249,11 +249,26 @@ try {
   $hooksPath = "failed: $($_.Exception.Message)"
 }
 
+# Codex 사용자용 /start-work 프롬프트를 사용자 홈에 복사한다. Claude 는 저장소의
+# .claude/skills 를 직접 읽지만 Codex 는 $CODEX_HOME/prompts 만 읽으므로 설치가 필요하다.
+# Codex 를 안 쓰는 사람에게는 무해하고, 실패해도 하니스 초기화를 막을 이유는 아니다.
+$codexPrompts = 'skipped'
+try {
+  $promptInstaller = Join-Path $PSScriptRoot 'install-codex-prompts.ps1'
+  if (Test-Path -LiteralPath $promptInstaller -PathType Leaf) {
+    & $promptInstaller | Out-Null
+    $codexPrompts = 'installed'
+  }
+} catch {
+  $codexPrompts = "failed: $($_.Exception.Message)"
+}
+
 [pscustomobject]@{
   repository = $resolvedRoot
   local_root = '.harness/local'
   migrated_files = $migratedFiles
   verified = [bool]$Verify
   git_hooks = $hooksPath
+  codex_prompts = $codexPrompts
   status = 'passed'
 } | ConvertTo-Json -Compress
