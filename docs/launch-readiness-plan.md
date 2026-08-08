@@ -408,8 +408,15 @@ v1.0.0 이전이므로 `AGENTS.md`의 pre-v1.0 자세에 따라 권한자 지시
 pwsh scripts/launch-status.ps1 -Owner hjcud     # kcrmin | pjy008008 | hjcud
 ```
 
-**세션을 시작하는 법 (Claude·Codex 동일 — 둘 다 슬래시 한 줄):**
-1. Claude Code: `/start-work hjcud`. **Codex: 똑같이 `/start-work hjcud`** — `initialize-local-harness.ps1`이 추적되는 `.agents/prompts/start-work.md`를 `~/.codex/prompts/`에 설치해 두므로 Codex에서도 커스텀 프롬프트로 뜬다. (한 번이라도 하니스 초기화를 돌린 기계라면 이미 설치돼 있다.) 사람이 직접 하려면 위 스크립트를 실행한다. 세 경로 모두 같은 원장을 읽으므로 같은 답이 나온다.
+**세션을 시작하는 법 — 위 스크립트 한 줄이 정식 경로다.**
+
+`-Owner` 를 주면 스크립트가 **에이전트에 그대로 붙여넣을 프롬프트까지 출력한다.** 설치도, 슬래시 명령도 필요 없다. Claude·Codex·다른 도구·사람 전부 이 경로가 동작한다. 출력된 블록을 복사해 붙이면 끝이다.
+
+슬래시 명령은 **선택적 편의**일 뿐이며, 없어도 아무 문제 없다:
+- Claude Code — `/start-work hjcud`. 저장소의 `.claude/skills/start-work/` 를 읽으므로 pull 후 바로 뜬다.
+- Codex — `/start-work hjcud`. `initialize-local-harness.ps1` 이 `.agents/prompts/start-work.md` 를 `$CODEX_HOME/prompts`(기본 `~/.codex/prompts`)에 복사한다. Codex 버전이 커스텀 프롬프트를 지원해야 뜨므로, **안 보이면 그냥 위 스크립트를 쓴다.**
+
+어느 경로든 같은 원장(`docs/launch-readiness-tasks.json`)을 읽으므로 답이 갈릴 수 없다.
 2. 스크립트가 지목한 작업의 절을 이 문서에서 읽고, `해줘`(또는 해당 절 번호를 프롬프트에) — **문서 전체를 넣지 않는다.** 남의 리포지터리 지시가 3분의 2다.
 3. 완료 판정은 스크립트가 한다. `repo`/`db` 작업은 검사가 통과해야 끝난 것이고, `manual` 작업(INT 카드)은 `.harness/local/evidence/<ID>.md`에 무엇을 실행해 무엇을 관찰했는지 적어야 끝난 것이다. **검사를 통과시키는 것이 완료의 정의다** — 체크박스를 켜는 게 아니다.
 4. 다 하면 스크립트를 다시 돌린다. 다음 작업이 나오거나, 누구를 기다리는지 나온다.
