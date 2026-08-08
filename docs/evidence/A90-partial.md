@@ -202,6 +202,42 @@ guard_operator_bootstrap_audit_before_change
 어댑터가 직접 채운다. 빠뜨리면 런타임에 실패하므로 누락은 없지만, **같은 종류의 사건에 같은
 `action_type`·`reason_code` 를 쓰는지**는 제약이 강제하지 않는다.
 
+## 2026-08-08 1차 실행 — 어휘 분화는 아직 없다. 보증 컬럼은 아예 없다
+
+`db/reconciliation/audit-vocabulary.sql` 을 만들어 AWS 정본 DB 에 돌렸다. 판정하지 않고 분포와
+의심 후보만 내놓는 질의다 — 어휘가 갈렸는지는 사람이 판단해야 한다.
+
+| 섹션 | 결과 |
+| --- | --- |
+| action_type 분포 | 3종 — `OPERATOR_BOOTSTRAP` 1, `OPERATOR_RBAC_READ_SELF` 29, `OPERATOR_RBAC_READ_CATALOG` 3 |
+| reason_code 분포 | action_type 마다 정확히 1개. 같은 이유를 다른 코드로 적은 흔적 없음 |
+| 같은 접두 후보 | `OPERATOR_RBAC` 에 2종 → **정상 분화**(서로 다른 동작). 설계대로 후보만 냈고 오탐이다 |
+| 시제 혼용 후보 | **0건** — `...APPLY` / `...APPLIED` 류가 없다 |
+| 보증 관련 컬럼 | **`delegated_authorization_id` 뿐** |
+| 표본 | 33건, action_type 3종, 도메인 2종, actor 2명 |
+
+### 아직 판정이 아니다
+
+표본이 **RBAC 읽기와 부트스트랩만** 덮는다. 제재·케이스·방 종료 같은 쓰기 동작이 감사에 들어온
+뒤에야 어휘가 갈리는지 볼 수 있다. 지금 결과는 "갈리지 않았다" 가 아니라 **"아직 볼 것이
+없다"** 다 — 질의의 마지막 섹션이 표본 크기를 함께 내는 이유가 그것이다.
+
+### 보증 컬럼이 없다는 것은 확정이다
+
+5번 섹션이 감사 테이블에서 `auth`·`mfa`·`assur`·`session` 을 담은 컬럼을 찾는다. 나온 것은
+`delegated_authorization_id` 하나뿐이고 그것은 위임 인가 식별자다. **`auth_time` 도, MFA 나이도,
+보증 근거도 저장되지 않는다.**
+
+그래서 "이 운영자 행위가 신선한 MFA 에 근거했는가" 를 기록으로 답할 수 없다.
+`docs/evidence/INT05-partial.md` 의 89분 관찰이 미결로 남은 이유가 정확히 이것이고, 이것은 INT08
+항목이다 — 스키마에 자리가 없으므로 코드만 고쳐서 해결되지 않는다.
+
+### 실행 방법 메모
+
+RDS 가 VPC 안이라 `idea2strategy-dev-core` 에서 SSM 으로 실행했다. 전송 과정에서 SQL 의 한글
+섹션 라벨을 ASCII 로 치환했으므로 위 표의 3~6번 라벨은 원격 출력에서 `section` 으로 찍혔다.
+**데이터는 그대로다** — 저장된 SQL 파일은 원래 라벨을 유지한다.
+
 그것이 감사 쪽의 실제 위험이다 — 열 곳 이상이 직접 쓰고 어휘의 일관성은 사람만 판별한다.
 Outbox 처럼 한 곳에서 만들어지지 않으므로 **여기는 판정하지 않는다.** 남은 일: `action_type` 과
 `reason_code` 의 값 분포를 뽑아 같은 사건이 다른 이름을 쓰지 않는지 본다. 그 조회는 감사 행이
