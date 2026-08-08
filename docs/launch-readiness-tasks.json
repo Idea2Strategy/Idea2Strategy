@@ -135,7 +135,7 @@
     },
     {
       "id": "2.4",
-      "title": "30분봉 포함 4종 시장 데이터를 data-pipeline 정본 경로로 적재",
+      "title": "시장 데이터 적재 — AWS 는 완료(30m 포함), 로컬만 비어 있음",
       "owner": "pjy008008",
       "repository": "data-pipeline",
       "depends_on": [],
@@ -145,7 +145,7 @@
         "expected": 4,
         "sql": "select count(distinct resolution) from market_data.dataset_manifests where status='AVAILABLE' and resolution in ('30m','1h','4h','1d')"
       },
-      "blocks_reason": "30분봉이 UI 기본 시계다. 없으면 기본값으로 만든 전략이 백테스트되지 않는다."
+      "blocks_reason": "**AWS 는 이미 되어 있다** (docs/evidence/2.4-aws-state.md): 네 해상도 전부 존재하고(30m 193 · 1h 192 · 4h 192 · 1d 192 객체), 종목 725개 · manifest 96개가 등록돼 있으며 카탈로그 부트스트랩 영수증이 ALREADY_APPLIED 다. 남은 것은 로컬 조합뿐이고, 로컬 적재 경로는 존재하지 않는다(invoke-development-market-catalog-bootstrap.ps1 은 AWS 전용). 따라서 이 카드는 '로컬에도 데이터를 넣는다'가 아니라 '로컬에서 무엇을 검증하고 무엇을 AWS 로 넘기는지 정한다'로 좁혀야 한다. market_hist_script 를 적재 경로에서 배제한다는 결론은 유지되지만 긴급도는 낮다 — 지금 쓰이고 있지 않다."
     },
     {
       "id": "2.5",
@@ -161,7 +161,7 @@
         "expected": 4,
         "sql": "select count(distinct d.resolution) from market_data.feature_materializations m join market_data.feature_definitions d on d.id = m.feature_definition_id where m.status='SUCCEEDED'"
       },
-      "blocks_reason": "지표 값이 없으면 RSI 전략은 빈 시계열을 읽는다."
+      "blocks_reason": "feature_materializations 가 로컬과 AWS 양쪽에서 0 이다 — RSI 전략의 실질 차단 요인이며 종목 725개 × 네 해상도의 백필이 남아 있다. **선행이 하나 있다**: AWS RDS 의 feature_definitions 가 1개다(로컬은 마이그레이션 적용 후 5개). 즉 AWS 가 최신 마이그레이션을 받지 않았고, V20260808120100__pipeline_seed_production_rsi_timeframes.sql 이 적용돼 프로덕션 4종 정의가 생긴 뒤에야 백필이 의미를 갖는다."
     },
     {
       "id": "2.6",
