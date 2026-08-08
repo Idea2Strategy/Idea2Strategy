@@ -205,3 +205,74 @@ grant·revoke 가 없으므로, 그 계정으로 grant 를 시도하면 403 이 
 **하지 말아야 할 것을 기록해 둔다.** 지금 계정의 root 역할을 회수해 403 을 만들려 하면 안 된다 —
 그 역할에 `OPERATOR_RBAC_GRANT`·`REVOKE` 가 포함되므로 회수하는 순간 되돌릴 권한도 사라진다.
 복구에 부트스트랩 재실행이 필요할 수 있다.
+
+---
+
+# 2026-08-08 미결 — MFA 나이 한도가 실효하는지 기록으로 판별할 수 없다
+
+## 배포된 설정
+
+```
+OPERATOR_AUTH_MAXIMUM_MFA_AGE=PT10M
+OPERATOR_AUTH_MAXIMUM_TOKEN_AGE=PT5M
+OPERATOR_RBAC_CATALOG_READ_MFA_REQUIRED=true
+OPERATOR_RBAC_ASSIGNMENT_READ_MFA_REQUIRED=true
+OPERATOR_AUTH_ALLOWED_AMR_VALUES=          ← 비어 있음. amr 검사는 동작하지 않는다
+OPERATOR_AUTH_ALLOWED_ACR_VALUES=          ← 비어 있음
+```
+
+MFA 보증 검사는 커스텀 클레임 하나에만 걸려 있고, 그 클레임은 pre-token lambda 가 **무조건**
+붙인다(이 문서 위쪽 §2026-08-08 확정 참조).
+
+## 관찰
+
+`operations.audit_events` 의 오늘 전체 타임라인.
+
+```
+13:46:51 … 4~5분 간격 … 15:15:39     OPERATOR_RBAC_READ_SELF (끊김 없이 성공)
+15:11:12 / 15:11:49 / 15:12:31       OPERATOR_RBAC_READ_CATALOG
+span = 89분
+```
+
+`MFA_REQUIRED=true` 인 읽기가 **첫 기록으로부터 85분 뒤에도 성공했다.** 10분 한도만 보면 실패해야
+한다.
+
+## 그런데 단정할 수 없다 — 그리고 그것이 결함이다
+
+`audit_events` 에 **`auth_time` 도, MFA 나이도, 보증의 근거도 기록되지 않는다.** 그래서 위 89분이
+하나의 세션인지, 중간에 재인증이 있었는지를 **기록만으로 판별할 수 없다.**
+
+backend 로그에도 거부 흔적이 없다. `/idea2strategy/dev/core` 를 최근 3시간
+`OPERATOR_MFA`·`MFA_STALE`·`stale`·`OPERATOR_AUTH`·`AuthenticationRejected`·
+`OperatorAuthorizationException`·`UNAUTHENTICATED` 로 검색해 **전부 0건**이었다
+(`403` 매치 4건은 `/health` 200 응답의 오탐).
+
+즉 거부가 일어나지 않았거나, **일어났어도 아무 곳에 남지 않는다.** 둘을 구분할 수 없다.
+
+**이것이 INT08 항목이다.** 운영자 행위가 신선한 MFA 에 근거했는지를 사후에 검증할 방법이 없다면,
+`operator_auth_maximum_mfa_age` 로 세운 정책은 감사 대상이 아니다. 정책이 있다는 것과 정책이
+지켜졌음을 보일 수 있다는 것은 다르다.
+
+담당자는 "아까 확인했을 때는 일정 시간 경과 후 확인이 불가능한 상태로 바뀌었다" 고 보고했다.
+그것이 MFA 나이 거부였는지, 아니면 배포 전의 잠금(§2026-08-08 후속 의 TOTP 등록 문제)이었는지는
+**기록으로 구분되지 않는다.** 추측하지 않고 미결로 둔다.
+
+## 이것을 확정할 시험
+
+두 번째 운영자가 필요 없다 — 거부되어야 하는 동작을 시간으로 만든다.
+
+1. 운영자 화면 탭을 **완전히 닫는다.** 열려 있으면 4~5분 주기 갱신이 세션을 계속 신선하게 한다
+   (위 타임라인의 규칙적 간격이 그 갱신이다).
+2. 15분 이상 기다린다.
+3. 다시 열어 RBAC 카탈로그를 조회한다.
+
+**재인증을 요구하거나 실패하면** 한도가 동작한다 — 거부 경로가 실증된다.
+**그냥 보이면** 한도가 무력하고, 위쪽에 확정한 MFA 보증 클레임 결함과 같은 뿌리다.
+
+## 고치는 방향 — 두 가지가 함께 간다
+
+1. **`operator_auth_allowed_amr_values` 를 채운다.** 지금 비어 있어 amr 검사가 꺼져 있다.
+   Cognito 가 스스로 채우는 `amr` 을 검사하면 우리가 만든 클레임을 우리가 검사하는 자기 참조가
+   해소된다.
+2. **감사에 보증 근거를 남긴다.** 최소한 `auth_time` 과 판정에 쓴 MFA 나이를 기록한다. 그러면
+   위 89분 같은 질문이 다음에는 기록으로 답해진다.
