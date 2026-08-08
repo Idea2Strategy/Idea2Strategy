@@ -328,9 +328,9 @@ variable "alpaca_secret_key_secret_name" {
 }
 
 variable "pipeline_schedule_expression" {
-  description = "Optional EventBridge schedule for the desired-zero pipeline task. Empty disables scheduled runs."
+  description = "EventBridge schedule that projects successful market-data manifests to durable active-feed watermarks. Empty disables scheduled runs."
   type        = string
-  default     = ""
+  default     = "cron(30 23 ? * MON-FRI *)"
 }
 
 variable "container_image_digests" {
