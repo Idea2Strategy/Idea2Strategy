@@ -44,6 +44,9 @@ $substitutions = [ordered]@{
     "__RUNTIME_ROLE__"         = "BACKTEST-WORKER"
     "__CORE_ORIGIN_READINESS__" = "true"
     "__RUNTIME_ROLE_PREPARE__" = "true"
+    "__POLICY_SERVICE__"       = "backtest-worker"
+    "__EXECUTION_POLICY_SHA256__" = ("a" * 64)
+    "__RUNTIME_POLICY_SHA256__" = ("b" * 64)
 }
 
 $fragments = New-Object System.Collections.Generic.List[object]

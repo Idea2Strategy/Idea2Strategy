@@ -13,6 +13,10 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "lib/development-backtest-policy-artifacts.ps1")
+$backtestPolicyArtifactSet = Get-DevelopmentBacktestPolicyArtifactSet -RepositoryRoot $root
+$expectedExecutionPolicySha256 = [string]$backtestPolicyArtifactSet.Artifacts['execution-policy'].sha256
+$expectedRuntimePolicySha256 = [string]$backtestPolicyArtifactSet.Artifacts['runtime-policy'].sha256
 $terraformDirectory = Join-Path $root $TerraformRoot
 $terraform = Get-Command terraform -ErrorAction SilentlyContinue
 $aws = Get-Command aws -ErrorAction SilentlyContinue
@@ -420,6 +424,22 @@ fi
 rm -f "$rollback_compose"
 echo CORE_RUNTIME_ROLLED_OUT
 '@.Replace('__AWS_REGION__', $AwsRegion).Replace('__RUNTIME_SERVICES__', $runtimeServiceWords).Replace('CORE_RUNTIME_ROLLED_OUT', $rolloutMarker).Replace('__RUNTIME_ROLE__', $RuntimeRole.ToUpperInvariant()).Replace('__SETTLE_SECONDS__', [string]$SettleSeconds).Replace('__RUNTIME_ROLE_PREPARE__', $runtimeRolePrepare)
+
+if ($RuntimeRole -in @('core', 'backtest-worker')) {
+    $policyService = if ($RuntimeRole -ceq 'core') { 'backtest-api' } else { 'backtest-worker' }
+    $backtestPolicyEvidence = @'
+set -euo pipefail
+cd /opt/idea2strategy
+test "$(sha256sum /var/lib/idea2strategy/backtest-policy/execution-policy.json | cut -d ' ' -f 1)" = '__EXECUTION_POLICY_SHA256__'
+test "$(sha256sum /var/lib/idea2strategy/backtest-policy/runtime-policy.json | cut -d ' ' -f 1)" = '__RUNTIME_POLICY_SHA256__'
+container="$(docker compose --project-name idea2strategy ps -q '__POLICY_SERVICE__')"
+test -n "$container"
+test "$(docker exec "$container" sha256sum /runtime-policy/execution-policy.json | cut -d ' ' -f 1)" = '__EXECUTION_POLICY_SHA256__'
+test "$(docker exec "$container" sha256sum /runtime-policy/runtime-policy.json | cut -d ' ' -f 1)" = '__RUNTIME_POLICY_SHA256__'
+echo BACKTEST_POLICY_ARTIFACTS_VERIFIED
+'@.Replace('__EXECUTION_POLICY_SHA256__', $expectedExecutionPolicySha256).Replace('__RUNTIME_POLICY_SHA256__', $expectedRuntimePolicySha256).Replace('__POLICY_SERVICE__', $policyService)
+    $remoteScript = $remoteScript.Replace("echo $rolloutMarker", "$backtestPolicyEvidence`necho $rolloutMarker")
+}
 
 if ($RuntimeRole -ceq 'trading') {
     $tradingEvidence = @'

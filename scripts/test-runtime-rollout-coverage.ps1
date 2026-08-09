@@ -98,7 +98,11 @@ if ($missing.Count -gt 0) {
 # compose file when they disagree. Losing either half would turn a failed rollout into a silent pass.
 foreach ($guard in @(
         'test "$configured" = "$expected"',
-        'rollback()')) {
+        'rollback()',
+        'Get-DevelopmentBacktestPolicyArtifactSet',
+        '/var/lib/idea2strategy/backtest-policy/execution-policy.json',
+        '/runtime-policy/execution-policy.json',
+        'BACKTEST_POLICY_ARTIFACTS_VERIFIED')) {
     if (-not $deployText.Contains($guard)) {
         throw "The rollout lost its fail-closed guard: $guard"
     }
