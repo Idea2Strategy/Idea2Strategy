@@ -228,9 +228,12 @@ if ($Owner) {
         Write-Host ''
         Write-Host "docs/launch-readiness-plan.md 의 §$($task.id) 를 수행해줘. 담당자는 $Owner 다."
         Write-Host ''
-        Write-Host 'AGENTS.md 의 "Launch work loop" 절을 먼저 읽고 그대로 따른다. 내 소유'
-        Write-Host "리포지터리($($task.repository)) 밖의 파일은 수정하지 않는다. feature 브랜치에서"
-        Write-Host '작업하고 해당 develop 으로 PR 을 연다. 완료 판정은'
+        Write-Host 'AGENTS.md 의 "Launch work loop" 절을 먼저 읽고 그대로 따른다. 수정 범위는'
+        Write-Host "이 작업의 리포지터리($($task.repository))와, 원장 owners 블록이 내게 허용한 것"
+        Write-Host '(내 서브모듈의 루트 gitlink 이동, 내 docs/evidence/** 작성)이다. 번들에 포함된'
+        Write-Host 'gitlink 를 옮기면 같은 커밋에서 scripts/refresh-flyway-ci-bundle.ps1 을 돌린다.'
+        Write-Host 'serialized_resources 에 있는 것을 쓰기 전에는 루트 #451 에 선점을 남긴다.'
+        Write-Host 'feature 브랜치에서 작업하고 해당 develop 으로 PR 을 연다. 완료 판정은'
         Write-Host "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/launch-status.ps1"
         Write-Host "-Owner $Owner 가 §$($task.id) 를 [x] 로 보고할 때다."
         Write-Host ''

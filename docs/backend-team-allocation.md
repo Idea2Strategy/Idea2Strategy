@@ -1,26 +1,33 @@
 # Idea2Strategy 개발 배정 및 병렬 진행 방식
 
-> 상태: **2026-08-08 3인으로 재배정.** 아래 §0이 현재 배정이고, §1의 A~F 표는 영역 정의로만 유지한다.
+> 상태: **2026-08-09 2인으로 재배정.** 정본은 `docs/launch-readiness-tasks.json` 의 `owners` 블록이다. 아래 §0은 그 요약이고, §1의 A~F 표는 영역 정의로만 유지한다.
 > 범위: Basic 전략, 외부 AI 연동 CLI, 실시간 가상 거래, 자동 백테스트, 방과 성과 기능
 > 원칙: 공통 선행 Issue와 사용자 흐름별 상위·하위 Issue를 확정하기 전에는 작업 브랜치를 생성하지 않는다.
 
 이 문서는 세부 구현 체크리스트가 아니다. 담당자와 진행 방식을 공유하고, 실제 구현 항목은 `backend-implementation-master-checklist.md`에서 GitHub Issue 단위로 옮길 때 사용한다. **현재 진행 중인 작업의 정본은 `launch-readiness-plan.md`다.**
 
-## 0. 현재 배정 (2026-08-08, 3인)
+## 0. 현재 배정 (2026-08-09, 2인)
 
-활동 인원이 6인에서 3인으로 줄었다. **배정 단위는 리포지터리다** — 같은 파일을 두 사람이 만지지 않는 것이 유일한 하드 제약이다. A~F 문자는 Issue·에픽 라벨로 계속 살아 있으므로 각 담당이 영역을 **통째로** 물려받는다.
+3인 배정은 모든 서브모듈 포인터가 한 사람을 거치게 해 왕복 대기를 만들었다. 2인으로 재편하면서
+**각 소유자가 자기 서브모듈의 루트 gitlink 를 직접 올린다.** 번들에 포함된 gitlink 를 옮기면 같은
+커밋에서 `scripts/refresh-flyway-ci-bundle.ps1` 을 돌린다 — 추적된 훅이 강제하므로 잊을 수 없다.
+자기 `docs/evidence/**` 도 직접 쓴다.
 
-| 담당 | 수정 가능한 리포지터리 | 물려받은 영역 |
+| 담당 | 수정 가능한 리포지터리 | 소유 영역 |
 |---|---|---|
-| 민경철 (`kcrmin`) | root 슈퍼프로젝트(`compose*.yml`, `infra/`, `scripts/`, `db/`, submodule pointer) + `backend` | A 계정·운영, B 전략·봇(backend), E 방·성과 |
-| 박준유 (`pjy008008`) | `data-pipeline`, `trading-engine` | C 시장·평가, D 데이터(수집·기업행사), F 거래·원장 |
-| 손현준 (`hjcud`) | `backtest-engine`, `ui` | D 백테스트, 전 영역의 UI |
+| 민경철 (`kcrmin`) | root 슈퍼프로젝트(`compose*.yml`, `infra/`, `scripts/`, `db/`) + `backend` + `trading-engine` + `data-pipeline` | 플랫폼: infra·릴리스·정본 DB·권한·운영자·방·원장·시장 데이터 (A·B·C·E·F, D 의 수집) |
+| 손현준 (`hjcud`) | `backtest-engine`, `ui` | 사용자 여정: 백테스트 실행과 전 화면 (D 의 백테스트, 전 영역 UI) |
 
-영역 D는 리포지터리 기준으로 쪼갠다. `data-pipeline`과 `backtest-engine`은 별개 리포지터리라 파일 경합이 없다. 문자와 리포지터리가 어긋나면 **리포지터리를 기준으로 판단**한다.
+여전히 한 사람만 수정하는 경로: `db/schema.dbml`, `compose.back.yml`, `compose.front.yml` (`kcrmin`).
+실제로 충돌했던 지점이 이 셋이다.
 
-`db/schema.dbml`, `compose.back.yml`, root submodule pointer는 **`kcrmin`만** 수정한다. 다른 담당이 필요하면 요청한다. 이 세 곳이 실제로 충돌이 났던 지점이다.
+**직렬 자원 — 건너뛰지 않는 대기.** Development 릴리스 워크플로, BASIC 큐와 단일 backtest worker,
+운영자 계정, DB 부트스트랩은 환경에 하나뿐이다. 쓰기 전에 루트 이슈 #451 에 선점 한 줄을 남기고
+끝나면 종료를 남긴다.
 
-비활동: 나주원 (`Juwon-Na`), 서동위 (`SeoDongWi`), 황영우 (`dertz569`). 위 표로 재배정됐다. 이들에게 작업을 배정하지 않는다.
+비활동: 박준유 (`pjy008008`, 2026-08-09 부터 — 카드는 `kcrmin` 으로, `INT07` 만 `INT03` 의존을 따라
+`hjcud` 로), 나주원 (`Juwon-Na`), 서동위 (`SeoDongWi`), 황영우 (`dertz569`). 이들에게 작업을 배정하지
+않는다.
 
 **v1.0 범위 제외 (2026-08-08 결정):** Pro 모드 — B09, B10, B13, C15, F06. 시작하지 않는다. UI의 `ProEditorUnavailableView`가 이미 진입을 막고 있다.
 
