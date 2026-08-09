@@ -8,7 +8,7 @@ Initial journey revision: `6ec540eb32aff6150a187a0a58c8515f3717b380`
 
 Latest fully verified release before the current investigation: `b31b9b8d16078c915d130f730bfc210c7618e755`
 
-Current deployed root under investigation: `70cdd868f9daff5644ddd5646bee7ddc0faf5a67`
+Current deployed root under investigation: `db3e333f483575eb5f2cf914cb54d5ba6b64fce9`
 
 This is partial evidence only. It deliberately does not create `docs/evidence/INT03.md`, because an
 automatic backtest has not completed and the personal bot run, order/fill, and stop sequence has not
@@ -254,19 +254,62 @@ It returned HTTP 200 with `ready=true` and `issues=[]`. This proves the original
 condition was removed without a DB insert, fabricated watermark, or temporary grant. The result was
 recorded on data-pipeline #57 and that issue was closed again.
 
+### One authorized public journey after the compiled-plan and worker-correlation fixes
+
+Development release run
+[31293508303](https://github.com/Idea2Strategy/Idea2Strategy/actions/runs/31293508303)
+completed successfully for root `db3e333f483575eb5f2cf914cb54d5ba6b64fce9`. `kcrmin` then
+recorded that the running worker used image
+`sha256:182ddcb0aa14551f3db6f61ce5b339285ca8e96e181bfef5f62ecf84f69b5f45`,
+had `restarts=0`, and carried UUID correlation ID
+`b915ae58-9bfd-5c36-8a36-f28a590403d2`. Root issue #447 explicitly authorized one new public
+journey and root issue #451 transferred the BASIC queue and worker to `hjcud` for that journey.
+
+The journey used one new customer and only public HTTPS APIs. Signup returned 202, a real
+verification email arrived at the journey's one-time mailbox, email verification returned 204, and
+login returned 200. No email address, password, verification token, customer JWT, or mailbox token
+is recorded here. No direct database write, temporary grant, DLQ operation, worker restart, ASG
+operation, or old-run redrive was performed.
+
+The accepted strategy used the same published
+`BASIC_SCHEDULE -> BASIC_RSI_CROSS -> BASIC_EQUAL_ALLOCATION_ORDER` flow, AAPL at 30 minutes,
+and the launch inputs recorded above. It produced exactly one release and automatic run:
+
+| Artifact | ID / observation |
+| --- | --- |
+| Account | `5b02eab1-497e-4faf-aad5-1555fbe61617` |
+| Strategy | `7e498b9e-e87d-4109-88f6-73247b9364a5`, edit sequence 1 |
+| Validation | `4dedd123-8d6a-4af8-80e5-df6face1b1b4` = `VALID` |
+| Bot | `dfc72d65-1670-38b5-a017-4e7d1773f0b9`, BASIC lane |
+| Official run | `dcc110d7-6cb2-3909-bb9f-623b21ac90bf`, queued at `2026-08-09T04:34:35.063825Z` |
+| Compiled plan | `sha256:4f4e30ac62c6f4f46c6c554863d572e694e132f00bc68251c70b9575da0a6d3f` |
+| Dataset | `7f7113c9-3b02-4098-97ec-0baa07e2b3b0`, locked hash `sha256:08a848a5f9aa1aac80e215c2d86bcf6d5f96c354400c7c16394dae9ffa9939af` |
+| Feature materialization | `940de4e9-731e-5c78-bb50-c6559e518774`, locked result `sha256:cf7f43ede602740e5a7879c759a19a4b77fac4803b5861628b1fa89e76d2ee3a` |
+
+The input view reported no missing requirements. The bot operation view reported no execution
+block, and preflight returned `ready=true` with no issues. The automatic backtest nevertheless did
+not begin simulation: attempt 1 through 5 each ended `FAILED` in approximately 18 to 54
+milliseconds with `failure_code=HANDLER_ERROR:ConfigurationError`. The public run view remained
+`QUEUED` with `attempt_count=5` and no top-level failure code.
+
+The public API does not expose the `ConfigurationError` message or traceback, so this evidence does
+not infer its cause. The exact run and input identifiers were posted to root issue #447 for a
+read-only `/idea2strategy/dev/backtest` traceback inspection. The BASIC queue/worker use was then
+released on root issue #451. Because the automatic backtest never reached `COMPLETED`, the personal
+bot run, order/fill, and stop calls were not made. No second release or run was created, and the old
+run `c0df2755-01eb-3660-b57e-be20ab73001a` remains untouched.
+
 ## Resume criteria
 
-Development release #61 satisfied the previous `bot.launch_contract_plans` grant and worker-rollout
-criteria. Two separate defects now block the same run: the exact compiled-plan checksum is not
-resolvable through the deployed immutable plan source, and the failure event cannot be published
-because its correlation ID is not a UUID. Resume INT03 only after `kcrmin` coordinates both owning
-boundaries, deploys both fixes, and explicitly lifts the automatic-backtest pause:
+Development release 31293508303 satisfied the previous exact-plan lookup and worker UUID-correlation
+criteria. The fresh run now fails at a later boundary with
+`HANDLER_ERROR:ConfigurationError`. Resume INT03 only after:
 
-1. make plan `sha256:f98de8f7bde5c44eaadf82acad874d9ba7c10eae0d56030687fa706f49a2e850`
-   resolvable through the deployed `PostgresCompiledPlanSource` and verify the publisher/consumer handoff;
-2. supply a UUID-conformant stable value for `BACKTEST_WORKER_CORRELATION_ID` so terminal failures can publish;
-3. deploy both fixes without redriving prior DLQ evidence;
-4. create one fresh RSI release through the public customer flow;
-5. verify the automatic backtest reaches `COMPLETED` and record its result hash and order/fill evidence;
-6. verify personal bot run, judgment, virtual order/fill, and stop in order (preflight already passes);
-7. only then replace this partial record with `docs/evidence/INT03.md`.
+1. `kcrmin` records the first attempt's exact exception message and traceback from
+   `/idea2strategy/dev/backtest` and assigns the owning repository from that evidence;
+2. the owning fix is tested, reviewed, deployed, and the running worker revision and health are
+   observed without redriving any prior run or DLQ message;
+3. `kcrmin` explicitly authorizes one new public journey and transfers the BASIC queue/worker again;
+4. that one automatic backtest reaches `COMPLETED`, with its result hash and trade evidence recorded;
+5. the same new bot then passes personal run, judgment, virtual order/fill, and stop in order;
+6. only then replace this partial record with `docs/evidence/INT03.md`.
