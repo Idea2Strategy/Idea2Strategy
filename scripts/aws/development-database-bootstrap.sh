@@ -7,6 +7,30 @@ readonly FLYWAY_IMAGE='redgate/flyway@sha256:52cdd559dc8ae38a17b56615e3c7137d9b0
 readonly AWS_CLI_IMAGE='amazon/aws-cli@sha256:310813a7eae8fd88da1cc9c37970e3500b0ff3984479e1012f0a6fd44e453f63'
 readonly CONSUMERS=(backend batch backtest trading pipeline)
 
+# The write privileges whose absence has actually stopped a deployed run, stated here independently of
+# the generated grant file so the two have to agree. `SELECT 1` proved a runtime role could log in and
+# nothing more: INT03 run 9095f2a3 failed five times against idea2strategy_backtest_runtime holding
+# select=true, insert=true, update=false on storage.objects, and the bootstrap that created that role
+# reported passed. Each entry names the run that failed without it.
+#
+# This is deliberately not the whole grant matrix. A copy of every privilege would be maintained
+# against itself and would say nothing; these are the ones a deployed service has been observed to
+# need, so a rotation that produces a role without them fails here instead of in a worker log.
+declare -rA RUNTIME_TABLE_PRIVILEGES=(
+  # storage.objects UPDATE: the registrar inserts a STAGED row, verifies the bytes, then promotes that
+  # row to AVAILABLE. INT03 run 9095f2a3.
+  # operations.outbox_consumer_receipts: the intake claims a receipt before executing (backend #249).
+  # bot.launch_contract_plans: the executor resolves the compiled plan (backend #246, root #447).
+  [backtest]='storage.objects:SELECT storage.objects:INSERT storage.objects:UPDATE backtest.runs:UPDATE backtest.run_attempts:INSERT operations.outbox_consumer_receipts:INSERT operations.outbox_consumer_receipts:UPDATE operations.outbox_messages:SELECT bot.launch_contract_plans:SELECT'
+  # bot.continuation_deadlines UPDATE is held for a lock, not a write (backend #251); competition.rooms
+  # is the ten-second room transition (backend #246); identity.account_sanctions is sanction expiry
+  # (backend #267).
+  [batch]='bot.continuation_deadlines:UPDATE competition.rooms:UPDATE competition.participations:UPDATE identity.account_sanctions:UPDATE'
+  [backend]='backtest.runs:INSERT identity.accounts:UPDATE competition.participations:INSERT storage.objects:SELECT'
+  [trading]='trading.orders:INSERT trading.orders:UPDATE'
+  [pipeline]='market_data.dataset_manifests:UPDATE storage.objects:INSERT'
+)
+
 archive=''
 archive_sha256=''
 bundle_sha256=''
@@ -477,10 +501,44 @@ table_count="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
   "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ('identity','strategy','bot','storage','market_data','trading','backtest','performance','competition','operations') AND table_type='BASE TABLE';")"
 test "$table_count" -gt 0
 
+verified_privileges=0
 for consumer in "${CONSUMERS[@]}"; do
   login_role="idea2strategy_${consumer}_runtime"
   password="${passwords[$consumer]}"
   PGPASSWORD="$password" PGUSER="$login_role" psql -X -qAt -v ON_ERROR_STOP=1 -c 'SELECT 1;' >/dev/null
+
+  # Logging in is not the contract. Ask the session that the application will open which table
+  # privileges it actually holds, so an inherited grant that never reached the group role is a
+  # bootstrap failure rather than a permission-denied five runs later. has_table_privilege runs as
+  # this role, which means the answer includes group membership exactly as a query would see it.
+  read -ra requirements <<<"${RUNTIME_TABLE_PRIVILEGES[$consumer]}"
+  privilege_values=''
+  for requirement in "${requirements[@]}"; do
+    qualified_table="${requirement%%:*}"
+    privilege="${requirement##*:}"
+    [[ "$qualified_table" =~ ^[a-z_]+\.[a-z_]+$ ]] || {
+      echo "Malformed runtime privilege requirement: $requirement" >&2
+      exit 69
+    }
+    [[ "$privilege" =~ ^(SELECT|INSERT|UPDATE|DELETE)$ ]] || {
+      echo "Malformed runtime privilege requirement: $requirement" >&2
+      exit 69
+    }
+    privilege_values+="${privilege_values:+,}('$qualified_table','$privilege')"
+  done
+  denied="$(PGPASSWORD="$password" PGUSER="$login_role" psql -X -qAt -v ON_ERROR_STOP=1 <<SQL
+SELECT format('%s %s', required.qualified_table, required.privilege)
+FROM (VALUES $privilege_values) AS required(qualified_table, privilege)
+WHERE NOT has_table_privilege(required.qualified_table, required.privilege)
+ORDER BY 1;
+SQL
+)"
+  if [[ -n "$denied" ]]; then
+    echo "Runtime role $login_role is missing table privileges its application executes: $(tr '\n' ';' <<<"$denied")" >&2
+    exit 69
+  fi
+  verified_privileges=$((verified_privileges + ${#requirements[@]}))
+
   secret_arn="$(jq -er --arg consumer "$consumer" '.[$consumer]' "$runtime_secret_arns_file")"
   if [[ "$initial_rotation" == true ]]; then
     if [[ -n "${old_versions[$consumer]}" ]]; then
@@ -584,6 +642,7 @@ jq -cn \
   --argjson migrations "$expected_migration_count" \
   --argjson tables "$table_count" \
   --argjson login_roles 5 \
+  --argjson runtime_privileges_verified "$verified_privileges" \
   --argjson policy_row_counts "$policy_row_counts" \
   --argjson policy_versions "$policy_versions" \
   --argjson scoring_versions "$scoring_versions" \
@@ -596,4 +655,4 @@ jq -cn \
   --arg rights_version "$rights_version" \
   --arg rights_sha256 "$rights_sha256" \
   --arg rights_expires_at "$rights_expires_at" \
-  '{status:$status,root_sha:$root_sha,bundle_sha256:$bundle_sha256,policy_seed_sha256:$policy_seed_sha256,scoring_seed_sha256:$scoring_seed_sha256,database_name:$database_name,flyway_image:$flyway_image,aws_cli_image:$aws_cli_image,migrations:$migrations,tables:$tables,login_roles:$login_roles,policy_row_counts:$policy_row_counts,policy_versions:$policy_versions,scoring_versions:$scoring_versions,secret_versions:$secret_versions,instrument_count:$instrument_count,rights_expires_at:$rights_expires_at,trading_runtime_artifacts:{"instrument-mapping":{runtime:"market-gateway",key:$instrument_mapping_key,version_id:$instrument_mapping_version,sha256:$instrument_mapping_sha256,local_path:"instruments.json"},"provider-rights":{runtime:"market-gateway",key:$rights_key,version_id:$rights_version,sha256:$rights_sha256,local_path:"alpaca-sip-rights.json"}}}'
+  '{status:$status,root_sha:$root_sha,bundle_sha256:$bundle_sha256,policy_seed_sha256:$policy_seed_sha256,scoring_seed_sha256:$scoring_seed_sha256,database_name:$database_name,flyway_image:$flyway_image,aws_cli_image:$aws_cli_image,migrations:$migrations,tables:$tables,login_roles:$login_roles,runtime_privileges_verified:$runtime_privileges_verified,policy_row_counts:$policy_row_counts,policy_versions:$policy_versions,scoring_versions:$scoring_versions,secret_versions:$secret_versions,instrument_count:$instrument_count,rights_expires_at:$rights_expires_at,trading_runtime_artifacts:{"instrument-mapping":{runtime:"market-gateway",key:$instrument_mapping_key,version_id:$instrument_mapping_version,sha256:$instrument_mapping_sha256,local_path:"instruments.json"},"provider-rights":{runtime:"market-gateway",key:$rights_key,version_id:$rights_version,sha256:$rights_sha256,local_path:"alpaca-sip-rights.json"}}}'
