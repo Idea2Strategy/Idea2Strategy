@@ -504,11 +504,11 @@ GRANT SELECT ON TABLE "identity"."account_retention_obligations" TO idea2strateg
 GRANT SELECT ON TABLE "identity"."account_retention_policy_proposals" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."account_retention_policy_rules" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."account_retention_policy_versions" TO idea2strategy_batch;
-GRANT SELECT ON TABLE "identity"."account_sanction_command_receipts" TO idea2strategy_batch;
-GRANT SELECT ON TABLE "identity"."account_sanction_events" TO idea2strategy_batch;
-GRANT SELECT ON TABLE "identity"."account_sanction_heads" TO idea2strategy_batch;
-GRANT SELECT ON TABLE "identity"."account_sanctions" TO idea2strategy_batch;
-GRANT SELECT ON TABLE "identity"."account_security_states" TO idea2strategy_batch;
+GRANT SELECT, INSERT ON TABLE "identity"."account_sanction_command_receipts" TO idea2strategy_batch;
+GRANT SELECT, INSERT ON TABLE "identity"."account_sanction_events" TO idea2strategy_batch;
+GRANT SELECT, INSERT, UPDATE ON TABLE "identity"."account_sanction_heads" TO idea2strategy_batch;
+GRANT SELECT, UPDATE ON TABLE "identity"."account_sanctions" TO idea2strategy_batch;
+GRANT SELECT, INSERT ON TABLE "identity"."account_security_states" TO idea2strategy_batch;
 GRANT SELECT, UPDATE ON TABLE "identity"."accounts" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."auth_providers" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."authentication_events" TO idea2strategy_batch;
@@ -526,7 +526,7 @@ GRANT SELECT ON TABLE "identity"."password_reset_requests" TO idea2strategy_batc
 GRANT SELECT ON TABLE "identity"."policy_documents" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."recovery_code_sets" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."recovery_codes" TO idea2strategy_batch;
-GRANT SELECT ON TABLE "identity"."refresh_token_families" TO idea2strategy_batch;
+GRANT SELECT, UPDATE ON TABLE "identity"."refresh_token_families" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "market_data"."corporate_actions" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "market_data"."dataset_lineage" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "market_data"."dataset_manifests" TO idea2strategy_batch;
