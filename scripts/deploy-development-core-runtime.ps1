@@ -38,7 +38,7 @@ $terraformOutputName = switch -CaseSensitive ($RuntimeRole) {
 $runtimeServices = switch -CaseSensitive ($RuntimeRole) {
     "trading" { @("market-gateway", "trading-worker") }
     "backtest-worker" { @("backtest-worker") }
-    default { @("backend-api", "backend-worker", "backtest-api") }
+    default { @("backend-api", "backend-batch", "backend-worker", "backtest-api") }
 }
 $runtimeServiceWords = $runtimeServices -join " "
 $hostReadyMarker = "$($RuntimeRole.ToUpperInvariant())_HOST_READY"

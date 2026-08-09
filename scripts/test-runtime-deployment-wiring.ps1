@@ -12,6 +12,7 @@ $variables = Get-Content -LiteralPath (Join-Path $environmentRoot "variables.tf"
 $pipeline = Get-Content -LiteralPath (Join-Path $environmentRoot "pipeline.tf") -Raw
 $queues = Get-Content -LiteralPath (Join-Path $environmentRoot "queues.tf") -Raw
 $prerequisites = Get-Content -LiteralPath (Join-Path $root "scripts/test-aws-deployment-prerequisites.ps1") -Raw
+$coreRollout = Get-Content -LiteralPath (Join-Path $root "scripts/deploy-development-core-runtime.ps1") -Raw
 
 foreach ($required in @(
     "BACKTEST_OUTBOX_RELAY_ENABLED",
@@ -96,7 +97,7 @@ if ($userData -notmatch '(?s)runtime_role == "service".*?refresh_service_runtime
     throw "Every runtime role must invoke only its role-specific secret refresh before Compose starts."
 }
 
-foreach ($service in @("backend-api", "backend-worker", "backtest-api")) {
+foreach ($service in @("backend-api", "backend-batch", "backend-worker", "backtest-api")) {
     if (-not $userData.Contains($service)) {
         throw "Core runtime does not start required service: $service"
     }
@@ -111,10 +112,23 @@ foreach ($healthBoundary in @(
         throw "Public deployment verification health boundary is missing: $healthBoundary"
     }
 }
-foreach ($manual in @("backend-batch", "admin-mcp", "profiles: [manual]")) {
+foreach ($manual in @("admin-mcp", "profiles: [manual]")) {
     if (-not $userData.Contains($manual)) {
         throw "Core manual runtime boundary is missing: $manual"
     }
+}
+$backendBatchBlock = [regex]::Match($userData, '(?m)^  backend-batch:\r?\n(?<body>(?:    .*\r?\n)+)').Value
+if (-not $backendBatchBlock) {
+    throw "backend-batch Compose definition is missing."
+}
+if ($backendBatchBlock -match 'profiles:\s*\[manual\]') {
+    throw "backend-batch must start with the core runtime; room lifecycle jobs are not manual."
+}
+if ($backendBatchBlock -notmatch 'restart:\s*unless-stopped') {
+    throw "backend-batch must restart with the core runtime after a host or process failure."
+}
+if (-not $coreRollout.Contains('default { @("backend-api", "backend-batch", "backend-worker", "backtest-api") }')) {
+    throw "The core rollout must verify backend-batch image, liveness, restart count, and settle time."
 }
 foreach ($factory in @(
     "backtest_engine.production:api_authenticator",

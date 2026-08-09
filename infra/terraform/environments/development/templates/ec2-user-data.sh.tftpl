@@ -487,7 +487,7 @@ services:
       options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backtest-api}
   backend-batch:
     image: $backend_batch_image
-    profiles: [manual]
+    restart: unless-stopped
     read_only: true
     env_file: [/etc/idea2strategy/batch-secret.env]
     tmpfs: [/tmp]
@@ -861,7 +861,7 @@ umask 077
 
 expected_services=(
 %{ if runtime_role == "service" ~}
-  backend-api backend-worker backtest-api
+  backend-api backend-batch backend-worker backtest-api
 %{ endif ~}
 %{ if runtime_role == "backtest-worker" ~}
   backtest-worker
