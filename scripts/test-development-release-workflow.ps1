@@ -151,6 +151,36 @@ foreach ($token in $required) {
     }
 }
 
+# An image digest is the SHA-256 of the manifest's exact bytes, and ECR returns that manifest
+# pretty-printed. The reuse path used to pipe it into `Set-Content -NoNewline`, which dropped every
+# line separator: put-image then registered a manifest 45 bytes shorter than the one being reused, the
+# digest comparison rejected it, and every release had to pass force_rebuild_all_images (A91). Measured
+# on idea2strategy-dev/admin-mcp: the joined bytes hash to the registry digest, the collapsed bytes do
+# not. Nothing here may reshape those bytes again.
+$manifestStaging = [regex]::Match(
+    $workflow,
+    "(?ms)aws ecr batch-get-image.*?imageManifest'.*?--output text\)(?<staging>.*?)aws ecr put-image")
+if (-not $manifestStaging.Success) {
+    throw ("The reuse path must capture the manifest into a variable and stage it before put-image. " +
+        "Piping batch-get-image straight into a file writer is the shape this check exists to reject.")
+}
+$staging = $manifestStaging.Groups['staging'].Value
+if ($staging -notmatch [regex]::Escape('[IO.File]::WriteAllText($manifestPath, ($manifestLines -join "`n"), [Text.UTF8Encoding]::new($false))')) {
+    throw "The reused ECR manifest must be written byte-for-byte: rejoin the lines with a newline and write UTF-8 without a BOM."
+}
+$manifestFetch = [regex]::Match(
+    $workflow,
+    "(?ms)(?<fetch>[^\n]*aws ecr batch-get-image[^\n]*)\n.*?imageManifest'.*?--output text\)")
+if (-not $manifestFetch.Success -or $manifestFetch.Groups['fetch'].Value -notmatch '@\(aws ecr batch-get-image') {
+    throw "The reused ECR manifest must be captured as the array of lines AWS returned, not as one collapsed string."
+}
+if ($staging.Contains('Set-Content')) {
+    throw "Set-Content must not stage the reused ECR manifest; it rewrites the bytes the digest is taken over."
+}
+if (-not $workflow.Contains('a manifest whose source tag')) {
+    throw "A reuse digest mismatch must report both digests; one of them alone never said which side moved."
+}
+
 $immutableReleaseExpression = '${{ github.sha }}-${{ github.run_id }}'
 if (([regex]::Matches($workflow, [regex]::Escape($immutableReleaseExpression))).Count -lt 5) {
     throw "Every release artifact, image tag, and release bundle must include the immutable GitHub run_id."

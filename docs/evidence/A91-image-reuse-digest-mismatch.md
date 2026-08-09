@@ -78,3 +78,59 @@ Exception: .../ps1:56
    다시 빌드한다.
 4. 고친 뒤 `force_rebuild_all_images` 없이 릴리스를 두 번 연속 통과시킨다. 두 번째가
    재사용 경로를 실제로 타는 실행이다.
+
+---
+
+# 2026-08-09 — 원인 확정. 후보 두 개 모두 아니었다
+
+세 번째 재현이 났다(`force_rebuild_all_images=false`, 실행
+[31293415523](https://github.com/Idea2Strategy/Idea2Strategy/actions/runs/31293415523),
+`admin-mcp/rc-db3e333f483575eb5f2cf914cb54d5ba6b64fce9-31293415523`). 이번에는 릴리스를 또 올리는
+대신, 그 비교를 **로컬에서 재현**했다. ECR 은 읽기만 했고 쓰지 않았다.
+
+## 관측
+
+`idea2strategy-dev/admin-mcp` 의 최신 태그에 대해, 워크플로가 하던 방식과 바이트를 보존하는 방식을
+같은 매니페스트에 대해 나란히 해시했다.
+
+```
+registry digest = sha256:6a783df66035b6082e6271fdd955b7988906285f390173354010dae1683bd43f
+워크플로 방식     = sha256:318ea06188daf703ffaff8429eb3e2a6f483fb29e81c45f3441f0902f9f233d6  bytes=1742  불일치
+줄 재결합+UTF-8   = sha256:6a783df66035b6082e6271fdd955b7988906285f390173354010dae1683bd43f  bytes=1787  일치
+줄 재결합+개행 1  = sha256:a6a4e8a158c09bf780df0d1c9296cc322b0a0b4de695529348d6de0ec9b96c6d  bytes=1788  불일치
+```
+
+## 원인
+
+이미지 digest 는 **매니페스트 바이트의 SHA-256** 이다. ECR 이 돌려주는 매니페스트는 여러 줄로
+정렬(pretty-print)되어 있고, 워크플로는 그것을
+
+```powershell
+aws ecr batch-get-image ... --output text | Set-Content -NoNewline $manifestPath
+```
+
+로 저장했다. PowerShell 파이프라인은 출력을 **줄 단위 문자열 배열**로 넘기고 `-NoNewline` 은 그
+배열을 이어 붙일 때 구분자를 넣지 않는다. 그래서 줄 구분자 45개가 사라진 1742바이트가 파일에
+남고, `put-image` 는 **재사용하려던 것과 다른 매니페스트**를 새 태그로 등록했다. 그 뒤의 digest
+비교는 정확히 제 역할을 해서 그것을 거부한 것이다.
+
+즉 비교가 틀린 것이 아니라, 비교 대상이 실제로 달랐다. 앞서 적어 둔 후보 두 개(매니페스트 리스트
+digest 혼동, 수명주기 정책이 태그를 지움)는 **둘 다 아니었다.** 매니페스트는 단일 플랫폼
+`application/vnd.docker.distribution.manifest.v2+json` 이고, 승계 대상 태그는 존재했다.
+
+## 고침
+
+`.github/workflows/development-release.yml` 의 재사용 경로가 매니페스트를 줄 배열로 받아
+개행으로 다시 잇고 BOM 없이 쓴다. `Set-Content` 는 쓰지 않는다. 그리고 불일치 예외가 이제 양쪽
+digest 와 원본 태그를 함께 말한다 — 한쪽만으로는 어느 쪽이 움직였는지 알 수 없었다.
+
+`scripts/test-development-release-workflow.ps1` 가 그 모양을 고정한다. 이 검사는 고치기 전 파일에
+대해 실제로 실패하는 것을 확인했다(회귀를 못 잡는 검사가 아니다).
+
+## 남은 것
+
+위 §다음에 할 것 4번만 남았다 — `force_rebuild_all_images` 없이 릴리스를 **두 번 연속** 통과시킨다.
+두 번째 실행이 재사용 경로를 실제로 타는 실행이다. hjcud 의 INT03 1회 여정이 끝난 뒤에 예약한다
+(릴리스 워크플로는 한 번에 한 사람, 루트 #451).
+
+전체 재빌드가 릴리스마다 붙던 15분 이상은 이것으로 사라진다.
