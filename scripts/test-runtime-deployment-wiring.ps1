@@ -133,6 +133,27 @@ foreach ($factory in @(
         throw "Backtest production adapter is not wired: $factory"
     }
 }
+# The result-event contract requires metadata.correlationId to be a UUID. Both variables used to carry
+# the EC2 instance id, so the first terminal failure a worker published was rejected as a contract
+# violation, the outer worker recorded HANDLER_ERROR:ContractValidationError instead, and the message
+# retried to exhaustion with the real failure code lost (root #439). Assert the two identifiers stay
+# separate and that the correlation id is the derived value rather than the instance id.
+if ($userData -notmatch [regex]::Escape('BACKTEST_WORKER_ID=$instance_id')) {
+    throw "BACKTEST_WORKER_ID must remain the EC2 instance id: it records which host executed."
+}
+if ($userData -notmatch [regex]::Escape('BACKTEST_WORKER_CORRELATION_ID=$backtest_worker_correlation_id')) {
+    throw ("BACKTEST_WORKER_CORRELATION_ID must be the derived UUID, not the instance id. " +
+        "An instance id fails the result-event contract and turns a terminal failure into a retry loop.")
+}
+foreach ($guard in @(
+        'backtest_correlation_digest="$(printf ',
+        'sha256sum | cut -c1-32',
+        'Derived backtest worker correlation id is not a UUID')) {
+    if (-not $userData.Contains($guard)) {
+        throw ("The backtest worker correlation id lost part of its derivation or its shape check: " +
+            "$guard. It must be deterministic per instance and verified before use.")
+    }
+}
 foreach ($required in @(
     "BACKTEST_BASIC_MAX_CONCURRENCY=2",
     "BACKTEST_CUSTOM_MAX_CONCURRENCY=1",
