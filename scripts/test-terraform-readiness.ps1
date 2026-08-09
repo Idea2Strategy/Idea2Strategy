@@ -74,6 +74,21 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "The Development release does not roll out its published images to every runtime role."
     }
+
+    # One derivation, two callers that cannot share code at run time: user data stamps the correlation
+    # id at boot and the rollout re-stamps a host that booted earlier. Drift between them would hand the
+    # same host two different correlation ids.
+    & (Join-Path $PSScriptRoot "test-backtest-correlation-derivation.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "The backtest worker correlation id derivation is not consistent across its callers."
+    }
+
+    # Parses the shell the rollout sends over SSM. Without this a typo surfaces mid-release on the one
+    # shared Development environment instead of here.
+    & (Join-Path $PSScriptRoot "test-runtime-rollout-script-syntax.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "The runtime rollout embeds shell that does not parse."
+    }
 } finally {
     Pop-Location
 }

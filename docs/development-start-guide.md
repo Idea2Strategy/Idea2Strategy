@@ -166,7 +166,7 @@ claude
 ```text
 /start-work A 나주원 Juwon-Na
 /start-work B 손현준 hjcud
-/start-work C 박준유 pjy008008
+/start-work hjcud
 /start-work D 서동위 SeoDongWi
 /start-work E 황영우 dertz569
 /start-work F 민경철 kcrmin

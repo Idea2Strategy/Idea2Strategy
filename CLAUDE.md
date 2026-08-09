@@ -28,25 +28,34 @@
 
 ## Team ownership
 
-Three active contributors as of 2026-08-08. **Ownership is by repository**, because that is what
-keeps two people out of one file. The A–F area letters still label issues and epics, so each owner
-inherits whole areas rather than parts of them.
+Two active contributors as of 2026-08-09. The 2026-08-08 three-way split moved every submodule's
+root pointer through one person, so a one-line fix in a submodule cost three round trips (submodule
+PR → wait for the pointer → wait for the release). This split removes the waits that were
+coordination overhead and keeps only the waits that are physical: one Development environment, one
+BASIC queue, one worker, one operator account.
 
-| Owner | Repositories they may change | Areas inherited |
+| Owner | Repositories they may change | What they own |
 | --- | --- | --- |
-| 민경철 (`kcrmin`) | root superproject (`compose*.yml`, `infra/`, `scripts/`, `db/`, submodule pointers) + `backend/` | A 계정·운영, B 전략·봇(backend), E 방·성과 |
-| 박준유 (`pjy008008`) | `data-pipeline/` + `trading-engine/` | C 시장·평가, D 데이터(수집·기업행사), F 거래·원장 |
-| 손현준 (`hjcud`) | `backtest-engine/` + `ui/` | D 백테스트, 전 영역의 UI |
+| 민경철 (`kcrmin`) | root superproject (`compose*.yml`, `infra/`, `scripts/`, `db/`) + `backend/` + `trading-engine/` + `data-pipeline/` | 플랫폼: infra·릴리스·정본 DB·권한 정책·운영자·방·원장·시장 데이터 |
+| 손현준 (`hjcud`) | `backtest-engine/` + `ui/` | 사용자 여정: 백테스트 실행과 전 화면 |
 
-Area D is split by repository on purpose: `data-pipeline` and `backtest-engine` are separate
-repositories, so the split creates no file contention. Name the repository, not the letter, when the
-two disagree.
+**Each owner moves the root gitlink for their own submodules.** `hjcud` bumps `backtest-engine` and
+`ui` pointers directly instead of asking; if the gitlink is one the Flyway bundle pins, the same
+commit runs `scripts/refresh-flyway-ci-bundle.ps1` — the tracked hook refuses the commit otherwise.
+Each owner also writes their own `docs/evidence/**` files.
 
-`db/schema.dbml`, `compose.back.yml` and root submodule pointers are changed by `kcrmin` only.
-Anyone else who needs one asks. These are the three places where concurrent work actually collided.
+Still one person only, because these are the paths that actually collided:
+`db/schema.dbml`, `compose.back.yml`, `compose.front.yml` (`kcrmin`).
 
-Inactive: 나주원 (`Juwon-Na`), 서동위 (`SeoDongWi`), 황영우 (`dertz569`). Their areas are
-redistributed above. Do not route work to them.
+**Serialized resources are waits to respect, not to skip**: the Development release workflow, the
+BASIC queue and its single backtest worker, the operator account, and the database bootstrap admit
+one user at a time. Claim on root issue #451 with one line before starting, close the claim when
+done. The `owners` block of `docs/launch-readiness-tasks.json` is the machine-readable form of this
+section and wins on any disagreement.
+
+Inactive: 박준유 (`pjy008008`) as of 2026-08-09 — cards moved to `kcrmin`, except `INT07` which
+follows `INT03` to `hjcud` so the dependency chain stays with one person. Also 나주원 (`Juwon-Na`),
+서동위 (`SeoDongWi`), 황영우 (`dertz569`). Do not route work to them.
 
 Use `/start-work <owner-name-or-GitHub-ID> [issue or goal]` for the first project turn after cloning
 or updating. Codex or human sessions get the same answer from
