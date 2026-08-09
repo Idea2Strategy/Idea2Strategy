@@ -778,7 +778,7 @@ GRANT SELECT ON TABLE "market_data"."stream_watermarks" TO idea2strategy_backtes
 GRANT SELECT ON TABLE "market_data"."trading_sessions" TO idea2strategy_backtest;
 GRANT SELECT, INSERT, UPDATE ON TABLE "operations"."outbox_consumer_receipts" TO idea2strategy_backtest;
 GRANT SELECT ON TABLE "operations"."outbox_messages" TO idea2strategy_backtest;
-GRANT SELECT, INSERT ON TABLE "storage"."objects" TO idea2strategy_backtest;
+GRANT SELECT, INSERT, UPDATE ON TABLE "storage"."objects" TO idea2strategy_backtest;
 GRANT SELECT ON TABLE "strategy"."compiled_flow_plans" TO idea2strategy_backtest;
 GRANT SELECT ON TABLE "strategy"."element_catalog_versions" TO idea2strategy_backtest;
 GRANT SELECT ON TABLE "strategy"."element_definitions" TO idea2strategy_backtest;
