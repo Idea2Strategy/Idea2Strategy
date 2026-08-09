@@ -100,6 +100,10 @@ foreach ($guard in @(
         'test "$configured" = "$expected"',
         'rollback()',
         'Get-DevelopmentBacktestPolicyArtifactSet',
+        'verify-development-backtest-policy-artifacts.ps1',
+        'reconcile_backtest_policy_artifacts',
+        's3api get-object --region __POLICY_REGION__',
+        'BACKTEST_POLICY_CHANGED=true',
         '/var/lib/idea2strategy/backtest-policy/execution-policy.json',
         '/runtime-policy/execution-policy.json',
         'BACKTEST_POLICY_ARTIFACTS_VERIFIED')) {

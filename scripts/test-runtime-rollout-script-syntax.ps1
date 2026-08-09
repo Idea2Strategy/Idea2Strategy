@@ -47,6 +47,14 @@ $substitutions = [ordered]@{
     "__POLICY_SERVICE__"       = "backtest-worker"
     "__EXECUTION_POLICY_SHA256__" = ("a" * 64)
     "__RUNTIME_POLICY_SHA256__" = ("b" * 64)
+    "__POLICY_REGION__"        = "'ap-northeast-2'"
+    "__POLICY_BUCKET__"        = "'idea2strategy-dev-123456789012-market-data'"
+    "__EXECUTION_POLICY_KEY__" = "'runtime/backtest/execution-policy/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/execution-policy.json'"
+    "__EXECUTION_POLICY_VERSION__" = "'execution-version'"
+    "__RUNTIME_POLICY_KEY__"   = "'runtime/backtest/runtime-policy/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/runtime-policy.json'"
+    "__RUNTIME_POLICY_VERSION__" = "'runtime-version'"
+    "__EXECUTION_POLICY_SHA256_LITERAL__" = "'" + ("a" * 64) + "'"
+    "__RUNTIME_POLICY_SHA256_LITERAL__" = "'" + ("b" * 64) + "'"
 }
 
 $fragments = New-Object System.Collections.Generic.List[object]
