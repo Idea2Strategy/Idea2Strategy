@@ -263,13 +263,26 @@ if ($artifactManifest.sourceApprovalPullRequest -ne 225 -or
 # record is the whole audit trail for a policy change made before v1.0.0, when no fresh provider
 # observation is obtainable (AGENTS.md, pre-v1.0.0 posture).
 if ($null -ne $artifactManifest.amendment) {
-    foreach ($field in @("reason", "authority", "instruction", "retiredVersion")) {
+    foreach ($field in @(
+            "reason", "authority", "instruction", "supersededVersion", "supersededHandling")) {
         if ([string]::IsNullOrWhiteSpace([string]$artifactManifest.amendment.$field)) {
             throw "Development policy amendment must record $field."
         }
     }
     if ([string]$artifactManifest.amendment.authority -notmatch '^user:[A-Za-z0-9-]+$') {
         throw "Development policy amendment authority must name a configured product authority."
+    }
+}
+# The remote bootstrap refuses a policy seed carrying anything but INSERT, so a published policy row can
+# never be rewritten by a later seed. A superseded version is therefore made unreachable rather than
+# retired in place, and that has to be checked here: the release that tried an UPDATE failed at the
+# remote guard after the gates had already been approved, which is an expensive place to learn it.
+foreach ($forbidden in @(
+        'UPDATE ', 'DELETE ', 'TRUNCATE ', 'ALTER ', 'DROP ', 'CREATE ', 'GRANT ', 'REVOKE ', 'MERGE ')) {
+    if ($policySeed.ToUpperInvariant().Contains($forbidden)) {
+        $keyword = $forbidden.Trim()
+        throw ("Development policy seed must contain only INSERT statements; the remote bootstrap " +
+            "rejects " + $keyword + " even inside a comment.")
     }
 }
 # Still exactly one policy: ExecutionPolicyCatalog rejects two policies sharing a release quarter, and
@@ -292,13 +305,11 @@ if ($policy.periodStart -cne "2024-01-01T05:00:00Z" -or $policy.periodEnd -cne "
     $policy.marketDataSchemaVersion -cne "market-bars/1" -or $policy.timezone -cne "America/New_York") {
     throw "Development execution policy window and market data schema must match the verified manifest."
 }
-# The seed must retire the superseded version rather than delete or rewrite it.
+# The seed publishes the new version and leaves the superseded one exactly as published.
 Assert-Contains $policySeed "development-official-backtest-2026-q3-v2" `
     "Development policy seed must publish the amended policy version."
-Assert-Contains $policySeed "UPDATE backtest.execution_policy_versions" `
-    "Development policy seed must retire the superseded policy version."
-Assert-Contains $policySeed ([string]$artifactManifest.amendment.retiredVersion) `
-    "Development policy seed must name the retired version."
+Assert-Contains $policySeed ([string]$artifactManifest.amendment.supersededVersion) `
+    "Development policy seed must keep publishing the superseded version so a fresh database still has its row."
 if ($runtimePolicy.schemaVersion -ne 1 -or $runtimePolicy.attempt.maxAttempts -ne 3 -or
     $runtimePolicy.attempt.leaseDurationSeconds -ne 300 -or
     $runtimePolicy.attempt.attemptTimeoutSeconds -ne 1800 -or
