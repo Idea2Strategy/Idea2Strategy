@@ -8,7 +8,7 @@ Initial journey revision: `6ec540eb32aff6150a187a0a58c8515f3717b380`
 
 Latest fully verified release before the current investigation: `b31b9b8d16078c915d130f730bfc210c7618e755`
 
-Current root under investigation: `23855a7913a130671441e48db55f0e31b9a421d0`
+Current deployed root under investigation: `70cdd868f9daff5644ddd5646bee7ddc0faf5a67`
 
 This is partial evidence only. It deliberately does not create `docs/evidence/INT03.md`, because an
 automatic backtest has not completed and the personal bot run, order/fill, and stop sequence has not
@@ -160,6 +160,51 @@ No second release or run was created. No worker restart, ASG change, DLQ receive
 additional release, or permanent deployment was performed after this observation. The diagnostic
 run was left in place as evidence.
 
+### One authorized post-grant reproduction after Development release #61
+
+Root `70cdd868f9daff5644ddd5646bee7ddc0faf5a67` completed every job in Development release run
+[31285790795](https://github.com/Idea2Strategy/Idea2Strategy/actions/runs/31285790795). This deployed
+the narrow `bot.launch_contract_plans` read grant and the Backtest worker rollout. A fresh
+`scripts/verify-deployed-development.ps1 -ExpectedAwsAccountId 418553863687` run then passed the
+public frontend, backend, backtest, WebSocket, CloudFront/S3, SSM, Core runtime, RDS, Valkey, queue,
+and CloudWatch checks.
+
+After the release completed, one new customer journey used only the public signup, email
+verification, login, strategy save, validation, and release APIs. Preparatory request-shaping
+created ephemeral verified accounts and invalid drafts while matching the deployed Basic catalog,
+but it did not create a release, bot, or backtest run. The final accepted payload used
+`BASIC_SCHEDULE -> BASIC_RSI_CROSS -> BASIC_EQUAL_ALLOCATION_ORDER`, and exactly one accepted
+strategy release produced:
+
+| Artifact | ID / observation |
+| --- | --- |
+| Account | `cef3b0ef-5da1-4c80-9339-26633dc576a9` |
+| Strategy | `671dfc39-3e33-4c97-a953-b0d574fff8c9` |
+| Validation | `b0470f6d-2b3a-40f3-ae0b-22d91a35485d` = `VALID` |
+| Bot | `eb8a35aa-7fbe-3eb7-8198-0d8748c3bd37` |
+| Official run | `c0df2755-01eb-3660-b57e-be20ab73001a` |
+| Attempts | 1 through 5 all `FAILED`, each with `failure_code=HANDLER_ERROR:ContractValidationError` |
+
+The run appeared as `QUEUED` immediately, exhausted all five attempts, and remained `QUEUED` after
+a bounded 30-minute public-API observation. Read-only CloudWatch inspection found the exact repeated
+exception while validating `backtest_result_event`:
+
+```text
+backtest_engine.contracts.ContractValidationError:
+backtest_result_event.metadata.correlationId: 'i-07a6870a8c4c199dc'
+does not match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+```
+
+The root Development user-data template obtains the EC2 instance ID and assigns it to both
+`BACKTEST_WORKER_ID` and `BACKTEST_WORKER_CORRELATION_ID`. The Backtest worker uses the latter as the
+result event's required correlation ID, whose contract accepts a UUID. This is a new root deployment
+wiring defect at result-event validation, not a recurrence of either database grant failure. The
+evidence does not claim that simulation completed before this validation failure.
+
+The personal bot run was not called because the automatic backtest did not reach `COMPLETED`. No
+additional release or run, worker restart, ASG operation, DLQ receive/delete/redrive, or deployment
+was performed. The failed run remains in place as evidence.
+
 ## Personal bot execution observations
 
 The RSI bot preflight returned `ready=false` with:
@@ -190,11 +235,12 @@ recorded on data-pipeline #57 and that issue was closed again.
 
 ## Resume criteria
 
-Resume INT03 after `kcrmin` grants the backtest runtime only the `bot.launch_contract_plans` read
-access required by the deployed repository, refreshes the central Flyway bundle, deploys that fix,
-and explicitly lifts the automatic-backtest pause:
+Development release #61 satisfied the previous `bot.launch_contract_plans` grant and worker-rollout
+criteria. Resume INT03 only after the root deployment owner (`kcrmin`) supplies a UUID-conformant
+stable value for `BACKTEST_WORKER_CORRELATION_ID`, deploys that wiring fix, and explicitly lifts the
+automatic-backtest pause:
 
-1. apply and deploy the narrow `bot` schema/table read grant without redriving prior DLQ evidence;
+1. apply and deploy the root worker-correlation wiring fix without redriving prior DLQ evidence;
 2. create one fresh RSI release through the public customer flow;
 3. verify the automatic backtest reaches `COMPLETED` and record its result hash and order/fill evidence;
 4. verify personal bot run, judgment, virtual order/fill, and stop in order (preflight already passes);
