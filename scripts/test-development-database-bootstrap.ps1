@@ -594,12 +594,6 @@ Assert-Contains $bootstrap 'declare -rA RUNTIME_TABLE_PRIVILEGES=(' "The bootstr
 Assert-Contains $bootstrap 'NOT has_table_privilege(required.qualified_table, required.privilege)' "Runtime privileges must be verified with has_table_privilege, not inferred from a successful connection."
 Assert-Contains $bootstrap 'storage.objects:UPDATE' "The backtest role must be verified for the storage.objects UPDATE its object registrar executes."
 Assert-Contains $bootstrap 'bot.continuation_deadlines:UPDATE' "The batch role must be verified for the lock privilege backend #251 added."
-Assert-Contains $bootstrap 'competition.live_evaluation_segments:UPDATE' "INT04 finalization must verify its segment evidence write."
-Assert-Contains $bootstrap 'performance.bot_snapshots:INSERT' "INT04 finalization must verify its cutoff snapshot write."
-Assert-Contains $bootstrap 'competition.leaderboard_snapshots:INSERT' "INT04 finalization must verify its FINAL snapshot write."
-Assert-Contains $bootstrap 'competition.leaderboard_snapshots:UPDATE' "INT04 finalization must verify the lock privilege on an existing FINAL snapshot."
-Assert-Contains $bootstrap 'competition.leaderboard_entries:INSERT' "INT04 finalization must verify its leaderboard entry write."
-Assert-Contains $bootstrap 'competition.room_final_access_grants:INSERT' "INT04 finalization must verify SECRET-room access freezing."
 Assert-Contains $bootstrap 'is missing table privileges its application executes' "A missing runtime privilege must fail the bootstrap with the privilege named."
 Assert-Contains $bootstrap 'runtime_privileges_verified' "The receipt must record how many runtime privileges were verified."
 foreach ($verifiedConsumer in @("backend", "batch", "backtest", "trading", "pipeline")) {

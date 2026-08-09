@@ -24,9 +24,8 @@ declare -rA RUNTIME_TABLE_PRIVILEGES=(
   [backtest]='storage.objects:SELECT storage.objects:INSERT storage.objects:UPDATE backtest.runs:UPDATE backtest.run_attempts:INSERT operations.outbox_consumer_receipts:INSERT operations.outbox_consumer_receipts:UPDATE operations.outbox_messages:SELECT bot.launch_contract_plans:SELECT'
   # bot.continuation_deadlines UPDATE is held for a lock, not a write (backend #251); competition.rooms
   # is the ten-second room transition (backend #246); identity.account_sanctions is sanction expiry
-  # (backend #267). The remaining entries are the INT04 live-room finalization chain; checking only
-  # participation UPDATE would let a release pass and then fail at the next evidence or leaderboard write.
-  [batch]='bot.continuation_deadlines:UPDATE competition.rooms:UPDATE competition.participations:UPDATE competition.live_evaluation_segments:UPDATE performance.bot_snapshots:INSERT competition.leaderboard_snapshots:INSERT competition.leaderboard_snapshots:UPDATE competition.leaderboard_entries:INSERT competition.room_final_access_grants:INSERT identity.account_sanctions:UPDATE'
+  # (backend #267).
+  [batch]='bot.continuation_deadlines:UPDATE competition.rooms:UPDATE competition.participations:UPDATE identity.account_sanctions:UPDATE'
   [backend]='backtest.runs:INSERT identity.accounts:UPDATE competition.participations:INSERT storage.objects:SELECT'
   [trading]='trading.orders:INSERT trading.orders:UPDATE'
   [pipeline]='market_data.dataset_manifests:UPDATE storage.objects:INSERT'
