@@ -755,6 +755,8 @@ GRANT SELECT, INSERT, UPDATE ON TABLE "backtest"."performance_summaries" TO idea
 GRANT SELECT, INSERT, UPDATE ON TABLE "backtest"."run_attempts" TO idea2strategy_backtest;
 GRANT SELECT, INSERT, UPDATE ON TABLE "backtest"."run_input_pins" TO idea2strategy_backtest;
 GRANT SELECT, INSERT, UPDATE ON TABLE "backtest"."runs" TO idea2strategy_backtest;
+GRANT SELECT ON TABLE "bot"."bots" TO idea2strategy_backtest;
+GRANT SELECT ON TABLE "bot"."launch_contract_plans" TO idea2strategy_backtest;
 GRANT SELECT ON TABLE "market_data"."corporate_actions" TO idea2strategy_backtest;
 GRANT SELECT ON TABLE "market_data"."dataset_lineage" TO idea2strategy_backtest;
 GRANT SELECT ON TABLE "market_data"."dataset_manifests" TO idea2strategy_backtest;
@@ -786,6 +788,7 @@ GRANT SELECT ON TABLE "strategy"."template_versions" TO idea2strategy_backtest;
 GRANT SELECT ON TABLE "strategy"."templates" TO idea2strategy_backtest;
 GRANT SELECT ON TABLE "strategy"."validation_runs" TO idea2strategy_backtest;
 GRANT USAGE ON SCHEMA "backtest" TO idea2strategy_backtest;
+GRANT USAGE ON SCHEMA "bot" TO idea2strategy_backtest;
 GRANT USAGE ON SCHEMA "market_data" TO idea2strategy_backtest;
 GRANT USAGE ON SCHEMA "operations" TO idea2strategy_backtest;
 GRANT USAGE ON SCHEMA "storage" TO idea2strategy_backtest;
