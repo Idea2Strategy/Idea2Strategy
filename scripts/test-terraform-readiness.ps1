@@ -67,6 +67,13 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "backend-batch mandatory runtime properties are not supplied by the development host."
     }
+
+    # Derives the runtime roles from the host template and fails when the release does not roll out to
+    # one of them. Read-only, so it belongs in ordinary CI rather than behind AWS credentials.
+    & (Join-Path $PSScriptRoot "test-runtime-rollout-coverage.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "The Development release does not roll out its published images to every runtime role."
+    }
 } finally {
     Pop-Location
 }
