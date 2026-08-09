@@ -353,3 +353,84 @@ and pinned by this root branch. Resume INT03 only after:
 4. that one automatic backtest reaches `COMPLETED`, with its result hash and trade evidence recorded;
 5. the same new bot then passes personal run, judgment, virtual order/fill, and stop in order;
 6. only then replace this partial record with `docs/evidence/INT03.md`.
+
+## 2026-08-10 scope split and accepted INT03-A journey
+
+The product owner split this task into two independently reported stages:
+
+- **INT03-A**: signup, email verification, strategy authoring and validation, one immutable release,
+  automatic backtest completion, and result reads;
+- **INT03-B**: personal bot start, judgment, virtual order and fill, and stop.
+
+INT03-A is the current MVP gate. INT03-B is deferred and is not a blocker for this result. The
+`MONTH_FIRST_TRADING_DAY` product behavior remains supported and unchanged; the INT03-A diagnostic
+strategy simply did not need a live-date trigger. This file intentionally remains the partial
+record because the launch ledger's full INT03 task still includes INT03-B.
+
+### Exact release and preflight evidence
+
+Development release
+[31320117336](https://github.com/Idea2Strategy/Idea2Strategy/actions/runs/31320117336)
+completed successfully for root `81e04bfc42eb400274988503c967edc5ddecacce`. That root points at:
+
+- Backend `5774669466d7722647d5f8fbad17599c3668c3f8`, merged by
+  [Backend PR #272](https://github.com/Idea2Strategy/Idea2Strategy-backend/pull/272);
+- Backtest `9717bbe071317507bb42e0ee1545c2f674d38348`.
+
+Root [PR #482](https://github.com/Idea2Strategy/Idea2Strategy/pull/482) made the database bootstrap
+verify runtime privileges with `has_table_privilege`, and root
+[PR #483](https://github.com/Idea2Strategy/Idea2Strategy/pull/483) moved the Backend pointer to the
+grant fix. The exact bootstrap receipt passed with:
+
+| Check | Observation |
+| --- | --- |
+| Receipt root | `81e04bfc42eb400274988503c967edc5ddecacce` |
+| Flyway bundle | `5252de6fcb94019730eea399343b6bdc61a6e4cd86c2d99d0133a2ef3440aab9` |
+| Migrations | 54 |
+| Runtime secret versions | all receipt versions are current |
+| Backtest worker image | `sha256:2961d787c9f7d72cd47be46b71ce142304871380bce699b46fcaae5e073488d0` |
+| Worker runtime | running, restart count 0, read-only root filesystem |
+| Execution-policy hash | host and container both `2fc989fe28df1f69dacb3c9af73908fa8d54b2b8d7d69a2e8a9683c529028953` |
+| Runtime-policy hash | host and container both `7930efefde46d2a870627189ad9ae1535f2ef1218fe46b295c7b04a2118e058b` |
+
+An independent read-only connection from the deployed worker container observed
+`current_user=idea2strategy_backtest_runtime`, membership in `idea2strategy_backtest`, and
+`SELECT=true`, `INSERT=true`, and `UPDATE=true` on `storage.objects`. The group role's grant list
+contained exactly `SELECT`, `INSERT`, and `UPDATE` for that table. The check performed zero database
+writes.
+
+The deployed-code read-only shadow replay also completed before the public mutation. It verified
+eight immutable objects and 546 declared and observed rows, produced 273 evaluation steps, and
+returned replay digest `a09631d8037d774297dd0da75223e3b8774e1c5d3e6426b418d7ecc227121499`
+with zero external writes. The repository's full deployed-environment verifier passed frontend,
+Backend, Backtest, CloudFront/HTTPS, SSM, RDS, Valkey, queues, and CloudWatch checks.
+
+### One new public INT03-A journey
+
+The bounded harness made exactly one release call. It never automatically retries a release or any
+other mutating request. During long observation it may reauthenticate and retry a failed **GET**
+once; POST, PUT, and DELETE requests are never replayed by the wrapper.
+
+| Artifact | ID / observation |
+| --- | --- |
+| Account | `275b55f5-5aac-4828-980d-07d7f7dacbd5` |
+| Strategy | `672e4122-9253-4aac-bc53-837ebd37e77a`, edit sequence 1 |
+| Validation | `f4032719-97a2-4a34-87dd-fe4b745b5092` = `VALID` |
+| Catalog / instrument | `0f4a0000-0000-4000-8000-000000000001` / AAPL `aa268aa6-9401-49d0-a2d4-a2a490df7d84` |
+| Bot created by release | `b74a8d2d-ca74-366e-9dec-9bad6c577348`, BASIC lane |
+| Official run | `d26c7913-7e23-3179-a6c9-f84c1cc9c881` = `COMPLETED` |
+| Attempts | exactly 1, `SUCCEEDED` |
+| Result hash | `8a2d4fad7811c9c1f428ec906990877096cc80fdd4d69148f90fdb3c8e9447b2` |
+| Result reads | performance hash matched the run; 1 monthly summary returned |
+
+Signup, real email verification, login, Basic catalog selection, strategy save, validation, release
+input selection, release, automatic execution, and result reads all passed. The one-time mailbox was
+destroyed after the journey. No email address, password, verification token, customer access token,
+or mailbox token is retained in this evidence.
+
+The harness contained zero bot-run and zero bot-stop endpoints and made no judgment, order, or fill
+request. Existing runs and DLQs were preserved: no receive, delete, redrive, retry, worker restart,
+ASG operation, or prior-state mutation was performed.
+
+**Recorded disposition: INT03-A automatic backtest completed / INT03-B live virtual execution
+deferred. This is not full INT03 completion.**
