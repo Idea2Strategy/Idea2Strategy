@@ -328,6 +328,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."delegated_authorizatio
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."delegated_authorizations" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."delegated_credentials" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."delegated_strategy_derivations" TO idea2strategy_backend;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."device_authorization_requests" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."email_verification_requests" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."login_identities" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "identity"."oidc_step_up_nonces" TO idea2strategy_backend;
@@ -518,6 +519,7 @@ GRANT SELECT ON TABLE "identity"."delegated_authorization_strategy_targets" TO i
 GRANT SELECT ON TABLE "identity"."delegated_authorizations" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."delegated_credentials" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."delegated_strategy_derivations" TO idea2strategy_batch;
+GRANT SELECT ON TABLE "identity"."device_authorization_requests" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."email_verification_requests" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."login_identities" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "identity"."oidc_step_up_nonces" TO idea2strategy_batch;
