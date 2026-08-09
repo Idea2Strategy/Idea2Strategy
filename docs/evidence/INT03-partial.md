@@ -292,23 +292,63 @@ not begin simulation: attempt 1 through 5 each ended `FAILED` in approximately 1
 milliseconds with `failure_code=HANDLER_ERROR:ConfigurationError`. The public run view remained
 `QUEUED` with `attempt_count=5` and no top-level failure code.
 
-The public API does not expose the `ConfigurationError` message or traceback, so this evidence does
-not infer its cause. The exact run and input identifiers were posted to root issue #447 for a
-read-only `/idea2strategy/dev/backtest` traceback inspection. The BASIC queue/worker use was then
-released on root issue #451. Because the automatic backtest never reached `COMPLETED`, the personal
-bot run, order/fill, and stop calls were not made. No second release or run was created, and the old
-run `c0df2755-01eb-3660-b57e-be20ab73001a` remains untouched.
+The public API does not expose the exception, so the cause was established from AWS read-only
+evidence instead of inferred from the public state. CloudWatch log group
+`/idea2strategy/dev/backtest`, stream `backtest-worker`, records the same first traceback on all
+five deliveries:
+
+```text
+PostgresDatasetManifestSource.by_id
+  -> _dataset_id([item["object_key"] for item in objects])
+ConfigurationError:
+dataset manifest object keys must bind one logical dataset= UUID
+```
+
+A read-only query through the deployed Core instance then retrieved the eight immutable object keys
+for manifest `7f7113c9-3b02-4098-97ec-0baa07e2b3b0`. They all use the deployed legacy-loader form:
+
+```text
+historical/provider=alpaca/feed=sip/adjustment=all/session=regular/resolution=30m/
+revision=00000001/year=2024/shard=00-of-08/
+manifest_id=7f7113c9-3b02-4098-97ec-0baa07e2b3b0/part-00001.parquet
+```
+
+The remaining seven keys differ only by shard `01-of-08` through `07-of-08`. The deployed Backtest
+adapter accepted only the newer `dataset=<UUID>` path segment, although the Backend release-input
+path advertised and pinned this AVAILABLE legacy manifest. This producer/consumer convention gap
+is the first failure. Its amplification into five attempts was a second defect: the adapter raised
+`ConfigurationError`, which the outer worker treats as an unclassified retryable handler error,
+rather than `JobNotSatisfiable(REQUIRED_INPUT_UNAVAILABLE)`, which is published once as a terminal,
+non-retryable failure.
+
+Backtest-engine issue
+[#76](https://github.com/Idea2Strategy/Idea2Strategy-backtest-engine/issues/76) and PR
+[#77](https://github.com/Idea2Strategy/Idea2Strategy-backtest-engine/pull/77) added a fail-closed
+compatibility boundary. Canonical keys must all bind one identical `dataset=<UUID>`. Legacy keys
+must all bind the exact requested `manifest_id=<UUID>`. Mixed conventions, missing bindings,
+invalid UUIDs, and mismatched manifests become `REQUIRED_INPUT_UNAVAILABLE` terminal failures.
+The regression uses the exact eight-shard Development key shape and also proves the canonical
+logical dataset ID is preserved. The local suite passed 1,245 tests with Ruff and mypy, and all nine
+GitHub CI gates passed, including PostgreSQL 16 + LocalStack integration, S3, contracts,
+dependency audit, and secret scanning. PR #77 merged as
+`ee979bc983afb488131500e7d8d96c9492f642ba`; this root branch pins that revision and the refreshed
+Flyway bundle passed against all 53 migrations.
+
+The exact failure and fix were posted to root issue #447, and the BASIC queue/worker use was released
+on root issue #451. Because the automatic backtest never reached `COMPLETED`, the personal bot run,
+order/fill, and stop calls were not made. No second release or run was created, and the old run
+`c0df2755-01eb-3660-b57e-be20ab73001a` remains untouched.
 
 ## Resume criteria
 
 Development release 31293508303 satisfied the previous exact-plan lookup and worker UUID-correlation
-criteria. The fresh run now fails at a later boundary with
-`HANDLER_ERROR:ConfigurationError`. Resume INT03 only after:
+criteria. The later dataset-manifest consumer failure is now diagnosed, regression-tested, merged,
+and pinned by this root branch. Resume INT03 only after:
 
-1. `kcrmin` records the first attempt's exact exception message and traceback from
-   `/idea2strategy/dev/backtest` and assigns the owning repository from that evidence;
-2. the owning fix is tested, reviewed, deployed, and the running worker revision and health are
-   observed without redriving any prior run or DLQ message;
+1. this root pointer and bundle pass root PR CI and merge to `develop`;
+2. a Development release deploys root with Backtest revision
+   `ee979bc983afb488131500e7d8d96c9492f642ba`, and the running worker revision and health are observed
+   without redriving any prior run or DLQ message;
 3. `kcrmin` explicitly authorizes one new public journey and transfers the BASIC queue/worker again;
 4. that one automatic backtest reaches `COMPLETED`, with its result hash and trade evidence recorded;
 5. the same new bot then passes personal run, judgment, virtual order/fill, and stop in order;
