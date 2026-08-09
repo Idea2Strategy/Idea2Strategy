@@ -12,6 +12,7 @@ resource "aws_vpc_security_group_ingress_rule" "cache_from_runtime" {
     core     = aws_security_group.service[0].id
     trading  = aws_security_group.trading[0].id
     backtest = aws_security_group.batch.id
+    pipeline = aws_security_group.pipeline[0].id
   } : {}
 
   security_group_id            = aws_security_group.cache[0].id
@@ -26,7 +27,7 @@ resource "aws_elasticache_serverless_cache" "this" {
   count = local.enable_service_stack ? 1 : 0
 
   name                     = "${local.name_prefix}-valkey"
-  description              = "Ephemeral sessions, cache and transient streams; durable ledger data remains in PostgreSQL"
+  description              = "Ephemeral sessions, market-data read models and transient streams; durable source data remains in PostgreSQL and S3"
   engine                   = "valkey"
   major_engine_version     = "8"
   subnet_ids               = values(aws_subnet.private_db)[*].id

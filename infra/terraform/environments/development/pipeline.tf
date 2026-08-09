@@ -226,6 +226,12 @@ resource "aws_ecs_task_definition" "pipeline" {
         })
       },
       { name = "MARKET_DATA_BUCKET", value = aws_s3_bucket.market_data.id },
+      {
+        name  = "PIPELINE_WORKER_MARKET_HISTORY_REDIS_URI"
+        value = "rediss://${aws_elasticache_serverless_cache.this[0].endpoint[0].address}:${aws_elasticache_serverless_cache.this[0].endpoint[0].port}"
+      },
+      { name = "PIPELINE_WORKER_MARKET_HISTORY_REDIS_KEY_PREFIX", value = "i2s" },
+      { name = "PIPELINE_WORKER_MARKET_HISTORY_LIMIT", value = "400" },
       { name = "PIPELINE_MANIFEST_MODE", value = "content-addressed" },
       { name = "PIPELINE_WORKER_EXIT_AFTER_IDLE_POLLS", value = "6" }
     ]
@@ -424,7 +430,7 @@ resource "aws_cloudwatch_event_target" "pipeline" {
   input = jsonencode({
     containerOverrides = [{
       name    = "pipeline-worker"
-      command = ["--publish-manifest-watermarks"]
+      command = ["--sync-market-history"]
     }]
   })
 
