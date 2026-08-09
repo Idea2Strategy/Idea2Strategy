@@ -183,11 +183,29 @@ strategy release produced:
 | Validation | `b0470f6d-2b3a-40f3-ae0b-22d91a35485d` = `VALID` |
 | Bot | `eb8a35aa-7fbe-3eb7-8198-0d8748c3bd37` |
 | Official run | `c0df2755-01eb-3660-b57e-be20ab73001a` |
-| Attempts | 1 through 5 all `FAILED`, each with `failure_code=HANDLER_ERROR:ContractValidationError` |
+| Worker / message | `i-07a6870a8c4c199dc` / `d6c7eed3-bc69-40a2-b753-b2c0a7f52253` |
+| First failure | `2026-08-09 10:17:01 KST` |
+| Attempts | 1 through 5 reported `failure_code=HANDLER_ERROR:ContractValidationError` |
 
 The run appeared as `QUEUED` immediately, exhausted all five attempts, and remained `QUEUED` after
-a bounded 30-minute public-API observation. Read-only CloudWatch inspection found the exact repeated
-exception while validating `backtest_result_event`:
+a bounded 30-minute public-API observation. A read-only, time-ordered inspection of
+`/idea2strategy/dev/backtest` found two causally ordered failures on every delivery of the same
+message.
+
+First, execution preparation could not resolve the immutable compiled plan named by the job:
+
+```text
+backtest_engine.wiring.JobNotSatisfiable:
+compiled plan sha256:f98de8f7bde5c44eaadf82acad874d9ba7c10eae0d56030687fa706f49a2e850
+is not resolvable
+```
+
+`OrchestratorJobHandler.bind` raises this before simulation when the deployed
+`PostgresCompiledPlanSource` returns no document for the exact checksum. The handler correctly tried
+to publish this non-retryable `REQUIRED_INPUT_UNAVAILABLE` result as terminal `FAILED`.
+
+Second, building that failure event raised another exception because the result-event correlation
+ID was not a UUID:
 
 ```text
 backtest_engine.contracts.ContractValidationError:
@@ -197,9 +215,12 @@ does not match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 The root Development user-data template obtains the EC2 instance ID and assigns it to both
 `BACKTEST_WORKER_ID` and `BACKTEST_WORKER_CORRELATION_ID`. The Backtest worker uses the latter as the
-result event's required correlation ID, whose contract accepts a UUID. This is a new root deployment
-wiring defect at result-event validation, not a recurrence of either database grant failure. The
-evidence does not claim that simulation completed before this validation failure.
+result event's required correlation ID, whose contract accepts a UUID. That secondary validation
+exception escaped the handler, so the outer worker recorded `HANDLER_ERROR:ContractValidationError`,
+released the same message for retry, and repeated the chain through attempt 5. It also prevented the
+original `JobNotSatisfiable` result from becoming terminal, which explains why the run remained
+`QUEUED`. This was not a long-running simulation and is not a recurrence of either database grant
+failure.
 
 The personal bot run was not called because the automatic backtest did not reach `COMPLETED`. No
 additional release or run, worker restart, ASG operation, DLQ receive/delete/redrive, or deployment
@@ -236,12 +257,16 @@ recorded on data-pipeline #57 and that issue was closed again.
 ## Resume criteria
 
 Development release #61 satisfied the previous `bot.launch_contract_plans` grant and worker-rollout
-criteria. Resume INT03 only after the root deployment owner (`kcrmin`) supplies a UUID-conformant
-stable value for `BACKTEST_WORKER_CORRELATION_ID`, deploys that wiring fix, and explicitly lifts the
-automatic-backtest pause:
+criteria. Two separate defects now block the same run: the exact compiled-plan checksum is not
+resolvable through the deployed immutable plan source, and the failure event cannot be published
+because its correlation ID is not a UUID. Resume INT03 only after `kcrmin` coordinates both owning
+boundaries, deploys both fixes, and explicitly lifts the automatic-backtest pause:
 
-1. apply and deploy the root worker-correlation wiring fix without redriving prior DLQ evidence;
-2. create one fresh RSI release through the public customer flow;
-3. verify the automatic backtest reaches `COMPLETED` and record its result hash and order/fill evidence;
-4. verify personal bot run, judgment, virtual order/fill, and stop in order (preflight already passes);
-5. only then replace this partial record with `docs/evidence/INT03.md`.
+1. make plan `sha256:f98de8f7bde5c44eaadf82acad874d9ba7c10eae0d56030687fa706f49a2e850`
+   resolvable through the deployed `PostgresCompiledPlanSource` and verify the publisher/consumer handoff;
+2. supply a UUID-conformant stable value for `BACKTEST_WORKER_CORRELATION_ID` so terminal failures can publish;
+3. deploy both fixes without redriving prior DLQ evidence;
+4. create one fresh RSI release through the public customer flow;
+5. verify the automatic backtest reaches `COMPLETED` and record its result hash and order/fill evidence;
+6. verify personal bot run, judgment, virtual order/fill, and stop in order (preflight already passes);
+7. only then replace this partial record with `docs/evidence/INT03.md`.
