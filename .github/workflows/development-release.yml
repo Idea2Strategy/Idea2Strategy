@@ -724,6 +724,19 @@ jobs:
             -AwsRegion '${{ env.AWS_REGION }}' `
             -RuntimeRole trading
 
+      # The backtest worker was missing from this list, so a release published its image to ECR and
+      # updated SSM without the running worker ever picking it up. That is how backtest-engine
+      # d0d6392 sat unused for two releases (root #454). The role is desired-zero, so the script
+      # passes without acting when the group is empty; it only fails when an instance is running and
+      # ends up on a digest other than the one this release published.
+      - name: Roll out and verify exact Backtest worker runtime images
+        shell: pwsh
+        run: |
+          ./scripts/deploy-development-core-runtime.ps1 `
+            -AwsProfile '' `
+            -AwsRegion '${{ env.AWS_REGION }}' `
+            -RuntimeRole backtest-worker
+
       - name: Verify deployed Development environment
         shell: pwsh
         run: |

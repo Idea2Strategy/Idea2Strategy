@@ -51,8 +51,11 @@ for ($lineIndex = 0; $lineIndex -lt $workflowLines.Count; $lineIndex++) {
     }
     $parsedPowerShellBlocks++
 }
-if ($parsedPowerShellBlocks -ne 17) {
-    throw "Expected to parse exactly 17 inline PowerShell blocks; observed $parsedPowerShellBlocks."
+# 18 since the backtest worker gained its own rollout step. The count is pinned rather than derived so
+# that an inline block cannot be added without a reviewer noticing; update it deliberately, and only
+# when the new block is one this file's syntax check has already accepted.
+if ($parsedPowerShellBlocks -ne 18) {
+    throw "Expected to parse exactly 18 inline PowerShell blocks; observed $parsedPowerShellBlocks."
 }
 
 $required = @(
