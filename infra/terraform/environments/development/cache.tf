@@ -34,8 +34,15 @@ resource "aws_elasticache_serverless_cache" "this" {
   snapshot_retention_limit = 1
 
   cache_usage_limits {
+    # A ceiling for scaling, not a reservation: serverless bills the data actually stored, so raising
+    # this costs nothing until the cache grows into it. It is raised with the recent-bar capacity
+    # because the two are coupled — 622 instruments x 480 bars x four timeframes is roughly 480 MB of
+    # bar members alone, beside a market event stream capped at a million entries. At a 1 GB ceiling
+    # the cache would begin evicting, and an evicted bar series is the failure this whole change
+    # exists to avoid: the preview still renders and its indicators are quietly computed over a
+    # truncated window.
     data_storage {
-      maximum = 1
+      maximum = 2
       unit    = "GB"
     }
     ecpu_per_second {

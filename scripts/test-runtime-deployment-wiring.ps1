@@ -225,7 +225,7 @@ foreach ($required in @(
     'MARKET_GATEWAY_ALPACA_ENDPOINT=${trading_market_data_endpoint}',
     'MARKET_GATEWAY_RIGHTS_EVIDENCE_PATH=/runtime/market-gateway/${trading_provider_rights_local_path}',
     'MARKET_GATEWAY_MINIMUM_INSTRUMENT_COUNT=500',
-    'MARKET_GATEWAY_RECENT_BAR_CAPACITY=390',
+    'MARKET_GATEWAY_RECENT_BAR_CAPACITY=480',
     'MARKET_DATA_REDIS_URI=rediss://${cache_endpoint}:6379',
     'runtime_role == "trading" } --force-recreate',
     "TRADING_WARMUP_MATERIALIZATION_RECEIPT_PATH",
