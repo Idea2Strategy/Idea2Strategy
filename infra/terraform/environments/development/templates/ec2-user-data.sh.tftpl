@@ -515,6 +515,27 @@ EOF
 materialize_backtest_policies
 backtest_worker_image="$(image_value backtest-worker)"
 instance_id="$(curl --fail --silent --show-error -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token | xargs -I{} curl --fail --silent --show-error -H 'X-aws-ec2-metadata-token: {}' http://169.254.169.254/latest/meta-data/instance-id)"
+# The result-event contract requires metadata.correlationId to be a UUID, and an EC2 instance id is
+# not one. Both variables used to carry the instance id, so the first terminal failure a worker tried
+# to publish was rejected as a contract violation, the outer worker turned that into
+# HANDLER_ERROR:ContractValidationError, and the same message retried to exhaustion while the real
+# failure code was lost (root #439, INT03 run c0df2755).
+#
+# The two identifiers mean different things and are now separate:
+#   BACKTEST_WORKER_ID              which host executed — the instance id is exactly right
+#   BACKTEST_WORKER_CORRELATION_ID  the contract's UUID field
+#
+# Derived rather than generated so it is stable for the life of the instance: a random value would
+# change on every restart and stop correlating the events it exists to tie together. The derivation is
+# a SHA-256 over a fixed namespace and the instance id, laid out as an RFC 4122 string with the
+# version and variant nibbles fixed. It is deterministic and collision-resistant for this purpose; it
+# is not a spec-conformant v5 UUID, and nothing may treat it as one beyond being a stable identifier.
+backtest_correlation_digest="$(printf 'idea2strategy:development:backtest-worker-correlation:%s' "$instance_id" | sha256sum | cut -c1-32)"
+backtest_worker_correlation_id="$${backtest_correlation_digest:0:8}-$${backtest_correlation_digest:8:4}-5$${backtest_correlation_digest:13:3}-8$${backtest_correlation_digest:17:3}-$${backtest_correlation_digest:20:12}"
+case "$backtest_worker_correlation_id" in
+  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-5[0-9a-f][0-9a-f][0-9a-f]-8[0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+  *) echo "Derived backtest worker correlation id is not a UUID: $backtest_worker_correlation_id" >&2; exit 1 ;;
+esac
 cat >>"$runtime_secret_env" <<EOF
 BACKTEST_JOB_HANDLER=backtest_engine.production:orchestrator_job_handler
 BACKTEST_EXECUTION_KEY_STORE=backtest_engine.production:postgres_execution_key_store
@@ -533,7 +554,7 @@ BACKTEST_MARKET_DATA_BATCH_SIZE=65536
 BACKTEST_API_BASE_URL=${core_public_url}
 BACKTEST_EXECUTION_POLICY_FILE=/runtime-policy/execution-policy.json
 BACKTEST_RUNTIME_POLICY_FILE=/runtime-policy/runtime-policy.json
-BACKTEST_WORKER_CORRELATION_ID=$instance_id
+BACKTEST_WORKER_CORRELATION_ID=$backtest_worker_correlation_id
 BACKTEST_VISIBILITY_TIMEOUT_SECONDS=900
 BACKTEST_HEARTBEAT_SECONDS=60
 BACKTEST_SCALE_DOWN_ENABLED=true
