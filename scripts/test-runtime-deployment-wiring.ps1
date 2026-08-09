@@ -145,10 +145,16 @@ if ($userData -notmatch [regex]::Escape('BACKTEST_WORKER_CORRELATION_ID=$backtes
     throw ("BACKTEST_WORKER_CORRELATION_ID must be the derived UUID, not the instance id. " +
         "An instance id fails the result-event contract and turns a terminal failure into a retry loop.")
 }
+# The derivation itself moved to scripts/backtest-worker-correlation-id.sh, because a boot-time-only
+# contract never reaches a long-lived instance and the rollout has to be able to re-stamp it from the
+# same definition. What this test still owns is that user data derives rather than improvises; the copy
+# and the pinned value are compared by scripts/test-backtest-correlation-derivation.ps1.
 foreach ($guard in @(
-        'backtest_correlation_digest="$(printf ',
+        '# BEGIN idea2strategy-backtest-worker-correlation-id',
+        'idea2strategy_backtest_worker_correlation_id() {',
         'sha256sum | cut -c1-32',
-        'Derived backtest worker correlation id is not a UUID')) {
+        'Derived backtest worker correlation id is not a UUID',
+        'backtest_worker_correlation_id="$(idea2strategy_backtest_worker_correlation_id "$instance_id")"')) {
     if (-not $userData.Contains($guard)) {
         throw ("The backtest worker correlation id lost part of its derivation or its shape check: " +
             "$guard. It must be deterministic per instance and verified before use.")

@@ -5,7 +5,8 @@ param(
     [string]$AwsRegion = "ap-northeast-2",
     [ValidateSet("core", "trading", "backtest-worker")][string]$RuntimeRole = "core",
     [ValidateRange(60, 1800)][int]$ReadinessTimeoutSeconds = 900,
-    [ValidateRange(60, 1800)][int]$RolloutTimeoutSeconds = 900
+    [ValidateRange(60, 1800)][int]$RolloutTimeoutSeconds = 900,
+    [ValidateRange(20, 300)][int]$SettleSeconds = 20
 )
 
 $ErrorActionPreference = "Stop"
@@ -283,6 +284,40 @@ $readinessCommandId = Invoke-SsmShellCommand `
     -SuccessMarker $hostReadyMarker `
     -TimeoutSeconds $ReadinessTimeoutSeconds
 
+# A boot-time environment contract only reaches instances that boot after it lands, and the backtest
+# instance is long lived — release 31291768890 shipped the derived UUID correlation id in user data and
+# the running worker kept the instance id it was stamped with hours earlier, so the new image rejected
+# it at startup. The rollout reconciles the value from the same canonical derivation the template
+# copies, which makes the contract converge on instances of any boot vintage.
+$runtimeRolePrepare = if ($RuntimeRole -ceq "backtest-worker") {
+    $correlationDerivation = ([IO.File]::ReadAllText(
+            (Join-Path $PSScriptRoot "backtest-worker-correlation-id.sh")) -replace "`r`n", "`n").TrimEnd("`n")
+    $correlationDerivation + @'
+
+reconcile_backtest_worker_correlation_id() {
+  local token instance_id desired current staged
+  token="$(curl --fail --silent --show-error -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token)"
+  instance_id="$(curl --fail --silent --show-error -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/instance-id)"
+  desired="$(idea2strategy_backtest_worker_correlation_id "$instance_id")"
+  current="$(sed -n 's/^BACKTEST_WORKER_CORRELATION_ID=//p' /etc/idea2strategy/runtime-secret.env | tail -n 1)"
+  if [ "$current" = "$desired" ]; then
+    return 0
+  fi
+  staged="$(mktemp /etc/idea2strategy/.runtime-secret.env.XXXXXX)"
+  sed '/^BACKTEST_WORKER_CORRELATION_ID=/d' /etc/idea2strategy/runtime-secret.env >"$staged"
+  printf 'BACKTEST_WORKER_CORRELATION_ID=%s\n' "$desired" >>"$staged"
+  chmod 0600 "$staged"
+  mv -f "$staged" /etc/idea2strategy/runtime-secret.env
+  # A container carries the environment it was created with, so it has to be replaced rather than
+  # restarted for the corrected value to reach the process.
+  docker compose --project-name idea2strategy rm --stop --force backtest-worker
+}
+reconcile_backtest_worker_correlation_id
+'@
+} else {
+    ""
+}
+
 $remoteScript = @'
 set -euo pipefail
 umask 077
@@ -315,20 +350,51 @@ runtime_ready() {
   done
 }
 
+restart_total() {
+  local service container total=0
+  for service in __RUNTIME_SERVICES__; do
+    container="$(docker compose --project-name idea2strategy ps -q "$service")"
+    test -n "$container"
+    total=$((total + $(docker inspect --format '{{.RestartCount}}' "$container")))
+  done
+  printf '%s' "$total"
+}
+
+# container_ready reads one instant, and a container that crash-loops fast enough is "running" for
+# most instants: release 31291768890 rolled out a backtest worker that exited on a startup contract
+# violation, passed both liveness checks, reported success, and was found restarting for the
+# sixteenth time afterwards. Surviving the settle window now means two further things — no container
+# restarted during it, and each has been up for the whole window rather than started inside it.
+runtime_settled() {
+  local expected_restarts="$1" service container started uptime
+  test "$expected_restarts" = "$(restart_total)"
+  for service in __RUNTIME_SERVICES__; do
+    container="$(docker compose --project-name idea2strategy ps -q "$service")"
+    test -n "$container"
+    started="$(docker inspect --format '{{.State.StartedAt}}' "$container")"
+    uptime=$(( $(date -u +%s) - $(date -u -d "$started" +%s) ))
+    test "$uptime" -ge __SETTLE_SECONDS__
+  done
+}
+
 rollback() {
+  local rollback_restarts
   install -m 0600 "$rollback_compose" compose.yaml
   docker compose --project-name idea2strategy config --quiet
   docker compose --project-name idea2strategy pull
   docker compose --project-name idea2strategy up --detach --remove-orphans --wait
-  sleep 20
+  rollback_restarts="$(restart_total)"
+  sleep __SETTLE_SECONDS__
   for service in __RUNTIME_SERVICES__; do
     container="$(docker compose --project-name idea2strategy ps -q "$service")"
     test -n "$container"
     container_ready "$container"
   done
+  runtime_settled "$rollback_restarts"
   echo CORE_RUNTIME_ROLLBACK_SUCCEEDED
 }
 
+__RUNTIME_ROLE_PREPARE__
 if ! /usr/local/sbin/idea2strategy-runtime-start; then
   rollback
   rm -f "$rollback_compose"
@@ -339,15 +405,21 @@ if ! runtime_ready; then
   rm -f "$rollback_compose"
   exit 1
 fi
-sleep 20
+settle_restarts="$(restart_total)"
+sleep __SETTLE_SECONDS__
 if ! runtime_ready; then
+  rollback
+  rm -f "$rollback_compose"
+  exit 1
+fi
+if ! runtime_settled "$settle_restarts"; then
   rollback
   rm -f "$rollback_compose"
   exit 1
 fi
 rm -f "$rollback_compose"
 echo CORE_RUNTIME_ROLLED_OUT
-'@.Replace('__AWS_REGION__', $AwsRegion).Replace('__RUNTIME_SERVICES__', $runtimeServiceWords).Replace('CORE_RUNTIME_ROLLED_OUT', $rolloutMarker).Replace('__RUNTIME_ROLE__', $RuntimeRole.ToUpperInvariant())
+'@.Replace('__AWS_REGION__', $AwsRegion).Replace('__RUNTIME_SERVICES__', $runtimeServiceWords).Replace('CORE_RUNTIME_ROLLED_OUT', $rolloutMarker).Replace('__RUNTIME_ROLE__', $RuntimeRole.ToUpperInvariant()).Replace('__SETTLE_SECONDS__', [string]$SettleSeconds).Replace('__RUNTIME_ROLE_PREPARE__', $runtimeRolePrepare)
 
 if ($RuntimeRole -ceq 'trading') {
     $tradingEvidence = @'
