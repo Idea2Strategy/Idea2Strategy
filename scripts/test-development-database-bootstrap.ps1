@@ -586,6 +586,24 @@ Assert-NotContains $bootstrap 'flyway migrate >&2' "Central multi-service migrat
 Assert-NotContains $bootstrap 'EXPECTED_MIGRATION_COUNT' "Host bootstrap must receive the locally validated manifest count instead of embedding a migration count."
 Assert-NotContains $bootstrap "EXPECTED_TABLE_COUNT='179'" "The exact bundle receipt must not require a manually synchronized table-count constant."
 Assert-Contains $bootstrap 'test "$table_count" -gt 0' "The receipt must still reject an empty application schema."
+
+# INT03 run 9095f2a3 failed five times against a runtime role that could log in and could not update
+# storage.objects, and the bootstrap that produced that role reported passed. A connection check is not
+# a privilege check, so the rotation now asks the role's own session what it holds.
+Assert-Contains $bootstrap 'declare -rA RUNTIME_TABLE_PRIVILEGES=(' "The bootstrap must state the runtime table privileges it verifies."
+Assert-Contains $bootstrap 'NOT has_table_privilege(required.qualified_table, required.privilege)' "Runtime privileges must be verified with has_table_privilege, not inferred from a successful connection."
+Assert-Contains $bootstrap 'storage.objects:UPDATE' "The backtest role must be verified for the storage.objects UPDATE its object registrar executes."
+Assert-Contains $bootstrap 'bot.continuation_deadlines:UPDATE' "The batch role must be verified for the lock privilege backend #251 added."
+Assert-Contains $bootstrap 'is missing table privileges its application executes' "A missing runtime privilege must fail the bootstrap with the privilege named."
+Assert-Contains $bootstrap 'runtime_privileges_verified' "The receipt must record how many runtime privileges were verified."
+foreach ($verifiedConsumer in @("backend", "batch", "backtest", "trading", "pipeline")) {
+    Assert-Contains $bootstrap "[$verifiedConsumer]='" "Every runtime role needs at least one verified write privilege: $verifiedConsumer"
+}
+# The promotion that ends the rotation, not the one inside rollback_runtime_credentials, which is
+# defined earlier in the file and would make this comparison pass for the wrong reason.
+if ($bootstrap.IndexOf('has_table_privilege(required.qualified_table') -gt $bootstrap.IndexOf('promoted_versions["$consumer"]')) {
+    throw "Runtime privileges must be verified before a new credential version is promoted to AWSCURRENT."
+}
 Assert-NotContains $bootstrap "jq -e 'length == 4'" "Scoring validation must derive cardinality from the hash-bound seed artifact."
 Assert-NotContains $bootstrap '3c81fb2f387fa790e126e1aa40b18d389c44bcf9f7ef2cefdd6911fd2e1eec71' "Scoring row selection must not duplicate seed-specific hashes in executable code."
 Assert-Contains $bootstrap '--version-stage AWSCURRENT' "Rollback-safe rotation must capture the current secret version before changing database passwords."
