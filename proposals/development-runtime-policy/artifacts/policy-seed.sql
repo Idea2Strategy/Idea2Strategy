@@ -78,8 +78,10 @@ WHERE NOT EXISTS (
 --
 -- releaseQuarter stays 2026-Q3 because the catalog selects by release quarter, not by data window, and
 -- a strategy released this quarter must resolve to a published policy. The window narrowing is not a
--- quiet reduction: it is a new immutable version, and v1's row is retired rather than edited so the
--- runs already recorded against it stay explainable.
+-- quiet reduction: it is a new immutable version. v1's row stays exactly as published, because this
+-- seed is append-only by design — the bootstrap refuses any statement that could rewrite an already
+-- published policy row. v1 stops being reachable because the runtime catalog file carries v2 alone and
+-- the producer guard refuses v1's window and schema against every available manifest.
 --
 -- The ten-year policy returns as its own version once the data pipeline publishes a ten-year
 -- market-bars-v2 composite and the calendar covers it.
@@ -99,10 +101,3 @@ WHERE NOT EXISTS (
   SELECT 1 FROM backtest.execution_policy_versions
   WHERE version = 'development-official-backtest-2026-q3-v2'
 );
-
--- v1 keeps its row and its artifact hash so the runs recorded against it remain auditable, and stops
--- being selectable from the release instant v2 was locked.
-UPDATE backtest.execution_policy_versions
-   SET retired_at = '2026-08-09T00:00:00Z'
- WHERE version = 'development-official-backtest-2026-q3-v1'
-   AND retired_at IS NULL;
