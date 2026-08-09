@@ -15,28 +15,57 @@
   "schema_version": 1,
   "plan": "docs/launch-readiness-plan.md",
   "owners": {
+    "$comment": [
+      "2026-08-09: 3인에서 2인으로 재편했다. 이유는 속도가 아니라 대기였다.",
+      "서브모듈 소유자가 자기 변경을 배포까지 가져가려면 루트 포인터·Flyway 번들·릴리스가 필요했고,",
+      "그 셋이 전부 한 사람에게 있어서 한 줄 수정마다 왕복이 세 번 생겼다. 그래서 포인터를 소유자에게 넘긴다.",
+      "여전히 한 사람만 바꾸는 것은 실제로 충돌했던 경로뿐이다 (exclusive_paths).",
+      "공유 자원(Development 환경·BASIC 큐·단일 워커·운영자 계정)은 병렬이 불가능하므로 직렬로 남긴다 —",
+      "이것은 없앨 수 있는 대기가 아니라 지켜야 하는 대기다. serialized_resources 를 보라."
+    ],
     "kcrmin": {
       "repositories": [
         ".",
-        "backend"
+        "backend",
+        "trading-engine",
+        "data-pipeline"
       ],
+      "owns": "플랫폼: infra·릴리스·정본 DB·권한 정책·운영자·방·원장·시장 데이터",
       "exclusive_paths": [
         "db/schema.dbml",
         "compose.back.yml",
         "compose.front.yml"
-      ]
-    },
-    "pjy008008": {
-      "repositories": [
-        "data-pipeline",
-        "trading-engine"
+      ],
+      "may_move_gitlinks": [
+        "backend",
+        "trading-engine",
+        "data-pipeline"
       ]
     },
     "hjcud": {
       "repositories": [
         "backtest-engine",
         "ui"
-      ]
+      ],
+      "owns": "사용자 여정: 백테스트 실행과 전 화면",
+      "may_move_gitlinks": [
+        "backtest-engine",
+        "ui"
+      ],
+      "may_write": [
+        "docs/evidence/**"
+      ],
+      "note": "자기 서브모듈의 루트 gitlink 를 직접 올린다. 번들에 포함된 gitlink 를 옮기면 같은 커밋에서 scripts/refresh-flyway-ci-bundle.ps1 을 돌린다 — 훅이 강제한다."
+    },
+    "serialized_resources": {
+      "$comment": "동시에 둘이 쓸 수 없는 것. 시작 전에 루트 이슈 #451 에 한 줄 남기고, 끝나면 종료를 남긴다.",
+      "items": [
+        "Development release workflow (한 번에 하나)",
+        "backtest BASIC 큐와 단일 backtest worker",
+        "운영자 계정과 그 MFA",
+        "Development RDS 부트스트랩"
+      ],
+      "claim_location": "https://github.com/Idea2Strategy/Idea2Strategy/issues/451"
     }
   },
   "out_of_scope": [
@@ -136,7 +165,7 @@
     {
       "id": "2.4",
       "title": "시장 데이터 적재 — AWS 는 완료(30m 포함), 로컬만 비어 있음",
-      "owner": "pjy008008",
+      "owner": "kcrmin",
       "repository": "data-pipeline",
       "depends_on": [],
       "kind": "manual",
@@ -146,7 +175,7 @@
     {
       "id": "2.5",
       "title": "지표(feature) 백필 실행 — 네 해상도 전부",
-      "owner": "pjy008008",
+      "owner": "kcrmin",
       "repository": "data-pipeline",
       "depends_on": [
         "2.4"
@@ -168,7 +197,7 @@
     {
       "id": "2.7",
       "title": "data-pipeline 의 vendored central-migration fixture 에서 자기 기여 파일 제거",
-      "owner": "pjy008008",
+      "owner": "kcrmin",
       "repository": "data-pipeline",
       "depends_on": [],
       "kind": "repo",
@@ -182,7 +211,7 @@
     {
       "id": "3.1",
       "title": "재기동이 SCHEDULE 주기 위상을 바꾸지 않게 한다 (제품 판단 선행)",
-      "owner": "pjy008008",
+      "owner": "kcrmin",
       "repository": "trading-engine",
       "depends_on": [
         "2.1"
@@ -318,7 +347,7 @@
     {
       "id": "INT06",
       "title": "장애·재기동·중복 전달 시험",
-      "owner": "pjy008008",
+      "owner": "kcrmin",
       "repository": ".",
       "depends_on": [
         "2.1",
@@ -331,7 +360,7 @@
     {
       "id": "INT07",
       "title": "성능·용량 시험",
-      "owner": "pjy008008",
+      "owner": "hjcud",
       "repository": ".",
       "depends_on": [
         "6",
