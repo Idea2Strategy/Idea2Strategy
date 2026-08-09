@@ -258,15 +258,47 @@ if ($artifactManifest.sourceApprovalPullRequest -ne 225 -or
     $artifactManifest.sourceApprovalCommit -cne "47932bf5febda9aa9603fd4d77e7f2ed2b60c23c") {
     throw "Development policy artifacts must identify the exact reviewed proposal evidence."
 }
+# The artifacts may be amended after that review, but never anonymously. An amendment has to name the
+# product authority that asked for it, quote the instruction, and say which version it retires — that
+# record is the whole audit trail for a policy change made before v1.0.0, when no fresh provider
+# observation is obtainable (AGENTS.md, pre-v1.0.0 posture).
+if ($null -ne $artifactManifest.amendment) {
+    foreach ($field in @("reason", "authority", "instruction", "retiredVersion")) {
+        if ([string]::IsNullOrWhiteSpace([string]$artifactManifest.amendment.$field)) {
+            throw "Development policy amendment must record $field."
+        }
+    }
+    if ([string]$artifactManifest.amendment.authority -notmatch '^user:[A-Za-z0-9-]+$') {
+        throw "Development policy amendment authority must name a configured product authority."
+    }
+}
+# Still exactly one policy: ExecutionPolicyCatalog rejects two policies sharing a release quarter, and
+# the runtime file is what the worker loads. A superseded version keeps its database row for audit and
+# is retired there, not carried in the active catalog.
 if ($executionPolicy.schemaVersion -ne 1 -or $executionPolicy.policies.Count -ne 1) {
     throw "Development execution policy must publish exactly one schema-v1 policy."
 }
 $policy = $executionPolicy.policies[0]
-if ($policy.version -cne "development-official-backtest-2026-q3-v1" -or
+if ($policy.version -cne "development-official-backtest-2026-q3-v2" -or
+    $policy.releaseQuarter -cne "2026-Q3" -or
     $policy.feeRate -cne "0.002" -or $policy.slippageRateBps -ne 5 -or
     $policy.goodTillCancelledHorizonSeconds -ne 7776000 -or $policy.maxOrderHorizonSeconds -ne 7776000) {
-    throw "Development execution policy diverges from the reviewed proposal."
+    throw "Development execution policy diverges from the reviewed proposal and its recorded amendment."
 }
+# The window and the schema are the whole point of the amendment, so they are pinned here rather than
+# left to the seed. Local calendar-day midnight in the policy timezone is what the consumer requires;
+# 05:00Z is that midnight in January, and stating it any other way makes the consumer reject the policy.
+if ($policy.periodStart -cne "2024-01-01T05:00:00Z" -or $policy.periodEnd -cne "2024-02-01T05:00:00Z" -or
+    $policy.marketDataSchemaVersion -cne "market-bars/1" -or $policy.timezone -cne "America/New_York") {
+    throw "Development execution policy window and market data schema must match the verified manifest."
+}
+# The seed must retire the superseded version rather than delete or rewrite it.
+Assert-Contains $policySeed "development-official-backtest-2026-q3-v2" `
+    "Development policy seed must publish the amended policy version."
+Assert-Contains $policySeed "UPDATE backtest.execution_policy_versions" `
+    "Development policy seed must retire the superseded policy version."
+Assert-Contains $policySeed ([string]$artifactManifest.amendment.retiredVersion) `
+    "Development policy seed must name the retired version."
 if ($runtimePolicy.schemaVersion -ne 1 -or $runtimePolicy.attempt.maxAttempts -ne 3 -or
     $runtimePolicy.attempt.leaseDurationSeconds -ne 300 -or
     $runtimePolicy.attempt.attemptTimeoutSeconds -ne 1800 -or

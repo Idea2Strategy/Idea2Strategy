@@ -3,9 +3,25 @@
   "sourceProposal": "proposals/development-runtime-policy/development-runtime-policy.v1.md",
   "sourceApprovalPullRequest": 225,
   "sourceApprovalCommit": "47932bf5febda9aa9603fd4d77e7f2ed2b60c23c",
+  "amendment": {
+    "reason": "The 2026-Q3 policy declared a ten-year window and market-bars-v2. Development holds neither, so every official run failed before simulation (root #471, backtest-engine #82). v2 states the window and schema Development can actually replay; v1 is retired, not edited.",
+    "authority": "user:kcrmin",
+    "instruction": "Development 2026-Q3 실행 정책 v2 게시 — version: development-official-backtest-2026-q3-v2, periodStart: 2024-01-01T05:00:00Z, periodEnd: 2024-02-01T05:00:00Z, marketDataSchemaVersion: market-bars/1, datasetManifestId: 7f7113c9-3b02-4098-97ec-0baa07e2b3b0, datasetHash: 08a848a5f9aa1aac80e215c2d86bcf6d5f96c354400c7c16394dae9ffa9939af, 기존 v1은 DB 증거를 보존하되 활성 runtime catalog에서는 v2만 선택되도록 retire 처리",
+    "verifiedManifest": {
+      "datasetManifestId": "7f7113c9-3b02-4098-97ec-0baa07e2b3b0",
+      "datasetHash": "08a848a5f9aa1aac80e215c2d86bcf6d5f96c354400c7c16394dae9ffa9939af",
+      "dataLayer": "ADJUSTED",
+      "resolution": "30m",
+      "periodStart": "2024-01-01",
+      "periodEnd": "2024-02-01",
+      "schemaVersion": "market-bars/1",
+      "observedAt": "2026-08-09"
+    },
+    "retiredVersion": "development-official-backtest-2026-q3-v1"
+  },
   "artifacts": {
-    "execution-policy.json": "c65484d8d981c6631a0d03772c7e1d772f9b176ba6922f8fadbfd5dfde7370eb",
+    "execution-policy.json": "2fc989fe28df1f69dacb3c9af73908fa8d54b2b8d7d69a2e8a9683c529028953",
     "runtime-policy.json": "7930efefde46d2a870627189ad9ae1535f2ef1218fe46b295c7b04a2118e058b",
-    "policy-seed.sql": "8d1e0b9ed6de1a4c028f83427c9a29a64191fa96a8876c75b0fe690409ad8005"
+    "policy-seed.sql": "589349b26f640413c1803255aac61646e12c076b3ae8c5f6b9fac8fb10b0f2fa"
   }
 }

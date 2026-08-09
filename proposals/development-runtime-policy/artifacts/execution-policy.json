@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "policies": [
     {
-      "version": "development-official-backtest-2026-q3-v1",
+      "version": "development-official-backtest-2026-q3-v2",
       "releaseQuarter": "2026-Q3",
-      "periodStart": "2016-07-01T04:00:00Z",
-      "periodEnd": "2026-07-01T04:00:00Z",
+      "periodStart": "2024-01-01T05:00:00Z",
+      "periodEnd": "2024-02-01T05:00:00Z",
       "feeRate": "0.002",
       "slippageRateBps": 5,
       "timezone": "America/New_York",
@@ -13,7 +13,7 @@
       "timestampUnit": "us",
       "priceArrowType": "double",
       "volumeArrowType": "int64",
-      "marketDataSchemaVersion": "market-bars-v2",
+      "marketDataSchemaVersion": "market-bars/1",
       "calculationModelVersion": "backtest-calculation-v1",
       "marketRulesVersion": "market:1.0.0",
       "accountingRulesVersion": "accounting:1.0.0",
