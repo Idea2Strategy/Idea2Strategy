@@ -13,6 +13,10 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "lib/development-backtest-policy-artifacts.ps1")
+$backtestPolicyArtifactSet = Get-DevelopmentBacktestPolicyArtifactSet -RepositoryRoot $root
+$expectedExecutionPolicySha256 = [string]$backtestPolicyArtifactSet.Artifacts['execution-policy'].sha256
+$expectedRuntimePolicySha256 = [string]$backtestPolicyArtifactSet.Artifacts['runtime-policy'].sha256
 $terraformDirectory = Join-Path $root $TerraformRoot
 $terraform = Get-Command terraform -ErrorAction SilentlyContinue
 $aws = Get-Command aws -ErrorAction SilentlyContinue
@@ -55,6 +59,11 @@ function Invoke-AwsJson([string[]]$Arguments) {
     }
     if ($exitCode -ne 0) { throw "AWS command failed without exposing remote output: $($Arguments[0]) $($Arguments[1])" }
     return (($output -join "`n") | ConvertFrom-Json)
+}
+
+function ConvertTo-BashLiteral([string]$Value) {
+    if ($Value -match "['`r`n]") { throw "A rollout artifact pin contains shell control characters." }
+    return "'$Value'"
 }
 
 function Get-RuntimeInstanceStartAction(
@@ -209,6 +218,36 @@ if ($RuntimeRole -ceq "backtest-worker" -and $null -eq $runtimeInstanceId) {
     exit 0
 }
 
+$verifiedBacktestPolicyArtifacts = $null
+if ($RuntimeRole -ceq 'backtest-worker') {
+    $previousAwsProfile = [Environment]::GetEnvironmentVariable('AWS_PROFILE', 'Process')
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) {
+            $env:AWS_PROFILE = $AwsProfile
+        } else {
+            Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
+        }
+        $marketDataBucket = (& $terraform.Source "-chdir=$terraformDirectory" output -raw market_data_bucket).Trim()
+        if ($LASTEXITCODE -ne 0 -or $marketDataBucket -notmatch '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') {
+            throw "Unable to resolve the exact Development market-data bucket."
+        }
+    }
+    finally {
+        if ($null -eq $previousAwsProfile) {
+            Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
+        } else {
+            $env:AWS_PROFILE = $previousAwsProfile
+        }
+    }
+    $verifiedBacktestPolicyArtifacts = & (Join-Path $PSScriptRoot 'verify-development-backtest-policy-artifacts.ps1') `
+        -Bucket $marketDataBucket `
+        -AwsProfile $AwsProfile `
+        -AwsRegion $AwsRegion | ConvertFrom-Json
+    if ([string]$verifiedBacktestPolicyArtifacts.status -cne 'passed') {
+        throw "The exact Development Backtest policy artifact receipt is not verified."
+    }
+}
+
 if ($RuntimeRole -ceq "trading") {
     $description = Invoke-AwsJson @("ec2", "describe-instances", "--instance-ids", $runtimeInstanceId)
     $instances = @($description.Reservations | ForEach-Object { $_.Instances })
@@ -292,25 +331,67 @@ $readinessCommandId = Invoke-SsmShellCommand `
 $runtimeRolePrepare = if ($RuntimeRole -ceq "backtest-worker") {
     $correlationDerivation = ([IO.File]::ReadAllText(
             (Join-Path $PSScriptRoot "backtest-worker-correlation-id.sh")) -replace "`r`n", "`n").TrimEnd("`n")
-    $correlationDerivation + @'
+    $executionPolicyPin = $verifiedBacktestPolicyArtifacts.backtest_policy_artifacts.'execution-policy'
+    $runtimePolicyPin = $verifiedBacktestPolicyArtifacts.backtest_policy_artifacts.'runtime-policy'
+    $policyReconciliation = @'
+
+BACKTEST_POLICY_CHANGED=false
+download_backtest_policy_artifact() {
+  local key="$1" version_id="$2" target="$3" attempt
+  for attempt in 1 2 3 4 5; do
+    if aws s3api get-object --region __POLICY_REGION__ --bucket __POLICY_BUCKET__ \
+      --key "$key" --version-id "$version_id" "$target" >/dev/null; then
+      return 0
+    fi
+    sleep $((attempt * 2))
+  done
+  return 1
+}
+
+reconcile_backtest_policy_artifacts() {
+  local destination temporary
+  destination=/var/lib/idea2strategy/backtest-policy
+  temporary="$(mktemp -d /var/lib/idea2strategy/backtest-policy.XXXXXX)"
+  download_backtest_policy_artifact __EXECUTION_POLICY_KEY__ __EXECUTION_POLICY_VERSION__ "$temporary/execution-policy.json"
+  download_backtest_policy_artifact __RUNTIME_POLICY_KEY__ __RUNTIME_POLICY_VERSION__ "$temporary/runtime-policy.json"
+  printf '%s  %s\n' __EXECUTION_POLICY_SHA256_LITERAL__ "$temporary/execution-policy.json" | sha256sum --check --status
+  printf '%s  %s\n' __RUNTIME_POLICY_SHA256_LITERAL__ "$temporary/runtime-policy.json" | sha256sum --check --status
+  if test -d "$destination" && \
+    cmp -s "$temporary/execution-policy.json" "$destination/execution-policy.json" && \
+    cmp -s "$temporary/runtime-policy.json" "$destination/runtime-policy.json"; then
+    rm -rf "$temporary"
+    return 0
+  fi
+  find "$temporary" -type d -exec chmod 0755 {} +
+  find "$temporary" -type f -exec chmod 0444 {} +
+  rm -rf "$destination.previous"
+  if test -d "$destination"; then mv "$destination" "$destination.previous"; fi
+  mv "$temporary" "$destination"
+  BACKTEST_POLICY_CHANGED=true
+}
+reconcile_backtest_policy_artifacts
+'@.Replace('__POLICY_REGION__', (ConvertTo-BashLiteral $AwsRegion)).Replace('__POLICY_BUCKET__', (ConvertTo-BashLiteral $marketDataBucket)).Replace('__EXECUTION_POLICY_KEY__', (ConvertTo-BashLiteral ([string]$executionPolicyPin.key))).Replace('__EXECUTION_POLICY_VERSION__', (ConvertTo-BashLiteral ([string]$executionPolicyPin.version_id))).Replace('__RUNTIME_POLICY_KEY__', (ConvertTo-BashLiteral ([string]$runtimePolicyPin.key))).Replace('__RUNTIME_POLICY_VERSION__', (ConvertTo-BashLiteral ([string]$runtimePolicyPin.version_id))).Replace('__EXECUTION_POLICY_SHA256_LITERAL__', (ConvertTo-BashLiteral ([string]$executionPolicyPin.sha256))).Replace('__RUNTIME_POLICY_SHA256_LITERAL__', (ConvertTo-BashLiteral ([string]$runtimePolicyPin.sha256)))
+    $correlationDerivation + $policyReconciliation + @'
 
 reconcile_backtest_worker_correlation_id() {
-  local token instance_id desired current staged
+  local token instance_id desired current staged correlation_changed=false
   token="$(curl --fail --silent --show-error -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token)"
   instance_id="$(curl --fail --silent --show-error -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/instance-id)"
   desired="$(idea2strategy_backtest_worker_correlation_id "$instance_id")"
   current="$(sed -n 's/^BACKTEST_WORKER_CORRELATION_ID=//p' /etc/idea2strategy/runtime-secret.env | tail -n 1)"
-  if [ "$current" = "$desired" ]; then
-    return 0
+  if [ "$current" != "$desired" ]; then
+    staged="$(mktemp /etc/idea2strategy/.runtime-secret.env.XXXXXX)"
+    sed '/^BACKTEST_WORKER_CORRELATION_ID=/d' /etc/idea2strategy/runtime-secret.env >"$staged"
+    printf 'BACKTEST_WORKER_CORRELATION_ID=%s\n' "$desired" >>"$staged"
+    chmod 0600 "$staged"
+    mv -f "$staged" /etc/idea2strategy/runtime-secret.env
+    correlation_changed=true
   fi
-  staged="$(mktemp /etc/idea2strategy/.runtime-secret.env.XXXXXX)"
-  sed '/^BACKTEST_WORKER_CORRELATION_ID=/d' /etc/idea2strategy/runtime-secret.env >"$staged"
-  printf 'BACKTEST_WORKER_CORRELATION_ID=%s\n' "$desired" >>"$staged"
-  chmod 0600 "$staged"
-  mv -f "$staged" /etc/idea2strategy/runtime-secret.env
   # A container carries the environment it was created with, so it has to be replaced rather than
-  # restarted for the corrected value to reach the process.
-  docker compose --project-name idea2strategy rm --stop --force backtest-worker
+  # restarted for a corrected value or a replaced bind-mounted policy directory to reach the process.
+  if [ "$correlation_changed" = true ] || [ "$BACKTEST_POLICY_CHANGED" = true ]; then
+    docker compose --project-name idea2strategy rm --stop --force backtest-worker
+  fi
 }
 reconcile_backtest_worker_correlation_id
 '@
@@ -420,6 +501,22 @@ fi
 rm -f "$rollback_compose"
 echo CORE_RUNTIME_ROLLED_OUT
 '@.Replace('__AWS_REGION__', $AwsRegion).Replace('__RUNTIME_SERVICES__', $runtimeServiceWords).Replace('CORE_RUNTIME_ROLLED_OUT', $rolloutMarker).Replace('__RUNTIME_ROLE__', $RuntimeRole.ToUpperInvariant()).Replace('__SETTLE_SECONDS__', [string]$SettleSeconds).Replace('__RUNTIME_ROLE_PREPARE__', $runtimeRolePrepare)
+
+if ($RuntimeRole -in @('core', 'backtest-worker')) {
+    $policyService = if ($RuntimeRole -ceq 'core') { 'backtest-api' } else { 'backtest-worker' }
+    $backtestPolicyEvidence = @'
+set -euo pipefail
+cd /opt/idea2strategy
+test "$(sha256sum /var/lib/idea2strategy/backtest-policy/execution-policy.json | cut -d ' ' -f 1)" = '__EXECUTION_POLICY_SHA256__'
+test "$(sha256sum /var/lib/idea2strategy/backtest-policy/runtime-policy.json | cut -d ' ' -f 1)" = '__RUNTIME_POLICY_SHA256__'
+container="$(docker compose --project-name idea2strategy ps -q '__POLICY_SERVICE__')"
+test -n "$container"
+test "$(docker exec "$container" sha256sum /runtime-policy/execution-policy.json | cut -d ' ' -f 1)" = '__EXECUTION_POLICY_SHA256__'
+test "$(docker exec "$container" sha256sum /runtime-policy/runtime-policy.json | cut -d ' ' -f 1)" = '__RUNTIME_POLICY_SHA256__'
+echo BACKTEST_POLICY_ARTIFACTS_VERIFIED
+'@.Replace('__EXECUTION_POLICY_SHA256__', $expectedExecutionPolicySha256).Replace('__RUNTIME_POLICY_SHA256__', $expectedRuntimePolicySha256).Replace('__POLICY_SERVICE__', $policyService)
+    $remoteScript = $remoteScript.Replace("echo $rolloutMarker", "$backtestPolicyEvidence`necho $rolloutMarker")
+}
 
 if ($RuntimeRole -ceq 'trading') {
     $tradingEvidence = @'

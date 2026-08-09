@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       database_bootstrap_authorization:
-        description: Type BOOTSTRAP_DEVELOPMENT_DATABASE only when the exact Flyway/seed fingerprint has no reusable receipt
+        description: Type BOOTSTRAP_DEVELOPMENT_DATABASE when the exact Flyway/seed or Backtest runtime-policy artifact receipt is missing
         required: true
         default: REUSE_EXISTING_RECEIPT
         type: string
@@ -106,6 +106,12 @@ jobs:
               -Execute -Confirm:$false
           }
           ./scripts/verify-development-database-bootstrap-receipt.ps1 @receiptArguments
+          ./scripts/publish-development-backtest-policy-artifacts.ps1 `
+            -RootSha '${{ github.sha }}' `
+            -Bucket 'idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-market-data' `
+            -AwsProfile '' `
+            -AwsRegion '${{ env.AWS_REGION }}' `
+            -Execute -Confirm:$false
 
   build:
     needs: bootstrap-database
@@ -357,6 +363,13 @@ jobs:
             -AwsProfile '' `
             -AwsRegion '${{ env.AWS_REGION }}' `
             -RuntimeDatabaseName $runtimeDatabaseName
+          $policyReceipt = ./scripts/verify-development-backtest-policy-artifacts.ps1 `
+            -Bucket 'idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-market-data' `
+            -AwsProfile '' `
+            -AwsRegion '${{ env.AWS_REGION }}' | ConvertFrom-Json
+          $policyReceipt.backtest_policy_artifacts |
+            ConvertTo-Json -Depth 8 |
+            Set-Content -NoNewline "$env:RUNNER_TEMP/backtest-policy-artifacts.json"
 
       - name: Publish immutable ARM64 images and capture registry digests
         id: images
@@ -606,6 +619,7 @@ jobs:
           $runtimeArtifacts = $databaseReceipt.trading_runtime_artifacts | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable
           $config.trading_runtime_artifacts['instrument-mapping'] = $runtimeArtifacts['instrument-mapping']
           $config.trading_runtime_artifacts['provider-rights'] = $runtimeArtifacts['provider-rights']
+          $config.backtest_policy_artifacts = Get-Content "$env:RUNNER_TEMP/backtest-policy-artifacts.json" -Raw | ConvertFrom-Json -AsHashtable
           $config.trading_market_data_feed = 'sip'
           if (-not $config.ContainsKey('dns_delegation_verified') -or $config.dns_delegation_verified -ne $true) {
             throw 'TF_VARS_JSON must carry independently reviewed public DNS delegation evidence.'

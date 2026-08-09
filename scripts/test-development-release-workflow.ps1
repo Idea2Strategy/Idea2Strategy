@@ -143,11 +143,41 @@ $required = @(
     "aws ecr put-image",
     "Server-side reuse digest mismatch",
     "No reusable runtime image exists; rerun with force_rebuild_all_images enabled"
+    "publish-development-backtest-policy-artifacts.ps1"
+    "verify-development-backtest-policy-artifacts.ps1"
+    "backtest-policy-artifacts.json"
+    "`$config.backtest_policy_artifacts = Get-Content"
 )
 
 foreach ($token in $required) {
     if (-not $workflow.Contains($token)) {
         throw "Development release workflow is missing required boundary: $token"
+    }
+}
+
+$policyPublisherPath = Join-Path $PSScriptRoot 'publish-development-backtest-policy-artifacts.ps1'
+$policyVerifierPath = Join-Path $PSScriptRoot 'verify-development-backtest-policy-artifacts.ps1'
+$policyLibraryPath = Join-Path $PSScriptRoot 'lib/development-backtest-policy-artifacts.ps1'
+foreach ($scriptPath in @($policyPublisherPath, $policyVerifierPath, $policyLibraryPath)) {
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        throw "Development Backtest policy artifact script is missing: $scriptPath"
+    }
+    $tokens = $null
+    $parseErrors = $null
+    [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
+    if (@($parseErrors).Count -ne 0) {
+        throw "Development Backtest policy artifact script has invalid PowerShell syntax: $scriptPath"
+    }
+}
+foreach ($boundary in @(
+        'Get-DevelopmentBacktestPolicyArtifactSet',
+        'execution-policy.json',
+        'runtime-policy.json',
+        'runtime/backtest/artifact-sets/',
+        '--version-id',
+        'Get-FileHash')) {
+    if (-not (($workflow + (Get-Content $policyPublisherPath -Raw) + (Get-Content $policyVerifierPath -Raw) + (Get-Content $policyLibraryPath -Raw)).Contains($boundary))) {
+        throw "Development Backtest policy publication boundary is missing: $boundary"
     }
 }
 
