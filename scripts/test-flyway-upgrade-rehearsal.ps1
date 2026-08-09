@@ -43,7 +43,7 @@
 [CmdletBinding()]
 param(
     [string]$FromRef,
-    [int]$ExpectedTables = 179,
+    [int]$ExpectedTables = 180,
     [int]$ExpectedMigrations = 53
 )
 
