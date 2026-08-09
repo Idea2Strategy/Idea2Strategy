@@ -396,13 +396,23 @@ jobs:
                 --output text 2>$null)
               if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($currentDigest) -or $currentDigest -ceq 'None') {
                 $manifestPath = "$env:RUNNER_TEMP/reuse-$name-manifest.json"
-                aws ecr batch-get-image `
+                # An image digest is the SHA-256 of the manifest's exact bytes, and ECR returns that
+                # manifest pretty-printed across lines. Piping it into `Set-Content -NoNewline`
+                # dropped every line separator, so put-image registered a manifest 45 bytes shorter
+                # than the one being reused and the comparison below correctly rejected it. That is
+                # why every release since needed force_rebuild_all_images (A91). The lines are
+                # rejoined with the separator they arrived with and written without a BOM.
+                $manifestLines = @(aws ecr batch-get-image `
                   --repository-name "idea2strategy-dev/$name" `
                   --image-ids "imageTag=$reuseTag" `
                   --query 'images[0].imageManifest' `
-                  --output text | Set-Content -NoNewline $manifestPath
-                if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+                  --output text)
+                if ($LASTEXITCODE -ne 0 -or $manifestLines.Count -eq 0) {
                   throw "Unable to read the reusable ECR manifest: $name/$reuseTag"
+                }
+                [IO.File]::WriteAllText($manifestPath, ($manifestLines -join "`n"), [Text.UTF8Encoding]::new($false))
+                if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+                  throw "Unable to stage the reusable ECR manifest: $name/$reuseTag"
                 }
                 aws ecr put-image `
                   --repository-name "idea2strategy-dev/$name" `
@@ -416,7 +426,8 @@ jobs:
                   --output text)
               }
               if ($currentDigest -cne $reuseDigest) {
-                throw "Server-side reuse digest mismatch: $name/$tag"
+                # Both digests, because one of them alone never said which side moved.
+                throw "Server-side reuse digest mismatch: $name/$tag published $currentDigest for a manifest whose source tag $reuseTag is $reuseDigest"
               }
               Write-Output "Reusing unchanged runtime image: $name@$currentDigest"
               $digests[$name] = $currentDigest
