@@ -73,6 +73,22 @@ jobs:
           echo CLOUD_INIT_TAIL
           grep -vE '^(Get:|Selecting |Preparing to unpack|Unpacking |Setting up |Processing triggers|Suggested packages|The following)' \
             /var/log/cloud-init-output.log 2>&1 | tail -n 40 || true
+          # The origin configuration only runs after the runtime service starts, so a container that
+          # cannot come up takes the whole host down and looks, from here, like a certificate
+          # problem. Collecting the service and container state is what tells those two apart.
+          echo RUNTIME_UNIT
+          systemctl show idea2strategy-runtime.service \
+            --property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus 2>&1 || true
+          echo RUNTIME_JOURNAL
+          journalctl -u idea2strategy-runtime.service --no-pager -n 60 2>&1 || true
+          echo COMPOSE_PS
+          (cd /opt/idea2strategy && docker compose --project-name idea2strategy ps -a 2>&1) || true
+          # Exit codes only. A container's own log can echo configuration, so the states come first
+          # and the tail below stays short and is read for a startup cause, not for content.
+          echo COMPOSE_STATE
+          docker ps -a --format '{{.Names}}\t{{.Status}}\t{{.State}}' 2>&1 || true
+          echo BATCH_TAIL
+          docker logs --tail 40 idea2strategy-backend-batch 2>&1 || true
           echo CORE_ORIGIN_DIAGNOSTIC_END
           '@
           $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($diagnosticScript))
