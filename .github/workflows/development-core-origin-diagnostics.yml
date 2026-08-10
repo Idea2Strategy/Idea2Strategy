@@ -45,6 +45,26 @@ jobs:
           echo CORE_ORIGIN_DIAGNOSTIC_BEGIN
           echo CLOUD_INIT
           cloud-init status --long 2>&1 || true
+          echo RUNTIME_UNIT
+          systemctl show idea2strategy-runtime.service \
+            --property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus 2>&1 || true
+          echo RUNTIME_JOURNAL
+          journalctl -u idea2strategy-runtime.service --no-pager -n 160 2>&1 || true
+          echo COMPOSE_PS
+          docker compose --project-directory /opt/idea2strategy --project-name idea2strategy ps --all 2>&1 || true
+          echo CONTAINER_STATES
+          for service in backend-api backend-batch backend-worker backtest-api; do
+            container="$(docker compose --project-directory /opt/idea2strategy --project-name idea2strategy \
+              ps --all -q "$service" 2>/dev/null || true)"
+            if test -z "$container"; then
+              printf '%s status=missing\n' "$service"
+              continue
+            fi
+            docker inspect --format "$service status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{json .State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}" \
+              "$container" 2>&1 || true
+            docker inspect --format '{{if .State.Health}}{{range .State.Health.Log}}{{println .ExitCode .Output}}{{end}}{{end}}' \
+              "$container" 2>&1 | tail -n 12 || true
+          done
           echo ORIGIN_UNIT
           systemctl show idea2strategy-origin-cert.service \
             --property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus 2>&1 || true
