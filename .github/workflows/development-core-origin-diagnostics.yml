@@ -49,7 +49,7 @@ jobs:
           systemctl show idea2strategy-runtime.service \
             --property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus 2>&1 || true
           echo RUNTIME_JOURNAL
-          journalctl -u idea2strategy-runtime.service --no-pager -n 160 2>&1 || true
+          journalctl -u idea2strategy-runtime.service --no-pager -n 60 2>&1 || true
           echo COMPOSE_PS
           docker compose --project-directory /opt/idea2strategy --project-name idea2strategy ps --all 2>&1 || true
           echo CONTAINER_STATES
@@ -78,37 +78,21 @@ jobs:
           echo CERTBOT
           certbot certificates 2>&1 | tail -n 80 || true
           echo ORIGIN_JOURNAL
-          journalctl -u idea2strategy-origin-cert.service --no-pager -n 120 2>&1 || true
+          journalctl -u idea2strategy-origin-cert.service --no-pager -n 60 2>&1 || true
           echo CLOUD_INIT_RELEVANT
           grep -E -i 'certbot|certificate|let.s encrypt|rate limit|nginx|idea2strategy-origin|configure-core-origin' \
-            /var/log/cloud-init-output.log 2>&1 | tail -n 120 || true
+            /var/log/cloud-init-output.log 2>&1 | tail -n 40 || true
           # Certbot's own log. The grep above matches apt's package chatter for the very packages it
           # looks for, so 120 matching lines can be entirely installation noise and hide the ACME
           # failure underneath it. This file carries protocol detail and domain names, not the
           # runtime secrets user-data writes, so it is safe to surface here.
           echo LETSENCRYPT
-          tail -n 60 /var/log/letsencrypt/letsencrypt.log 2>&1 || true
+          tail -n 30 /var/log/letsencrypt/letsencrypt.log 2>&1 || true
           # The tail of user-data's own output with package installation removed, which is where a
           # failure between "packages installed" and "certificate issued" actually shows up.
           echo CLOUD_INIT_TAIL
           grep -vE '^(Get:|Selecting |Preparing to unpack|Unpacking |Setting up |Processing triggers|Suggested packages|The following)' \
             /var/log/cloud-init-output.log 2>&1 | tail -n 40 || true
-          # The origin configuration only runs after the runtime service starts, so a container that
-          # cannot come up takes the whole host down and looks, from here, like a certificate
-          # problem. Collecting the service and container state is what tells those two apart.
-          echo RUNTIME_UNIT
-          systemctl show idea2strategy-runtime.service \
-            --property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus 2>&1 || true
-          echo RUNTIME_JOURNAL
-          journalctl -u idea2strategy-runtime.service --no-pager -n 60 2>&1 || true
-          echo COMPOSE_PS
-          (cd /opt/idea2strategy && docker compose --project-name idea2strategy ps -a 2>&1) || true
-          # Exit codes only. A container's own log can echo configuration, so the states come first
-          # and the tail below stays short and is read for a startup cause, not for content.
-          echo COMPOSE_STATE
-          docker ps -a --format '{{.Names}}\t{{.Status}}\t{{.State}}' 2>&1 || true
-          echo BATCH_TAIL
-          docker logs --tail 40 idea2strategy-backend-batch 2>&1 || true
           echo CORE_ORIGIN_DIAGNOSTIC_END
           '@
           $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($diagnosticScript))
