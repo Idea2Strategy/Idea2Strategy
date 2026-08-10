@@ -104,6 +104,53 @@
       "expires_at": "2026-08-10T14:49:48.2940882Z"
     },
     {
+      "id": "claim.local-integration-environment",
+      "work_id": "work.local-development-foundation",
+      "definition_fingerprint": "sha256:22976f6fe6d3cca999cc2ea2de591c3ee45c17ccf9be8518db2c7400fb92b49a",
+      "status": "in_progress",
+      "owner": "local",
+      "branch": "feature/local-integration-environment",
+      "repository": "idea2strategy.platform",
+      "paths": [
+        ".env.docker.example",
+        "backend/**",
+        "backtest-engine/**",
+        "compose.back.yml",
+        "compose.front.yml",
+        "data-pipeline/**",
+        "docs/backend-and-aws-architecture.md",
+        "docs/backend-implementation-master-checklist.md",
+        "docs/backend-team-allocation.md",
+        "docs/infrastructure/**",
+        "infra/docker/**",
+        "scripts/dev.ps1",
+        "scripts/test-docker-development.ps1",
+        "trading-engine/**",
+        "ui/**"
+      ],
+      "policy_ids": [],
+      "scenario_ids": [],
+      "contract_ids": [],
+      "db_entities": [],
+      "migration_slots": [
+        "flyway.foundation"
+      ],
+      "ui_flows": [],
+      "dependency_majors": [
+        "node@24",
+        "python@3.12",
+        "spring-boot@4"
+      ],
+      "stable_ids": [
+        "quality.failure-safety",
+        "quality.reproducibility",
+        "technology.need.server-runtime"
+      ],
+      "root_pointer": true,
+      "starts_at": "2026-08-10T03:32:48.546987Z",
+      "expires_at": "2026-08-13T03:32:48.4337385Z"
+    },
+    {
       "id": "claim.strategy-launch-gate-pjy008008",
       "work_id": "work.basic-strategy-full-catalog",
       "definition_fingerprint": "sha256:2ccc16b0e87204ce58001251496af233a25d5261d068fc60a0c8ad5a0bbe440c",
