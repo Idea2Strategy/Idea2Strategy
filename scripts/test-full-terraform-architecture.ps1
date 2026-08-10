@@ -133,7 +133,7 @@ if ($userData.Contains('config --images | head -n1')) {
 }
 foreach ($coreHealthBoundary in @(
     'test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/actuator/health"]',
-    'start_period: 180s',
+    'start_period: 300s',
     'timeout: 10s',
     'retries: 6'
 )) {

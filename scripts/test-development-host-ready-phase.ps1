@@ -41,6 +41,14 @@ foreach ($required in @(
         throw "Host-ready phase boundary is missing: $required"
     }
 }
+if (($coreDiagnostics | Select-String -Pattern 'echo RUNTIME_UNIT' -AllMatches).Matches.Count -ne 1 -or
+    ($coreDiagnostics | Select-String -Pattern 'echo RUNTIME_JOURNAL' -AllMatches).Matches.Count -ne 1 -or
+    -not $coreDiagnostics.Contains('journalctl -u idea2strategy-runtime.service --no-pager -n 60')) {
+    throw "Core runtime diagnostics must stay single and bounded below the SSM output limit."
+}
+if ($coreDiagnostics.Contains('echo BATCH_TAIL') -or $coreDiagnostics.Contains('docker logs --tail')) {
+    throw "Core runtime diagnostics must not emit application logs that can contain configuration."
+}
 
 foreach ($required in @(
     'echo RUNTIME_UNIT',

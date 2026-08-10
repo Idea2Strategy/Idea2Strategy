@@ -451,7 +451,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 6
-      start_period: 180s
+      start_period: 300s
     logging: &awslogs
       driver: awslogs
       options: {awslogs-region: "${aws_region}", awslogs-group: "${log_group_name}", awslogs-stream: backend-api}
