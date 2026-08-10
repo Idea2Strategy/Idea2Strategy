@@ -28,6 +28,7 @@ $edge = Read-Terraform "edge.tf"
 $email = Read-Terraform "email.tf"
 $userData = Get-Content -LiteralPath (Join-Path $environmentRoot "templates/ec2-user-data.sh.tftpl") -Raw
 $coreDeploy = Get-Content -LiteralPath (Join-Path $root "scripts/deploy-development-core-runtime.ps1") -Raw
+$coreDiagnostics = Get-Content -LiteralPath (Join-Path $root ".github/workflows/development-core-origin-diagnostics.yml") -Raw
 $runbook = Get-Content -LiteralPath (Join-Path $root "docs/infrastructure/deploy-readiness-runbook.md") -Raw
 
 foreach ($required in @(
@@ -38,6 +39,22 @@ foreach ($required in @(
 )) {
     if (-not $all.Contains($required)) {
         throw "Host-ready phase boundary is missing: $required"
+    }
+}
+
+foreach ($required in @(
+    'echo RUNTIME_UNIT',
+    'systemctl show idea2strategy-runtime.service',
+    'echo RUNTIME_JOURNAL',
+    'journalctl -u idea2strategy-runtime.service',
+    'echo COMPOSE_PS',
+    'docker compose --project-directory /opt/idea2strategy --project-name idea2strategy ps --all',
+    'echo CONTAINER_STATES',
+    '.State.ExitCode',
+    '.State.Health.Status'
+)) {
+    if (-not $coreDiagnostics.Contains($required)) {
+        throw "Core host diagnostics cannot identify a failed runtime bootstrap: $required"
     }
 }
 
