@@ -33,8 +33,8 @@
 사용자가 `나는 B 담당이야. 이제 뭐 해야 해?`라고 하면 다음 순서로 처리한다.
 
 1. B 묶음에서 완료되지 않았고 선행 카드가 끝난 첫 카드를 찾는다.
-2. 실제 Git·서브모듈·진행 중 작업과 의미 충돌을 Stackcord로 확인한다.
-3. 해당 카드를 루트 상위 Issue로 두고, 지금 담당자가 처리할 저장소 하위 Issue 하나를 실행 가능한 Stackcord 작업으로 정의해 작업 브랜치를 예약한다.
+2. 실제 Git·worktree·서브모듈·GitHub Issue 상태로 진행 중 작업과 의미 충돌을 확인한다.
+3. 해당 카드를 루트 상위 Issue로 두고, 지금 담당자가 처리할 저장소 하위 Issue 하나를 정의해 전용 worktree와 작업 브랜치를 예약한다.
 4. 최초 실패 테스트부터 작성하고 구현·검증한다.
 5. 필요한 DBML·Flyway·계약·문서 변경을 같은 PR 또는 명시된 선행 PR에 포함한다.
 6. 하위 Issue 완료 근거와 PR을 상위 Issue에 기록한 후 다음 `Ready` 하위 Issue를 안내한다.
@@ -58,7 +58,7 @@
 - [x] **COM07 — DB 소유권·중앙 Flyway baseline**: 스키마·테이블별 단일 write owner가 자신이 소유한 변경의 migration을 작성하고, 나주원(`Juwon-Na`)이 중앙 Flyway 모듈의 통합 담당자로서 순서·충돌·DBML 일치를 검토한다. 전용 Flyway 1회 실행, 서비스별 최소 권한, timestamp 기반 migration 이름, JPA validate·jOOQ code generation과 Python 접근 경계를 검증한다.
 - [x] **COM08 — 독립 테스트 kit**: fake auth, fake clock, fake queue, 녹화 시장 사건, 소형 Parquet, fake S3와 Testcontainers를 각 저장소에서 외부 구현 없이 사용할 수 있게 한다.
 - [x] **COM09 — 공통 CI gate**: build, lint, test, migration, DBML, 계약 호환성, dependency·secret scan과 앱 smoke test를 `develop` PR 필수 검사로 구성한다.
-- [x] **COM10 — 병렬 작업 소유권 확인**: A~F의 경로·스키마·계약 producer를 확정하고 Stackcord로 의미·migration·workspace·root pointer 충돌과 병합 순서를 확인한다.
+- [x] **COM10 — 병렬 작업 소유권 확인**: A~F의 경로·스키마·계약 producer를 확정하고 Git worktree·Issue·PR 상태로 의미·migration·workspace·root pointer 충돌과 병합 순서를 확인한다.
 - [x] **COM11 — UI 공통 골격**: 실제 제품용 `ui` 서브모듈에 app shell, router, 인증 상태, API client, 공통 오류·loading 처리와 테스트 기반을 먼저 병합한다.
 - [x] **COM12 — Issue·브랜치·PR 흐름 검증**: 확정된 A~F 담당자를 루트 사용자 흐름 Issue와 저장소별 하위 Issue에 배정한다. 이후 하위 Issue 하나를 선택해 해당 저장소 feature 브랜치→`develop` PR→E2E→Issue 종료→최신 `develop`에서 다음 브랜치 생성 흐름을 검증한다.
 

@@ -26,8 +26,6 @@ try {
     throw 'Unable to initialize the test Git repository.'
   }
 
-  New-Item -ItemType Directory -Path (Join-Path $sandbox '.harness') | Out-Null
-  Set-Content -LiteralPath (Join-Path $sandbox '.harness/manifest.yaml') -Encoding utf8 -Value "schema_version: 1`nid: test.project`n"
   Set-Content -LiteralPath (Join-Path $sandbox '.gitignore') -Encoding utf8 -Value @'
 .harness/local/**
 !.harness/local/README.md
