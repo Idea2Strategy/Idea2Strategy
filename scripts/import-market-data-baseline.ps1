@@ -103,7 +103,7 @@ try {
             $putOutput = Invoke-BaselineAwsTool -BaselineRoot $root -UseDockerTools:$UseDockerTools `
                 -DockerNetwork $DockerNetwork -Capture -Arguments ($awsBase + @(
                 "s3api", "put-object", "--bucket", $TargetBucket, "--key", $key, "--body", $file,
-                "--if-none-match", "*", "--metadata", "sha256=$sha256,transfer_attempt=$transferAttempt",
+                "--if-none-match=*", "--metadata", "sha256=$sha256,transfer_attempt=$transferAttempt",
                 "--checksum-algorithm", "SHA256", "--output", "json"
             ))
             $putResult = ($putOutput | Out-String) | ConvertFrom-Json

@@ -33,7 +33,7 @@ if ($uploadPosition -lt 0 -or $restorePosition -lt 0 -or $uploadPosition -gt $re
 if ($importSource -notmatch 'AllowAwsTarget' -or $importSource -notmatch 'Import without -S3EndpointUrl targets AWS') {
     throw "Import must require explicit opt-in before writing to AWS."
 }
-if ($importSource -notmatch '--if-none-match' -or
+if ($importSource -notmatch '--if-none-match=\*' -or
     $importSource -notmatch '--version-id' -or
     $importSource -notmatch '\\set ON_ERROR_STOP on' -or
     $importSource -notmatch 'BEGIN;' -or
