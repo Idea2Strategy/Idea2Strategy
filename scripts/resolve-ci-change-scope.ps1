@@ -68,7 +68,7 @@ $scope["any_changed"] = $paths.Count -gt 0
 $result = [pscustomobject]$scope
 if (-not [string]::IsNullOrWhiteSpace($GithubOutput)) {
     foreach ($entry in $scope.GetEnumerator()) {
-        $line = "$($entry.Key)=$([bool]$entry.Value).ToString().ToLowerInvariant()"
+        $line = "$($entry.Key)=$(([bool]$entry.Value).ToString().ToLowerInvariant())"
         Add-Content -LiteralPath $GithubOutput -Value $line -Encoding utf8
     }
 }

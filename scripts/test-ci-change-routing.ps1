@@ -37,4 +37,17 @@ Assert-Scope -Name "main" -Paths @() -Event push -Ref "refs/heads/main" -Expecte
 Assert-Scope -Name "nightly" -Paths @() -Event schedule -Expected @{ terraform = $false; full_e2e = $true; security = $true }
 Assert-Scope -Name "manual" -Paths @() -Event workflow_dispatch -Expected @{ terraform = $true; full_e2e = $true; security = $true }
 
+$githubOutput = Join-Path ([System.IO.Path]::GetTempPath()) ("i2s-ci-output-" + [guid]::NewGuid().ToString("N"))
+try {
+    & $resolver -ChangedPath @("scripts/import-market-data-baseline.ps1") -EventName pull_request `
+        -Ref "refs/pull/1/merge" -GithubOutput $githubOutput | Out-Null
+    $githubLines = @(Get-Content -LiteralPath $githubOutput)
+    if ($githubLines -cnotcontains "integration=true" -or $githubLines -cnotcontains "terraform=false") {
+        throw "GitHub outputs must be exact lowercase booleans. Found: $($githubLines -join ', ')"
+    }
+}
+finally {
+    Remove-Item -LiteralPath $githubOutput -Force -ErrorAction SilentlyContinue
+}
+
 Write-Output "CI change routing checks passed."
