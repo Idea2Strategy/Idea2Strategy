@@ -31,8 +31,10 @@ Assert-Scope -Name "compose" -Paths @("compose.back.yml") -Expected @{ integrati
 Assert-Scope -Name "contract" -Paths @("contracts/data/example.md") -Expected @{ integration = $true; root = $true }
 Assert-Scope -Name "terraform" -Paths @("infra/terraform/environments/development/main.tf") -Expected @{ terraform = $true; integration = $false }
 Assert-Scope -Name "deployment workflow" -Paths @(".github/workflows/development-release.yml") -Expected @{ terraform = $true }
+Assert-Scope -Name "frontend workflow" -Paths @(".github/workflows/development-frontend-release.yml") -Expected @{ terraform = $false }
+Assert-Scope -Name "market data transfer" -Paths @("scripts/import-market-data-baseline.ps1") -Expected @{ integration = $true; terraform = $false }
 Assert-Scope -Name "main" -Paths @() -Event push -Ref "refs/heads/main" -Expected @{ terraform = $true; full_e2e = $true; security = $true }
-Assert-Scope -Name "nightly" -Paths @() -Event schedule -Expected @{ full_e2e = $true; security = $true }
+Assert-Scope -Name "nightly" -Paths @() -Event schedule -Expected @{ terraform = $false; full_e2e = $true; security = $true }
 Assert-Scope -Name "manual" -Paths @() -Event workflow_dispatch -Expected @{ terraform = $true; full_e2e = $true; security = $true }
 
 Write-Output "CI change routing checks passed."

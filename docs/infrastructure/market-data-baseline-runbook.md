@@ -25,7 +25,7 @@ After the first full build, rebuild only a changed service:
 
 ## 2. Export from the old AWS account
 
-Prerequisites: authenticated AWS CLI v2, `psql`, `pg_dump`, enough free SSD space, an RDS connection URL, and read permission for the source bucket and object versions. The command performs only database reads and S3 `GetObject` operations. If RDS is private, run the exporter from an approved network path such as an SSM port-forwarded session or the existing database-access host; do not make RDS public for the backup.
+Prerequisites: enough free SSD space, an RDS connection URL, and read permission for the source bucket and object versions. Either install AWS CLI v2 plus PostgreSQL client tools, or install Docker and pass `-UseDockerTools`; the Docker mode uses pinned PostgreSQL 16 and AWS CLI images and reads the authenticated AWS profile from the normal local AWS configuration. The command performs only database reads and S3 `GetObject` operations. If RDS is private, run the exporter from an approved network path such as an SSM port-forwarded session or the existing database-access host; do not make RDS public for the backup.
 
 ```powershell
 .\scripts\export-market-data-baseline.ps1 `
@@ -33,10 +33,12 @@ Prerequisites: authenticated AWS CLI v2, `psql`, `pg_dump`, enough free SSD spac
   -DatabaseUrl $env:I2S_SOURCE_DATABASE_URL `
   -Bucket 'SOURCE_MARKET_DATA_BUCKET' `
   -Region 'ap-northeast-2' `
-  -AwsProfile 'old-account-readonly'
+  -AwsProfile 'old-account-readonly' `
+  -UseDockerTools `
+  -ConfirmMarketDataWritersStopped
 ```
 
-The exporter creates `market-catalog.dump`, `storage-objects.csv`, `objects/`, and `baseline-manifest.json`. It downloads every catalogued object in the selected market-data bucket by its exact key and source VersionId, then verifies byte size and SHA-256. Keeping the storage catalog separate prevents unrelated result-bucket metadata from being restored without its bytes.
+First stop and verify every process that can write `market_data` or `storage.objects`; the exporter fails closed unless that operator condition is acknowledged. Keep writers stopped until the command finishes so its separate read operations describe one stable catalog. The destination directory must not already exist. The exporter builds a private staging directory and only renames it to the requested destination after verification, so it never clears or overwrites an existing backup. It creates `market-catalog.dump`, `storage-objects.csv`, `objects/`, and `baseline-manifest.json`. It downloads every referenced object in the selected market-data bucket by its exact key and source VersionId, then verifies byte size, catalog semantics, and SHA-256. Keeping the storage catalog separate prevents unrelated result-bucket metadata from being restored without its bytes.
 
 ## 3. Verify and make the second copy
 
@@ -60,10 +62,11 @@ $env:AWS_SECRET_ACCESS_KEY = '<MINIO_ROOT_PASSWORD from .env.docker>'
   -DatabaseUrl $env:I2S_LOCAL_DATABASE_URL `
   -TargetBucket 'idea2strategy-local-market-data' `
   -Region 'ap-northeast-2' `
-  -S3EndpointUrl 'http://127.0.0.1:19000'
+  -S3EndpointUrl 'http://127.0.0.1:19000' `
+  -UseDockerTools
 ```
 
-The import receipt records the new provider version ID for each unchanged logical UUID and key. An import without `-S3EndpointUrl` is rejected unless `-AllowAwsTarget` is explicitly supplied.
+The target bucket must have versioning enabled, and both `storage.objects` and every `market_data` table must be empty. The importer refuses keys with any existing version history and re-downloads each exact new VersionId to verify its SHA-256. Database rows are restored in one transaction; before that transaction commits, a failure removes only the exact object versions uploaded by the current attempt. The destination role therefore needs `s3:DeleteObjectVersion` during the import. If rollback reports a warning, stop and reconcile the printed `transfer_attempt` metadata before retrying. The import receipt records the new provider version ID for each unchanged logical UUID and key. An import without `-S3EndpointUrl` is rejected unless `-AllowAwsTarget` is explicitly supplied.
 
 ## 5. Move to a completely different AWS root account
 

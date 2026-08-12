@@ -39,6 +39,7 @@ $isMain = $Ref -ceq "refs/heads/main"
 $isManual = $EventName -ceq "workflow_dispatch"
 $isNightly = $EventName -ceq "schedule"
 $full = $isMain -or $isManual -or $isNightly
+$infrastructureValidation = $isMain -or $isManual
 
 $scope = [ordered]@{
     backend = Test-AnyPath @("backend", "backend/*")
@@ -51,9 +52,13 @@ $scope = [ordered]@{
     integration = Test-AnyPath @(
         "backend", "backtest-engine", "data-pipeline", "trading-engine", "ui",
         "db/*", "contracts/*", "compose.*.yml", "infra/docker/*", "db/flyway-ci-bundle/*",
-        "scripts/prepare-flyway-bundle.ps1", "scripts/test-flyway-*.ps1", "scripts/integration/*"
+        "scripts/prepare-flyway-bundle.ps1", "scripts/test-flyway-*.ps1", "scripts/integration/*",
+        "scripts/*market-data-baseline*.ps1", "scripts/test-market-data-transfer-docker.ps1"
     )
-    terraform = $full -or (Test-AnyPath @("infra/*", "scripts/aws/*", "scripts/*terraform*.ps1", "scripts/*development*.ps1", "scripts/*deployment*.ps1", ".github/workflows/*"))
+    terraform = $infrastructureValidation -or (Test-AnyPath @(
+        "infra/*", "scripts/aws/*", "scripts/*terraform*.ps1", "scripts/*development*.ps1", "scripts/*deployment*.ps1",
+        ".github/workflows/development-release.yml", ".github/workflows/development-core-origin-diagnostics.yml"
+    ))
     full_e2e = $full
     security = $full
 }

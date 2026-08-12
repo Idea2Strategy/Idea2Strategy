@@ -248,6 +248,9 @@ jobs:
         run: |
           ./scripts/test-docker-development.ps1
           ./scripts/test-deployment-inputs.ps1
+      - name: Verify market-data export/import round trip
+        shell: pwsh
+        run: ./scripts/test-market-data-transfer-docker.ps1
       - name: Verify pinned central Flyway migration lifecycle
         shell: pwsh
         run: ./scripts/test-flyway-ci-bundle.ps1
