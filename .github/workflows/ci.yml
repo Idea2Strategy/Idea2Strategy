@@ -5,6 +5,9 @@ on:
     branches: [develop]
   push:
     branches: [develop, main]
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,79 +17,84 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  infrastructure-readiness:
+  classify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 3
+    outputs:
+      backend: ${{ steps.scope.outputs.backend }}
+      trading: ${{ steps.scope.outputs.trading }}
+      backtest: ${{ steps.scope.outputs.backtest }}
+      data_pipeline: ${{ steps.scope.outputs.data_pipeline }}
+      ui: ${{ steps.scope.outputs.ui }}
+      root: ${{ steps.scope.outputs.root }}
+      docker: ${{ steps.scope.outputs.docker }}
+      integration: ${{ steps.scope.outputs.integration }}
+      terraform: ${{ steps.scope.outputs.terraform }}
+      full_e2e: ${{ steps.scope.outputs.full_e2e }}
+      security: ${{ steps.scope.outputs.security }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           submodules: false
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_version: 1.15.8
-          terraform_wrapper: false
-      - name: Validate Terraform without AWS credentials or remote backend
+      - id: scope
+        name: Resolve changed service and validation scope
         shell: pwsh
-        run: ./scripts/test-terraform-readiness.ps1
-      - uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6.3.0
-        with:
-          tflint_version: v0.58.1
-      - name: Lint Terraform
-        run: |
-          tflint --chdir=infra/terraform/bootstrap
-          tflint --chdir=infra/terraform/environments/development
-      - name: Scan Terraform policy and security
-        run: |
-          python -m pip install --disable-pip-version-check checkov==3.2.471
-          checkov --directory infra/terraform --config-file infra/terraform/checkov.yaml
-      - name: Validate secret-safe deployment inputs and Compose model
-        shell: pwsh
-        run: ./scripts/test-deployment-inputs.ps1
-      - name: Validate manual Development release safety boundaries
-        shell: pwsh
-        run: ./scripts/test-development-release-workflow.ps1
-      - name: Validate fast Development CI scheduling
-        shell: pwsh
-        run: ./scripts/test-ci-scheduling.ps1
-      - name: Validate immutable GitHub Action runtime pins
-        shell: pwsh
-        run: ./scripts/test-github-action-runtime-pins.ps1
-      - name: Validate Development transactional email infrastructure
-        shell: pwsh
-        run: ./scripts/test-development-email-delivery-infrastructure.ps1
-      - name: Validate staged Development www edge cutover
-        shell: pwsh
-        run: ./scripts/test-development-www-edge.ps1
-      - name: Validate pre-DNS host-ready deployment phase
-        shell: pwsh
-        run: ./scripts/test-development-host-ready-phase.ps1
-      - name: Validate optional Cognito operator identity boundaries
-        shell: pwsh
-        run: ./scripts/test-development-cognito-operator-identity.ps1
-      - name: Test Cognito operator token transformer
-        run: node --test infra/terraform/environments/development/lambda/operator-pre-token/index.test.mjs
-      - name: Validate one-shot Development database bootstrap boundaries
-        shell: pwsh
-        run: ./scripts/test-development-database-bootstrap.ps1
-      - name: Validate proposed Development scoring seed boundary
-        run: node --test scripts/validate-development-scoring-seed.test.mjs
-      - name: Parse the one-shot host bootstrap
-        shell: bash
-        run: bash -n scripts/aws/development-database-bootstrap.sh
-      - name: Validate one-shot Development market catalog bootstrap boundaries
-        shell: pwsh
-        run: ./scripts/test-development-market-catalog-bootstrap.ps1
-      - name: Validate Development active-feed watermark wiring
-        shell: pwsh
-        run: ./scripts/test-development-pipeline-watermarks.ps1
-      - name: Parse the market catalog host bootstrap
-        shell: bash
-        run: bash -n scripts/aws/development-market-catalog-bootstrap.sh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+        run: >-
+          ./scripts/resolve-ci-change-scope.ps1
+          -BaseSha "$env:BASE_SHA"
+          -HeadSha "$env:HEAD_SHA"
+          -EventName "$env:EVENT_NAME"
+          -Ref "$env:EVENT_REF"
+          -GithubOutput "$env:GITHUB_OUTPUT"
 
-  schema-and-coordination:
+  repository-policy:
+    needs: classify
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          submodules: false
+      - name: Validate tracked formatting
+        shell: bash
+        run: git diff --check HEAD^
+      - name: Verify submodule pointers are tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in backend backtest-engine data-pipeline trading-engine ui; do
+            test "$(git ls-files -s "$path" | awk '{print $1}')" = "160000"
+          done
+      - name: Initialize local harness
+        shell: pwsh
+        run: ./scripts/initialize-local-harness.ps1 -Verify
+      - name: Verify collaboration policy and product authorities
+        shell: pwsh
+        run: ./scripts/verify-collaboration-policy.ps1
+      - name: Validate CI path routing
+        shell: pwsh
+        run: ./scripts/test-ci-change-routing.ps1
+      - name: Validate CI scheduling and immutable action pins
+        shell: pwsh
+        run: |
+          ./scripts/test-ci-scheduling.ps1
+          ./scripts/test-github-action-runtime-pins.ps1
+      - name: Validate portable market-data baseline safety
+        shell: pwsh
+        run: ./scripts/test-market-data-baseline.ps1
+
+  root-schema:
+    needs: classify
+    if: needs.classify.outputs.root == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,81 +108,269 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-      - name: Install schema tooling
-        run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Validate canonical DBML
-        run: pnpm dbml:validate
-      - name: Validate canonical COM A contracts
-        run: pnpm dbml:validate:com-a-canonical
-      - name: Validate release adoption contracts and registry
-        run: pnpm contract:validate:release-adoption
-      - name: Validate every registered contract exhaustively
-        run: pnpm contract:validate:registry
-      - name: Validate A12 account lifecycle contract
-        run: pnpm dbml:validate:a12
-      - name: Test dbdiagram export preparation
-        run: pnpm dbml:export:test
-      - name: Validate tracked formatting
-        run: git diff --check HEAD^
-      - name: Verify submodule pointers are tracked
-        shell: bash
-        run: |
-          set -euo pipefail
-          for path in backend backtest-engine data-pipeline trading-engine ui; do
-            test "$(git ls-files -s "$path" | awk '{print $1}')" = "160000"
-          done
-      # The governance verifiers assert the product-authority list as literals in
-      # four scripts and four rule documents. Without these steps a change to
-      # .harness/governance.yaml can silently drift from its enforcement files.
-      # initialize-local-harness.ps1 generates the ignored owner.yaml and the
-      # policy integrity baseline from the checked-out tree, so a fresh runner
-      # has everything the verifiers need.
-      - name: Initialize local harness
-        shell: pwsh
-        run: ./scripts/initialize-local-harness.ps1 -Verify
-      - name: Verify collaboration policy and product authorities
-        shell: pwsh
-        run: ./scripts/verify-collaboration-policy.ps1
-      - name: Verify governance foundation evidence
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Validate DBML, contracts, registry, and export tooling
+        run: >-
+          pnpm dbml:validate &&
+          pnpm dbml:validate:com-a-canonical &&
+          pnpm contract:validate:release-adoption &&
+          pnpm contract:validate:registry &&
+          pnpm dbml:validate:a12 &&
+          pnpm dbml:export:test
+      - name: Verify governance foundation and local harness
         run: node scripts/verify-foundation-evidence.mjs policy
-      - name: Test local harness
-        shell: pwsh
+      - shell: pwsh
         run: ./scripts/test-local-harness.ps1
 
-  flyway-integration:
+  backend-fast:
+    needs: classify
+    if: needs.classify.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-read-only: true
+      - name: Backend unit tests and distributable build
+        working-directory: backend
+        run: |
+          chmod +x gradlew
+          ./gradlew test :apps:idea2strategy-cli:distZip --no-daemon --build-cache --parallel
+
+  trading-fast:
+    needs: classify
+    if: needs.classify.outputs.trading == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-read-only: true
+      - name: Trading lint, unit tests, and build
+        working-directory: trading-engine
+        run: |
+          chmod +x gradlew
+          ./gradlew check --no-daemon --build-cache --parallel
+
+  backtest-fast:
+    needs: classify
+    if: needs.classify.outputs.backtest == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12.13'
+          cache: pip
+          cache-dependency-path: backtest-engine/pyproject.toml
+      - name: Backtest lint and unit tests
+        working-directory: backtest-engine
+        run: |
+          python -m pip install --disable-pip-version-check -e '.[dev,test]'
+          python -m ruff check src tests
+          python -m pytest -p no:cacheprovider -m 'not docker' -q
+
+  data-pipeline-fast:
+    needs: classify
+    if: needs.classify.outputs.data_pipeline == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12.13'
+          cache: pip
+          cache-dependency-path: data-pipeline/pyproject.toml
+      - name: Data-pipeline lint and unit tests
+        working-directory: data-pipeline
+        run: |
+          python -m pip install --disable-pip-version-check -e '.[dev]'
+          python -m ruff check .
+          python -m pytest -p no:cacheprovider -m 'not integration' -q
+
+  ui-fast:
+    needs: classify
+    if: needs.classify.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - name: UI typecheck, unit tests, and build
+        working-directory: ui
+        run: |
+          pnpm install --frozen-lockfile --prefer-offline
+          pnpm typecheck
+          pnpm exec vitest run
+          pnpm build
+          node scripts/assert-production-bundle.mjs
+
+  integration:
+    needs: classify
+    if: needs.classify.outputs.integration == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
-          submodules: false
+          submodules: recursive
+      - name: Validate Compose and targeted development commands
+        shell: pwsh
+        run: |
+          ./scripts/test-docker-development.ps1
+          ./scripts/test-deployment-inputs.ps1
       - name: Verify pinned central Flyway migration lifecycle
         shell: pwsh
         run: ./scripts/test-flyway-ci-bundle.ps1
-      - name: Verify proposed scoring seed replay and collision safety
+      - name: Verify scoring seed replay and collision safety
         shell: pwsh
         run: ./scripts/test-development-scoring-seed-integration.ps1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backtest-engine/pyproject.toml
+      - name: Verify producer-consumer contract fixture parity
+        run: python scripts/validate_d_contract_parity.py
 
-  three-lane-feature-e2e:
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+  infrastructure-readiness:
+    needs: classify
+    if: needs.classify.outputs.terraform == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          submodules: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - shell: pwsh
+        run: ./scripts/test-terraform-readiness.ps1
+      - uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6.3.0
+        with:
+          tflint_version: v0.58.1
+      - name: Lint and scan Terraform
+        run: |
+          tflint --chdir=infra/terraform/bootstrap
+          tflint --chdir=infra/terraform/environments/development
+          python -m pip install --disable-pip-version-check checkov==3.2.471
+          checkov --directory infra/terraform --config-file infra/terraform/checkov.yaml
+      - name: Validate deployment and Terraform-adjacent contracts
+        shell: pwsh
+        run: |
+          ./scripts/test-deployment-inputs.ps1
+          ./scripts/test-development-release-workflow.ps1
+          ./scripts/test-full-terraform-architecture.ps1
+          ./scripts/test-development-email-delivery-infrastructure.ps1
+          ./scripts/test-development-www-edge.ps1
+          ./scripts/test-development-host-ready-phase.ps1
+          ./scripts/test-development-cognito-operator-identity.ps1
+          ./scripts/test-development-database-bootstrap.ps1
+          ./scripts/test-development-market-catalog-bootstrap.ps1
+          ./scripts/test-development-pipeline-watermarks.ps1
+      - name: Validate infrastructure scripts and Cognito transformer
+        shell: bash
+        run: |
+          bash -n scripts/aws/development-database-bootstrap.sh
+          bash -n scripts/aws/development-market-catalog-bootstrap.sh
+          node --test infra/terraform/environments/development/lambda/operator-pre-token/index.test.mjs
+          node --test scripts/validate-development-scoring-seed.test.mjs
+
+  full-e2e:
+    needs: classify
+    if: needs.classify.outputs.full_e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
           submodules: recursive
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: backtest-engine/pyproject.toml
-      - name: Verify contract fixture parity between owners and consumers
-        run: python scripts/validate_d_contract_parity.py
-      - name: Install the exact backtest runtime and integration dependencies
-        run: python -m pip install --disable-pip-version-check -e './backtest-engine[test]'
+      - run: python scripts/validate_d_contract_parity.py
+      - run: python -m pip install --disable-pip-version-check -e './backtest-engine[test]'
       - name: Prove BASIC, CUSTOM and COMPETITION on one shared runtime
         run: >-
           python -m pytest -c backtest-engine/pyproject.toml
           scripts/integration/test_three_lane_feature_e2e.py -m docker -vv
+
+  security-audit:
+    needs: classify
+    if: needs.classify.outputs.security == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Reject tracked credential material
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.env(\..+)?\.example$'; then exit 1; fi
+          if git ls-files | grep -E '\.(pem|p12|pfx|jks|keystore|tfstate)$'; then exit 1; fi
+      - name: Security policy scan
+        run: |
+          python -m pip install --disable-pip-version-check checkov==3.2.471
+          checkov --directory infra/terraform --config-file infra/terraform/checkov.yaml
+
+  ci-summary:
+    if: always()
+    needs:
+      - classify
+      - repository-policy
+      - root-schema
+      - backend-fast
+      - trading-fast
+      - backtest-fast
+      - data-pipeline-fast
+      - ui-fast
+      - integration
+      - infrastructure-readiness
+      - full-e2e
+      - security-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Require every selected check to pass
+        shell: bash
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "CI results: $RESULTS"
+          if grep -Eq '(^| )(failure|cancelled)( |$)' <<<"$RESULTS"; then exit 1; fi

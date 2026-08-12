@@ -6,6 +6,9 @@ param(
     [ValidateSet("all", "front", "back")]
     [string]$Scope = "all",
 
+    [ValidateSet("frontend", "backend-api", "backend-batch", "backend-worker", "admin-mcp", "market-gateway", "trading-worker", "backtest-api", "backtest-worker", "all")]
+    [string]$Service = "all",
+
     [switch]$WithBackend,
     [switch]$NoBrowser,
     [switch]$Force
@@ -18,6 +21,18 @@ $environmentTemplate = Join-Path $root ".env.docker.example"
 $composeBack = Join-Path $root "compose.back.yml"
 $composeFront = Join-Path $root "compose.front.yml"
 $env:COMPOSE_IGNORE_ORPHANS = "true"
+$targetedService = $Service -cne "all"
+$includeApps = $WithBackend -or ($targetedService -and $Service -cne "frontend")
+
+if ($targetedService -and $Scope -eq "front" -and $Service -cne "frontend") {
+    throw "-Scope front can target only the frontend service."
+}
+if ($targetedService -and $Scope -eq "back" -and $Service -ceq "frontend") {
+    throw "-Scope back cannot target the frontend service."
+}
+if ($targetedService -and $Action -eq "reset") {
+    throw "reset applies to the complete local environment; omit -Service."
+}
 
 function New-RandomSecret {
     $bytes = New-Object byte[] 32
@@ -190,7 +205,7 @@ function Get-ComposeBaseArguments {
 
     $arguments += @("-p", "idea2strategy-local")
 
-    if ($WithBackend) {
+    if ($includeApps) {
         if ($Scope -eq "front") {
             throw "-WithBackend cannot be used with -Scope front."
         }
@@ -232,7 +247,7 @@ function Invoke-Compose {
 }
 
 function Initialize-FlywayBundle {
-    if (-not $WithBackend) {
+    if (-not $includeApps) {
         return
     }
     $prepareBundle = Join-Path $PSScriptRoot "prepare-flyway-bundle.ps1"
@@ -346,7 +361,7 @@ function Show-ConnectionSummary {
     }
     Write-Host "  Local secrets: .env.docker (Git ignored)"
     if ($Scope -in @("all", "back")) {
-        if ($WithBackend) {
+        if ($includeApps) {
             Write-Host "  Backend API:   http://localhost:$backendPort"
             Write-Host "  Backtest API:  http://localhost:$backtestPort"
             Write-Host "  Admin MCP:     http://localhost:$adminMcpPort"
@@ -369,15 +384,25 @@ try {
     switch ($Action) {
         "up" {
             Initialize-FlywayBundle
-            Invoke-Compose -Arguments @("up", "-d", "--build") | Out-Null
-            Wait-DevelopmentEnvironment
+            if ($targetedService) {
+                Invoke-Compose -Arguments @("up", "-d", "--build", $Service) | Out-Null
+                Invoke-Compose -Arguments @("ps", $Service)
+            }
+            else {
+                Invoke-Compose -Arguments @("up", "-d", "--build") | Out-Null
+                Wait-DevelopmentEnvironment
+            }
             Show-ConnectionSummary
             if (-not $NoBrowser) {
                 Open-DevelopmentPages
             }
         }
         "down" {
-            if ($Scope -eq "all") {
+            if ($targetedService) {
+                Invoke-Compose -Arguments @("stop", $Service) | Out-Null
+                Invoke-Compose -Arguments @("rm", "-f", $Service) | Out-Null
+            }
+            elseif ($Scope -eq "all") {
                 Invoke-Compose -Arguments @("down", "--remove-orphans") | Out-Null
             }
             elseif ($Scope -eq "front") {
@@ -386,7 +411,7 @@ try {
             }
             else {
                 $backServices = @("postgres", "redis", "minio", "minio-init", "localstack")
-                if ($WithBackend) {
+                if ($includeApps) {
                     $backServices += @(
                         "flyway",
                         "backend-api",
@@ -406,19 +431,32 @@ try {
         }
         "restart" {
             Initialize-FlywayBundle
-            Invoke-Compose -Arguments @("up", "-d", "--build") | Out-Null
-            Wait-DevelopmentEnvironment
+            if ($targetedService) {
+                Invoke-Compose -Arguments @("up", "-d", "--build", $Service) | Out-Null
+                Invoke-Compose -Arguments @("ps", $Service)
+            }
+            else {
+                Invoke-Compose -Arguments @("up", "-d", "--build") | Out-Null
+                Wait-DevelopmentEnvironment
+            }
             Show-ConnectionSummary
             if (-not $NoBrowser) {
                 Open-DevelopmentPages
             }
         }
         "status" {
-            Invoke-Compose -Arguments @("ps")
+            if ($targetedService) {
+                Invoke-Compose -Arguments @("ps", $Service)
+            }
+            else {
+                Invoke-Compose -Arguments @("ps")
+            }
             Show-ConnectionSummary
         }
         "logs" {
-            Invoke-Compose -Arguments @("logs", "--follow", "--tail", "200")
+            $logArguments = @("logs", "--follow", "--tail", "200")
+            if ($targetedService) { $logArguments += $Service }
+            Invoke-Compose -Arguments $logArguments
         }
         "open" {
             Open-DevelopmentPages

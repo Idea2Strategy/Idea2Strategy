@@ -226,4 +226,10 @@ if ($devScript -notmatch 'Initialize-FlywayBundle' -or
     throw "The developer apps-profile entry point must prepare the central Flyway bundle before Compose starts."
 }
 
+if ($devScript -notmatch '\[ValidateSet\("frontend",\s*"backend-api"' -or
+    $devScript -notmatch '\[string\]\$Service' -or
+    $devScript -notmatch '@\("up",\s*"-d",\s*"--build",\s*\$Service\)') {
+    throw "The developer entry point must support rebuilding one selected Compose service."
+}
+
 Write-Output "Docker development configuration checks passed."

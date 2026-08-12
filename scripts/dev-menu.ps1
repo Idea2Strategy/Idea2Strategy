@@ -14,6 +14,7 @@ function Invoke-DevelopmentCommand {
     param(
         [Parameter(Mandatory = $true)][string]$Action,
         [ValidateSet("all", "front", "back")][string]$Scope = "all",
+        [string]$Service = "all",
         [switch]$WithBackend,
         [switch]$NoBrowser,
         [switch]$Force
@@ -26,6 +27,9 @@ function Invoke-DevelopmentCommand {
         }
         if ($WithBackend) {
             $arguments.WithBackend = $true
+        }
+        if ($Service -cne "all") {
+            $arguments.Service = $Service
         }
         if ($NoBrowser) {
             $arguments.NoBrowser = $true
@@ -53,6 +57,7 @@ function Show-ManagementMenu {
         Write-Host " 4. 전체 환경 다시 빌드·시작"
         Write-Host " 5. 전체 환경 종료 (데이터 유지)"
         Write-Host " 6. 전체 환경 초기화 (DB·MinIO 데이터 삭제)"
+        Write-Host " 7. 변경한 서비스 하나만 다시 빌드·시작"
         Write-Host " 0. 이전 메뉴"
         Write-Host ""
 
@@ -86,6 +91,14 @@ function Show-ManagementMenu {
                 else {
                     Write-Host "초기화를 취소했습니다."
                 }
+                Wait-ForMenu
+            }
+            "7" {
+                Write-Host ""
+                Write-Host "선택 가능: frontend, backend-api, backend-batch, backend-worker, admin-mcp," -ForegroundColor Cyan
+                Write-Host "           market-gateway, trading-worker, backtest-api, backtest-worker" -ForegroundColor Cyan
+                $service = Read-Host "서비스 이름"
+                Invoke-DevelopmentCommand -Action restart -Scope all -Service $service -NoBrowser
                 Wait-ForMenu
             }
             "0" {

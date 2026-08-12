@@ -1,5 +1,7 @@
 # Idea2Strategy 로컬 Docker 개발 환경
 
+After the first complete startup, rebuild only the changed application with `./scripts/dev.ps1 restart -Service <name> -NoBrowser`. Supported names are `frontend`, `backend-api`, `backend-batch`, `backend-worker`, `admin-mcp`, `market-gateway`, `trading-worker`, `backtest-api`, and `backtest-worker`. Durable market-data backup and restore are documented in [`docs/infrastructure/market-data-baseline-runbook.md`](../../docs/infrastructure/market-data-baseline-runbook.md); dumps and Parquet payloads never belong in Git.
+
 Frontend와 Backend/공통 인프라를 별도 Compose 파일로 관리한다.
 
 - `compose.front.yml`: 현재 `ui` 서브모듈의 Vite Frontend

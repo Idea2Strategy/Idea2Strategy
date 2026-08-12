@@ -16,6 +16,7 @@
 - Do not edit protected product, contract, policy, or governance sources unless the repository authority check permits it. Prepare an isolated proposal when approval is unavailable.
 - Do not invent product behavior. Read approved `specs/` and `contracts/`, then use the implementation checklist only as work decomposition.
 - Complete one reviewable issue unit at a time with relevant tests and report changed files, verification, and remaining integration work.
+- For local Docker, market-data backup, or a new AWS account, follow `docs/infrastructure/market-data-baseline-runbook.md`; large data and generated receipts stay outside Git.
 
 ## Repository map
 

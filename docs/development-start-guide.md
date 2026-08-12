@@ -1,5 +1,7 @@
 # Idea2Strategy 팀 개발 시작 가이드
 
+> Portable data and targeted rebuild workflow: [`docs/infrastructure/market-data-baseline-runbook.md`](infrastructure/market-data-baseline-runbook.md). Run the complete stack once; afterwards use `./scripts/dev.ps1 restart -Service <compose-service> -NoBrowser`. Market-data dumps and Parquet objects are shared outside Git and must pass the baseline verifier.
+
 이 문서는 공통 개발 기반이 각 저장소의 `develop` 브랜치에 병합되고, 루트 `develop`이 그 서브모듈 커밋들을 가리킨 뒤 팀원들이 따라야 하는 순서를 정리한다.
 
 ## 1. 시작 전 확인
