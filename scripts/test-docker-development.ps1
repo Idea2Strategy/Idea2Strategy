@@ -28,6 +28,11 @@ foreach ($relativePath in $requiredFiles) {
     }
 }
 
+$flywayAssemblerSource = Get-Content -LiteralPath (Join-Path $root "scripts/prepare-flyway-bundle.ps1") -Raw
+if ($flywayAssemblerSource -notmatch '& bash \$gradleWrapper') {
+    throw "The Flyway bundle assembler must invoke the non-executable Unix Gradle wrapper through bash."
+}
+
 & (Join-Path $root "scripts/prepare-flyway-bundle.ps1") | Out-Host
 $generatedBundle = Join-Path $root ".harness/local/tmp/flyway-bundle"
 foreach ($fileName in @("V1__initial_schema.sql", "migration-bundle.manifest", "migration-bundle.sha256")) {
