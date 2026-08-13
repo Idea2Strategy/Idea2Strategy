@@ -1,4 +1,21 @@
 * text=auto eol=lf
+
+# Unix, macOS, Docker, and cross-platform PowerShell use LF.
+*.sh text eol=lf
+*.ps1 text eol=lf
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Native Windows command scripts keep Windows line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Local data is ignored, but keep binary formats safe if fixtures are ever added.
+*.dump binary
+*.pgdump binary
+*.parquet binary
 *.png binary
 *.jpg binary
 *.jpeg binary

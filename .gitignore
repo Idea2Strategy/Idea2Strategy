@@ -2,6 +2,7 @@
 .harness-drafts/
 .dbdiagram/
 .worktrees/
+.local-data/
 
 # Environment and local overrides
 .env

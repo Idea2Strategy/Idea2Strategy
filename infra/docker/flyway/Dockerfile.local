@@ -1,0 +1,13 @@
+FROM eclipse-temurin:21-jdk AS bundle
+WORKDIR /workspace
+COPY backend /workspace/backend
+COPY backtest-engine /workspace/backtest-engine
+COPY trading-engine /workspace/trading-engine
+COPY data-pipeline /workspace/data-pipeline
+RUN cd /workspace/backend \
+    && java -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain \
+      --no-daemon :db-migration:run \
+      --args="/workspace/backend/db-migration/src/main/resources/db/migration /bundle /workspace/backtest-engine/db/migration-contributions /workspace/trading-engine/db/migration-contributions /workspace/data-pipeline/db/migration-contributions"
+
+FROM redgate/flyway:11-alpine
+COPY --from=bundle /bundle /flyway/sql

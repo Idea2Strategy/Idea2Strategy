@@ -59,11 +59,18 @@ $identityCryptoKeys = @(
     "IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY"
 )
 $backtestLocalSecrets = @("BACKTEST_RESULT_INGEST_TOKEN")
+$fixedDataSecretDefaults = [ordered]@{
+    APP_POSTGRES_USER = "idea2strategy_local_app"
+    APP_POSTGRES_PASSWORD = $null
+    APP_S3_ACCESS_KEY = "i2s-local-app"
+    APP_S3_SECRET_KEY = $null
+}
 
 function Initialize-EnvironmentFile {
     if (Test-Path -LiteralPath $environmentFile) {
         Add-MissingIdentityCryptoKeys
         Add-MissingBacktestSecrets
+        Add-MissingFixedDataSecrets
         return
     }
 
@@ -81,6 +88,8 @@ function Initialize-EnvironmentFile {
     foreach ($keyName in $backtestLocalSecrets) {
         $content = $content.Replace("__GENERATE_$keyName__", (New-RandomSecret))
     }
+    $content = $content.Replace("__GENERATE_APP_POSTGRES_PASSWORD__", (New-RandomSecret))
+    $content = $content.Replace("__GENERATE_APP_S3_SECRET_KEY__", (New-RandomSecret))
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
     Write-Host "Created local-only environment file: .env.docker" -ForegroundColor Green
@@ -124,6 +133,23 @@ function Add-MissingBacktestSecrets {
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
     Write-Host "Added generated backtest local secrets to .env.docker" -ForegroundColor Green
+}
+
+function Add-MissingFixedDataSecrets {
+    $content = Get-Content -LiteralPath $environmentFile -Raw
+    $appended = @()
+    foreach ($entry in $fixedDataSecretDefaults.GetEnumerator()) {
+        if ($content -notmatch "(?im)^$($entry.Key)\s*=\s*\S+") {
+            $value = if ($null -eq $entry.Value) { New-RandomSecret } else { $entry.Value }
+            $appended += "$($entry.Key)=$value"
+        }
+    }
+    if ($appended.Count -eq 0) { return }
+    if (-not $content.EndsWith("`n")) { $content += "`n" }
+    $content += ($appended -join "`n") + "`n"
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
+    Write-Host "Added generated fixed-data application credentials to .env.docker" -ForegroundColor Green
 }
 
 function Get-EnvironmentValue {

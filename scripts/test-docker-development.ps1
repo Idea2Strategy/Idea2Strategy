@@ -34,6 +34,7 @@ if ($flywayAssemblerSource -notmatch '& bash \$gradleWrapper') {
 }
 
 & (Join-Path $root "scripts/prepare-flyway-bundle.ps1") | Out-Host
+$env:BACKUP_PATH = $root
 $generatedBundle = Join-Path $root ".harness/local/tmp/flyway-bundle"
 foreach ($fileName in @("V1__initial_schema.sql", "migration-bundle.manifest", "migration-bundle.sha256")) {
     if (-not (Test-Path -LiteralPath (Join-Path $generatedBundle $fileName) -PathType Leaf)) {
@@ -47,7 +48,7 @@ $composeArguments = @(
     "-f", (Join-Path $root "compose.back.yml"),
     "-f", (Join-Path $root "compose.front.yml"),
     "-p", "idea2strategy-local",
-    "--profile", "apps",
+    "--profile", "collection-disabled",
     "config",
     "--format", "json"
 )
@@ -91,25 +92,19 @@ foreach ($serviceName in @("postgres", "redis", "minio", "localstack", "frontend
     }
 }
 
-foreach ($serviceName in @("flyway", "backend-api", "backend-batch", "backend-worker", "admin-mcp", "market-gateway", "trading-worker", "backtest-api", "backtest-worker")) {
+foreach ($serviceName in @("backend-batch", "market-gateway")) {
     $profiles = @($config.services.$serviceName.profiles)
-    if (-not $profiles.Contains("apps")) {
-        throw "$serviceName must be opt-in through the apps profile."
+    if (-not $profiles.Contains("collection-disabled")) {
+        throw "$serviceName must stay outside the default fixed-data profile."
     }
 }
-
-$flywaySqlMount = @($config.services.flyway.volumes) |
-    Where-Object { $_.target -eq "/flyway/sql" } |
-    Select-Object -First 1
-if ($null -eq $flywaySqlMount) {
-    throw "flyway must mount the generated migration bundle at /flyway/sql."
+foreach ($serviceName in @("flyway", "data-bootstrap", "backend-api", "backend-worker", "admin-mcp", "trading-worker", "backtest-api", "backtest-worker")) {
+    if ($null -ne $config.services.$serviceName.profiles) {
+        throw "$serviceName must be part of the safe default Compose graph."
+    }
 }
-if (-not $flywaySqlMount.read_only) {
-    throw "The generated Flyway bundle must be mounted read-only."
-}
-$normalizedFlywaySource = ([string]$flywaySqlMount.source).Replace('\', '/')
-if (-not $normalizedFlywaySource.EndsWith('/.harness/local/tmp/flyway-bundle')) {
-    throw "flyway must read only the generated bundle; found $normalizedFlywaySource"
+if ([string]$config.services.flyway.build.dockerfile -notmatch 'Dockerfile[.]local$') {
+    throw 'flyway must build the reviewed canonical bundle into its local image.'
 }
 
 foreach ($serviceName in @("backend-batch", "backend-worker", "market-gateway", "trading-worker", "backtest-worker")) {
@@ -225,16 +220,9 @@ if ($initialMigration -match "(?im)^INSERT INTO ") {
     throw "The initial Flyway migration must not include DBML review-only Records data."
 }
 
-$devScript = Get-Content -LiteralPath (Join-Path $root "scripts/dev.ps1") -Raw
-if ($devScript -notmatch 'Initialize-FlywayBundle' -or
-    $devScript -notmatch 'prepare-flyway-bundle\.ps1') {
-    throw "The developer apps-profile entry point must prepare the central Flyway bundle before Compose starts."
-}
-
-if ($devScript -notmatch '\[ValidateSet\("frontend",\s*"backend-api"' -or
-    $devScript -notmatch '\[string\]\$Service' -or
-    $devScript -notmatch '@\("up",\s*"-d",\s*"--build",\s*\$Service\)') {
-    throw "The developer entry point must support rebuilding one selected Compose service."
+$localScript = Get-Content -LiteralPath (Join-Path $root "scripts/local.ps1") -Raw
+if ($localScript -notmatch 'docker compose up -d --build \$Service') {
+    throw "The local entry point must support rebuilding one selected safe Compose service."
 }
 
 Write-Output "Docker development configuration checks passed."

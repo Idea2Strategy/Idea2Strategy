@@ -1,28 +1,26 @@
-name: ${COMPOSE_PROJECT_NAME:-idea2strategy-local}
-
 x-spring-environment: &spring-environment
   SPRING_PROFILES_ACTIVE: local
-  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-  SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-  SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-idea2strategy}
+  SPRING_DATASOURCE_USERNAME: ${APP_POSTGRES_USER:-idea2strategy_local_app}
+  SPRING_DATASOURCE_PASSWORD: ${APP_POSTGRES_PASSWORD:?Run the local environment initializer}
   SPRING_DATA_REDIS_HOST: redis
   SPRING_DATA_REDIS_PORT: "6379"
   AWS_ENDPOINT_URL_SQS: http://localstack:4566
   AWS_REGION: ${AWS_REGION:-ap-northeast-2}
-  AWS_ACCESS_KEY_ID: ${LOCALSTACK_ACCESS_KEY:-test}
-  AWS_SECRET_ACCESS_KEY: ${LOCALSTACK_SECRET_KEY:-test}
+  AWS_ACCESS_KEY_ID: ${APP_S3_ACCESS_KEY:-i2s-local-app}
+  AWS_SECRET_ACCESS_KEY: ${APP_S3_SECRET_KEY:?Run the local environment initializer}
   S3_ENDPOINT_URL: http://minio:9000
   S3_REGION: ${S3_REGION:-ap-northeast-2}
-  S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
-  S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
+  S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET:-idea2strategy-local-market-data}
+  S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET:-idea2strategy-local-results}
   # backend-api registers the customer identity surface (signup/login/token refresh)
   # only when all five keys are present (fail-closed, root #266). dev.ps1
   # generates and backfills them into .env.docker.
-  IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY: ${IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY}
-  IDENTITY_CRYPTO_LOOKUP_HMAC_KEY: ${IDENTITY_CRYPTO_LOOKUP_HMAC_KEY}
-  IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY: ${IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY}
-  IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY: ${IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY}
-  IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY: ${IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY}
+  IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY: ${IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY:?Run the local environment initializer}
+  IDENTITY_CRYPTO_LOOKUP_HMAC_KEY: ${IDENTITY_CRYPTO_LOOKUP_HMAC_KEY:?Run the local environment initializer}
+  IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY: ${IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY:?Run the local environment initializer}
+  IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY: ${IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY:?Run the local environment initializer}
+  IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY: ${IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY:?Run the local environment initializer}
   IDENTITY_JWT_REFRESH_COOKIE_SECURE: ${IDENTITY_JWT_REFRESH_COOKIE_SECURE:-false}
   IDENTITY_OIDC_ENABLED: ${IDENTITY_OIDC_ENABLED:-false}
   IDENTITY_OIDC_PROVIDERS_GOOGLE_ISSUER: https://accounts.google.com
@@ -30,27 +28,27 @@ x-spring-environment: &spring-environment
   IDENTITY_OIDC_PROVIDERS_GOOGLE_AUDIENCES_0: ${GOOGLE_OAUTH_CLIENT_ID:-disabled.apps.googleusercontent.com}
 
 x-python-environment: &python-environment
-  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  DATABASE_URL: postgresql://${APP_POSTGRES_USER:-idea2strategy_local_app}:${APP_POSTGRES_PASSWORD:?Run the local environment initializer}@postgres:5432/${POSTGRES_DB:-idea2strategy}
   REDIS_URL: redis://redis:6379/0
   AWS_ENDPOINT_URL_SQS: http://localstack:4566
   AWS_REGION: ${AWS_REGION:-ap-northeast-2}
-  AWS_ACCESS_KEY_ID: ${LOCALSTACK_ACCESS_KEY:-test}
-  AWS_SECRET_ACCESS_KEY: ${LOCALSTACK_SECRET_KEY:-test}
+  AWS_ACCESS_KEY_ID: ${APP_S3_ACCESS_KEY:-i2s-local-app}
+  AWS_SECRET_ACCESS_KEY: ${APP_S3_SECRET_KEY:?Run the local environment initializer}
   S3_ENDPOINT_URL: http://minio:9000
   S3_REGION: ${S3_REGION:-ap-northeast-2}
-  S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
-  S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
+  S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET:-idea2strategy-local-market-data}
+  S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET:-idea2strategy-local-results}
 
 x-backtest-environment: &backtest-environment
   <<: *python-environment
-  BACKTEST_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-  BACKTEST_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
+  BACKTEST_DATABASE_URL: postgresql+psycopg://${APP_POSTGRES_USER:-idea2strategy_local_app}:${APP_POSTGRES_PASSWORD:?Run the local environment initializer}@postgres:5432/${POSTGRES_DB:-idea2strategy}
+  BACKTEST_RESULTS_BUCKET: ${S3_RESULTS_BUCKET:-idea2strategy-local-results}
   BACKTEST_RESULTS_PREFIX: backtest-results
   BACKTEST_EXECUTION_POLICY_FILE: /runtime-policy/execution-policy.json
-  BACKTEST_RESULT_INGEST_TOKEN: ${BACKTEST_RESULT_INGEST_TOKEN}
+  BACKTEST_RESULT_INGEST_TOKEN: ${BACKTEST_RESULT_INGEST_TOKEN:?Run the local environment initializer}
   # The backend decodes this same customer JWT signing key. dev.ps1 generates an
   # unpadded 32-byte value, so the single trailing '=' restores its wire form.
-  CUSTOMER_JWT_SIGNING_KEY_BASE64: ${IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY}=
+  CUSTOMER_JWT_SIGNING_KEY_BASE64: ${IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY:?Run the local environment initializer}=
   BACKTEST_RESULT_PRINCIPAL_ID: 00000000-0000-4000-8000-000000000266
   CUSTOMER_JWT_ISSUER: https://ideatostrategy.com
   CUSTOMER_JWT_ACCESS_AUDIENCE: idea2strategy-api
@@ -58,17 +56,16 @@ x-backtest-environment: &backtest-environment
   AWS_ENDPOINT_URL_SQS: http://localstack:4566
   # LocalStack accepts arbitrary credentials; using MinIO's credentials lets
   # the same process reach both emulators without any real AWS credential.
-  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+  AWS_ACCESS_KEY_ID: ${APP_S3_ACCESS_KEY:-i2s-local-app}
+  AWS_SECRET_ACCESS_KEY: ${APP_S3_SECRET_KEY:?Run the local environment initializer}
 
 services:
   postgres:
-    container_name: idea2strategy-postgres
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-idea2strategy}
+      POSTGRES_USER: ${POSTGRES_USER:-idea2strategy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run the local environment initializer}
       TZ: UTC
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-15432}:5432"
@@ -84,7 +81,6 @@ services:
     restart: unless-stopped
 
   redis:
-    container_name: idea2strategy-redis
     image: redis:7.4-alpine
     command: ["redis-server", "--appendonly", "no", "--save", ""]
     ports:
@@ -98,12 +94,13 @@ services:
     restart: unless-stopped
 
   minio:
-    container_name: idea2strategy-minio
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-idea2strategy}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run the local environment initializer}
+      APP_S3_ACCESS_KEY: ${APP_S3_ACCESS_KEY:-i2s-local-app}
+      APP_S3_SECRET_KEY: ${APP_S3_SECRET_KEY:?Run the local environment initializer}
     ports:
       - "127.0.0.1:${MINIO_API_PORT:-19000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-19001}:9001"
@@ -119,16 +116,17 @@ services:
     restart: unless-stopped
 
   minio-init:
-    container_name: idea2strategy-minio-init
     image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio:
         condition: service_healthy
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
-      S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET:?S3_MARKET_DATA_BUCKET is required}
-      S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET:?S3_RESULTS_BUCKET is required}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-idea2strategy}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run the local environment initializer}
+      APP_S3_ACCESS_KEY: ${APP_S3_ACCESS_KEY:-i2s-local-app}
+      APP_S3_SECRET_KEY: ${APP_S3_SECRET_KEY:?Run the local environment initializer}
+      S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET:-idea2strategy-local-market-data}
+      S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET:-idea2strategy-local-results}
     entrypoint:
       - /bin/sh
       - -ec
@@ -140,11 +138,15 @@ services:
         mc version enable "local/$${S3_RESULTS_BUCKET}"
         mc anonymous set none "local/$${S3_MARKET_DATA_BUCKET}"
         mc anonymous set none "local/$${S3_RESULTS_BUCKET}"
+        mc admin user add local "$${APP_S3_ACCESS_KEY}" "$${APP_S3_SECRET_KEY}" || true
+        mc admin policy create local market-baseline-readonly /policies/market-baseline-readonly.json || true
+        mc admin policy attach local market-baseline-readonly --user "$${APP_S3_ACCESS_KEY}"
+    volumes:
+      - ./infra/docker/minio:/policies:ro
     networks: [development]
     restart: "no"
 
   localstack:
-    container_name: idea2strategy-localstack
     image: localstack/localstack:4.7.0
     environment:
       SERVICES: sqs
@@ -165,26 +167,55 @@ services:
     restart: unless-stopped
 
   flyway:
-    container_name: idea2strategy-flyway
-    image: redgate/flyway:11-alpine
-    profiles: [apps]
+    build:
+      context: .
+      dockerfile: infra/docker/flyway/Dockerfile.local
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-idea2strategy}
+      FLYWAY_USER: ${POSTGRES_USER:-idea2strategy}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Run the local environment initializer}
     command:
       - -connectRetries=60
-      - -url=jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      - -user=${POSTGRES_USER}
-      - -password=${POSTGRES_PASSWORD}
       - migrate
+    networks: [development]
+    restart: "no"
+
+  data-bootstrap:
+    build:
+      context: .
+      dockerfile: infra/docker/local-bootstrap/Dockerfile
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-idea2strategy}
+      POSTGRES_USER: ${POSTGRES_USER:-idea2strategy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run the local environment initializer}
+      APP_POSTGRES_USER: ${APP_POSTGRES_USER:-idea2strategy_local_app}
+      APP_POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:?Run the local environment initializer}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-idea2strategy}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run the local environment initializer}
+      APP_S3_ACCESS_KEY: ${APP_S3_ACCESS_KEY:-i2s-local-app}
+      APP_S3_SECRET_KEY: ${APP_S3_SECRET_KEY:?Run the local environment initializer}
+      S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET:-idea2strategy-local-market-data}
+      S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET:-idea2strategy-local-results}
     volumes:
-      - ./.harness/local/tmp/flyway-bundle:/flyway/sql:ro
+      - type: bind
+        source: ${BACKUP_PATH:?Set BACKUP_PATH to the immutable baseline directory}
+        target: /backup
+        read_only: true
+      - bootstrap-state:/state
+    depends_on:
+      postgres: {condition: service_healthy}
+      flyway: {condition: service_completed_successfully}
+      minio-init: {condition: service_completed_successfully}
     networks: [development]
     restart: "no"
 
   backend-api:
-    container_name: idea2strategy-backend-api
-    profiles: [apps]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.spring
@@ -198,15 +229,13 @@ services:
     ports:
       - "127.0.0.1:${BACKEND_PORT:-18080}:8080"
     depends_on:
-      flyway: {condition: service_completed_successfully}
+      data-bootstrap: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
       minio-init: {condition: service_completed_successfully}
       localstack: {condition: service_healthy}
     networks: [development]
 
   admin-mcp:
-    container_name: idea2strategy-admin-mcp
-    profiles: [apps]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.spring
@@ -220,13 +249,12 @@ services:
     ports:
       - "127.0.0.1:${ADMIN_MCP_PORT:-18083}:8083"
     depends_on:
-      flyway: {condition: service_completed_successfully}
+      data-bootstrap: {condition: service_completed_successfully}
       localstack: {condition: service_healthy}
     networks: [development]
 
   backend-batch:
-    container_name: idea2strategy-backend-batch
-    profiles: [apps]
+    profiles: [collection-disabled]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.spring
@@ -236,13 +264,11 @@ services:
         APP_OUTPUT: apps/backend-batch
     environment: *spring-environment
     depends_on:
-      flyway: {condition: service_completed_successfully}
+      data-bootstrap: {condition: service_completed_successfully}
       localstack: {condition: service_healthy}
     networks: [development]
 
   backend-worker:
-    container_name: idea2strategy-backend-worker
-    profiles: [apps]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.spring
@@ -274,13 +300,12 @@ services:
       # start unless both result URLs are present, so the two go together with this flag.
       ROOM_LEDGER_RESULT_CONSUMER_ENABLED: "true"
     depends_on:
-      flyway: {condition: service_completed_successfully}
+      data-bootstrap: {condition: service_completed_successfully}
       localstack: {condition: service_healthy}
     networks: [development]
 
   market-gateway:
-    container_name: idea2strategy-market-gateway
-    profiles: [apps]
+    profiles: [collection-disabled]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.spring
@@ -307,8 +332,8 @@ services:
       MARKET_GATEWAY_MATERIALIZATION_RECEIPT_PATH: /etc/market-gateway/materialization.properties
       # Credentials come from .env.docker and are never committed. Without them the
       # gateway refuses to start, which is the intended posture.
-      ALPACA_API_KEY: ${ALPACA_API_KEY}
-      ALPACA_API_SECRET: ${ALPACA_API_SECRET}
+      ALPACA_API_KEY: ${ALPACA_API_KEY:-}
+      ALPACA_API_SECRET: ${ALPACA_API_SECRET:-}
     volumes:
       # scripts/prepare-local-market-gateway.ps1 writes these three, the local
       # counterpart of what development-database-bootstrap.sh materializes for AWS. The
@@ -320,8 +345,6 @@ services:
     networks: [development]
 
   trading-worker:
-    container_name: idea2strategy-trading-worker
-    profiles: [apps]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.spring
@@ -345,14 +368,12 @@ services:
       # all it needs; the results it writes are relayed by backend-worker above.
       TRADING_ROOM_ACCOUNT_OPEN_ENABLED: "true"
     depends_on:
-      flyway: {condition: service_completed_successfully}
+      data-bootstrap: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
       localstack: {condition: service_healthy}
     networks: [development]
 
   backtest-api:
-    container_name: idea2strategy-backtest-api
-    profiles: [apps]
     build:
       context: ./backtest-engine
     environment:
@@ -373,14 +394,12 @@ services:
     ports:
       - "127.0.0.1:${BACKTEST_PORT:-18082}:8082"
     depends_on:
-      flyway: {condition: service_completed_successfully}
+      data-bootstrap: {condition: service_completed_successfully}
       minio-init: {condition: service_completed_successfully}
       localstack: {condition: service_healthy}
     networks: [development]
 
   backtest-worker:
-    container_name: idea2strategy-backtest-worker
-    profiles: [apps]
     build:
       context: ./backtest-engine
     command: ["backtest-worker"]
@@ -391,7 +410,7 @@ services:
       BACKTEST_REQUEST_HANDLER: backtest_engine.production:backtest_request_handler
       BACKTEST_REQUEST_RECEIPT_STORE: backtest_engine.production:postgres_request_receipt_store
       BACKTEST_WORKER_ID: local-backtest-worker
-      BACKTEST_WORKER_CORRELATION_ID: local-compose
+      BACKTEST_WORKER_CORRELATION_ID: 00000000-0000-4000-8000-000000000267
       BACKTEST_BASIC_QUEUE_URL: http://localstack:4566/000000000000/backtest-basic
       BACKTEST_BASIC_DLQ_URL: http://localstack:4566/000000000000/backtest-basic-dlq
       BACKTEST_BASIC_MAX_CONCURRENCY: "2"
@@ -408,7 +427,7 @@ services:
       BACKTEST_CUSTOM_REQUEST_DLQ_URL: http://localstack:4566/000000000000/backtest-custom-request-dlq
       BACKTEST_COMPETITION_REQUEST_QUEUE_URL: http://localstack:4566/000000000000/backtest-competition-request
       BACKTEST_COMPETITION_REQUEST_DLQ_URL: http://localstack:4566/000000000000/backtest-competition-request-dlq
-      BACKTEST_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
+      BACKTEST_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET:-idea2strategy-local-market-data}
       BACKTEST_MARKET_DATA_CACHE: /tmp/idea2strategy-market-data
       BACKTEST_MARKET_DATA_BATCH_SIZE: "65536"
       BACKTEST_API_BASE_URL: http://backtest-api:8082
@@ -416,7 +435,7 @@ services:
     volumes:
       - ./proposals/development-runtime-policy/artifacts:/runtime-policy:ro
     depends_on:
-      flyway: {condition: service_completed_successfully}
+      data-bootstrap: {condition: service_completed_successfully}
       backtest-api: {condition: service_started}
       minio-init: {condition: service_completed_successfully}
       localstack: {condition: service_healthy}
@@ -428,8 +447,6 @@ networks:
 
 volumes:
   postgres-data:
-    name: idea2strategy-postgres-data
   minio-data:
-    name: idea2strategy-minio-data
   localstack-data:
-    name: idea2strategy-localstack-data
+  bootstrap-state:
