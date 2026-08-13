@@ -23,9 +23,9 @@ if ($metadata.format -cne 'idea2strategy-flyway-ci-bundle-v1') {
 }
 
 function Get-GitlinkRevision([string]$Path) {
-    $entry = (& git -C $root ls-tree HEAD -- $Path) -join "`n"
-    if ($LASTEXITCODE -ne 0 -or $entry -notmatch '^160000\s+commit\s+([0-9a-f]{40})\s+') {
-        throw "Unable to resolve root gitlink: $Path"
+    $entry = (& git -C $root ls-files --stage -- $Path) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or $entry -notmatch '^160000\s+([0-9a-f]{40})\s+0\s+') {
+        throw "Unable to resolve staged root gitlink: $Path"
     }
     return $Matches[1]
 }
@@ -57,13 +57,9 @@ $runtimeGrantEntries = @($manifestLines | Where-Object { $_ -match '^R__database
 if ($runtimeGrantEntries.Count -ne 1) {
     throw 'The pinned Flyway manifest must contain exactly one generated runtime grant migration.'
 }
-$pipelineUpgradeEntries = @($manifestLines | Where-Object { $_ -match '^V20260805010000__pipeline_upgrade_legacy_market_schema\.sql\t[0-9a-f]{64}$' })
-if ($pipelineUpgradeEntries.Count -ne 1) {
-    throw 'The pinned Flyway manifest must contain the legacy market schema upgrade from the pinned data pipeline.'
-}
-$backtestOutcomeEntries = @($manifestLines | Where-Object { $_ -match '^V20260805170000__backtest_run_outcome_detail\.sql\t[0-9a-f]{64}$' })
-if ($backtestOutcomeEntries.Count -ne 1) {
-    throw 'The pinned Flyway manifest must contain the forward-only Backtest outcome migration from the pinned Backtest engine.'
+$versionedEntries = @($manifestLines | Where-Object { $_ -match '^V[^\t]+\.sql\t[0-9a-f]{64}$' })
+if ($versionedEntries.Count -ne 1 -or $versionedEntries[0] -notmatch '^V1__initial_schema\.sql\t') {
+    throw 'The rebased Flyway manifest must contain V1 as its only versioned migration.'
 }
 $runtimeGrantPath = Join-Path $bundle 'R__database_runtime_grants.sql'
 $runtimeGrantSql = Get-Content -LiteralPath $runtimeGrantPath -Raw

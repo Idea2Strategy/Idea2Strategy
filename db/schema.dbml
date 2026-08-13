@@ -889,6 +889,44 @@ Table identity.email_verification_requests {
   }
 }
 
+Table identity.device_authorization_requests {
+  id uuid [pk, default: `gen_random_uuid()`]
+  device_code_digest varchar(128) [not null, unique]
+  user_code_digest varchar(128) [not null, unique]
+  digest_key_version smallint [not null]
+  client_label varchar(80) [not null]
+  status identity.device_authorization_status [not null]
+  approved_account_id uuid
+  approved_login_identity_id uuid
+  poll_interval_seconds smallint [not null, default: 5]
+  requested_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz [not null]
+  approved_at timestamptz
+  consumed_at timestamptz
+  denied_at timestamptz
+  failed_attempt_count int [not null, default: 0]
+  last_polled_at timestamptz
+
+  indexes {
+    (status, expires_at)
+    (approved_account_id, requested_at)
+  }
+
+  Note: '브라우저 승인으로 CLI 를 인증시키는 기기 인증 요청. 사용자가 보는 짧은 user_code 와 CLI 가 폴링하는 device_code 는 서로 다른 비밀이며 둘 다 다이제스트로만 저장한다. 승인은 브라우저 세션이, 토큰 수령은 device_code 소지자가 한다. 소진은 1회 한정.'
+
+  Records (id, device_code_digest, user_code_digest, digest_key_version, client_label, status, approved_account_id, approved_login_identity_id, poll_interval_seconds, requested_at, expires_at, approved_at, consumed_at, denied_at, failed_attempt_count, last_polled_at) {
+    '00000000-0000-4000-8000-000000000001', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', 1, 'idea2strategy-cli', 'PENDING', null, null, 5, '2026-08-10T09:00:00+09:00', '2026-08-10T09:10:00+09:00', null, null, null, 0, null
+  }
+}
+
+Enum identity.device_authorization_status {
+  PENDING
+  APPROVED
+  CONSUMED
+  DENIED
+  EXPIRED
+}
+
 Table identity.auth_providers {
   id smallint [pk]
   code varchar(40) [not null, unique]
@@ -5010,6 +5048,8 @@ Ref: identity.account_security_states.account_id > identity.accounts.id
 Ref: identity.account_preferences.account_id > identity.accounts.id
 Ref: identity.account_emails.account_id > identity.accounts.id
 Ref: identity.email_verification_requests.account_id > identity.account_emails.account_id
+Ref: identity.device_authorization_requests.approved_account_id > identity.accounts.id
+Ref: identity.device_authorization_requests.approved_login_identity_id > identity.login_identities.id
 Ref: identity.oidc_step_up_nonces.provider_id > identity.auth_providers.id
 Ref: identity.oidc_step_up_nonces.consumed_by_account_id > identity.accounts.id
 Ref: identity.login_identities.provider_id > identity.auth_providers.id

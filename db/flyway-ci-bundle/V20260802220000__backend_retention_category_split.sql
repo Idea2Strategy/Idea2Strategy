@@ -1,5 +1,0 @@
-ALTER TYPE identity.account_data_category
-    ADD VALUE IF NOT EXISTS 'BOT_STRATEGY_PRIVATE_DATA';
-
-ALTER TYPE identity.account_data_category
-    ADD VALUE IF NOT EXISTS 'COMPETITION_RESULT_EVIDENCE';
