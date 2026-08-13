@@ -1,5 +1,9 @@
 # Agent entry
 
+## Portable local development and market-data safety
+
+For local Docker development and any AWS-to-local or local-to-AWS data work, read `docs/infrastructure/market-data-baseline-runbook.md`. Start the full stack once, then use `scripts/dev.ps1 restart -Service <name>` for the service being changed. Never add PostgreSQL dumps, Parquet objects, generated baseline manifests, import receipts, AWS credentials, or `.env.docker` to Git or Git LFS. Preserve `storage.objects.id`, S3 object keys, and SHA-256 values across environments; provider version IDs are remapped and recorded by the import tool. A real backup is complete only after two independent copies pass `verify-market-data-baseline.ps1`.
+
 ## Required Idea2Strategy policy
 
 Before any task, run `scripts/initialize-local-harness.ps1 -Verify`, then read `docs/collaboration-policy.md` in addition to the Stackcord entry below. It is the canonical Idea2Strategy-specific Git and collaboration policy. Do not modify it during ordinary work. If a change is needed, stop the affected work and record a separate policy-change request for the authorized policy document owner. Run `scripts/verify-collaboration-policy.ps1` after the local policy baseline exists.

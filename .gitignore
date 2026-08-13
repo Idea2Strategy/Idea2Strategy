@@ -2,6 +2,7 @@
 .harness-drafts/
 .dbdiagram/
 .worktrees/
+.local-data/
 
 # Environment and local overrides
 .env
@@ -141,3 +142,11 @@ $RECYCLE.BIN/
 
 # Generated local reports and review artifacts.
 outputs/
+
+# Portable market-data baselines are large operational artifacts.
+market-data-baseline/
+market-data-baselines/
+*.pgdump
+*.dump
+baseline-manifest.json
+import-receipt.json

@@ -47,7 +47,7 @@ if ($null -eq $compose) {
     throw "Docker is required to validate the merged Compose model."
 }
 $configJson = & docker compose `
-    --env-file (Join-Path $root ".env.docker.example") `
+    --env-file (Join-Path $root ".env.example") `
     -f (Join-Path $root "compose.back.yml") `
     -f (Join-Path $root "compose.front.yml") `
     --profile apps config --format json

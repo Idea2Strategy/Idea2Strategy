@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "manifest_sha256": "d0f4a1a6925cbef876842f2c70c465daa31c390ec73d662f2b25876ab300cf76",
+  "database_dump_sha256": "ff08918e7cc7f22f0230aca13e7a0f30ab6349d4714e280ce1013d6c53f15e12",
+  "s3_versions": 10798,
+  "delete_markers": 12,
+  "minio_mapping_events": 10810,
+  "parquet_files": 10529,
+  "storage_objects": 768,
+  "dataset_manifests": 96,
+  "dataset_objects": 768,
+  "dataset_lineage": 72
+}

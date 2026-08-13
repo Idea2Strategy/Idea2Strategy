@@ -1,83 +1,62 @@
 # Idea2Strategy
 
-Idea2Strategy is an early-stage virtual trading bot SaaS project. Product discovery is still in progress, so repository contents should not be treated as a finalized specification.
+주식 전략·백테스트·가상 트레이딩 서비스입니다.
 
-## Repository structure
+## 로컬 실행
 
-- `backend/`: Spring Boot API, batch, worker, Admin MCP, and Flyway migration modules
-- `trading-engine/`: Spring Boot market gateway and trading worker modules
-- `backtest-engine/`: Python FastAPI and backtest worker
-- `data-pipeline/`: Python market-data pipeline and corporate-action research jobs
-- `ui/`: React/Vite frontend
-- Root repository: canonical DBML, product context, contracts, Docker orchestration, and cross-repository coordination
+준비물: Git, Docker Desktop, 팀 공용 백업 폴더
 
-The current UI is exploratory. Its UX, copy, visual design, and implementation architecture may be substantially revised or replaced.
+`local-development.env`는 로컬 Docker 전용 자격증명입니다. Git, 메신저, 이메일에 올리지 말고 팀 SSD로만 전달합니다(SSD 암호화 권장).
 
-## Prerequisites
+Windows PowerShell:
 
-- Git
-- PowerShell 5.1 or later on Windows
-- Stackcord CLI 1.0.0 available as `stackcord`
-- Claude Code when using the shared AI-assisted workflow
-- Access to the selected GitHub or GitLab repository
+```powershell
+git clone --recurse-submodules https://github.com/Idea2Strategy/Idea2Strategy.git
+Set-Location Idea2Strategy
+New-Item -ItemType Directory -Force .local-data | Out-Null
+Copy-Item 'D:\Idea2Strategy-backups\baseline-2026-08-13' '.\.local-data\baseline-2026-08-13' -Recurse
+.\scripts\init-local-env.ps1 -SharedEnvPath 'D:\Idea2Strategy-backups\local-development.env'
+```
 
-Both remotes use `develop` as their default collaboration branch. `main` is reserved for complete releases beginning with `v1.0.0`.
-
-Team members should follow [`docs/development-start-guide.md`](docs/development-start-guide.md) after the shared foundation is merged into `develop`. It covers clone/update, Claude Code onboarding, local startup, assigned-repository branching, tests, pull requests, and root submodule-pointer integration.
-
-The executable backtest catalog, cancellation behavior, supported resolutions, and release gates
-are recorded in [`docs/backtest-production-readiness.md`](docs/backtest-production-readiness.md).
-
-Claude Code automatically reads [`CLAUDE.md`](CLAUDE.md). After cloning or pulling, start Claude from the repository root and run `/start-work <A-F> <name> <GitHub-ID>`.
-
-## Clone from GitHub with all submodules
+macOS:
 
 ```bash
 git clone --recurse-submodules https://github.com/Idea2Strategy/Idea2Strategy.git
 cd Idea2Strategy
+mkdir -p .local-data
+cp -R /Volumes/SSD/Idea2Strategy-backups/baseline-2026-08-13 .local-data/
+cp /Volumes/SSD/Idea2Strategy-backups/local-development.env .env
+chmod 600 .env
 ```
 
-For an existing clone:
+백업 위치가 다르면 복사 명령의 원본 경로만 수정합니다. `.env`는 아래 프로젝트 내부 경로를 사용합니다.
 
-```bash
-git submodule update --init --recursive
+```dotenv
+BACKUP_PATH=./.local-data/baseline-2026-08-13
 ```
 
-## Clone from the monolithic GitLab mirror
-
-```bash
-git clone https://lab.ssafy.com/s15-webmobile2-sub1/S15P11B205.git
-cd S15P11B205
-```
-
-The GitLab checkout contains `ui/` as ordinary tracked files and must not contain a nested `ui/.git` directory.
-
-## Initialize collaboration
-
-Run these commands from the cloned repository root:
+이후에는 아래 명령만 실행합니다.
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/initialize-local-harness.ps1 -Verify
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-collaboration-policy.ps1
-stackcord context audit --root . --json
-git status --short --branch
-stackcord status --json
+docker compose up -d
 ```
 
-The initializer creates the ignored local workspace, policy-integrity baseline, and a non-secret reference to the configured product authority. It does not authenticate the current user and never overwrites an existing local owner record.
+최초 실행에만 PostgreSQL과 MinIO 데이터를 복원·검증합니다. 같은 백업으로 다시 실행하면 복원을 생략합니다. 백업 데이터는 Git에 포함하지 않습니다.
 
-The shared skeleton lives under `.harness/local/`; generated artifacts, temporary files, caches, logs, dbdiagram proposals, and user-specific project records stored there are never committed. A fresh clone must remain clean after initialization.
+## 개발
 
-`stackcord status` can report governance as `unknown` with a nonzero exit code until a fresh GitHub approval by the configured product authority is observed. This is the intended fail-closed state: ordinary unprotected work can proceed, but protected product, policy, business, contract, and governance changes remain blocked.
+수정한 서비스만 다시 빌드할 수 있습니다.
 
-<!-- stackcord:begin -->
-## Project harness
+```powershell
+docker compose up -d --build backend-api
+docker compose up -d --build backtest-worker
+```
 
-Ask your AI assistant what to do next. It will read `.harness/entry.md`, inspect actual Git state, and continue from canonical specs and contracts.
+로컬 데이터를 완전히 초기화하려면:
 
-If the project uses an independent editable UI baseline, it lives in a declared `ui/` directory or submodule. External mockups can be inspected, brought into that workspace, edited normally, and committed before frontend implementation is bound to the exact baseline.
-<!-- stackcord:end -->
+```powershell
+docker compose down -v
+docker compose up -d
+```
 
-## Collaboration policy
-
-Before contributing, read [`docs/collaboration-policy.md`](docs/collaboration-policy.md). It defines the Idea2Strategy-specific GitHub/GitLab boundaries, policy ownership, local Jira record, dbdiagram operation, and remote distribution rules. Stackcord remains the source of truth for its common recovery, coordination, planning, and verification procedures.
+`backend-batch`와 `market-gateway`는 기본 실행에서 제외되어 로컬 시장 데이터 수집을 실행하지 않습니다.

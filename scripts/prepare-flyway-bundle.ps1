@@ -163,7 +163,11 @@ if ($null -ne $java) {
         ForEach-Object { Quote-ApplicationArgument $_ }
     Push-Location $backendRoot
     try {
-        & $gradleWrapper --no-daemon :db-migration:run "--args=$($applicationArgs -join ' ')"
+        if ($env:OS -eq 'Windows_NT') {
+            & $gradleWrapper --no-daemon :db-migration:run "--args=$($applicationArgs -join ' ')"
+        } else {
+            & bash $gradleWrapper --no-daemon :db-migration:run "--args=$($applicationArgs -join ' ')"
+        }
         if ($LASTEXITCODE -ne 0) {
             throw 'The backend migration bundle assembler failed.'
         }

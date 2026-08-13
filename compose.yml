@@ -1,0 +1,5 @@
+name: ${COMPOSE_PROJECT_NAME:-idea2strategy-local}
+
+include:
+  - path: compose.back.yml
+  - path: compose.front.yml

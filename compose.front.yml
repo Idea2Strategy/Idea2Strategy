@@ -1,8 +1,5 @@
-name: ${COMPOSE_PROJECT_NAME:-idea2strategy-local}
-
 services:
   frontend:
-    container_name: idea2strategy-frontend
     build:
       context: .
       dockerfile: infra/docker/frontend/Dockerfile
@@ -48,6 +45,8 @@ services:
       retries: 30
       start_period: 20s
     restart: unless-stopped
+    depends_on:
+      data-bootstrap: {condition: service_completed_successfully}
 
 networks:
   development:
@@ -55,4 +54,3 @@ networks:
 
 volumes:
   frontend-node-modules:
-    name: idea2strategy-frontend-node-modules

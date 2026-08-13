@@ -2,6 +2,7 @@
 .gitmodules
 .harness
 .worktrees
+.local-data
 .env
 .env.*
 **/node_modules
@@ -9,9 +10,14 @@
 **/dist
 **/build
 **/.gradle
+**/.venv
+**/uv.lock
 **/.idea
 **/.vscode
 **/.terraform
+*.dump
+*.pgdump
+*.parquet
 *.tfstate
 *.tfplan
 docs
