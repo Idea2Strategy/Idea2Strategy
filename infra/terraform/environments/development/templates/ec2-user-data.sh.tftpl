@@ -304,7 +304,11 @@ append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_LOOKUP_HMAC_KEY "$core_i
 append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY "$core_internal_secret" IDENTITY_VERIFICATION_HMAC_KEY
 append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY "$core_internal_secret" IDENTITY_REFRESH_TOKEN_HMAC_KEY
 append_json_field "$runtime_secret_env" IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY "$core_internal_secret" IDENTITY_CUSTOMER_JWT_SIGNING_KEY
-append_json_field "$runtime_secret_env" OPERATOR_AUTH_CURRENT_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_CURRENT_HMAC_KEY
+append_json_field "$runtime_secret_env" OPERATOR_AUTH_TOTP_KEY "$core_internal_secret" OPERATOR_AUTH_TOTP_KEY
+append_json_field "$runtime_secret_env" OPERATOR_AUTH_SESSION_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_SESSION_HMAC_KEY
+append_json_field "$runtime_secret_env" OPERATOR_AUTH_CSRF_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_CSRF_HMAC_KEY
+append_json_field "$runtime_secret_env" OPERATOR_AUTH_SOURCE_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_SOURCE_HMAC_KEY
+append_json_field "$runtime_secret_env" OPERATOR_AUTH_LOGIN_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_LOGIN_HMAC_KEY
 append_env_value "$runtime_secret_env" EMAIL_DELIVERY_ENABLED "$(ssm_value '${parameter_path}/email/enabled')"
 append_env_value "$runtime_secret_env" EMAIL_DELIVERY_PROVIDER "$(ssm_value '${parameter_path}/email/provider')"
 append_env_value "$runtime_secret_env" EMAIL_DELIVERY_FROM_ADDRESS "$(ssm_value '${parameter_path}/email/from-address')"
@@ -316,17 +320,15 @@ IDENTITY_OIDC_ENABLED=${google_oauth_client_id != ""}
 IDENTITY_OIDC_PROVIDERS_GOOGLE_ISSUER=https://accounts.google.com
 IDENTITY_OIDC_PROVIDERS_GOOGLE_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs
 IDENTITY_OIDC_PROVIDERS_GOOGLE_AUDIENCES_0=${google_oauth_client_id}
-OPERATOR_AUTH_ISSUER=${operator_auth_issuer}
-OPERATOR_AUTH_JWK_SET_URI=${operator_auth_jwk_set_uri}
-OPERATOR_AUTH_AUDIENCE=${operator_auth_audience}
-OPERATOR_AUTH_MAXIMUM_TOKEN_AGE=PT5M
-OPERATOR_AUTH_MAXIMUM_MFA_AGE=PT10M
-OPERATOR_AUTH_CLOCK_SKEW=PT30S
-OPERATOR_AUTH_ALLOWED_ACR_VALUES=${operator_auth_allowed_acr_values}
-OPERATOR_AUTH_ALLOWED_AMR_VALUES=${operator_auth_allowed_amr_values}
-OPERATOR_AUTH_MFA_CLAIM_NAME=${operator_auth_mfa_claim_name}
-OPERATOR_AUTH_ALLOWED_MFA_CLAIM_VALUES=${operator_auth_allowed_mfa_claim_values}
-OPERATOR_AUTH_CURRENT_HMAC_KEY_VERSION=1
+OPERATOR_AUTH_SECURE_COOKIE=true
+OPERATOR_AUTH_IDLE_LIFETIME=PT15M
+OPERATOR_AUTH_ABSOLUTE_LIFETIME=PT8H
+OPERATOR_AUTH_THROTTLE_REDIS_URI=rediss://${cache_endpoint}:6379
+OPERATOR_AUTH_TOTP_KEY_VERSION=1
+OPERATOR_AUTH_SESSION_HMAC_KEY_VERSION=1
+OPERATOR_AUTH_CSRF_HMAC_KEY_VERSION=1
+OPERATOR_AUTH_SOURCE_HMAC_KEY_VERSION=1
+OPERATOR_AUTH_LOGIN_HMAC_KEY_VERSION=1
 OPERATOR_RBAC_READ_ENABLED=${enable_operator_auth}
 OPERATOR_RBAC_CATALOG_VERSION=${operator_rbac_catalog_version}
 OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID=${operator_rbac_catalog_read_permission_id}
@@ -730,7 +732,7 @@ refresh_service_runtime_secrets() {
   refreshed_backtest_env="$(mktemp /etc/idea2strategy/.backtest-secret.env.XXXXXX)"
   trap 'rm -f "$refreshed_runtime_env" "$refreshed_batch_env" "$refreshed_backtest_env"' EXIT
 
-  grep -Ev '^(SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY|IDENTITY_CRYPTO_LOOKUP_HMAC_KEY|IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY|IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY|IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY|OPERATOR_AUTH_CURRENT_HMAC_KEY)=' \
+  grep -Ev '^(SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY|IDENTITY_CRYPTO_LOOKUP_HMAC_KEY|IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY|IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY|IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY|OPERATOR_AUTH_TOTP_KEY|OPERATOR_AUTH_SESSION_HMAC_KEY|OPERATOR_AUTH_CSRF_HMAC_KEY|OPERATOR_AUTH_SOURCE_HMAC_KEY|OPERATOR_AUTH_LOGIN_HMAC_KEY)=' \
     /etc/idea2strategy/runtime-secret.env >"$refreshed_runtime_env"
   append_json_field "$refreshed_runtime_env" SPRING_DATASOURCE_USERNAME "$core_database_secret" username
   append_json_field "$refreshed_runtime_env" SPRING_DATASOURCE_PASSWORD "$core_database_secret" password
@@ -739,7 +741,11 @@ refresh_service_runtime_secrets() {
   append_json_field "$refreshed_runtime_env" IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY "$core_internal_secret" IDENTITY_VERIFICATION_HMAC_KEY
   append_json_field "$refreshed_runtime_env" IDENTITY_CRYPTO_REFRESH_TOKEN_HMAC_KEY "$core_internal_secret" IDENTITY_REFRESH_TOKEN_HMAC_KEY
   append_json_field "$refreshed_runtime_env" IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY "$core_internal_secret" IDENTITY_CUSTOMER_JWT_SIGNING_KEY
-  append_json_field "$refreshed_runtime_env" OPERATOR_AUTH_CURRENT_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_CURRENT_HMAC_KEY
+  append_json_field "$refreshed_runtime_env" OPERATOR_AUTH_TOTP_KEY "$core_internal_secret" OPERATOR_AUTH_TOTP_KEY
+  append_json_field "$refreshed_runtime_env" OPERATOR_AUTH_SESSION_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_SESSION_HMAC_KEY
+  append_json_field "$refreshed_runtime_env" OPERATOR_AUTH_CSRF_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_CSRF_HMAC_KEY
+  append_json_field "$refreshed_runtime_env" OPERATOR_AUTH_SOURCE_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_SOURCE_HMAC_KEY
+  append_json_field "$refreshed_runtime_env" OPERATOR_AUTH_LOGIN_HMAC_KEY "$core_internal_secret" OPERATOR_AUTH_LOGIN_HMAC_KEY
 
   grep -Ev '^(SPRING_DATASOURCE_USERNAME|SPRING_DATASOURCE_PASSWORD|IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY)=' \
     /etc/idea2strategy/batch-secret.env >"$refreshed_batch_env"

@@ -28,14 +28,14 @@ function Assert-CleanContribution([string]$Repository, [string]$RelativePath) {
 }
 
 function Assert-PinnedSubmodule([string]$Root, [string]$SubmodulePath, [string]$Repository) {
-    $treeEntry = (& git -C $Root ls-tree HEAD -- $SubmodulePath) -join "`n"
-    if ($LASTEXITCODE -ne 0 -or $treeEntry -notmatch '^160000\s+commit\s+([0-9a-f]{40})\s+') {
-        throw "Unable to read the pinned gitlink for $SubmodulePath from the root HEAD."
+    $indexEntry = (& git -C $Root ls-files --stage -- $SubmodulePath) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or $indexEntry -notmatch '^160000\s+([0-9a-f]{40})\s+0\s+') {
+        throw "Unable to read the staged gitlink for $SubmodulePath from the root index."
     }
     $pinnedRevision = $Matches[1]
     $checkedOutRevision = (& git -C $Repository rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $checkedOutRevision -cne $pinnedRevision) {
-        throw "$SubmodulePath must be checked out at the exact root gitlink revision ($pinnedRevision); found $checkedOutRevision."
+        throw "$SubmodulePath must be checked out at the exact staged gitlink revision ($pinnedRevision); found $checkedOutRevision."
     }
 }
 

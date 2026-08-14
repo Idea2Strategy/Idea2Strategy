@@ -421,92 +421,9 @@ variable "enable_backtest_outbox_relay" {
 }
 
 variable "enable_operator_auth" {
-  description = "Enable the dedicated operator OIDC and RBAC read plane. Set false only for a pre-DNS Development host rollout; operator routes then remain unavailable instead of accepting weaker identity."
+  description = "Enable dedicated operator password, TOTP, server-session authentication and RBAC."
   type        = bool
   default     = true
-}
-
-variable "enable_cognito_operator_identity" {
-  description = "Create the dedicated AWS-native operator identity plane. Keep false until the namespaced MFA assurance proposal has fresh product-authority approval."
-  type        = bool
-  default     = false
-}
-
-variable "operator_auth_issuer" {
-  description = "Exact HTTPS issuer for the dedicated operator OIDC JWT. Required for a full release; it is not inferred from customer login."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.operator_auth_issuer == "" || can(regex("^https://[^/?#]+(?:/[^?#]*)?$", var.operator_auth_issuer))
-    error_message = "operator_auth_issuer must be empty or an exact HTTPS issuer without query or fragment."
-  }
-}
-
-variable "operator_auth_jwk_set_uri" {
-  description = "Exact HTTPS JWKS URI for the dedicated operator OIDC provider."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.operator_auth_jwk_set_uri == "" || can(regex("^https://[^/?#]+/[^?#]+$", var.operator_auth_jwk_set_uri))
-    error_message = "operator_auth_jwk_set_uri must be empty or an HTTPS JWKS URI without query or fragment."
-  }
-}
-
-variable "operator_auth_audience" {
-  description = "Single exact audience accepted by the Backend operator JWT verifier."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.operator_auth_audience == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", var.operator_auth_audience))
-    error_message = "operator_auth_audience must be a newline-free exact audience token."
-  }
-}
-
-variable "operator_auth_allowed_acr_values" {
-  description = "Exact OIDC acr values that prove recent operator MFA. At least one acr/amr value is required for full deployment."
-  type        = set(string)
-  default     = []
-
-  validation {
-    condition     = alltrue([for value in var.operator_auth_allowed_acr_values : can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", value))])
-    error_message = "operator_auth_allowed_acr_values must contain only bounded claim tokens."
-  }
-}
-
-variable "operator_auth_allowed_amr_values" {
-  description = "Exact OIDC amr values that prove recent operator MFA. At least one acr/amr value is required for full deployment."
-  type        = set(string)
-  default     = []
-
-  validation {
-    condition     = alltrue([for value in var.operator_auth_allowed_amr_values : can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", value))])
-    error_message = "operator_auth_allowed_amr_values must contain only bounded claim tokens."
-  }
-}
-
-variable "operator_auth_mfa_claim_name" {
-  description = "Optional exact HTTPS namespaced claim used by a reviewed provider that cannot emit reserved acr/amr claims."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.operator_auth_mfa_claim_name == "" || can(regex("^https://[^/?#]+/[^?#]+$", var.operator_auth_mfa_claim_name))
-    error_message = "operator_auth_mfa_claim_name must be empty or an exact HTTPS namespaced claim without query or fragment."
-  }
-}
-
-variable "operator_auth_allowed_mfa_claim_values" {
-  description = "Exact accepted values for the reviewed namespaced MFA claim."
-  type        = set(string)
-  default     = []
-
-  validation {
-    condition     = alltrue([for value in var.operator_auth_allowed_mfa_claim_values : can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", value))])
-    error_message = "operator_auth_allowed_mfa_claim_values must contain only bounded exact claim tokens."
-  }
 }
 
 variable "operator_rbac_catalog_version" {

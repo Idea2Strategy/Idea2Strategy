@@ -7,6 +7,7 @@ x-spring-environment: &spring-environment
   SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
   SPRING_DATA_REDIS_HOST: redis
   SPRING_DATA_REDIS_PORT: "6379"
+  OPERATOR_AUTH_THROTTLE_REDIS_URI: redis://redis:6379/0
   AWS_ENDPOINT_URL_SQS: http://localstack:4566
   AWS_REGION: ${AWS_REGION:-ap-northeast-2}
   AWS_ACCESS_KEY_ID: ${LOCALSTACK_ACCESS_KEY:-test}
@@ -28,6 +29,18 @@ x-spring-environment: &spring-environment
   IDENTITY_OIDC_PROVIDERS_GOOGLE_ISSUER: https://accounts.google.com
   IDENTITY_OIDC_PROVIDERS_GOOGLE_JWKS_URI: https://www.googleapis.com/oauth2/v3/certs
   IDENTITY_OIDC_PROVIDERS_GOOGLE_AUDIENCES_0: ${GOOGLE_OAUTH_CLIENT_ID:-disabled.apps.googleusercontent.com}
+  OPERATOR_AUTH_ENABLED: ${OPERATOR_AUTH_ENABLED:-true}
+  OPERATOR_AUTH_SECURE_COOKIE: "false"
+  OPERATOR_AUTH_TOTP_KEY_VERSION: "1"
+  OPERATOR_AUTH_TOTP_KEY: ${OPERATOR_AUTH_TOTP_KEY}
+  OPERATOR_AUTH_SESSION_HMAC_KEY_VERSION: "1"
+  OPERATOR_AUTH_SESSION_HMAC_KEY: ${OPERATOR_AUTH_SESSION_HMAC_KEY}
+  OPERATOR_AUTH_CSRF_HMAC_KEY_VERSION: "1"
+  OPERATOR_AUTH_CSRF_HMAC_KEY: ${OPERATOR_AUTH_CSRF_HMAC_KEY}
+  OPERATOR_AUTH_SOURCE_HMAC_KEY_VERSION: "1"
+  OPERATOR_AUTH_SOURCE_HMAC_KEY: ${OPERATOR_AUTH_SOURCE_HMAC_KEY}
+  OPERATOR_AUTH_LOGIN_HMAC_KEY_VERSION: "1"
+  OPERATOR_AUTH_LOGIN_HMAC_KEY: ${OPERATOR_AUTH_LOGIN_HMAC_KEY}
 
 x-python-environment: &python-environment
   DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -48,9 +61,8 @@ x-backtest-environment: &backtest-environment
   BACKTEST_RESULTS_PREFIX: backtest-results
   BACKTEST_EXECUTION_POLICY_FILE: /runtime-policy/execution-policy.json
   BACKTEST_RESULT_INGEST_TOKEN: ${BACKTEST_RESULT_INGEST_TOKEN}
-  # The backend decodes this same customer JWT signing key. dev.ps1 generates an
-  # unpadded 32-byte value, so the single trailing '=' restores its wire form.
-  CUSTOMER_JWT_SIGNING_KEY_BASE64: ${IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY}=
+  # The backend and backtest API must receive the exact same padded base64 value.
+  CUSTOMER_JWT_SIGNING_KEY_BASE64: ${IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY}
   BACKTEST_RESULT_PRINCIPAL_ID: 00000000-0000-4000-8000-000000000266
   CUSTOMER_JWT_ISSUER: https://ideatostrategy.com
   CUSTOMER_JWT_ACCESS_AUDIENCE: idea2strategy-api
@@ -280,7 +292,7 @@ services:
 
   market-gateway:
     container_name: idea2strategy-market-gateway
-    profiles: [apps]
+    profiles: [market-live]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.spring
@@ -391,7 +403,7 @@ services:
       BACKTEST_REQUEST_HANDLER: backtest_engine.production:backtest_request_handler
       BACKTEST_REQUEST_RECEIPT_STORE: backtest_engine.production:postgres_request_receipt_store
       BACKTEST_WORKER_ID: local-backtest-worker
-      BACKTEST_WORKER_CORRELATION_ID: local-compose
+      BACKTEST_WORKER_CORRELATION_ID: 00000000-0000-4000-8000-000000000082
       BACKTEST_BASIC_QUEUE_URL: http://localstack:4566/000000000000/backtest-basic
       BACKTEST_BASIC_DLQ_URL: http://localstack:4566/000000000000/backtest-basic-dlq
       BACKTEST_BASIC_MAX_CONCURRENCY: "2"

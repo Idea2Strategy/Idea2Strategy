@@ -13,6 +13,16 @@ refs:
 
 # contract.operations.operator-rbac.v1
 
+## Internal operator authentication revision
+
+Approved authority: `user:kcrmin`.
+
+Human operator Cognito/OIDC is not an accepted authentication path. Operators authenticate with a dedicated normalized login name, an Argon2id password verifier, and a 6-digit 30-second TOTP. Browser operator requests use an opaque server-side session cookie. The raw session and CSRF tokens are never stored; the browser keeps CSRF material in memory only and the database stores versioned HMAC digests.
+
+Every request resolves the active operator, current credential version, session expiry, current TOTP evidence, and the existing RBAC catalog. A disabled operator, stale credential, expired session, replayed TOTP step, missing dependency, or ambiguous lookup fails closed. Authentication failures are non-enumerating and use the same public response for unknown, disabled, incomplete, or incorrect credentials.
+
+Provisioning, password reset, and TOTP replacement are audited CLI-only operations with no public HTTP, UI, or MCP recovery route. Customer authentication remains separate. GitHub Actions to AWS OIDC remains the deployment identity; Jenkins migration is outside this revision.
+
 상태: [COM-A13 #130](https://github.com/Idea2Strategy/Idea2Strategy/issues/130) 확정 계약.
 제안 PR [#147](https://github.com/Idea2Strategy/Idea2Strategy/pull/147)을 제품 권한자
 `user:kcrmin`이 병합해 승인한 의미를 canonical DBML과 함께 고정한다.

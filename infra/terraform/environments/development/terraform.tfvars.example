@@ -58,20 +58,6 @@ runtime_database_secret_names = {
 # Set true only for an exact Backend commit whose three-lane Outbox relay tests passed.
 enable_backtest_outbox_relay = false
 enable_operator_auth          = true
-enable_cognito_operator_identity = false
-
-# Dedicated operator OIDC trust. Use the exact reviewed provider values and an
-# access token that contains one exact aud plus auth_time and an approved MFA
-# acr/amr claim. Cognito remains disabled until the isolated namespaced-claim
-# proposal has fresh product-authority approval; do not substitute a customer
-# login or mark MFA optional.
-operator_auth_issuer             = ""
-operator_auth_jwk_set_uri        = ""
-operator_auth_audience           = ""
-operator_auth_allowed_acr_values = []
-operator_auth_allowed_amr_values = []
-operator_auth_mfa_claim_name             = ""
-operator_auth_allowed_mfa_claim_values   = []
 
 # These must match the immutable catalog installed by the reviewed one-shot
 # operator bootstrap receipt. They are identifiers, not secrets.
