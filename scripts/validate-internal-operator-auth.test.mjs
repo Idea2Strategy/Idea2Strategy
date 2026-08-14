@@ -41,6 +41,17 @@ test('rejects a schema without credential and session ownership', () => {
   );
 });
 
+test('rejects credential and session tables without account ownership references', () => {
+  const invalid = dbml
+    .replace('Ref: operations.operator_login_credentials.operator_account_id - operations.operator_accounts.id', '')
+    .replace('Ref: operations.operator_sessions.operator_account_id > operations.operator_accounts.id', '');
+
+  assert.throws(
+    () => validateInternalOperatorAuth({ dbml: invalid, contract, releaseWorkflow }),
+    /operator authentication schema/,
+  );
+});
+
 test('rejects removal of GitHub Actions AWS OIDC', () => {
   const invalid = releaseWorkflow.replaceAll('id-token: write', 'id-token: none');
 
