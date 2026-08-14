@@ -2,7 +2,7 @@
 param()
 
 # Refreshes the committed db/flyway-ci-bundle from the exact submodule revisions
-# pinned by the root HEAD. Run this in the same change that moves the backend,
+# staged in the root index. Run this in the same change that moves the backend,
 # backtest-engine, trading-engine, or data-pipeline gitlink; test-flyway-ci-bundle.ps1 fails closed until the pinned
 # metadata matches the root gitlinks. The bundle content is regenerated through
 # prepare-flyway-bundle.ps1, so this never weakens the pin: every digest is
@@ -27,9 +27,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 function Get-GitlinkRevision([string]$Path) {
-    $entry = (& git -C $root ls-tree HEAD -- $Path) -join "`n"
-    if ($LASTEXITCODE -ne 0 -or $entry -notmatch '^160000\s+commit\s+([0-9a-f]{40})\s+') {
-        throw "Unable to resolve root gitlink: $Path"
+    $entry = (& git -C $root ls-files --stage -- $Path) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or $entry -notmatch '^160000\s+([0-9a-f]{40})\s+0\s+') {
+        throw "Unable to resolve staged root gitlink: $Path"
     }
     return $Matches[1]
 }

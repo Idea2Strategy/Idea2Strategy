@@ -162,7 +162,7 @@ docker compose -f compose.back.yml --profile apps logs market-gateway | grep -iE
 **선행 조건이 있다. 플래그만 켜면 기동이 깨진다.**
 
 - 방 큐 3개와 기업행사 큐가 localstack에 **생성되지 않는다.** `infra/docker/localstack/ready.d/10-create-queues.sh`가 만드는 큐는 `bot-commands`, `backtest-jobs`, `pipeline-jobs`, `domain-events`, `official-backtest-requests`, `backtest-{basic,custom,competition}`, `backtest-{basic,custom,competition}-request`뿐이다. → **먼저 큐를 추가**해야 한다.
-- `OPERATOR_AUTH_ENABLED=true`는 운영자 OIDC IdP 설정을 요구한다. IdP 없이 켜면 fail-closed로 기동이 막힐 수 있다. → `ui/playwright.operator-oidc.config.ts`와 `scripts/`의 운영자 OIDC 하니스가 로컬에서 무엇을 요구하는지 먼저 확인한다.
+- `OPERATOR_AUTH_ENABLED=true`는 다섯 개의 독립적인 버전 키(TOTP/session/CSRF/source/login)와 DB가 필요하다. 로컬과 배포 모두 동일한 비밀번호+TOTP+서버 세션 경로를 사용하고, 운영자 OIDC/Cognito 설정은 사용하지 않는다. → `scripts/dev.ps1`이 로컬 키를 보존 생성하는지와 `ui/playwright.operator-session.config.ts` 하니스를 확인한다.
 - `EMAIL_DELIVERY_ENABLED=true`는 SES를 요구한다. 로컬에서는 켜지 말고 **INT05는 AWS에서** 검증한다.
 
 **할 일:**
@@ -507,7 +507,7 @@ aws cognito-idp set-user-pool-mfa-config --user-pool-id ap-northeast-2_xxeN2Ej7A
 | INT01 계약 호환성 | P1 | INT02, §3.4 | provider·consumer 버전·fixture 전수. 전수 검사는 `pnpm contract:validate:registry`가 하고 CI에 붙어 있다. `scripts/validate_d_contract_parity.py`가 §3.4의 드리프트를 잡으므로 그것이 고쳐진 뒤 닫힌다 |
 | INT03 전체 사용자 E2E | P3 | §2.1 §2.4 §2.5 | 가입→전략→검증→출시→자동 백테스트→봇 실행→주문·체결→중단. **§2.5가 안 끝나면 RSI 전략에서 반드시 실패한다** |
 | INT04 전체 방 E2E | P1 | §2.2 | 백테스트 결과가 방 점수에 섞이지 않는지 포함 |
-| INT05 운영자 E2E | P1 | §2.2 | 운영자 OIDC·SES는 로컬에서 안 되므로 **AWS에서**. 시작 전 AWS 상태 2건 확인: SES가 아직 sandbox(PENDING)면 검증 메일이 안 나가고, Cognito 운영자 풀에 사용자 0명이면 로그인할 운영자가 없다(2026-08-06 기준 둘 다 미해결이었다) |
+| INT05 운영자 E2E | P1 | §2.2 | 로컬과 AWS에서 같은 전용 login name·Argon2id 비밀번호·TOTP·서버 세션 흐름을 검증한다. AWS에서는 SSM의 감사 CLI로 첫 운영자를 provision한 뒤 로그인, TOTP replay 거절, CSRF, 만료, 로그아웃, credential reset의 전 세션 폐기를 확인한다. SES와 Cognito는 이 흐름의 선행 조건이 아니다. |
 | INT06 장애·재기동·중복 전달 | P2 | §2.1 §3.1 | **§3.1이 여기 걸린다** — 재기동 위상 문제를 안 고치면 이 카드가 정직하게 통과할 수 없다 |
 | INT07 성능·용량 | P2 | **차단됨** | §6 참조 — 목표치가 없어 합격 기준이 없다 |
 | INT08 보안·개인정보·법적 표현 | P1 | INT10, A90 | 1차 검토 완료(`docs/reviews/int08-...md`). 잔여 3건이 각각 A90·INT10에 귀속되므로 그 둘이 끝나야 닫힌다 |

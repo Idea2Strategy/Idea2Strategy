@@ -81,7 +81,11 @@ foreach ($atomicSecretFile in @(
 foreach ($refreshedSecret in @(
     'IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY',
     'IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY',
-    'OPERATOR_AUTH_CURRENT_HMAC_KEY',
+    'OPERATOR_AUTH_TOTP_KEY',
+    'OPERATOR_AUTH_SESSION_HMAC_KEY',
+    'OPERATOR_AUTH_CSRF_HMAC_KEY',
+    'OPERATOR_AUTH_SOURCE_HMAC_KEY',
+    'OPERATOR_AUTH_LOGIN_HMAC_KEY',
     'CUSTOMER_JWT_SIGNING_KEY_BASE64',
     'BACKTEST_RESULT_INGEST_TOKEN',
     'ALPACA_API_KEY',
@@ -294,8 +298,7 @@ if (-not $runtime.Contains('try(var.trading_runtime_artifacts["provider-rights"]
 }
 
 foreach ($variable in @(
-    "enable_operator_auth", "operator_auth_issuer", "operator_auth_jwk_set_uri", "operator_auth_audience",
-    "operator_auth_allowed_acr_values", "operator_auth_allowed_amr_values",
+    "enable_operator_auth",
     "operator_rbac_catalog_version", "operator_rbac_catalog_read_permission_id",
     "operator_rbac_assignment_read_permission_id", "operator_rbac_grant_permission_id",
     "operator_rbac_revoke_permission_id",
@@ -312,10 +315,15 @@ foreach ($variable in @(
     }
 }
 foreach ($required in @(
-    'OPERATOR_AUTH_ENABLED=${enable_operator_auth}', "OPERATOR_AUTH_ISSUER=", "OPERATOR_AUTH_JWK_SET_URI=",
-    "OPERATOR_AUTH_AUDIENCE=", "OPERATOR_AUTH_ALLOWED_ACR_VALUES=",
-    "OPERATOR_AUTH_ALLOWED_AMR_VALUES=", "OPERATOR_AUTH_CURRENT_HMAC_KEY_VERSION=1",
-    "OPERATOR_AUTH_CURRENT_HMAC_KEY", 'OPERATOR_RBAC_READ_ENABLED=${enable_operator_auth}',
+    'OPERATOR_AUTH_ENABLED=${enable_operator_auth}', "OPERATOR_AUTH_SECURE_COOKIE=true",
+    "OPERATOR_AUTH_IDLE_LIFETIME=PT15M", "OPERATOR_AUTH_ABSOLUTE_LIFETIME=PT8H",
+    'OPERATOR_AUTH_THROTTLE_REDIS_URI=rediss://${cache_endpoint}:6379',
+    "OPERATOR_AUTH_TOTP_KEY_VERSION=1", "OPERATOR_AUTH_SESSION_HMAC_KEY_VERSION=1",
+    "OPERATOR_AUTH_CSRF_HMAC_KEY_VERSION=1", "OPERATOR_AUTH_SOURCE_HMAC_KEY_VERSION=1",
+    "OPERATOR_AUTH_LOGIN_HMAC_KEY_VERSION=1", "OPERATOR_AUTH_TOTP_KEY",
+    "OPERATOR_AUTH_SESSION_HMAC_KEY", "OPERATOR_AUTH_CSRF_HMAC_KEY",
+    "OPERATOR_AUTH_SOURCE_HMAC_KEY", "OPERATOR_AUTH_LOGIN_HMAC_KEY",
+    'OPERATOR_RBAC_READ_ENABLED=${enable_operator_auth}',
     "OPERATOR_RBAC_CATALOG_VERSION=", "OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID=",
     "OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID=",
     "IDEA2STRATEGY_OPERATOR_RBAC_GUARD_CATALOG_VERSION=",
@@ -378,7 +386,7 @@ if ($userData -notmatch [regex]::Escape("grep -Ev '^(SPRING_DATASOURCE_USERNAME|
 foreach ($required in @(
     'var.operator_rbac_grant_permission_id',
     'var.operator_rbac_revoke_permission_id',
-    'reviewed RBAC read/mutation/case/sanction permission UUIDs'
+    'reviewed internal-session RBAC permission UUIDs'
 )) {
     if (-not $runtime.Contains($required)) {
         throw "Operator mutation guard release precondition is missing: $required"

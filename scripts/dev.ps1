@@ -18,19 +18,7 @@ $environmentTemplate = Join-Path $root ".env.docker.example"
 $composeBack = Join-Path $root "compose.back.yml"
 $composeFront = Join-Path $root "compose.front.yml"
 $env:COMPOSE_IGNORE_ORPHANS = "true"
-
-function New-RandomSecret {
-    $bytes = New-Object byte[] 32
-    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $generator.GetBytes($bytes)
-    }
-    finally {
-        $generator.Dispose()
-    }
-
-    return [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "A").Replace("/", "B")
-}
+. (Join-Path $PSScriptRoot "local-development-environment.ps1")
 
 # backend-api registers its customer identity surface only when all five
 # identity.crypto keys are present (fail-closed, root #266), so both a fresh
@@ -44,11 +32,19 @@ $identityCryptoKeys = @(
     "IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY"
 )
 $backtestLocalSecrets = @("BACKTEST_RESULT_INGEST_TOKEN")
+$operatorLocalSecrets = @(
+    "OPERATOR_AUTH_TOTP_KEY",
+    "OPERATOR_AUTH_SESSION_HMAC_KEY",
+    "OPERATOR_AUTH_CSRF_HMAC_KEY",
+    "OPERATOR_AUTH_SOURCE_HMAC_KEY",
+    "OPERATOR_AUTH_LOGIN_HMAC_KEY"
+)
 
 function Initialize-EnvironmentFile {
     if (Test-Path -LiteralPath $environmentFile) {
         Add-MissingIdentityCryptoKeys
         Add-MissingBacktestSecrets
+        Add-MissingOperatorSecrets
         return
     }
 
@@ -57,14 +53,17 @@ function Initialize-EnvironmentFile {
     }
 
     $content = Get-Content -LiteralPath $environmentTemplate -Raw
-    $content = $content.Replace("__GENERATE_POSTGRES_PASSWORD__", (New-RandomSecret))
-    $content = $content.Replace("__GENERATE_MINIO_PASSWORD__", (New-RandomSecret))
+    $content = $content.Replace("__GENERATE_POSTGRES_PASSWORD__", (New-LocalDevelopmentSecret))
+    $content = $content.Replace("__GENERATE_MINIO_PASSWORD__", (New-LocalDevelopmentSecret))
     foreach ($keyName in $identityCryptoKeys) {
         $placeholder = "__GENERATE_" + $keyName.Replace("IDENTITY_CRYPTO_", "IDENTITY_") + "__"
-        $content = $content.Replace($placeholder, (New-RandomSecret))
+        $content = $content.Replace($placeholder, (New-LocalDevelopmentSecret))
     }
     foreach ($keyName in $backtestLocalSecrets) {
-        $content = $content.Replace("__GENERATE_$keyName__", (New-RandomSecret))
+        $content = $content.Replace("__GENERATE_$keyName__", (New-LocalDevelopmentSecret))
+    }
+    foreach ($keyName in $operatorLocalSecrets) {
+        $content = $content.Replace("__GENERATE_${keyName}__", (New-LocalDevelopmentSecret))
     }
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
@@ -76,7 +75,7 @@ function Add-MissingIdentityCryptoKeys {
     $appended = @()
     foreach ($keyName in $identityCryptoKeys) {
         if ($content -notmatch "(?im)^$keyName\s*=\s*\S+") {
-            $appended += "$keyName=$(New-RandomSecret)"
+            $appended += "$keyName=$(New-LocalDevelopmentSecret)"
         }
     }
     if ($appended.Count -eq 0) {
@@ -96,7 +95,7 @@ function Add-MissingBacktestSecrets {
     $appended = @()
     foreach ($keyName in $backtestLocalSecrets) {
         if ($content -notmatch "(?im)^$keyName\s*=\s*\S+") {
-            $appended += "$keyName=$(New-RandomSecret)"
+            $appended += "$keyName=$(New-LocalDevelopmentSecret)"
         }
     }
     if ($appended.Count -eq 0) {
@@ -109,6 +108,19 @@ function Add-MissingBacktestSecrets {
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
     Write-Host "Added generated backtest local secrets to .env.docker" -ForegroundColor Green
+}
+
+function Add-MissingOperatorSecrets {
+    $content = Get-Content -LiteralPath $environmentFile -Raw
+    $appended = @()
+    foreach ($keyName in $operatorLocalSecrets) {
+        if ($content -notmatch "(?im)^$keyName\s*=\s*\S+") { $appended += "$keyName=$(New-LocalDevelopmentSecret)" }
+    }
+    if ($appended.Count -eq 0) { return }
+    if (-not $content.EndsWith("`n")) { $content += "`n" }
+    $content += ($appended -join "`n") + "`n"
+    [System.IO.File]::WriteAllText($environmentFile, $content, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Added generated operator authentication keys to .env.docker" -ForegroundColor Green
 }
 
 function Get-EnvironmentValue {

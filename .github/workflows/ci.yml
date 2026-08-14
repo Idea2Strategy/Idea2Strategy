@@ -61,11 +61,8 @@ jobs:
       - name: Validate pre-DNS host-ready deployment phase
         shell: pwsh
         run: ./scripts/test-development-host-ready-phase.ps1
-      - name: Validate optional Cognito operator identity boundaries
-        shell: pwsh
-        run: ./scripts/test-development-cognito-operator-identity.ps1
-      - name: Test Cognito operator token transformer
-        run: node --test infra/terraform/environments/development/lambda/operator-pre-token/index.test.mjs
+      - name: Validate internal operator authentication boundaries
+        run: node --test scripts/validate-internal-operator-auth.test.mjs
       - name: Validate one-shot Development database bootstrap boundaries
         shell: pwsh
         run: ./scripts/test-development-database-bootstrap.ps1

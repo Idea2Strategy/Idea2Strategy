@@ -54,7 +54,7 @@ contracts:
       - journey.operator.administer
       - capability.audit.evidence
       - scenario.account.sanction
-    fingerprint: sha256:ec8b813a105d184ecda937844989695446b6b102d2a3cf23c6b2af35af86d659
+    fingerprint: sha256:7dee6fc3fffa14567b22dcf14669774d04ee6ea17b071e880936cb68e80a6583
   - id: contract.operations.outbox-delivery.v1
     kind: data
     status: approved

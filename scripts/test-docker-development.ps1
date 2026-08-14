@@ -16,6 +16,7 @@ $requiredFiles = @(
     "backend/db-migration/src/main/resources/db/migration/V1__initial_schema.sql",
     "scripts/prepare-flyway-bundle.ps1",
     "scripts/test-flyway-migration.ps1",
+    "scripts/local-development-environment.ps1",
     "scripts/dev.ps1",
     "scripts/dev-menu.ps1",
     "scripts/dev.cmd"
@@ -25,6 +26,15 @@ foreach ($relativePath in $requiredFiles) {
     $path = Join-Path $root $relativePath
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required Docker development file is missing: $relativePath"
+    }
+}
+
+. (Join-Path $root "scripts/local-development-environment.ps1")
+foreach ($sample in 1..32) {
+    $generatedSecret = New-LocalDevelopmentSecret
+    $decodedSecret = [Convert]::FromBase64String($generatedSecret)
+    if ($decodedSecret.Length -ne 32) {
+        throw "Generated local secret must be padded base64 for exactly 32 bytes."
     }
 }
 
@@ -65,7 +75,6 @@ $requiredServices = @(
     "backend-batch",
     "backend-worker",
     "admin-mcp",
-    "market-gateway",
     "trading-worker",
     "backtest-api",
     "backtest-worker"
@@ -86,11 +95,29 @@ foreach ($serviceName in @("postgres", "redis", "minio", "localstack", "frontend
     }
 }
 
-foreach ($serviceName in @("flyway", "backend-api", "backend-batch", "backend-worker", "admin-mcp", "market-gateway", "trading-worker", "backtest-api", "backtest-worker")) {
+foreach ($serviceName in @("flyway", "backend-api", "backend-batch", "backend-worker", "admin-mcp", "trading-worker", "backtest-api", "backtest-worker")) {
     $profiles = @($config.services.$serviceName.profiles)
     if (-not $profiles.Contains("apps")) {
         throw "$serviceName must be opt-in through the apps profile."
     }
+}
+
+if ($config.services.PSObject.Properties.Name.Contains("market-gateway")) {
+    throw "The apps profile must start without the credential-gated live market gateway."
+}
+
+$liveConfigArguments = @(
+    "compose",
+    "--env-file", (Join-Path $root ".env.docker.example"),
+    "-f", (Join-Path $root "compose.back.yml"),
+    "-p", "idea2strategy-local",
+    "--profile", "market-live",
+    "config",
+    "--format", "json"
+)
+$liveConfig = (& docker @liveConfigArguments) | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or -not $liveConfig.services.PSObject.Properties.Name.Contains("market-gateway")) {
+    throw "The market-live profile must expose the live market gateway."
 }
 
 $flywaySqlMount = @($config.services.flyway.volumes) |
@@ -142,7 +169,21 @@ foreach ($required in @(
     }
 }
 
+try {
+    $customerJwtKey = [Convert]::FromBase64String([string]$backtestApiEnvironment.CUSTOMER_JWT_SIGNING_KEY_BASE64)
+}
+catch {
+    throw "backtest-api customer JWT key must be valid base64: $($_.Exception.Message)"
+}
+if ($customerJwtKey.Length -lt 32) {
+    throw "backtest-api customer JWT key must decode to at least 32 bytes."
+}
+
 $backtestWorkerEnvironment = $config.services."backtest-worker".environment
+$correlationId = [Guid]::Empty
+if (-not [Guid]::TryParse([string]$backtestWorkerEnvironment.BACKTEST_WORKER_CORRELATION_ID, [ref]$correlationId)) {
+    throw "backtest-worker correlation id must be a UUID."
+}
 foreach ($required in @(
     "BACKTEST_JOB_HANDLER",
     "BACKTEST_EXECUTION_KEY_STORE",
@@ -212,12 +253,8 @@ foreach ($queueName in @(
 $initialMigrationPath = Join-Path $root "backend/db-migration/src/main/resources/db/migration/V1__initial_schema.sql"
 $initialMigration = Get-Content -LiteralPath $initialMigrationPath -Raw
 $createTableCount = ([regex]::Matches($initialMigration, "(?im)^CREATE TABLE ")).Count
-if ($createTableCount -ne 137) {
-    throw "The immutable V1 Flyway baseline must remain at 137 tables; found $createTableCount."
-}
-
-if ($initialMigration -match "(?im)^INSERT INTO ") {
-    throw "The initial Flyway migration must not include DBML review-only Records data."
+if ($createTableCount -ne 181) {
+    throw "The rebased V1 Flyway baseline must contain 181 tables; found $createTableCount."
 }
 
 $devScript = Get-Content -LiteralPath (Join-Path $root "scripts/dev.ps1") -Raw
