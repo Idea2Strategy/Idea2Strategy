@@ -18,8 +18,9 @@ $minioReceiptPath = Join-Path $BackupRoot 'local-minio-import-receipt.json'
 $currentObjects = Join-Path $BackupRoot 's3-current'
 $envPath = Join-Path $root '.env.docker'
 $composePath = Join-Path $root 'compose.back.yml'
+$policySeedPath = Join-Path $root 'proposals/development-runtime-policy/artifacts/policy-seed.sql'
 
-foreach ($required in @($manifestPath, $dumpPath, $receiptPath, $minioReceiptPath, $currentObjects, $envPath, $composePath)) {
+foreach ($required in @($manifestPath, $dumpPath, $receiptPath, $minioReceiptPath, $currentObjects, $envPath, $composePath, $policySeedPath)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required local baseline artifact is missing: $required"
     }
@@ -68,8 +69,8 @@ $user = Get-EnvValue 'POSTGRES_USER'
 $password = Get-EnvValue 'POSTGRES_PASSWORD'
 $minioUser = Get-EnvValue 'MINIO_ROOT_USER'
 $minioPassword = Get-EnvValue 'MINIO_ROOT_PASSWORD'
-$localBucket = [string]$minioReceipt.target_bucket
-if ([string]::IsNullOrWhiteSpace($localBucket)) { throw 'The MinIO import receipt has no target bucket.' }
+$localBucket = Get-EnvValue 'S3_MARKET_DATA_BUCKET'
+if ([string]::IsNullOrWhiteSpace($localBucket)) { throw 'S3_MARKET_DATA_BUCKET must name the local Backtest input bucket.' }
 $expectedVolumes = @(
     'idea2strategy-postgres-data',
     'idea2strategy-minio-data',
@@ -78,6 +79,8 @@ $expectedVolumes = @(
 $importSuffix = [guid]::NewGuid().ToString('N').Substring(0, 12)
 $importVolume = "idea2strategy-baseline-import-$importSuffix"
 $mappingPath = Join-Path $root ".harness/local/tmp/baseline-import-$importSuffix.tsv"
+$versionListingPath = Join-Path $root ".harness/local/tmp/baseline-minio-versions-$importSuffix.jsonl"
+$versionMappingPath = Join-Path $root ".harness/local/tmp/baseline-object-versions-$importSuffix.tsv"
 $importScriptPath = Join-Path $root ".harness/local/tmp/baseline-import-$importSuffix.sh"
 $minioImportScriptPath = Join-Path $root ".harness/local/tmp/baseline-minio-import-$importSuffix.sh"
 $importVolumeCreated = $false
@@ -143,7 +146,9 @@ done < /mapping.tsv
 set -eu
 mc alias set local http://minio:9000 "$MINIO_ALIAS_USER" "$MINIO_ALIAS_PASSWORD" >/dev/null
 mc mb --ignore-existing "local/$MINIO_ALIAS_BUCKET" >/dev/null
+mc version enable "local/$MINIO_ALIAS_BUCKET" >/dev/null
 mc mirror --quiet --overwrite /import "local/$MINIO_ALIAS_BUCKET"
+mc ls --versions --recursive --json "local/$MINIO_ALIAS_BUCKET" > /versions/objects.jsonl
 mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
 '@
     [System.IO.File]::WriteAllText($minioImportScriptPath, $minioImportScript.Replace("`r`n", "`n"), $mappingEncoding)
@@ -159,11 +164,13 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
         alpine:3.20 sh /import.sh
     if ($LASTEXITCODE -ne 0) { throw 'Unable to reconstruct the S3 object-key tree.' }
 
+    [System.IO.File]::WriteAllText($versionListingPath, '', $mappingEncoding)
     $minioImportOutput = @(docker run --rm --network $minioNetwork `
         -e "MINIO_ALIAS_USER=$minioUser" `
         -e "MINIO_ALIAS_PASSWORD=$minioPassword" `
         -e "MINIO_ALIAS_BUCKET=$localBucket" `
         -v "${importVolume}:/import:ro" `
+        -v "${versionListingPath}:/versions/objects.jsonl" `
         -v "${minioImportScriptPath}:/minio-import.sh:ro" `
         --entrypoint /bin/sh minio/mc /minio-import.sh)
     $minioImportExitCode = $LASTEXITCODE
@@ -173,6 +180,20 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
     if ($minioImportExitCode -ne 0 -or $importedObjectCount -ne [int]$manifest.s3.current_versions) {
         throw "Imported MinIO object count mismatch: expected $($manifest.s3.current_versions), found $importedObjectCount"
     }
+    $versionLines = foreach ($line in Get-Content -LiteralPath $versionListingPath) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $entry = $line | ConvertFrom-Json
+        if ($entry.type -eq 'file' -and $entry.versionId -and $entry.versionId -ne 'null') {
+            if ([string]$entry.key -match "`t|`r|`n" -or [string]$entry.versionId -match "`t|`r|`n") {
+                throw 'MinIO returned an unsafe object key or version identifier.'
+            }
+            "$($entry.key)`t$($entry.versionId)"
+        }
+    }
+    if ($versionLines.Count -ne $importedObjectCount) {
+        throw "MinIO immutable-version count mismatch: expected $importedObjectCount, found $($versionLines.Count)"
+    }
+    [System.IO.File]::WriteAllText($versionMappingPath, ($versionLines -join "`n") + "`n", $mappingEncoding)
 
     docker cp $dumpPath 'idea2strategy-postgres:/tmp/idea2strategy-baseline.dump'
     if ($LASTEXITCODE -ne 0) { throw 'Unable to copy the database dump into PostgreSQL.' }
@@ -189,6 +210,25 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
         -v "backup_user=$user" -v "backup_password=$password" -v "local_bucket=$localBucket" `
         -U $user -d $database -f /tmp/restore-local-baseline-data.sql | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Legacy baseline transformation failed.' }
+
+    $versionSqlPath = Join-Path $root 'scripts/sql/rebind-local-object-versions.sql'
+    docker cp $versionMappingPath 'idea2strategy-postgres:/tmp/local-object-versions.tsv'
+    docker cp $versionSqlPath 'idea2strategy-postgres:/tmp/rebind-local-object-versions.sql'
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to copy the MinIO version mapping into PostgreSQL.' }
+    docker exec idea2strategy-postgres psql -v ON_ERROR_STOP=1 `
+        -v "local_bucket=$localBucket" -U $user -d $database `
+        -f /tmp/rebind-local-object-versions.sql | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to bind restored storage rows to immutable MinIO versions.' }
+
+    # V1 intentionally contains schema/reference data only. Restore the reviewed
+    # development execution-policy catalog after importing the retired AWS data;
+    # otherwise a strategy can validate but cannot release or enqueue its
+    # automatic official backtest.
+    docker cp $policySeedPath 'idea2strategy-postgres:/tmp/local-backtest-policy-seed.sql'
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to copy the local backtest policy seed into PostgreSQL.' }
+    docker exec idea2strategy-postgres psql -v ON_ERROR_STOP=1 `
+        -U $user -d $database -f /tmp/local-backtest-policy-seed.sql | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Local backtest policy seed failed.' }
     docker exec idea2strategy-postgres dropdb -U $user idea2strategy_backup_stage
 
     $checks = @{
@@ -207,6 +247,21 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
         }
     }
 
+    # The UI publishes RSI at four strategy clocks. Materialize the compact AAPL/MSFT
+    # development window locally so a clean restore can release and backtest those cards
+    # without the retired D: drive or an AWS feature worker.
+    $encodedPassword = [uri]::EscapeDataString($password)
+    $env:LOCAL_FEATURE_DATABASE_URL = "postgresql+psycopg://${user}:${encodedPassword}@127.0.0.1:15432/${database}"
+    $env:LOCAL_FEATURE_ROOT = Join-Path $root '.harness/local/tmp/feature-materialization'
+    $env:LOCAL_FEATURE_S3_ENDPOINT = 'http://127.0.0.1:19000'
+    $env:LOCAL_FEATURE_S3_BUCKET = $localBucket
+    $env:AWS_ACCESS_KEY_ID = $minioUser
+    $env:AWS_SECRET_ACCESS_KEY = $minioPassword
+    $env:AWS_REGION = 'ap-northeast-2'
+    uv run --project (Join-Path $root 'data-pipeline') python `
+        (Join-Path $root 'scripts/local/materialize-local-strategy-features.py') | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Local strategy feature materialization failed.' }
+
     [pscustomobject]@{
         status = 'restored'
         database_sha256 = $dumpHash
@@ -223,6 +278,12 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
     }
     if (Test-Path -LiteralPath $minioImportScriptPath -PathType Leaf) {
         Remove-Item -LiteralPath $minioImportScriptPath -Force
+    }
+    if (Test-Path -LiteralPath $versionListingPath -PathType Leaf) {
+        Remove-Item -LiteralPath $versionListingPath -Force
+    }
+    if (Test-Path -LiteralPath $versionMappingPath -PathType Leaf) {
+        Remove-Item -LiteralPath $versionMappingPath -Force
     }
     if ($importVolumeCreated) {
         docker volume rm $importVolume | Out-Null

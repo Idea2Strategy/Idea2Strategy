@@ -99,12 +99,25 @@ INSERT INTO market_data.dataset_manifests (
     period_start, period_end, schema_version, dataset_hash, supersedes_manifest_id,
     created_at, available_at, object_count
 )
-SELECT id, feed_id, instrument_id, data_layer, resolution, revision_number,
-       status::text::market_data.dataset_status,
-       period_start::timestamp AT TIME ZONE 'UTC', period_end::timestamp AT TIME ZONE 'UTC',
-       processing_version, manifest_hash, supersedes_manifest_id, created_at,
-       CASE WHEN status::text = 'AVAILABLE' THEN as_of_at ELSE NULL END, 0
-FROM backup_market_data.dataset_manifests
+SELECT legacy.id, legacy.feed_id, legacy.instrument_id,
+       CASE
+           WHEN current_feed.code LIKE 'ALPACA_SIP_ALL_%' THEN 'ADJUSTED'
+           WHEN current_feed.code LIKE 'ALPACA_SIP_RAW_%' THEN 'RAW'
+           ELSE legacy.data_layer
+       END,
+       legacy.resolution, legacy.revision_number,
+       legacy.status::text::market_data.dataset_status,
+       legacy.period_start::timestamp AT TIME ZONE 'UTC', legacy.period_end::timestamp AT TIME ZONE 'UTC',
+       COALESCE((
+           SELECT MIN(source_object.format_version)
+           FROM backup_market_data.dataset_objects source_link
+           JOIN backup_storage.objects source_object ON source_object.id = source_link.object_id
+           WHERE source_link.dataset_manifest_id = legacy.id
+       ), legacy.processing_version),
+       legacy.manifest_hash, legacy.supersedes_manifest_id, legacy.created_at,
+       CASE WHEN legacy.status::text = 'AVAILABLE' THEN legacy.as_of_at ELSE NULL END, 0
+FROM backup_market_data.dataset_manifests legacy
+JOIN market_data.feeds current_feed ON current_feed.id = legacy.feed_id
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO market_data.dataset_objects (
@@ -112,20 +125,17 @@ INSERT INTO market_data.dataset_objects (
     partition_start, partition_end, period_start, period_end, shard_key,
     part_number, row_count, min_instrument_id, max_instrument_id
 )
-SELECT o.id, o.dataset_manifest_id, o.object_id, o.object_kind,
-       CASE
-           WHEN m.period_end = m.period_start + 1 THEN 'DAY'
-           WHEN m.period_end = m.period_start + 7 THEN 'WEEK'
-           WHEN m.period_end = (m.period_start + interval '1 month')::date THEN 'MONTH'
-           ELSE 'YEAR'
-       END::market_data.partition_granularity,
+SELECT o.id, o.dataset_manifest_id, o.object_id, 'MARKET_BARS',
+       'YEAR'::market_data.partition_granularity,
        m.period_start, m.period_end,
        m.period_start::timestamp AT TIME ZONE 'UTC', m.period_end::timestamp AT TIME ZONE 'UTC',
-       COALESCE(substring(o.partition_key from 'shard=([^/]+)'), 'unsharded'),
-       COALESCE((substring(o.partition_key from 'shard=([0-9]+)'))::integer, 0),
+       's' || substring(source_object.object_key from 'shard=([0-9]+)-of-') || '-of-' ||
+           (substring(source_object.object_key from 'shard=[0-9]+-of-([0-9]+)'))::integer,
+       (substring(source_object.object_key from 'part-([0-9]+)\.parquet'))::integer,
        o.row_count, NULL, NULL
 FROM backup_market_data.dataset_objects o
 JOIN backup_market_data.dataset_manifests m ON m.id = o.dataset_manifest_id
+JOIN backup_storage.objects source_object ON source_object.id = o.object_id
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO market_data.dataset_lineage (derived_manifest_id, source_manifest_id, relation_type)
