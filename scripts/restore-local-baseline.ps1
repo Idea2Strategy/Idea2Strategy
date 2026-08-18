@@ -1,12 +1,16 @@
 [CmdletBinding()]
 param(
-    [string]$BackupRoot = 'D:\Idea2Strategy-backups\baseline-2026-08-13',
+    [string]$BackupRoot,
     [switch]$Force,
     [switch]$ValidateOnly
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($BackupRoot)) {
+    $BackupRoot = Join-Path $root '.harness/local/artifacts/backups/baseline-2026-08-13'
+}
+$BackupRoot = [System.IO.Path]::GetFullPath($BackupRoot)
 $manifestPath = Join-Path $BackupRoot 'backup-manifest.json'
 $dumpPath = Join-Path $BackupRoot 'database.dump'
 $receiptPath = Join-Path $BackupRoot 's3-current-receipts.json'
@@ -48,7 +52,7 @@ if ($ValidateOnly) {
 }
 
 if (-not $Force) {
-    throw 'Restoring replaces only the active PostgreSQL and LocalStack volumes. Re-run with -Force after reviewing the validated backup.'
+    throw 'Restoring replaces only the active PostgreSQL, MinIO, and LocalStack volumes. Re-run with -Force after reviewing the validated backup.'
 }
 
 function Get-EnvValue([string]$Name) {
@@ -62,9 +66,21 @@ function Get-EnvValue([string]$Name) {
 $database = Get-EnvValue 'POSTGRES_DB'
 $user = Get-EnvValue 'POSTGRES_USER'
 $password = Get-EnvValue 'POSTGRES_PASSWORD'
+$minioUser = Get-EnvValue 'MINIO_ROOT_USER'
+$minioPassword = Get-EnvValue 'MINIO_ROOT_PASSWORD'
 $localBucket = [string]$minioReceipt.target_bucket
 if ([string]::IsNullOrWhiteSpace($localBucket)) { throw 'The MinIO import receipt has no target bucket.' }
-$expectedVolumes = @('idea2strategy-postgres-data', 'idea2strategy-localstack-data')
+$expectedVolumes = @(
+    'idea2strategy-postgres-data',
+    'idea2strategy-minio-data',
+    'idea2strategy-localstack-data'
+)
+$importSuffix = [guid]::NewGuid().ToString('N').Substring(0, 12)
+$importVolume = "idea2strategy-baseline-import-$importSuffix"
+$mappingPath = Join-Path $root ".harness/local/tmp/baseline-import-$importSuffix.tsv"
+$importScriptPath = Join-Path $root ".harness/local/tmp/baseline-import-$importSuffix.sh"
+$minioImportScriptPath = Join-Path $root ".harness/local/tmp/baseline-minio-import-$importSuffix.sh"
+$importVolumeCreated = $false
 
 & (Join-Path $PSScriptRoot 'prepare-flyway-bundle.ps1') | Out-Host
 if ($LASTEXITCODE -ne 0) { throw 'Unable to prepare the rebased Flyway bundle.' }
@@ -84,10 +100,79 @@ try {
 
     docker compose --env-file $envPath -f $composePath up -d --wait postgres minio localstack
     if ($LASTEXITCODE -ne 0) { throw 'Local storage services did not become healthy.' }
+    $minioNetworks = @(docker inspect --format '{{range $name, $network := .NetworkSettings.Networks}}{{$name}}{{println}}{{end}}' idea2strategy-minio) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    if ($LASTEXITCODE -ne 0 -or $minioNetworks.Count -ne 1) {
+        throw "Expected exactly one MinIO container network, found: $($minioNetworks -join ', ')"
+    }
+    $minioNetwork = ([string]($minioNetworks | Select-Object -First 1)).Trim()
     docker compose --env-file $envPath -f $composePath rm -f flyway | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Unable to clear the completed Flyway one-shot container.' }
     docker compose --env-file $envPath -f $composePath up --no-deps flyway
     if ($LASTEXITCODE -ne 0) { throw 'Flyway could not apply the rebased V1.' }
+
+    $mappingLines = foreach ($receipt in $currentReceipts) {
+        $relativeFile = [string]$receipt.file
+        $objectKey = [string]$receipt.key
+        if (-not $relativeFile.StartsWith('s3-current/') -or
+            [string]::IsNullOrWhiteSpace($objectKey) -or
+            $relativeFile.Contains("`t") -or $relativeFile.Contains("`n") -or $relativeFile.Contains("`r") -or
+            $objectKey.Contains("`t") -or $objectKey.Contains("`n") -or $objectKey.Contains("`r")) {
+            throw "Unsafe S3 current-object receipt: $relativeFile"
+        }
+        $sourceName = $relativeFile.Substring('s3-current/'.Length)
+        $sourcePath = Join-Path $currentObjects $sourceName
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            throw "S3 current-object payload is missing: $sourcePath"
+        }
+        "$sourceName`t$objectKey"
+    }
+    $mappingEncoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($mappingPath, ($mappingLines -join "`n") + "`n", $mappingEncoding)
+    $importScript = @'
+set -eu
+tab="$(printf '\t')"
+while IFS="$tab" read -r file key; do
+    target="/import/$key"
+    mkdir -p "$(dirname "$target")"
+    cp "/backup/$file" "$target"
+done < /mapping.tsv
+'@
+    [System.IO.File]::WriteAllText($importScriptPath, $importScript.Replace("`r`n", "`n"), $mappingEncoding)
+    $minioImportScript = @'
+set -eu
+mc alias set local http://minio:9000 "$MINIO_ALIAS_USER" "$MINIO_ALIAS_PASSWORD" >/dev/null
+mc mb --ignore-existing "local/$MINIO_ALIAS_BUCKET" >/dev/null
+mc mirror --quiet --overwrite /import "local/$MINIO_ALIAS_BUCKET"
+mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
+'@
+    [System.IO.File]::WriteAllText($minioImportScriptPath, $minioImportScript.Replace("`r`n", "`n"), $mappingEncoding)
+
+    docker volume create --label 'com.idea2strategy.local-baseline-import=true' $importVolume | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to create the temporary baseline import volume.' }
+    $importVolumeCreated = $true
+    docker run --rm `
+        -v "${currentObjects}:/backup:ro" `
+        -v "${mappingPath}:/mapping.tsv:ro" `
+        -v "${importScriptPath}:/import.sh:ro" `
+        -v "${importVolume}:/import" `
+        alpine:3.20 sh /import.sh
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to reconstruct the S3 object-key tree.' }
+
+    $minioImportOutput = @(docker run --rm --network $minioNetwork `
+        -e "MINIO_ALIAS_USER=$minioUser" `
+        -e "MINIO_ALIAS_PASSWORD=$minioPassword" `
+        -e "MINIO_ALIAS_BUCKET=$localBucket" `
+        -v "${importVolume}:/import:ro" `
+        -v "${minioImportScriptPath}:/minio-import.sh:ro" `
+        --entrypoint /bin/sh minio/mc /minio-import.sh)
+    $minioImportExitCode = $LASTEXITCODE
+    $importedObjectCount = if ($minioImportOutput.Count -gt 0) {
+        [int](([string]($minioImportOutput | Select-Object -Last 1)).Trim())
+    } else { 0 }
+    if ($minioImportExitCode -ne 0 -or $importedObjectCount -ne [int]$manifest.s3.current_versions) {
+        throw "Imported MinIO object count mismatch: expected $($manifest.s3.current_versions), found $importedObjectCount"
+    }
 
     docker cp $dumpPath 'idea2strategy-postgres:/tmp/idea2strategy-baseline.dump'
     if ($LASTEXITCODE -ne 0) { throw 'Unable to copy the database dump into PostgreSQL.' }
@@ -127,8 +212,20 @@ try {
         database_sha256 = $dumpHash
         flyway_version = '1'
         current_object_backup_count = $currentFiles.Count
-        minio_volume = 'preserved'
+        minio_object_count = $importedObjectCount
     } | ConvertTo-Json -Compress
 } finally {
+    if (Test-Path -LiteralPath $mappingPath -PathType Leaf) {
+        Remove-Item -LiteralPath $mappingPath -Force
+    }
+    if (Test-Path -LiteralPath $importScriptPath -PathType Leaf) {
+        Remove-Item -LiteralPath $importScriptPath -Force
+    }
+    if (Test-Path -LiteralPath $minioImportScriptPath -PathType Leaf) {
+        Remove-Item -LiteralPath $minioImportScriptPath -Force
+    }
+    if ($importVolumeCreated) {
+        docker volume rm $importVolume | Out-Null
+    }
     Pop-Location
 }
