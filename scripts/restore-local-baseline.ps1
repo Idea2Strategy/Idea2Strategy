@@ -66,9 +66,9 @@ function Get-EnvValue([string]$Name) {
 
 $database = Get-EnvValue 'POSTGRES_DB'
 $user = Get-EnvValue 'POSTGRES_USER'
-$password = Get-EnvValue 'POSTGRES_PASSWORD'
+$postgresCredential = Get-EnvValue 'POSTGRES_PASSWORD'
 $minioUser = Get-EnvValue 'MINIO_ROOT_USER'
-$minioPassword = Get-EnvValue 'MINIO_ROOT_PASSWORD'
+$minioCredential = Get-EnvValue 'MINIO_ROOT_PASSWORD'
 $localBucket = Get-EnvValue 'S3_MARKET_DATA_BUCKET'
 if ([string]::IsNullOrWhiteSpace($localBucket)) { throw 'S3_MARKET_DATA_BUCKET must name the local Backtest input bucket.' }
 $expectedVolumes = @(
@@ -167,7 +167,7 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
     [System.IO.File]::WriteAllText($versionListingPath, '', $mappingEncoding)
     $minioImportOutput = @(docker run --rm --network $minioNetwork `
         -e "MINIO_ALIAS_USER=$minioUser" `
-        -e "MINIO_ALIAS_PASSWORD=$minioPassword" `
+        -e "MINIO_ALIAS_PASSWORD=$minioCredential" `
         -e "MINIO_ALIAS_BUCKET=$localBucket" `
         -v "${importVolume}:/import:ro" `
         -v "${versionListingPath}:/versions/objects.jsonl" `
@@ -207,7 +207,7 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
     docker cp $transformPath 'idea2strategy-postgres:/tmp/restore-local-baseline-data.sql'
     if ($LASTEXITCODE -ne 0) { throw 'Unable to copy the baseline transformation into PostgreSQL.' }
     docker exec idea2strategy-postgres psql -v ON_ERROR_STOP=1 `
-        -v "backup_user=$user" -v "backup_password=$password" -v "local_bucket=$localBucket" `
+        -v "backup_user=$user" -v "backup_password=$postgresCredential" -v "local_bucket=$localBucket" `
         -U $user -d $database -f /tmp/restore-local-baseline-data.sql | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Legacy baseline transformation failed.' }
 
@@ -250,13 +250,13 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
     # The UI publishes RSI at four strategy clocks. Materialize the compact AAPL/MSFT
     # development window locally so a clean restore can release and backtest those cards
     # without the retired D: drive or an AWS feature worker.
-    $encodedPassword = [uri]::EscapeDataString($password)
-    $env:LOCAL_FEATURE_DATABASE_URL = "postgresql+psycopg://${user}:${encodedPassword}@127.0.0.1:15432/${database}"
+    $encodedCredential = [uri]::EscapeDataString($postgresCredential)
+    $env:LOCAL_FEATURE_DATABASE_URL = "postgresql+psycopg://${user}:${encodedCredential}@127.0.0.1:15432/${database}"
     $env:LOCAL_FEATURE_ROOT = Join-Path $root '.harness/local/tmp/feature-materialization'
     $env:LOCAL_FEATURE_S3_ENDPOINT = 'http://127.0.0.1:19000'
     $env:LOCAL_FEATURE_S3_BUCKET = $localBucket
     $env:AWS_ACCESS_KEY_ID = $minioUser
-    $env:AWS_SECRET_ACCESS_KEY = $minioPassword
+    $env:AWS_SECRET_ACCESS_KEY = $minioCredential
     $env:AWS_REGION = 'ap-northeast-2'
     uv run --project (Join-Path $root 'data-pipeline') python `
         (Join-Path $root 'scripts/local/materialize-local-strategy-features.py') | Out-Host
