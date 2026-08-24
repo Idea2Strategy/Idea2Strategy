@@ -89,6 +89,17 @@ function Get-Sha256OfText([string]$Text) {
     }
 }
 
+function Get-FileSha256([string]$Path) {
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Get-NormalizedTextSha256([string]$Path) {
     $bytes = [System.IO.File]::ReadAllBytes($Path)
     $normalized = New-Object System.IO.MemoryStream
@@ -123,7 +134,7 @@ foreach ($line in $manifestLines[1..($manifestLines.Count - 1)]) {
     }
 }
 
-$manifestDigest = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$manifestDigest = Get-FileSha256 $manifestPath
 $recordedDigest = (Get-Content -LiteralPath $digestPath -Raw).Trim()
 if ($manifestDigest -cne $recordedDigest -or $recordedDigest -cne $metadata.bundle_sha256) {
     throw 'Pinned Flyway bundle digest does not match its manifest or source metadata.'

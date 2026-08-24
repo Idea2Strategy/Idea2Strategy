@@ -276,10 +276,12 @@ function Test-ContainerCommand {
 
 function Wait-DevelopmentEnvironment {
     $frontendPort = Get-EnvironmentValue -Name "FRONTEND_PORT" -DefaultValue "15173"
+    $backendPort = Get-EnvironmentValue -Name "BACKEND_PORT" -DefaultValue "18080"
     $minioApiPort = Get-EnvironmentValue -Name "MINIO_API_PORT" -DefaultValue "19000"
     $postgresUser = Get-EnvironmentValue -Name "POSTGRES_USER" -DefaultValue "idea2strategy"
     $postgresDatabase = Get-EnvironmentValue -Name "POSTGRES_DB" -DefaultValue "idea2strategy"
     $frontendUrl = "http://localhost:$frontendPort"
+    $backendHealthUrl = "http://localhost:$backendPort/actuator/health"
     $minioHealthUrl = "http://localhost:$minioApiPort/minio/health/live"
     # A first run builds nine images and the probes themselves crawl while the
     # machine is compiling, so a fixed four minutes lost the race on slower
@@ -294,6 +296,7 @@ function Wait-DevelopmentEnvironment {
         $minioReady = $true
         $localstackReady = $true
         $frontendReady = $true
+        $backendReady = $true
 
         if ($Scope -in @("all", "back")) {
             $postgresReady = Test-ContainerCommand -Arguments @(
@@ -310,7 +313,11 @@ function Wait-DevelopmentEnvironment {
             $frontendReady = Test-HttpEndpoint -Uri $frontendUrl
         }
 
-        if ($postgresReady -and $redisReady -and $minioReady -and $localstackReady -and $frontendReady) {
+        if ($WithBackend -and $Scope -in @("all", "back")) {
+            $backendReady = Test-HttpEndpoint -Uri $backendHealthUrl
+        }
+
+        if ($postgresReady -and $redisReady -and $minioReady -and $localstackReady -and $frontendReady -and $backendReady) {
             Write-Host "All default development services are ready." -ForegroundColor Green
             return
         }
@@ -320,6 +327,15 @@ function Wait-DevelopmentEnvironment {
 
     Invoke-Compose -Arguments @("ps") -AllowFailure
     throw "Development services did not become ready within $readyTimeoutMinutes minutes (override with DEV_READY_TIMEOUT_MINUTES in .env.docker). Run scripts\dev.cmd logs."
+}
+
+function Initialize-LocalTestAccount {
+    if (-not $WithBackend -or $Scope -notin @("all", "back")) {
+        return
+    }
+    $backendPort = Get-EnvironmentValue -Name "BACKEND_PORT" -DefaultValue "18080"
+    & (Join-Path $PSScriptRoot 'ensure-local-test-account.ps1') `
+        -BackendBaseUrl "http://localhost:$backendPort"
 }
 
 function Open-DevelopmentPages {
@@ -362,6 +378,8 @@ function Show-ConnectionSummary {
             Write-Host "  Backend API:   http://localhost:$backendPort"
             Write-Host "  Backtest API:  http://localhost:$backtestPort"
             Write-Host "  Admin MCP:     http://localhost:$adminMcpPort"
+            Write-Host "  Test ID:       developer@idea2strategy.local"
+            Write-Host "  Test password: TestUser!2026"
         }
         else {
             Write-Host "  Service apps:  not started; use -WithBackend to start API and workers"
@@ -383,6 +401,7 @@ try {
             Initialize-FlywayBundle
             Invoke-Compose -Arguments @("up", "-d", "--build") | Out-Null
             Wait-DevelopmentEnvironment
+            Initialize-LocalTestAccount
             Show-ConnectionSummary
             if (-not $NoBrowser) {
                 Open-DevelopmentPages
@@ -420,6 +439,7 @@ try {
             Initialize-FlywayBundle
             Invoke-Compose -Arguments @("up", "-d", "--build") | Out-Null
             Wait-DevelopmentEnvironment
+            Initialize-LocalTestAccount
             Show-ConnectionSummary
             if (-not $NoBrowser) {
                 Open-DevelopmentPages
