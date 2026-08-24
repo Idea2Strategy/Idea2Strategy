@@ -74,21 +74,6 @@ locals {
     var.existing_hosted_zone_id != "" ? var.existing_hosted_zone_id : aws_route53_zone.this[0].zone_id
   ) : null
 
-  operator_auth_issuer = var.enable_cognito_operator_identity ? (
-    "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.operator[0].id}"
-  ) : var.operator_auth_issuer
-  operator_auth_jwk_set_uri = var.enable_cognito_operator_identity ? (
-    "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.operator[0].id}/.well-known/jwks.json"
-  ) : var.operator_auth_jwk_set_uri
-  operator_auth_audience = var.enable_cognito_operator_identity ? (
-    aws_cognito_user_pool_client.operator[0].id
-  ) : var.operator_auth_audience
-  operator_auth_mfa_claim_name = var.enable_cognito_operator_identity ? (
-    "https://ideatostrategy.com/claims/mfa"
-  ) : var.operator_auth_mfa_claim_name
-  operator_auth_allowed_mfa_claim_values = var.enable_cognito_operator_identity ? (
-    toset(["cognito:mfa-required"])
-  ) : var.operator_auth_allowed_mfa_claim_values
 }
 
 check "two_availability_zones" {

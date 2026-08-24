@@ -90,29 +90,15 @@ Before requesting an AWS plan, record and review all of the following:
   `instruments.json`, `alpaca-sip-rights.json`, and `warmup/manifest.json`;
 - `enable_backtest_outbox_relay=true` only after the exact Backend consumer
   commit and all three queue routes have passed integration tests;
-- exact dedicated operator OIDC issuer, JWKS URI, single audience, and MFA
-  `acr`/`amr` allow-list, plus the immutable RBAC catalog version and read
-  permission UUIDs installed by the reviewed bootstrap receipt. The provider
-  must issue RS256 access tokens with `auth_time` and one approved MFA claim.
-  Amazon Cognito's default token shape has no `acr`/`amr`, so it is not a
-  drop-in substitute for this contract;
-- reviewed public GitHub Actions variables for the production UI:
-  `OPERATOR_OIDC_ISSUER`, `OPERATOR_OIDC_AUTHORIZATION_ENDPOINT`,
-  `OPERATOR_OIDC_TOKEN_ENDPOINT`, optional `OPERATOR_OIDC_END_SESSION_ENDPOINT`,
-  `OPERATOR_OIDC_CLIENT_ID`, `OPERATOR_OIDC_AUDIENCE`,
-  `OPERATOR_OIDC_REDIRECT_URI`, `OPERATOR_OIDC_POST_LOGOUT_REDIRECT_URI`,
-  `OPERATOR_OIDC_LOGOUT_REDIRECT_PARAMETER`,
-  `OPERATOR_OIDC_SCOPES`, `OPERATOR_OIDC_SIGNING_ALGORITHM`,
-  `OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID`, and
-  `OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID`. The dedicated Cognito pool
-  uses the approved signed namespaced claim
-  `https://ideatostrategy.com/claims/mfa=cognito:mfa-required`; Backend still
-  enforces the exact issuer, client audience, RS256 signature, and signed
-  `auth_time` freshness. The two permission UUIDs must
-  come from the same reviewed operator RBAC bootstrap receipt used by the
-  Terraform runtime inputs. Register the
-  exact callback and logout URIs with a public Authorization Code + PKCE S256
-  client, disable implicit flow, and allow the UI origin at the token endpoint.
+- internal operator authentication enabled with the five independent versioned
+  TOTP/session/CSRF/source/login keys in the Core secret, production
+  `__Host-operator_session` cookie settings, and the immutable RBAC catalog and
+  permission UUIDs installed by the reviewed bootstrap receipt;
+- no operator OIDC values in Terraform or the frontend bundle. Provision the
+  first login-name/password/TOTP credential through the audited CLI over an
+  interactive SSM session, confirm one TOTP code before commit, and retain no
+  password, seed, session token, or CSRF token in shell history or deployment
+  evidence. GitHub Actions still uses OIDC solely to assume AWS deployment roles.
   These are public build inputs, never a client secret. The release workflow
   fails closed when one is absent and cross-checks issuer/audience against the
   Terraform runtime inputs;
@@ -232,12 +218,12 @@ The following steps intentionally remain outside this repository-only readiness 
    container health/readiness, three-lane queue processing, scheduled Trading
    stop/drain/start, corporate-action approval Queue/DLQ redrive, desired-zero
    Pipeline 0→1→0 completion, and rollback.
-   Separately bootstrap the approved operator subject mapping/RBAC catalog,
-   record its immutable receipt, configure the exact OIDC inputs, and prove a
-   real MFA token succeeds while a stale, wrong-audience, customer, or
-   non-MFA token fails closed. Terraform generates the subject HMAC key in the
-   Core secret; the IdP token, subject, and bootstrap material never enter
-   Terraform variables or state.
+   Separately bootstrap the approved operator account, credential, and RBAC
+   catalog; record its immutable receipt; then prove login, TOTP replay
+   rejection, idle/absolute expiry, CSRF rejection, logout, and credential-reset
+   session revocation. The five authentication keys are generated independently
+   in the Core secret; passwords, TOTP seeds, session tokens, CSRF tokens, and
+   bootstrap material never enter Terraform variables or state.
 10. Only after host verification succeeds, review the copied DNS inventory and rollback record, change the registrar delegation, and independently verify every Route 53 nameserver before setting `dns_delegation_verified=true`.
 11. Publish the immutable frontend prefix, save and review a separate `full` plan, and require zero replacement/deletion. Apply only that plan after approval; then verify CloudFront-prefix-list-only Core ingress, secret-header rejection, the viewer ACM certificate is `ISSUED`, and the Core DNS-01 ACME certificate is trusted from CloudFront.
 12. Attach both exact plans, apply results, SSM/public smoke-test evidence, and rollback outcome to the approved deployment record.

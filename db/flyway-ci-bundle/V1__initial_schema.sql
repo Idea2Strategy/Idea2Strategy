@@ -1754,11 +1754,13 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM operations.operator_accounts account
+        JOIN operations.operator_login_credentials credential
+          ON credential.operator_account_id = account.id
         JOIN operations.operator_role_assignments assignment
           ON assignment.id = NEW.operator_role_assignment_id
          AND assignment.operator_account_id = account.id
         WHERE account.id = NEW.operator_account_id
-          AND account.external_identity_key_version = NEW.external_identity_key_version
+          AND credential.credential_version = NEW.credential_version
     ) THEN
         RAISE EXCEPTION 'operator bootstrap receipt references incoherent identity evidence';
     END IF;
@@ -1777,6 +1779,8 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM operations.operator_accounts account
+        JOIN operations.operator_login_credentials credential
+          ON credential.operator_account_id = account.id
         JOIN operations.operator_role_assignments assignment
           ON assignment.id = NEW.operator_role_assignment_id
          AND assignment.operator_account_id = account.id
@@ -1785,9 +1789,10 @@ BEGIN
         JOIN operations.audit_events audit
           ON audit.id = NEW.audit_event_id
         WHERE account.id = NEW.operator_account_id
-          AND account.external_identity_key_version = NEW.external_identity_key_version
+          AND credential.credential_version = NEW.credential_version
           AND account.created_at = NEW.applied_at
-          AND account.mfa_enrolled_at = NEW.applied_at
+          AND credential.created_at = NEW.applied_at
+          AND credential.totp_enrolled_at = NEW.applied_at
           AND assignment.catalog_version = NEW.catalog_version
           AND assignment.granted_by_operator_id = NEW.operator_account_id
           AND assignment.granted_at = NEW.applied_at
@@ -1813,7 +1818,7 @@ BEGIN
           AND audit.response_document ->> 'operatorAccountId' = NEW.operator_account_id::text
           AND audit.response_document ->> 'operatorRoleAssignmentId' = NEW.operator_role_assignment_id::text
           AND audit.response_document ->> 'catalogVersion' = NEW.catalog_version
-          AND (audit.response_document ->> 'externalIdentityKeyVersion')::smallint = NEW.external_identity_key_version
+          AND (audit.response_document ->> 'credentialVersion')::bigint = NEW.credential_version
           AND audit.response_document ->> 'status' = 'ACTIVE'
           AND audit.evidence_document ->> 'deploymentActorId' = audit.actor_id::text
           AND audit.evidence_document ->> 'technicalGrantorOperatorId' = NEW.operator_account_id::text
@@ -1836,26 +1841,6 @@ END $$;
 --
 
 COMMENT ON FUNCTION operations.require_complete_operator_bootstrap_evidence() IS 'Binds the immutable receipt to its catalog, self-granted technical assignment, deployment actor, dedicated database role, correlation, and DB-time audit evidence.';
-
-
---
--- Name: require_versioned_operator_identity(); Type: FUNCTION; Schema: operations; Owner: -
---
-
-CREATE FUNCTION operations.require_versioned_operator_identity() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    IF TG_OP = 'INSERT' AND NEW.external_identity_key_version IS NULL THEN
-        RAISE EXCEPTION 'new operator identity mappings require a key version';
-    END IF;
-    IF TG_OP = 'UPDATE'
-        AND OLD.external_identity_key_version IS NOT NULL
-        AND NEW.external_identity_key_version IS NULL THEN
-        RAISE EXCEPTION 'operator identity mappings cannot become unversioned';
-    END IF;
-    RETURN NEW;
-END $$;
 
 
 --
@@ -5907,14 +5892,11 @@ COMMENT ON COLUMN operations.notifications.source_event_hash IS 'Immutable sourc
 
 CREATE TABLE operations.operator_accounts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    external_identity_key_hmac character varying(128) NOT NULL,
     status character varying(30) NOT NULL,
-    mfa_enrolled_at timestamp with time zone NOT NULL,
-    last_mfa_verified_at timestamp with time zone,
     created_at timestamp with time zone NOT NULL,
     disabled_at timestamp with time zone,
-    external_identity_key_version smallint,
-    CONSTRAINT operator_identity_key_version_positive CHECK (((external_identity_key_version IS NULL) OR (external_identity_key_version > 0)))
+    CONSTRAINT operator_account_status_valid CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'DISABLED'::character varying])::text[]))),
+    CONSTRAINT operator_account_status_coherent CHECK (((((status)::text = 'ACTIVE'::text) AND (disabled_at IS NULL)) OR (((status)::text = 'DISABLED'::text) AND (disabled_at IS NOT NULL))))
 );
 
 
@@ -5926,10 +5908,72 @@ COMMENT ON TABLE operations.operator_accounts IS '운영자 계정 저장. Recor
 
 
 --
--- Name: COLUMN operator_accounts.external_identity_key_version; Type: COMMENT; Schema: operations; Owner: -
+-- Name: operator_login_credentials; Type: TABLE; Schema: operations; Owner: -
 --
 
-COMMENT ON COLUMN operations.operator_accounts.external_identity_key_version IS 'Version of the deployment HMAC key used for the length-delimited issuer/subject mapping. NULL legacy mappings fail closed until verified backfill.';
+CREATE TABLE operations.operator_login_credentials (
+    operator_account_id uuid PRIMARY KEY,
+    login_name character varying(120) NOT NULL UNIQUE,
+    password_hash character varying(512) NOT NULL,
+    password_algorithm character varying(30) DEFAULT 'ARGON2ID'::character varying NOT NULL,
+    password_parameters jsonb NOT NULL,
+    password_version smallint NOT NULL,
+    credential_version bigint DEFAULT 1 NOT NULL,
+    totp_ciphertext bytea NOT NULL,
+    totp_nonce bytea NOT NULL,
+    totp_key_version smallint NOT NULL,
+    totp_enrolled_at timestamp with time zone NOT NULL,
+    last_accepted_totp_step bigint,
+    failed_attempt_count integer DEFAULT 0 NOT NULL,
+    locked_until timestamp with time zone,
+    password_changed_at timestamp with time zone NOT NULL,
+    compromised_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT operator_credential_versions_positive CHECK (((password_version > 0) AND (credential_version > 0) AND (totp_key_version > 0))),
+    CONSTRAINT operator_failed_attempt_count_nonnegative CHECK ((failed_attempt_count >= 0)),
+    CONSTRAINT operator_login_name_normalized CHECK ((((login_name)::text = lower((login_name)::text)) AND ((login_name)::text ~ '^[a-z0-9][a-z0-9._-]{2,119}$'::text))),
+    CONSTRAINT operator_password_algorithm_valid CHECK (((password_algorithm)::text = 'ARGON2ID'::text)),
+    CONSTRAINT operator_totp_nonce_valid CHECK ((octet_length(totp_nonce) = 12))
+);
+
+COMMENT ON TABLE operations.operator_login_credentials IS 'Dedicated operator password and encrypted TOTP credential. Raw passwords and TOTP seeds are never stored.';
+
+
+--
+-- Name: operator_sessions; Type: TABLE; Schema: operations; Owner: -
+--
+
+CREATE TABLE operations.operator_sessions (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    operator_account_id uuid NOT NULL,
+    credential_version bigint NOT NULL,
+    session_token_hmac character varying(64) NOT NULL UNIQUE,
+    session_hmac_key_version smallint NOT NULL,
+    csrf_token_hmac character varying(64) NOT NULL,
+    csrf_hmac_key_version smallint NOT NULL,
+    csrf_generation bigint DEFAULT 1 NOT NULL,
+    source_key_hmac character varying(64) NOT NULL,
+    source_hmac_key_version smallint NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    last_used_at timestamp with time zone NOT NULL,
+    idle_expires_at timestamp with time zone NOT NULL,
+    absolute_expires_at timestamp with time zone NOT NULL,
+    mfa_verified_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    revocation_reason_code character varying(80),
+    CONSTRAINT operator_session_expiry_coherent CHECK (((created_at <= last_used_at) AND (last_used_at < idle_expires_at) AND (idle_expires_at <= absolute_expires_at))),
+    CONSTRAINT operator_session_hmacs_valid CHECK ((((session_token_hmac)::text ~ '^[0-9a-f]{64}$'::text) AND ((csrf_token_hmac)::text ~ '^[0-9a-f]{64}$'::text) AND ((source_key_hmac)::text ~ '^[0-9a-f]{64}$'::text))),
+    CONSTRAINT operator_session_revocation_coherent CHECK ((((revoked_at IS NULL) AND (revocation_reason_code IS NULL)) OR ((revoked_at IS NOT NULL) AND (revocation_reason_code IS NOT NULL)))),
+    CONSTRAINT operator_session_versions_positive CHECK (((credential_version > 0) AND (session_hmac_key_version > 0) AND (csrf_hmac_key_version > 0) AND (source_hmac_key_version > 0) AND (csrf_generation > 0)))
+);
+
+COMMENT ON TABLE operations.operator_sessions IS 'Opaque server-side operator session. Only versioned HMAC digests are stored.';
+
+CREATE INDEX operator_login_credentials_locked_until_idx ON operations.operator_login_credentials USING btree (locked_until);
+CREATE INDEX operator_sessions_operator_created_idx ON operations.operator_sessions USING btree (operator_account_id, created_at);
+CREATE INDEX operator_sessions_idle_expiry_idx ON operations.operator_sessions USING btree (idle_expires_at);
+CREATE INDEX operator_sessions_absolute_expiry_idx ON operations.operator_sessions USING btree (absolute_expires_at);
 
 
 --
@@ -5942,11 +5986,11 @@ CREATE TABLE operations.operator_bootstrap_receipts (
     catalog_version character varying(80) NOT NULL,
     operator_account_id uuid NOT NULL,
     operator_role_assignment_id uuid NOT NULL,
-    external_identity_key_version smallint NOT NULL,
+    credential_version bigint NOT NULL,
     correlation_id uuid NOT NULL,
     audit_event_id uuid NOT NULL,
     applied_at timestamp with time zone NOT NULL,
-    CONSTRAINT operator_bootstrap_key_version_positive CHECK ((external_identity_key_version > 0))
+    CONSTRAINT operator_bootstrap_credential_version_positive CHECK ((credential_version > 0))
 );
 
 
@@ -8846,7 +8890,7 @@ COPY operations.notifications (id, account_id, bot_id, notification_type, mandat
 -- Data for Name: operator_accounts; Type: TABLE DATA; Schema: operations; Owner: -
 --
 
-COPY operations.operator_accounts (id, external_identity_key_hmac, status, mfa_enrolled_at, last_mfa_verified_at, created_at, disabled_at, external_identity_key_version) FROM stdin;
+COPY operations.operator_accounts (id, status, created_at, disabled_at) FROM stdin;
 \.
 
 
@@ -8854,7 +8898,7 @@ COPY operations.operator_accounts (id, external_identity_key_hmac, status, mfa_e
 -- Data for Name: operator_bootstrap_receipts; Type: TABLE DATA; Schema: operations; Owner: -
 --
 
-COPY operations.operator_bootstrap_receipts (bootstrap_key, manifest_hash, catalog_version, operator_account_id, operator_role_assignment_id, external_identity_key_version, correlation_id, audit_event_id, applied_at) FROM stdin;
+COPY operations.operator_bootstrap_receipts (bootstrap_key, manifest_hash, catalog_version, operator_account_id, operator_role_assignment_id, credential_version, correlation_id, audit_event_id, applied_at) FROM stdin;
 \.
 
 
@@ -10787,14 +10831,6 @@ ALTER TABLE ONLY operations.notifications
 
 ALTER TABLE ONLY operations.notifications
     ADD CONSTRAINT notifications_pkey PRIMARY KEY (id);
-
-
---
--- Name: operator_accounts operator_accounts_external_identity_key_hmac_key; Type: CONSTRAINT; Schema: operations; Owner: -
---
-
-ALTER TABLE ONLY operations.operator_accounts
-    ADD CONSTRAINT operator_accounts_external_identity_key_hmac_key UNIQUE (external_identity_key_hmac);
 
 
 --
@@ -14029,13 +14065,6 @@ CREATE TRIGGER require_complete_operator_bootstrap_evidence_before_insert BEFORE
 
 
 --
--- Name: operator_accounts require_versioned_operator_identity_before_write; Type: TRIGGER; Schema: operations; Owner: -
---
-
-CREATE TRIGGER require_versioned_operator_identity_before_write BEFORE INSERT OR UPDATE ON operations.operator_accounts FOR EACH ROW EXECUTE FUNCTION operations.require_versioned_operator_identity();
-
-
---
 -- Name: case_events verify_case_event_chain; Type: TRIGGER; Schema: operations; Owner: -
 --
 
@@ -15859,6 +15888,22 @@ ALTER TABLE ONLY operations.operator_role_assignments
 
 ALTER TABLE ONLY operations.operator_bootstrap_receipts
     ADD CONSTRAINT operator_bootstrap_account_fk FOREIGN KEY (operator_account_id) REFERENCES operations.operator_accounts(id);
+
+
+--
+-- Name: operator_login_credentials operator_login_credentials_account_fk; Type: FK CONSTRAINT; Schema: operations; Owner: -
+--
+
+ALTER TABLE ONLY operations.operator_login_credentials
+    ADD CONSTRAINT operator_login_credentials_account_fk FOREIGN KEY (operator_account_id) REFERENCES operations.operator_accounts(id);
+
+
+--
+-- Name: operator_sessions operator_sessions_account_fk; Type: FK CONSTRAINT; Schema: operations; Owner: -
+--
+
+ALTER TABLE ONLY operations.operator_sessions
+    ADD CONSTRAINT operator_sessions_account_fk FOREIGN KEY (operator_account_id) REFERENCES operations.operator_accounts(id);
 
 
 --

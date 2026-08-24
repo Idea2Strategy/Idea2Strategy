@@ -32,11 +32,19 @@ $identityCryptoKeys = @(
     "IDENTITY_CRYPTO_CUSTOMER_JWT_SIGNING_KEY"
 )
 $backtestLocalSecrets = @("BACKTEST_RESULT_INGEST_TOKEN")
+$operatorLocalSecrets = @(
+    "OPERATOR_AUTH_TOTP_KEY",
+    "OPERATOR_AUTH_SESSION_HMAC_KEY",
+    "OPERATOR_AUTH_CSRF_HMAC_KEY",
+    "OPERATOR_AUTH_SOURCE_HMAC_KEY",
+    "OPERATOR_AUTH_LOGIN_HMAC_KEY"
+)
 
 function Initialize-EnvironmentFile {
     if (Test-Path -LiteralPath $environmentFile) {
         Add-MissingIdentityCryptoKeys
         Add-MissingBacktestSecrets
+        Add-MissingOperatorSecrets
         return
     }
 
@@ -53,6 +61,9 @@ function Initialize-EnvironmentFile {
     }
     foreach ($keyName in $backtestLocalSecrets) {
         $content = $content.Replace("__GENERATE_$keyName__", (New-LocalDevelopmentSecret))
+    }
+    foreach ($keyName in $operatorLocalSecrets) {
+        $content = $content.Replace("__GENERATE_${keyName}__", (New-LocalDevelopmentSecret))
     }
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
@@ -97,6 +108,19 @@ function Add-MissingBacktestSecrets {
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
     Write-Host "Added generated backtest local secrets to .env.docker" -ForegroundColor Green
+}
+
+function Add-MissingOperatorSecrets {
+    $content = Get-Content -LiteralPath $environmentFile -Raw
+    $appended = @()
+    foreach ($keyName in $operatorLocalSecrets) {
+        if ($content -notmatch "(?im)^$keyName\s*=\s*\S+") { $appended += "$keyName=$(New-LocalDevelopmentSecret)" }
+    }
+    if ($appended.Count -eq 0) { return }
+    if (-not $content.EndsWith("`n")) { $content += "`n" }
+    $content += ($appended -join "`n") + "`n"
+    [System.IO.File]::WriteAllText($environmentFile, $content, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Added generated operator authentication keys to .env.docker" -ForegroundColor Green
 }
 
 function Get-EnvironmentValue {

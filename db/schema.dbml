@@ -4434,23 +4434,90 @@ Table competition.room_final_access_grants {
 
 Table operations.operator_accounts {
   id uuid [pk, default: `gen_random_uuid()`]
-  external_identity_key_hmac varchar(128) [not null, unique]
-  external_identity_key_version smallint [not null]
   status varchar(30) [not null]
-  mfa_enrolled_at timestamptz [not null]
-  last_mfa_verified_at timestamptz
   created_at timestamptz [not null]
   disabled_at timestamptz
 
   checks {
-    `external_identity_key_version > 0` [name: 'operator_identity_key_version_positive']
+    `status IN ('ACTIVE', 'DISABLED')` [name: 'operator_account_status_valid']
+    `(status = 'ACTIVE' AND disabled_at IS NULL) OR (status = 'DISABLED' AND disabled_at IS NOT NULL)` [name: 'operator_account_status_coherent']
   }
 
   Note: '운영자 계정 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'
 
-  Records (id, external_identity_key_hmac, external_identity_key_version, status, mfa_enrolled_at, last_mfa_verified_at, created_at, disabled_at) {
-    '00000000-0000-4000-8000-000000000001', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 'ACTIVE', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
+  Records (id, status, created_at, disabled_at) {
+    '00000000-0000-4000-8000-000000000001', 'DISABLED', '2026-07-27T09:00:00+09:00', '2026-07-27T09:00:00+09:00'
   }
+}
+
+Table operations.operator_login_credentials {
+  operator_account_id uuid [pk]
+  login_name varchar(120) [not null, unique]
+  password_hash varchar(512) [not null]
+  password_algorithm varchar(30) [not null, default: 'ARGON2ID']
+  password_parameters jsonb [not null]
+  password_version smallint [not null]
+  credential_version bigint [not null, default: 1]
+  totp_ciphertext bytea [not null]
+  totp_nonce bytea [not null]
+  totp_key_version smallint [not null]
+  totp_enrolled_at timestamptz [not null]
+  last_accepted_totp_step bigint
+  failed_attempt_count int [not null, default: 0]
+  locked_until timestamptz
+  password_changed_at timestamptz [not null]
+  compromised_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (locked_until)
+  }
+
+  checks {
+    `login_name = lower(login_name) AND login_name ~ '^[a-z0-9][a-z0-9._-]{2,119}$'` [name: 'operator_login_name_normalized']
+    `password_algorithm = 'ARGON2ID'` [name: 'operator_password_algorithm_valid']
+    `password_version > 0 AND credential_version > 0 AND totp_key_version > 0` [name: 'operator_credential_versions_positive']
+    `octet_length(totp_nonce) = 12` [name: 'operator_totp_nonce_valid']
+    `failed_attempt_count >= 0` [name: 'operator_failed_attempt_count_nonnegative']
+  }
+
+  Note: 'Dedicated operator password and encrypted TOTP credential. Raw passwords and TOTP seeds are never stored.'
+}
+
+Table operations.operator_sessions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  operator_account_id uuid [not null]
+  credential_version bigint [not null]
+  session_token_hmac varchar(64) [not null, unique]
+  session_hmac_key_version smallint [not null]
+  csrf_token_hmac varchar(64) [not null]
+  csrf_hmac_key_version smallint [not null]
+  csrf_generation bigint [not null, default: 1]
+  source_key_hmac varchar(64) [not null]
+  source_hmac_key_version smallint [not null]
+  created_at timestamptz [not null]
+  last_used_at timestamptz [not null]
+  idle_expires_at timestamptz [not null]
+  absolute_expires_at timestamptz [not null]
+  mfa_verified_at timestamptz [not null]
+  revoked_at timestamptz
+  revocation_reason_code varchar(80)
+
+  indexes {
+    (operator_account_id, created_at)
+    (idle_expires_at)
+    (absolute_expires_at)
+  }
+
+  checks {
+    `credential_version > 0 AND session_hmac_key_version > 0 AND csrf_hmac_key_version > 0 AND source_hmac_key_version > 0 AND csrf_generation > 0` [name: 'operator_session_versions_positive']
+    `session_token_hmac ~ '^[0-9a-f]{64}$' AND csrf_token_hmac ~ '^[0-9a-f]{64}$' AND source_key_hmac ~ '^[0-9a-f]{64}$'` [name: 'operator_session_hmacs_valid']
+    `created_at <= last_used_at AND last_used_at < idle_expires_at AND idle_expires_at <= absolute_expires_at` [name: 'operator_session_expiry_coherent']
+    `(revoked_at IS NULL AND revocation_reason_code IS NULL) OR (revoked_at IS NOT NULL AND revocation_reason_code IS NOT NULL)` [name: 'operator_session_revocation_coherent']
+  }
+
+  Note: 'Opaque server-side operator session. Only versioned HMAC digests are stored.'
 }
 
 Table operations.roles {
@@ -5340,6 +5407,8 @@ Ref: operations.rbac_catalog_permissions.permission_id > operations.permissions.
 Ref: operations.rbac_catalog_role_permissions.(catalog_version, role_id) > operations.rbac_catalog_roles.(catalog_version, role_id)
 Ref: operations.rbac_catalog_role_permissions.(catalog_version, permission_id) > operations.rbac_catalog_permissions.(catalog_version, permission_id)
 Ref: operations.operator_role_assignments.operator_account_id > operations.operator_accounts.id
+Ref: operations.operator_login_credentials.operator_account_id - operations.operator_accounts.id
+Ref: operations.operator_sessions.operator_account_id > operations.operator_accounts.id
 Ref: operations.operator_role_assignments.role_id > operations.roles.id
 Ref: operations.operator_role_assignments.(catalog_version, role_id) > operations.rbac_catalog_roles.(catalog_version, role_id)
 Ref: operations.operator_role_assignments.granted_by_operator_id > operations.operator_accounts.id

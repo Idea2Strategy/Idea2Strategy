@@ -33,9 +33,30 @@ resource "random_password" "identity_customer_jwt_signing" {
   special = false
 }
 
-resource "random_password" "operator_subject_hmac" {
+resource "random_password" "operator_totp_encryption" {
   count   = local.enable_service_stack ? 1 : 0
-  length  = 48
+  length  = 32
+  special = false
+}
+
+resource "random_password" "operator_session_hmac" {
+  count   = local.enable_service_stack ? 1 : 0
+  length  = 32
+  special = false
+}
+resource "random_password" "operator_csrf_hmac" {
+  count   = local.enable_service_stack ? 1 : 0
+  length  = 32
+  special = false
+}
+resource "random_password" "operator_source_hmac" {
+  count   = local.enable_service_stack ? 1 : 0
+  length  = 32
+  special = false
+}
+resource "random_password" "operator_login_hmac" {
+  count   = local.enable_service_stack ? 1 : 0
+  length  = 32
   special = false
 }
 
@@ -69,7 +90,11 @@ resource "aws_secretsmanager_secret_version" "core_internal" {
     IDENTITY_VERIFICATION_HMAC_KEY    = base64encode(random_password.identity_verification_hmac[0].result)
     IDENTITY_REFRESH_TOKEN_HMAC_KEY   = base64encode(random_password.identity_refresh_token_hmac[0].result)
     IDENTITY_CUSTOMER_JWT_SIGNING_KEY = base64encode(random_password.identity_customer_jwt_signing[0].result)
-    OPERATOR_AUTH_CURRENT_HMAC_KEY    = base64encode(random_password.operator_subject_hmac[0].result)
+    OPERATOR_AUTH_TOTP_KEY            = base64encode(random_password.operator_totp_encryption[0].result)
+    OPERATOR_AUTH_SESSION_HMAC_KEY    = base64encode(random_password.operator_session_hmac[0].result)
+    OPERATOR_AUTH_CSRF_HMAC_KEY       = base64encode(random_password.operator_csrf_hmac[0].result)
+    OPERATOR_AUTH_SOURCE_HMAC_KEY     = base64encode(random_password.operator_source_hmac[0].result)
+    OPERATOR_AUTH_LOGIN_HMAC_KEY      = base64encode(random_password.operator_login_hmac[0].result)
   })
 
   lifecycle {
@@ -145,13 +170,6 @@ resource "terraform_data" "runtime_artifact_guard" {
     precondition {
       condition = (
         !var.enable_operator_auth || (
-          local.operator_auth_issuer != "" &&
-          local.operator_auth_jwk_set_uri != "" &&
-          local.operator_auth_audience != "" &&
-          (
-            length(setunion(var.operator_auth_allowed_acr_values, var.operator_auth_allowed_amr_values)) > 0 ||
-            (local.operator_auth_mfa_claim_name != "" && length(local.operator_auth_allowed_mfa_claim_values) > 0)
-          ) &&
           var.operator_rbac_catalog_version != "" &&
           can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_catalog_read_permission_id)) &&
           can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.operator_rbac_assignment_read_permission_id)) &&
@@ -174,7 +192,7 @@ resource "terraform_data" "runtime_artifact_guard" {
           ] : can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", permission_id))])
         )
       )
-      error_message = "Enabling operator authentication requires exact OIDC trust, reviewed MFA assurance, and reviewed RBAC read/mutation/case/sanction permission UUIDs."
+      error_message = "Enabling operator authentication requires reviewed internal-session RBAC permission UUIDs."
     }
   }
 }

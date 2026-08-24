@@ -374,7 +374,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."notifications" TO id
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_accounts" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_bootstrap_receipts" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_case_command_receipts" TO idea2strategy_backend;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_login_credentials" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_role_assignments" TO idea2strategy_backend;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_sessions" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."outbox_consumer_receipts" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."outbox_delivery_attempts" TO idea2strategy_backend;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."outbox_messages" TO idea2strategy_backend;
@@ -565,7 +567,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."notifications" TO id
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_accounts" TO idea2strategy_batch;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_bootstrap_receipts" TO idea2strategy_batch;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_case_command_receipts" TO idea2strategy_batch;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_login_credentials" TO idea2strategy_batch;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_role_assignments" TO idea2strategy_batch;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_sessions" TO idea2strategy_batch;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."outbox_consumer_receipts" TO idea2strategy_batch;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."outbox_delivery_attempts" TO idea2strategy_batch;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."outbox_messages" TO idea2strategy_batch;
@@ -686,7 +690,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."notifications" TO id
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_accounts" TO idea2strategy_trading;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_bootstrap_receipts" TO idea2strategy_trading;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_case_command_receipts" TO idea2strategy_trading;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_login_credentials" TO idea2strategy_trading;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_role_assignments" TO idea2strategy_trading;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."operator_sessions" TO idea2strategy_trading;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."outbox_consumer_receipts" TO idea2strategy_trading;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."outbox_delivery_attempts" TO idea2strategy_trading;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "operations"."outbox_messages" TO idea2strategy_trading;
