@@ -63,6 +63,8 @@ jobs:
         run: ./scripts/test-development-host-ready-phase.ps1
       - name: Validate internal operator authentication boundaries
         run: node --test scripts/validate-internal-operator-auth.test.mjs
+      - name: Validate local secret-scanner commit gate
+        run: node --test scripts/test-secret-scan-git-hook.mjs
       - name: Validate one-shot Development database bootstrap boundaries
         shell: pwsh
         run: ./scripts/test-development-database-bootstrap.ps1

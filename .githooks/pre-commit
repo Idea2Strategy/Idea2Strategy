@@ -56,4 +56,15 @@ if [ -n "$offenders" ]; then
     fail=1
 fi
 
+# GitGuardian 의 Generic Password 탐지기는 환경 변수에서 값을 읽는 코드라도
+# password 계열 변수에 PASSWORD 이름을 직접 대입하면 자격증명으로 오인할 수 있다.
+# 실제 값은 없어도 PR/메일 경고를 만들기 때문에 GitHub 에 도달하기 전에 막는다.
+generic_password_assignments=$(git diff --cached -U0 -- '*.ps1' | grep '^+' | grep -Ei '\$[a-z0-9_]*password[[:space:]]*=.*Get-EnvValue.*PASSWORD' || true)
+if [ -n "$generic_password_assignments" ]; then
+    echo "pre-commit: GitGuardian Generic Password 오탐을 유발하는 대입이 있다:" >&2
+    echo "$generic_password_assignments" | sed 's/^/  /' >&2
+    echo "  password 계열 로컬 변수 대신 credential 계열 이름을 사용한다." >&2
+    fail=1
+fi
+
 exit $fail
