@@ -338,6 +338,61 @@ function Initialize-LocalTestAccount {
         -BackendBaseUrl "http://localhost:$backendPort"
 }
 
+function Initialize-LocalStrategyData {
+    if (-not $WithBackend -or $Scope -notin @("all", "back")) {
+        return
+    }
+    $policySeed = Join-Path $root 'proposals/development-runtime-policy/artifacts/policy-seed.sql'
+    $seedScript = Join-Path $root 'scripts/local/seed-basic-strategy-e2e.py'
+    foreach ($required in @($policySeed, $seedScript)) {
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "Local strategy seed input is missing: $required"
+        }
+    }
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+        throw 'uv is required to prepare deterministic local strategy data.'
+    }
+
+    $postgresUser = Get-EnvironmentValue -Name 'POSTGRES_USER' -DefaultValue 'idea2strategy'
+    $postgresPassword = Get-EnvironmentValue -Name 'POSTGRES_PASSWORD' -DefaultValue ''
+    $postgresDatabase = Get-EnvironmentValue -Name 'POSTGRES_DB' -DefaultValue 'idea2strategy'
+    $postgresPort = Get-EnvironmentValue -Name 'POSTGRES_PORT' -DefaultValue '15432'
+    $minioUser = Get-EnvironmentValue -Name 'MINIO_ROOT_USER' -DefaultValue 'idea2strategy'
+    $minioPassword = Get-EnvironmentValue -Name 'MINIO_ROOT_PASSWORD' -DefaultValue ''
+    $minioPort = Get-EnvironmentValue -Name 'MINIO_API_PORT' -DefaultValue '19000'
+    $marketBucket = Get-EnvironmentValue -Name 'S3_MARKET_DATA_BUCKET' -DefaultValue 'idea2strategy-local-market-data'
+    $region = Get-EnvironmentValue -Name 'S3_REGION' -DefaultValue 'ap-northeast-2'
+
+    docker cp $policySeed 'idea2strategy-postgres:/tmp/local-backtest-policy-seed.sql' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to copy the local execution-policy seed.' }
+    docker exec idea2strategy-postgres psql -v ON_ERROR_STOP=1 `
+        -U $postgresUser -d $postgresDatabase -f /tmp/local-backtest-policy-seed.sql | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to seed the local execution-policy catalog.' }
+
+    $names = @(
+        'LOCAL_SEED_DATABASE_URL', 'LOCAL_SEED_S3_ENDPOINT', 'LOCAL_SEED_S3_BUCKET',
+        'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION'
+    )
+    $previous = @{}
+    foreach ($name in $names) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
+    try {
+        $encodedPassword = [uri]::EscapeDataString($postgresPassword)
+        $env:LOCAL_SEED_DATABASE_URL = "postgresql://${postgresUser}:${encodedPassword}@127.0.0.1:${postgresPort}/${postgresDatabase}"
+        $env:LOCAL_SEED_S3_ENDPOINT = "http://127.0.0.1:$minioPort"
+        $env:LOCAL_SEED_S3_BUCKET = $marketBucket
+        $env:AWS_ACCESS_KEY_ID = $minioUser
+        $env:AWS_SECRET_ACCESS_KEY = $minioPassword
+        $env:AWS_REGION = $region
+        uv run --project (Join-Path $root 'backtest-engine') python $seedScript | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to seed deterministic local strategy inputs.' }
+    }
+    finally {
+        foreach ($name in $names) {
+            [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process')
+        }
+    }
+}
+
 function Open-DevelopmentPages {
     $frontendPort = Get-EnvironmentValue -Name "FRONTEND_PORT" -DefaultValue "15173"
     $minioConsolePort = Get-EnvironmentValue -Name "MINIO_CONSOLE_PORT" -DefaultValue "19001"
@@ -401,6 +456,7 @@ try {
             Initialize-FlywayBundle
             Invoke-Compose -Arguments @("up", "-d", "--build") | Out-Null
             Wait-DevelopmentEnvironment
+            Initialize-LocalStrategyData
             Initialize-LocalTestAccount
             Show-ConnectionSummary
             if (-not $NoBrowser) {
@@ -439,6 +495,7 @@ try {
             Initialize-FlywayBundle
             Invoke-Compose -Arguments @("up", "-d", "--build") | Out-Null
             Wait-DevelopmentEnvironment
+            Initialize-LocalStrategyData
             Initialize-LocalTestAccount
             Show-ConnectionSummary
             if (-not $NoBrowser) {
