@@ -16,10 +16,10 @@
     {
       "elementCode": "BASIC_PRICE_CHANGE_PERCENT",
       "containers": ["BUY", "SELL"],
-      "validParameters": {"resolution": "1h", "operator": "GTE", "changePercent": 3.5, "reference": "PREVIOUS_CLOSE"},
-      "invalidParameters": [{"name": "missing-percent", "code": "BASIC_PARAMETER_REQUIRED", "parameters": {"resolution": "1h", "operator": "GTE", "reference": "PREVIOUS_CLOSE"}}],
+      "validParameters": {"resolution": "1h", "base": "PREVIOUS_CLOSE", "direction": "UP", "thresholdPercent": "3.5"},
+      "invalidParameters": [{"name": "missing-percent", "code": "BASIC_PARAMETER_REQUIRED", "parameters": {"resolution": "1h", "base": "PREVIOUS_CLOSE", "direction": "UP"}}],
       "operation": "PRICE_CHANGE_PERCENT",
-      "arguments": {"resolution": "1h", "operator": "GTE", "changePercent": 3.5, "reference": "PREVIOUS_CLOSE"},
+      "arguments": {"resolution": "1h", "base": "PREVIOUS_CLOSE", "direction": "UP", "thresholdPercent": "3.5"},
       "trueInputs": {"currentPrice": 103.5, "referencePrice": 100},
       "falseInputs": {"currentPrice": 102, "referencePrice": 100},
       "expectedReviewKo": "1시간 등락률이 전일 종가 대비 3.5% 이상"
@@ -27,10 +27,10 @@
     {
       "elementCode": "BASIC_VOLUME_COMPARE",
       "containers": ["BUY", "SELL"],
-      "validParameters": {"resolution": "4h", "operator": "GTE", "multiplier": 2, "reference": "AVERAGE_20"},
-      "invalidParameters": [{"name": "zero-multiplier", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"resolution": "4h", "operator": "GTE", "multiplier": 0, "reference": "AVERAGE_20"}}],
+      "validParameters": {"resolution": "4h", "operator": "GTE", "reference": "AVERAGE_VOLUME", "period": "20", "multiplier": "2"},
+      "invalidParameters": [{"name": "zero-multiplier", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"resolution": "4h", "operator": "GTE", "reference": "AVERAGE_VOLUME", "period": "20", "multiplier": "0"}}],
       "operation": "VOLUME_COMPARE",
-      "arguments": {"resolution": "4h", "operator": "GTE", "multiplier": 2, "reference": "AVERAGE_20"},
+      "arguments": {"resolution": "4h", "operator": "GTE", "reference": "AVERAGE_VOLUME", "period": "20", "multiplier": "2"},
       "trueInputs": {"currentVolume": 2000, "referenceVolume": 1000},
       "falseInputs": {"currentVolume": 1500, "referenceVolume": 1000},
       "expectedReviewKo": "4시간 거래량이 20봉 평균의 2배 이상"
@@ -38,10 +38,10 @@
     {
       "elementCode": "BASIC_STREAK",
       "containers": ["BUY", "SELL"],
-      "validParameters": {"resolution": "1d", "direction": "UP", "count": 3},
-      "invalidParameters": [{"name": "count-too-small", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"resolution": "1d", "direction": "UP", "count": 0}}],
+      "validParameters": {"resolution": "1d", "direction": "UP", "bars": "3"},
+      "invalidParameters": [{"name": "count-too-small", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"resolution": "1d", "direction": "UP", "bars": "0"}}],
       "operation": "STREAK",
-      "arguments": {"resolution": "1d", "direction": "UP", "count": 3},
+      "arguments": {"resolution": "1d", "direction": "UP", "bars": "3"},
       "trueInputs": {"closes": [100, 101, 102, 103]},
       "falseInputs": {"closes": [100, 101, 100, 103]},
       "expectedReviewKo": "일봉 종가가 3회 연속 상승"
@@ -49,10 +49,10 @@
     {
       "elementCode": "BASIC_SMA_CROSS",
       "containers": ["BUY", "SELL"],
-      "validParameters": {"resolution": "30m", "direction": "GOLDEN", "shortPeriod": 5, "longPeriod": 20},
-      "invalidParameters": [{"name": "reversed-periods", "code": "BASIC_PERIOD_ORDER_INVALID", "parameters": {"resolution": "30m", "direction": "GOLDEN", "shortPeriod": 20, "longPeriod": 5}}],
+      "validParameters": {"resolution": "30m", "direction": "UP", "shortPeriod": "5", "longPeriod": "20"},
+      "invalidParameters": [{"name": "reversed-periods", "code": "BASIC_PERIOD_ORDER_INVALID", "parameters": {"resolution": "30m", "direction": "UP", "shortPeriod": "20", "longPeriod": "5"}}],
       "operation": "SMA_CROSS",
-      "arguments": {"resolution": "30m", "direction": "GOLDEN", "shortPeriod": 5, "longPeriod": 20},
+      "arguments": {"resolution": "30m", "direction": "UP", "shortPeriod": "5", "longPeriod": "20"},
       "trueInputs": {"shortPrevious": 99, "longPrevious": 100, "shortCurrent": 101, "longCurrent": 100},
       "falseInputs": {"shortPrevious": 101, "longPrevious": 100, "shortCurrent": 102, "longCurrent": 100},
       "expectedReviewKo": "30분 5단순이동평균이 20단순이동평균을 상향 돌파"
@@ -60,10 +60,10 @@
     {
       "elementCode": "BASIC_RSI_CROSS",
       "containers": ["BUY", "SELL"],
-      "validParameters": {"resolution": "1h", "direction": "CROSS_UP", "period": 14, "threshold": 30},
-      "invalidParameters": [{"name": "threshold-over-100", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"resolution": "1h", "direction": "CROSS_UP", "period": 14, "threshold": 101}}],
+      "validParameters": {"resolution": "1h", "direction": "UP", "period": "14", "threshold": "30"},
+      "invalidParameters": [{"name": "threshold-over-100", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"resolution": "1h", "direction": "UP", "period": "14", "threshold": "101"}}],
       "operation": "RSI_CROSS",
-      "arguments": {"resolution": "1h", "direction": "CROSS_UP", "period": 14, "threshold": 30},
+      "arguments": {"resolution": "1h", "direction": "UP", "period": "14", "threshold": "30"},
       "trueInputs": {"previousRsi": 29, "currentRsi": 31},
       "falseInputs": {"previousRsi": 31, "currentRsi": 32},
       "expectedReviewKo": "1시간 RSI(14)가 30을 상향 돌파"
@@ -71,10 +71,10 @@
     {
       "elementCode": "BASIC_MACD_CROSS",
       "containers": ["BUY", "SELL"],
-      "validParameters": {"resolution": "4h", "direction": "GOLDEN", "fastPeriod": 12, "slowPeriod": 26, "signalPeriod": 9},
-      "invalidParameters": [{"name": "reversed-periods", "code": "BASIC_PERIOD_ORDER_INVALID", "parameters": {"resolution": "4h", "direction": "GOLDEN", "fastPeriod": 26, "slowPeriod": 12, "signalPeriod": 9}}],
+      "validParameters": {"resolution": "4h", "direction": "UP", "fastPeriod": "12", "slowPeriod": "26", "signalPeriod": "9"},
+      "invalidParameters": [{"name": "reversed-periods", "code": "BASIC_PERIOD_ORDER_INVALID", "parameters": {"resolution": "4h", "direction": "UP", "fastPeriod": "26", "slowPeriod": "12", "signalPeriod": "9"}}],
       "operation": "MACD_CROSS",
-      "arguments": {"resolution": "4h", "direction": "GOLDEN", "fastPeriod": 12, "slowPeriod": 26, "signalPeriod": 9},
+      "arguments": {"resolution": "4h", "direction": "UP", "fastPeriod": "12", "slowPeriod": "26", "signalPeriod": "9"},
       "trueInputs": {"previousMacd": -0.2, "previousSignal": -0.1, "currentMacd": 0.1, "currentSignal": 0},
       "falseInputs": {"previousMacd": 0.1, "previousSignal": 0, "currentMacd": 0.2, "currentSignal": 0.1},
       "expectedReviewKo": "4시간 MACD(12,26,9)가 시그널을 상향 돌파"
@@ -82,10 +82,10 @@
     {
       "elementCode": "BASIC_BOLLINGER_REVERSAL",
       "containers": ["BUY", "SELL"],
-      "validParameters": {"resolution": "1d", "direction": "LOWER_REENTRY", "period": 20, "standardDeviations": 2},
-      "invalidParameters": [{"name": "negative-deviation", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"resolution": "1d", "direction": "LOWER_REENTRY", "period": 20, "standardDeviations": -1}}],
+      "validParameters": {"resolution": "1d", "direction": "UP", "period": "20", "deviations": "2"},
+      "invalidParameters": [{"name": "negative-deviation", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"resolution": "1d", "direction": "UP", "period": "20", "deviations": "-1"}}],
       "operation": "BOLLINGER_REVERSAL",
-      "arguments": {"resolution": "1d", "direction": "LOWER_REENTRY", "period": 20, "standardDeviations": 2},
+      "arguments": {"resolution": "1d", "direction": "UP", "period": "20", "deviations": "2"},
       "trueInputs": {"previousPrice": 89, "previousLowerBand": 90, "currentPrice": 92, "currentLowerBand": 91},
       "falseInputs": {"previousPrice": 92, "previousLowerBand": 90, "currentPrice": 93, "currentLowerBand": 91},
       "expectedReviewKo": "일봉 종가가 볼린저 하단(20, 2σ) 밖에서 안으로 재진입"
@@ -93,10 +93,10 @@
     {
       "elementCode": "BASIC_POSITION_RETURN",
       "containers": ["SELL"],
-      "validParameters": {"operator": "LTE", "returnPercent": -5},
-      "invalidParameters": [{"name": "missing-return", "code": "BASIC_PARAMETER_REQUIRED", "parameters": {"operator": "LTE"}}],
+      "validParameters": {"direction": "LOSS", "thresholdPercent": "5"},
+      "invalidParameters": [{"name": "missing-return", "code": "BASIC_PARAMETER_REQUIRED", "parameters": {"direction": "LOSS"}}],
       "operation": "POSITION_RETURN",
-      "arguments": {"operator": "LTE", "returnPercent": -5},
+      "arguments": {"direction": "LOSS", "thresholdPercent": "5"},
       "trueInputs": {"positionReturnPercent": -5.1},
       "falseInputs": {"positionReturnPercent": -4.9},
       "expectedReviewKo": "보유 포지션 수익률이 -5% 이하"
@@ -104,10 +104,10 @@
     {
       "elementCode": "BASIC_HOLDING_PERIOD",
       "containers": ["SELL"],
-      "validParameters": {"operator": "GTE", "holdingBars": 10, "resolution": "1d"},
-      "invalidParameters": [{"name": "fractional-bars", "code": "BASIC_PARAMETER_INTEGER_REQUIRED", "parameters": {"operator": "GTE", "holdingBars": 1.5, "resolution": "1d"}}],
+      "validParameters": {"unit": "TRADING_DAY", "amount": "10", "resolution": "1d"},
+      "invalidParameters": [{"name": "fractional-bars", "code": "BASIC_PARAMETER_INTEGER_REQUIRED", "parameters": {"unit": "TRADING_DAY", "amount": "1.5", "resolution": "1d"}}],
       "operation": "HOLDING_PERIOD",
-      "arguments": {"operator": "GTE", "holdingBars": 10, "resolution": "1d"},
+      "arguments": {"unit": "TRADING_DAY", "amount": "10", "resolution": "1d"},
       "trueInputs": {"heldBars": 10},
       "falseInputs": {"heldBars": 9},
       "expectedReviewKo": "보유 기간이 일봉 10개 이상"
@@ -115,10 +115,10 @@
     {
       "elementCode": "BASIC_PEAK_RETURN",
       "containers": ["SELL"],
-      "validParameters": {"operator": "GTE", "peakReturnPercent": 15},
-      "invalidParameters": [{"name": "negative-peak", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"operator": "GTE", "peakReturnPercent": -1}}],
+      "validParameters": {"operator": "GTE", "thresholdPercent": "15"},
+      "invalidParameters": [{"name": "negative-peak", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"operator": "GTE", "thresholdPercent": "-1"}}],
       "operation": "PEAK_RETURN",
-      "arguments": {"operator": "GTE", "peakReturnPercent": 15},
+      "arguments": {"operator": "GTE", "thresholdPercent": "15"},
       "trueInputs": {"peakReturnPercent": 15.1},
       "falseInputs": {"peakReturnPercent": 14.9},
       "expectedReviewKo": "보유 중 최고 수익률이 15% 이상"
@@ -126,10 +126,10 @@
     {
       "elementCode": "BASIC_DRAWDOWN_FROM_PEAK",
       "containers": ["SELL"],
-      "validParameters": {"operator": "GTE", "drawdownPercent": 7},
-      "invalidParameters": [{"name": "over-100", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"operator": "GTE", "drawdownPercent": 101}}],
+      "validParameters": {"operator": "GTE", "thresholdPercent": "7"},
+      "invalidParameters": [{"name": "over-100", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"operator": "GTE", "thresholdPercent": "101"}}],
       "operation": "DRAWDOWN_FROM_PEAK",
-      "arguments": {"operator": "GTE", "drawdownPercent": 7},
+      "arguments": {"operator": "GTE", "thresholdPercent": "7"},
       "trueInputs": {"peakPrice": 110, "currentPrice": 102},
       "falseInputs": {"peakPrice": 110, "currentPrice": 109},
       "expectedReviewKo": "고점 대비 하락률이 7% 이상"
@@ -137,10 +137,10 @@
     {
       "elementCode": "BASIC_SCHEDULE",
       "containers": ["BUY"],
-      "validParameters": {"timezone": "Asia/Seoul", "daysOfWeek": ["MON", "WED", "FRI"], "time": "09:00"},
-      "invalidParameters": [{"name": "invalid-time", "code": "BASIC_TIME_INVALID", "parameters": {"timezone": "Asia/Seoul", "daysOfWeek": ["MON"], "time": "25:00"}}],
+      "validParameters": {"cycle": "EVERY_N_TRADING_DAYS", "interval": "5", "resolution": "1d"},
+      "invalidParameters": [{"name": "zero-interval", "code": "BASIC_PARAMETER_OUT_OF_RANGE", "parameters": {"cycle": "EVERY_N_TRADING_DAYS", "interval": "0", "resolution": "1d"}}],
       "operation": "SCHEDULE",
-      "arguments": {"timezone": "Asia/Seoul", "daysOfWeek": ["MON", "WED", "FRI"], "time": "09:00"},
+      "arguments": {"cycle": "EVERY_N_TRADING_DAYS", "interval": "5", "resolution": "1d"},
       "trueInputs": {"timestamp": "2026-08-26T09:00:00+09:00"},
       "falseInputs": {"timestamp": "2026-08-27T09:00:00+09:00"},
       "expectedReviewKo": "Asia/Seoul 기준 월·수·금 09:00에 실행"
@@ -148,16 +148,16 @@
     {
       "elementCode": "BASIC_EQUAL_ALLOCATION_ORDER",
       "containers": ["BUY", "SELL"],
-      "validParameters": {"orderPercent": 25, "maxPositionPercent": 40, "executionMode": "MARKET", "waitMode": "FIXED", "waitInterval": "30m", "maxExecutions": 1},
+      "validParameters": {"orderPercent": "25", "maxPositionPercent": "40", "executionMode": "1회만", "waitMode": "조건 재충족", "waitInterval": "1", "maxExecutions": "1"},
       "invalidParameters": [
-        {"name": "zero-cap", "code": "BASIC_POSITION_CAP_OUT_OF_RANGE", "parameters": {"orderPercent": 25, "maxPositionPercent": 0, "executionMode": "MARKET", "waitMode": "FIXED", "waitInterval": "30m", "maxExecutions": 1}},
-        {"name": "cap-over-100", "code": "BASIC_POSITION_CAP_OUT_OF_RANGE", "parameters": {"orderPercent": 25, "maxPositionPercent": 100.1, "executionMode": "MARKET", "waitMode": "FIXED", "waitInterval": "30m", "maxExecutions": 1}},
-        {"name": "negative-cap", "code": "BASIC_POSITION_CAP_OUT_OF_RANGE", "parameters": {"orderPercent": 25, "maxPositionPercent": -1, "executionMode": "MARKET", "waitMode": "FIXED", "waitInterval": "30m", "maxExecutions": 1}},
-        {"name": "empty-cap", "code": "BASIC_POSITION_CAP_REQUIRED", "parameters": {"orderPercent": 25, "maxPositionPercent": "", "executionMode": "MARKET", "waitMode": "FIXED", "waitInterval": "30m", "maxExecutions": 1}},
-        {"name": "malformed-cap", "code": "BASIC_POSITION_CAP_NUMBER_REQUIRED", "parameters": {"orderPercent": 25, "maxPositionPercent": "many", "executionMode": "MARKET", "waitMode": "FIXED", "waitInterval": "30m", "maxExecutions": 1}}
+        {"name": "zero-cap", "code": "BASIC_POSITION_CAP_OUT_OF_RANGE", "parameters": {"orderPercent": "25", "maxPositionPercent": "0", "executionMode": "1회만", "waitMode": "조건 재충족", "waitInterval": "1", "maxExecutions": "1"}},
+        {"name": "cap-over-100", "code": "BASIC_POSITION_CAP_OUT_OF_RANGE", "parameters": {"orderPercent": "25", "maxPositionPercent": "100.1", "executionMode": "1회만", "waitMode": "조건 재충족", "waitInterval": "1", "maxExecutions": "1"}},
+        {"name": "negative-cap", "code": "BASIC_POSITION_CAP_OUT_OF_RANGE", "parameters": {"orderPercent": "25", "maxPositionPercent": "-1", "executionMode": "1회만", "waitMode": "조건 재충족", "waitInterval": "1", "maxExecutions": "1"}},
+        {"name": "empty-cap", "code": "BASIC_POSITION_CAP_REQUIRED", "parameters": {"orderPercent": "25", "maxPositionPercent": "", "executionMode": "1회만", "waitMode": "조건 재충족", "waitInterval": "1", "maxExecutions": "1"}},
+        {"name": "malformed-cap", "code": "BASIC_POSITION_CAP_NUMBER_REQUIRED", "parameters": {"orderPercent": "25", "maxPositionPercent": "many", "executionMode": "1회만", "waitMode": "조건 재충족", "waitInterval": "1", "maxExecutions": "1"}}
       ],
       "operation": "EMIT_ORDER_CANDIDATE",
-      "arguments": {"orderPercent": 25, "maxPositionPercent": 40, "executionMode": "MARKET", "waitMode": "FIXED", "waitInterval": "30m", "maxExecutions": 1},
+      "arguments": {"orderPercent": "25", "maxPositionPercent": "40", "executionMode": "1회만", "waitMode": "조건 재충족", "waitInterval": "1", "maxExecutions": "1"},
       "trueInputs": {"conditionsPassed": true, "currentPositionPercent": 10, "side": "BUY"},
       "falseInputs": {"conditionsPassed": true, "currentPositionPercent": 40, "side": "BUY"},
       "expectedReviewKo": "조건 충족 시 25% 균등 주문, 종목별 보유 비중 40% 상한"
