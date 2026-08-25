@@ -176,4 +176,5 @@ jobs:
       - name: Prove BASIC, CUSTOM and COMPETITION on one shared runtime
         run: >-
           python -m pytest -c backtest-engine/pyproject.toml
-          scripts/integration/test_three_lane_feature_e2e.py -m docker -vv
+          scripts/integration/test_three_lane_feature_e2e.py
+          scripts/integration/test_basic_strategy_matrix_e2e.py -m docker -vv
