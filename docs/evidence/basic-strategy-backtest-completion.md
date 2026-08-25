@@ -2,11 +2,11 @@
 
 - 실행 일시: 2026-08-25 (KST)
 - 환경: Windows 로컬 Docker Desktop, 실제 PostgreSQL·Redis·LocalStack·MinIO와 브라우저
-- 루트 기준 커밋(최종 통합 커밋 직전): `d76eb0c`
+- 루트 통합 `develop`: `bfe8d37a48395ae036eade365b033742c69f4c3c`
 - Backend `develop`: `933f3e3f48a83fb68e3107ac903c699d2e9e7383`
 - Backtest `develop`: `2ce1020f8429ae7bc35cb3022bcb086dfe033407`
 - Data Pipeline `develop`: `3e7a33a382b003ab9d9e9c4be95d7114470734b7`
-- UI: `b3ab7e7195715837fc2b75bf4caccd11cea3041a`
+- UI `develop`: `17067d7b17b894064b29c5747a7799062005cd80`
 - 판정: **PASS**
 
 ## 실행 범위와 판정 기준
