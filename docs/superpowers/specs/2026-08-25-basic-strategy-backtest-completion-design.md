@@ -1,7 +1,7 @@
 # Basic Strategy and Backtest Completion Design
 
-**Date:** 2026-08-25  
-**Status:** Approved in session by `user:kcrmin`  
+**Date:** 2026-08-25
+**Status:** Approved in session by `user:kcrmin`
 **Scope:** Basic strategy authoring and every downstream backtest path. Pro remains visible but unavailable.
 
 ## 1. Goal
