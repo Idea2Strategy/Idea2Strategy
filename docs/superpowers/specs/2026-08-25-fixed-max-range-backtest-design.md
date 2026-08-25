@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-25
 **Status:** Approved in session by `user:kcrmin`
-**Scope:** Local Basic backtests, fixed evaluation policy, real-data reference pack, seeded complex strategies, semantic evidence, and trade-history UI.
+**Scope:** Local Basic backtests, all 725 instruments, fixed evaluation policy, seeded complex strategies, 1/3-month preview, incomplete-draft access, semantic evidence, and trade-history UI.
 
 ## 1. Outcome
 
@@ -22,15 +22,15 @@ The period is derived from the available adjusted SIP backup. It is not derived 
 
 ## 3. Reference universe
 
-The backup contains 725 instruments. The current V1 application catalog and local bootstrap expose three stable official instruments: AAPL, MSFT, and SPY. Their current UUIDs differ from the backup UUIDs, so the local importer remaps these three symbols into the V1 identities and verifies there is exactly one unambiguous source symbol for each.
+The backup contains 725 instruments and the local official catalog exposes all of them. A one-time approved local reset removes the former three-instrument fixture and adopts one consistent identity for every backup instrument across the catalog, market bars, feature outputs, compiled plans, previews, and results.
 
-This is a reference-universe boundary, not a claim that only three instruments exist. Unsupported backup symbols are not presented as locally backtestable. Extending the official catalog and remapping all 725 instruments is a separate catalog/data migration.
+The catalog API and instrument picker search the complete universe. An instrument without sufficient rows for a requested period or warm-up returns a typed unavailable result and is never silently replaced by another symbol, resolution, or synthetic price series.
 
 The normalized files live below ignored local storage and do not require a mounted `D:` drive after import. Bootstrap fails with an actionable message if neither the normalized pack nor the approved backup is available; it never replaces real data with synthetic prices while claiming a real-data run.
 
 ## 4. Immutable data and calendar
 
-The importer reads the ignored baseline backup, selects AAPL, MSFT, and SPY rows from adjusted 30-minute objects, rewrites only the instrument identity to the V1 UUID, preserves OHLCV and timestamps, and emits deterministic Parquet objects ordered by instrument and bar start. Content hashes, row counts, min/max timestamps, source hashes, and the importer version are recorded in a local receipt.
+The importer reads the ignored baseline backup, preserves all 725 instruments, OHLCV values, and timestamps, and promotes deterministic local objects ordered by instrument and bar start. Content hashes, row counts, min/max timestamps, source hashes, and the importer version are recorded in a local receipt. A plan-aware read path excludes unrelated instruments from replay memory.
 
 A new pinned XNYS calendar version covers `2016-01-01` through `2026-12-31`. Session dates and early closes within the evaluation window must agree with the observed real bars. Known one-off closures are pinned explicitly. Requests outside calendar coverage fail rather than being treated as market-closed.
 
@@ -42,7 +42,7 @@ Bootstrap creates and releases at least three idempotent strategies owned by the
 
 1. **AAPL MACD/SMA Trend Cycle** — separate complex BUY and SELL flows combining a schedule/regime condition, an SMA relationship or cross, and MACD direction.
 2. **MSFT RSI/Bollinger Mean Reversion** — separate BUY and SELL flows combining RSI, Bollinger behavior, and an additional price/volume guard.
-3. **Three-Asset Partition Rotation** — independent AAPL, MSFT, and SPY partitions with multiple conditions and both risk-increasing and risk-reducing paths.
+3. **Liquid Multi-Asset Partition Cycle** — selected well-covered liquid symbols such as SPY, QQQ, and NVDA in independent partitions, with multiple conditions and both risk-increasing and risk-reducing paths.
 
 Thresholds are selected from the real fixed-period series only to make the examples useful; the UI describes them as demonstration strategies, not recommendations. A sample is accepted only when its real run has:
 
@@ -53,6 +53,8 @@ Thresholds are selected from the real fixed-period series only to make the examp
 - a non-empty monthly trade-history response whose count matches result evidence.
 
 If a sample no longer meets its declared minimum after code or data changes, bootstrap/test fails. It does not silently loosen conditions at runtime.
+
+These samples are inserted into `developer@idea2strategy.local` so manual testing starts from ordinary editable strategies and completed real runs. Every BUY and SELL flow contains multiple meaningful conditions. The examples are chosen to trigger usefully on their seeded symbols; they do not claim one parameter set has identical trigger rates across all 725 instruments.
 
 ## 6. Semantic oracle
 
@@ -84,22 +86,29 @@ Zero trades remain a valid result for a user-created strategy. Completion must n
 - missing warm-up or data gaps remain typed unavailable/data-gap outcomes, not false conditions; and
 - the result page explicitly shows zero trades when appropriate and renders complete trade rows when present.
 
-## 8. UI behavior
+## 8. Historical preview and incomplete drafts
 
-The Backtest page displays the fixed period and explains that it is the official local dataset window. There is no editable date input for this official Basic path. Sample strategies are visible in the ordinary strategy list and their completed runs appear in ordinary history.
+Preview uses real historical bars and anchors to the selected instrument/resolution's latest available completed bar, not the browser clock. Users choose `1개월` or `3개월`; `3개월` is the default. Edited variables and multi-condition AND semantics affect markers immediately and are checked against the independent oracle.
+
+`INCOMPLETE` is a validation state, not an access restriction. Every owned, non-archived Basic draft opens from the whole list row, the explicit action, the keyboard, a direct URL, refresh, and browser history. Its partial document is restored and validation issues are highlighted. Release and backtest remain disabled until valid. Pro remains unavailable under the existing decision.
+
+## 9. UI behavior
+
+The Backtest page displays the fixed period and explains that it is the official local dataset window. There is no editable date input for this official Basic path. Sample strategies are visible in the ordinary strategy list and their completed runs appear in ordinary history. The picker searches all 725 instruments without relying on a hard-coded preview list.
 
 Trade history displays month, side, instrument, signal/evaluation time, fill time, quantity, fill price, fee, realized PnL when available, and the strategy/flow explanation already carried by evidence. Empty, loading, unavailable, failed, and forbidden states remain distinct.
 
-## 9. Test and delivery gates
+## 10. Test and delivery gates
 
 Completion requires:
 
 - policy-boundary and calendar tests for the full fixed interval;
-- deterministic importer tests including identity mapping, hashes, ordering, and D-drive independence;
+- deterministic importer tests including 725 identities, hashes, ordering, plan filtering, and D-drive independence;
+- 1-month and 3-month previews anchored to the latest available data;
+- incomplete Basic draft entry by row, action, keyboard, direct URL, and refresh;
 - real runs for all seeded samples meeting their positive-trade contracts;
 - independent RSI, MACD, SMA, Bollinger, signal-time, fill, fee, cash, position, PnL, and result reconciliation;
 - API and Playwright checks for fixed-period display and non-empty trade history;
 - a clean second bootstrap proving idempotency;
 - all affected Backend, Backtest, UI, Flyway, root, and GitGuardian checks passing; and
 - local services restarted with the test URL and credentials reported to the user.
-
