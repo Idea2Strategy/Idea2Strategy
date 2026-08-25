@@ -5,7 +5,7 @@
 - 루트 기준 커밋(증빙 커밋 직전): `c22e035b8365e21053f2ef0976befc0f68ad92a2`
 - Backend: `7283b7c8220c999820b445fa2fcad1214ed280b1`
 - Backtest: `c5458b008eeca42a8d7780a84718b2982282a483`
-- Data Pipeline: `236d1e3d8981d747d44ea7cba2805508d070e60e`
+- Data Pipeline: `3efef2ee7d0a219a20b11db6629a796715aa5660`
 - UI: `b3ab7e7195715837fc2b75bf4caccd11cea3041a`
 - 판정: **PASS**
 
