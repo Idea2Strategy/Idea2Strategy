@@ -354,11 +354,11 @@ function Initialize-LocalStrategyData {
     }
 
     $postgresUser = Get-EnvironmentValue -Name 'POSTGRES_USER' -DefaultValue 'idea2strategy'
-    $postgresPassword = Get-EnvironmentValue -Name 'POSTGRES_PASSWORD' -DefaultValue ''
+    $postgresPassword = Get-EnvironmentValue -Name 'POSTGRES_PASSWORD' -DefaultValue 'missing-local-postgres-password'
     $postgresDatabase = Get-EnvironmentValue -Name 'POSTGRES_DB' -DefaultValue 'idea2strategy'
     $postgresPort = Get-EnvironmentValue -Name 'POSTGRES_PORT' -DefaultValue '15432'
     $minioUser = Get-EnvironmentValue -Name 'MINIO_ROOT_USER' -DefaultValue 'idea2strategy'
-    $minioPassword = Get-EnvironmentValue -Name 'MINIO_ROOT_PASSWORD' -DefaultValue ''
+    $minioPassword = Get-EnvironmentValue -Name 'MINIO_ROOT_PASSWORD' -DefaultValue 'missing-local-minio-password'
     $minioPort = Get-EnvironmentValue -Name 'MINIO_API_PORT' -DefaultValue '19000'
     $marketBucket = Get-EnvironmentValue -Name 'S3_MARKET_DATA_BUCKET' -DefaultValue 'idea2strategy-local-market-data'
     $region = Get-EnvironmentValue -Name 'S3_REGION' -DefaultValue 'ap-northeast-2'
