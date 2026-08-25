@@ -35,7 +35,9 @@ Status: **unapproved proposal**. This file is intentionally outside `specs/` and
 ### Backtest runtime safety policy
 
 - Attempts: maximum 3; 300-second lease; 1,800-second wall timeout;
-  300-second CPU limit; 512 MiB memory limit.
+  900-second CPU limit; 1 GiB memory limit. The increased per-attempt limits
+  are required by the approved fixed 2016-2026 evaluation window and remain
+  below the development backtest host's 4 GiB capacity.
 - Microstructure: version `development-microstructure-v1`, maximum volume
   participation 1,000 bps, and a 1-bp buying-power buffer.
 - Fractional trading: allow only instruments marked fractional by the reviewed

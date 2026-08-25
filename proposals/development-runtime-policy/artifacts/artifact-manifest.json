@@ -4,25 +4,26 @@
   "sourceApprovalPullRequest": 225,
   "sourceApprovalCommit": "47932bf5febda9aa9603fd4d77e7f2ed2b60c23c",
   "amendment": {
-    "reason": "The 2026-Q3 policy declared a ten-year window and market-bars-v2. Development holds neither, so every official run failed before simulation (root #471, backtest-engine #82). v2 states the window and schema Development can actually replay; v1 is retired, not edited.",
+    "reason": "The approved local baseline now holds the complete adjusted market-bars/1 range and a pinned 2016-2026 XNYS calendar. v3 fixes every local official Basic run to the maximum verified interval; v1 and v2 remain immutable historical evidence.",
     "authority": "user:kcrmin",
-    "instruction": "Development 2026-Q3 실행 정책 v2 게시 — version: development-official-backtest-2026-q3-v2, periodStart: 2024-01-01T05:00:00Z, periodEnd: 2024-02-01T05:00:00Z, marketDataSchemaVersion: market-bars/1, datasetManifestId: 7f7113c9-3b02-4098-97ec-0baa07e2b3b0, datasetHash: 08a848a5f9aa1aac80e215c2d86bcf6d5f96c354400c7c16394dae9ffa9939af, 기존 v1은 DB 증거를 보존하되 활성 runtime catalog에서는 v2만 선택되도록 retire 처리",
+    "instruction": "user:kcrmin approved a fixed maximum local backtest period and the complete 725-instrument backup: version development-official-backtest-2026-q3-v3, periodStart 2016-01-01T05:00:00Z, periodEnd 2026-07-30T04:00:00Z, marketDataSchemaVersion market-bars/1; keep earlier policy rows immutable and expose only v3 in the active runtime catalog. Full-range measurements require a 900-second CPU and 1 GiB memory ceiling within the existing 1,800-second timeout.",
+    "resourceSizingEvidence": "A single-instrument 2016-2026 AAPL run reached the former 300-second CPU ceiling after plan-aware shard, row-group, rolling-window, and evidence-compaction optimizations; the development backtest host is t4g.medium (4 GiB).",
     "verifiedManifest": {
-      "datasetManifestId": "7f7113c9-3b02-4098-97ec-0baa07e2b3b0",
-      "datasetHash": "08a848a5f9aa1aac80e215c2d86bcf6d5f96c354400c7c16394dae9ffa9939af",
+      "datasetManifestId": "17574f1e-d36e-524b-923f-609fa75c966d",
+      "datasetHash": "7fb470ba16f470ddcb4afce279c21734d4029ecf04cfe7e23ce50c9b3d1fef22",
       "dataLayer": "ADJUSTED",
       "resolution": "30m",
-      "periodStart": "2024-01-01",
-      "periodEnd": "2024-02-01",
+      "periodStart": "2016-01-01",
+      "periodEnd": "2026-07-30",
       "schemaVersion": "market-bars/1",
-      "observedAt": "2026-08-09"
+      "observedAt": "2026-08-25"
     },
-    "supersededVersion": "development-official-backtest-2026-q3-v1",
-    "supersededHandling": "The policy seed is append-only by design: the bootstrap refuses any statement that could rewrite an already published policy row, so v1 keeps its row and its artifact hash untouched. v1 stops being reachable because the runtime catalog file carries v2 alone and the producer guard refuses v1's ten-year window and market-bars-v2 schema against every AVAILABLE manifest."
+    "supersededVersion": "development-official-backtest-2026-q3-v2",
+    "supersededHandling": "The policy seed remains append-only. v1 and v2 keep their exact rows and hashes; the active runtime catalog carries v3 alone."
   },
   "artifacts": {
-    "execution-policy.json": "2fc989fe28df1f69dacb3c9af73908fa8d54b2b8d7d69a2e8a9683c529028953",
-    "runtime-policy.json": "7930efefde46d2a870627189ad9ae1535f2ef1218fe46b295c7b04a2118e058b",
-    "policy-seed.sql": "8a8b6939d239ec8ade35525230961fb7310881545d751feae718e7a49634e46e"
+    "execution-policy.json": "bc2d7cd830d5c6fa98e4ff9c0eb7a2ce45ec3d742f90eb4297228878a1691a9b",
+    "runtime-policy.json": "d0309df1e41d6b12759c11fe35e2bb7bd21a64d126abe0e3feed239093f553c5",
+    "policy-seed.sql": "523c6856ef2a078addf04b7e7d0d70983d3a3953645c95c57ddddcdb876474f2"
   }
 }

@@ -20,6 +20,12 @@ The official local policy is:
 
 The period is derived from the available adjusted SIP backup. It is not derived from the current date, request date, strategy release date, or UI state. Every Basic official run pins the same policy version and the UI renders it read-only.
 
+The full-range workload uses a 900-second CPU and 1 GiB per-attempt memory
+ceiling within the existing 1,800-second wall timeout. These limits are backed
+by local full-range measurements and fit the 4 GiB development backtest host;
+the previous 300-second/512 MiB limits were sized for the superseded short
+window and cannot complete the approved interval.
+
 ## 3. Reference universe
 
 The backup contains 725 instruments and the local official catalog exposes all of them. A one-time approved local reset removes the former three-instrument fixture and adopts one consistent identity for every backup instrument across the catalog, market bars, feature outputs, compiled plans, previews, and results.

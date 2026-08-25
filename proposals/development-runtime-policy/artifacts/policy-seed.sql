@@ -39,7 +39,7 @@ INSERT INTO trading.buying_power_buffer_policy_versions (
   'development-2026-q3-v1',
   1,
   'precision:1.0.0',
-  '7930efefde46d2a870627189ad9ae1535f2ef1218fe46b295c7b04a2118e058b',
+  'd0309df1e41d6b12759c11fe35e2bb7bd21a64d126abe0e3feed239093f553c5',
   '2026-07-01T04:00:00Z',
   NULL,
   '2026-07-01T04:00:00Z'
@@ -100,4 +100,24 @@ INSERT INTO backtest.execution_policy_versions (
 WHERE NOT EXISTS (
   SELECT 1 FROM backtest.execution_policy_versions
   WHERE version = 'development-official-backtest-2026-q3-v2'
+);
+
+-- v3 is the user-approved fixed maximum local window. The local bootstrap registers a
+-- content-verified composite of the stored market-bars/1 objects before releasing a run.
+-- Earlier versions remain byte-for-byte immutable and are not present in the active runtime file.
+INSERT INTO backtest.execution_policy_versions (
+  version,
+  policy_artifact_hash,
+  policy_document,
+  locked_at,
+  retired_at
+) SELECT
+  'development-official-backtest-2026-q3-v3',
+  'bc2d7cd830d5c6fa98e4ff9c0eb7a2ce45ec3d742f90eb4297228878a1691a9b',
+  '{"version":"development-official-backtest-2026-q3-v3","releaseQuarter":"2026-Q3","periodStart":"2016-01-01T05:00:00Z","periodEnd":"2026-07-30T04:00:00Z","feeRate":"0.002","slippageRateBps":5,"timezone":"America/New_York","sessionCalendar":"XNYS","timestampUnit":"us","priceArrowType":"double","volumeArrowType":"int64","marketDataSchemaVersion":"market-bars/1","calculationModelVersion":"backtest-calculation-v1","marketRulesVersion":"market:1.0.0","accountingRulesVersion":"accounting:1.0.0","precisionRulesVersion":"precision:1.0.0","feePolicyId":"6f2eae59-bc3d-4fc2-9330-a544d4c7e101","buyingPowerBufferPolicyId":"a27b9962-56cc-41f8-b98c-9311833ff201","goodTillCancelledHorizonSeconds":7776000,"maxOrderHorizonSeconds":7776000}'::jsonb,
+  '2026-08-25T00:00:00Z',
+  NULL
+WHERE NOT EXISTS (
+  SELECT 1 FROM backtest.execution_policy_versions
+  WHERE version = 'development-official-backtest-2026-q3-v3'
 );

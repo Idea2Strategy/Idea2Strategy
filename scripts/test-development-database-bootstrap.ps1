@@ -292,7 +292,7 @@ if ($executionPolicy.schemaVersion -ne 1 -or $executionPolicy.policies.Count -ne
     throw "Development execution policy must publish exactly one schema-v1 policy."
 }
 $policy = $executionPolicy.policies[0]
-if ($policy.version -cne "development-official-backtest-2026-q3-v2" -or
+if ($policy.version -cne "development-official-backtest-2026-q3-v3" -or
     $policy.releaseQuarter -cne "2026-Q3" -or
     $policy.feeRate -cne "0.002" -or $policy.slippageRateBps -ne 5 -or
     $policy.goodTillCancelledHorizonSeconds -ne 7776000 -or $policy.maxOrderHorizonSeconds -ne 7776000) {
@@ -301,20 +301,22 @@ if ($policy.version -cne "development-official-backtest-2026-q3-v2" -or
 # The window and the schema are the whole point of the amendment, so they are pinned here rather than
 # left to the seed. Local calendar-day midnight in the policy timezone is what the consumer requires;
 # 05:00Z is that midnight in January, and stating it any other way makes the consumer reject the policy.
-if ($policy.periodStart -cne "2024-01-01T05:00:00Z" -or $policy.periodEnd -cne "2024-02-01T05:00:00Z" -or
+$periodStart = ([DateTimeOffset]$policy.periodStart).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+$periodEnd = ([DateTimeOffset]$policy.periodEnd).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+if ($periodStart -cne "2016-01-01T05:00:00Z" -or $periodEnd -cne "2026-07-30T04:00:00Z" -or
     $policy.marketDataSchemaVersion -cne "market-bars/1" -or $policy.timezone -cne "America/New_York") {
     throw "Development execution policy window and market data schema must match the verified manifest."
 }
 # The seed publishes the new version and leaves the superseded one exactly as published.
-Assert-Contains $policySeed "development-official-backtest-2026-q3-v2" `
+Assert-Contains $policySeed "development-official-backtest-2026-q3-v3" `
     "Development policy seed must publish the amended policy version."
 Assert-Contains $policySeed ([string]$artifactManifest.amendment.supersededVersion) `
     "Development policy seed must keep publishing the superseded version so a fresh database still has its row."
 if ($runtimePolicy.schemaVersion -ne 1 -or $runtimePolicy.attempt.maxAttempts -ne 3 -or
     $runtimePolicy.attempt.leaseDurationSeconds -ne 300 -or
     $runtimePolicy.attempt.attemptTimeoutSeconds -ne 1800 -or
-    $runtimePolicy.attempt.maxCpuTimeSeconds -ne 300 -or
-    $runtimePolicy.attempt.maxMemoryBytes -ne 536870912 -or
+    $runtimePolicy.attempt.maxCpuTimeSeconds -ne 900 -or
+    $runtimePolicy.attempt.maxMemoryBytes -ne 1073741824 -or
     $runtimePolicy.microstructure.maxVolumeParticipationBps -ne 1000 -or
     $runtimePolicy.microstructure.buyingPowerBufferBps -ne 1 -or
     $runtimePolicy.riskLimits.maxStrategyNotional -cne "1000000" -or

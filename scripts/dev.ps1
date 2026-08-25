@@ -343,7 +343,7 @@ function Initialize-LocalStrategyData {
         return
     }
     $policySeed = Join-Path $root 'proposals/development-runtime-policy/artifacts/policy-seed.sql'
-    $seedScript = Join-Path $root 'scripts/local/seed-basic-strategy-e2e.py'
+    $seedScript = Join-Path $root 'scripts/local/full_range_manifest.py'
     foreach ($required in @($policySeed, $seedScript)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "Local strategy seed input is missing: $required"
@@ -357,11 +357,6 @@ function Initialize-LocalStrategyData {
     $postgresPassword = Get-EnvironmentValue -Name 'POSTGRES_PASSWORD' -DefaultValue 'missing-local-postgres-password'
     $postgresDatabase = Get-EnvironmentValue -Name 'POSTGRES_DB' -DefaultValue 'idea2strategy'
     $postgresPort = Get-EnvironmentValue -Name 'POSTGRES_PORT' -DefaultValue '15432'
-    $minioUser = Get-EnvironmentValue -Name 'MINIO_ROOT_USER' -DefaultValue 'idea2strategy'
-    $minioPassword = Get-EnvironmentValue -Name 'MINIO_ROOT_PASSWORD' -DefaultValue 'missing-local-minio-password'
-    $minioPort = Get-EnvironmentValue -Name 'MINIO_API_PORT' -DefaultValue '19000'
-    $marketBucket = Get-EnvironmentValue -Name 'S3_MARKET_DATA_BUCKET' -DefaultValue 'idea2strategy-local-market-data'
-    $region = Get-EnvironmentValue -Name 'S3_REGION' -DefaultValue 'ap-northeast-2'
 
     docker cp $policySeed 'idea2strategy-postgres:/tmp/local-backtest-policy-seed.sql' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Unable to copy the local execution-policy seed.' }
@@ -370,19 +365,13 @@ function Initialize-LocalStrategyData {
     if ($LASTEXITCODE -ne 0) { throw 'Unable to seed the local execution-policy catalog.' }
 
     $names = @(
-        'LOCAL_SEED_DATABASE_URL', 'LOCAL_SEED_S3_ENDPOINT', 'LOCAL_SEED_S3_BUCKET',
-        'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION'
+        'LOCAL_FEATURE_DATABASE_URL'
     )
     $previous = @{}
     foreach ($name in $names) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
     try {
         $encodedPassword = [uri]::EscapeDataString($postgresPassword)
-        $env:LOCAL_SEED_DATABASE_URL = "postgresql://${postgresUser}:${encodedPassword}@127.0.0.1:${postgresPort}/${postgresDatabase}"
-        $env:LOCAL_SEED_S3_ENDPOINT = "http://127.0.0.1:$minioPort"
-        $env:LOCAL_SEED_S3_BUCKET = $marketBucket
-        $env:AWS_ACCESS_KEY_ID = $minioUser
-        $env:AWS_SECRET_ACCESS_KEY = $minioPassword
-        $env:AWS_REGION = $region
+        $env:LOCAL_FEATURE_DATABASE_URL = "postgresql+psycopg://${postgresUser}:${encodedPassword}@127.0.0.1:${postgresPort}/${postgresDatabase}"
         uv run --project (Join-Path $root 'backtest-engine') python $seedScript | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Unable to seed deterministic local strategy inputs.' }
     }

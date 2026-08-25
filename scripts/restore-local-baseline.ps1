@@ -220,6 +220,12 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
         -f /tmp/rebind-local-object-versions.sql | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Unable to bind restored storage rows to immutable MinIO versions.' }
 
+    $encodedCredential = [uri]::EscapeDataString($postgresCredential)
+    $env:LOCAL_FEATURE_DATABASE_URL = "postgresql+psycopg://${user}:${encodedCredential}@127.0.0.1:15432/${database}"
+    uv run --project (Join-Path $root 'backtest-engine') python `
+        (Join-Path $root 'scripts/local/full_range_manifest.py') | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Full-range adjusted 30m manifest registration failed.' }
+
     # V1 intentionally contains schema/reference data only. Restore the reviewed
     # development execution-policy catalog after importing the retired AWS data;
     # otherwise a strategy can validate but cannot release or enqueue its
@@ -241,23 +247,36 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
     }
     foreach ($name in $checks.Keys) {
         $actual = (docker exec idea2strategy-postgres psql -U $user -d $database -Atc $checks[$name]).Trim()
-        $expected = [string]$manifest.database.row_counts.$name
+        $expectedValue = [long]$manifest.database.row_counts.$name
+        if ($name -eq 'dataset_manifests') { $expectedValue += 1 }
+        if ($name -eq 'dataset_objects') { $expectedValue += 88 }
+        if ($name -eq 'dataset_lineage') { $expectedValue += 11 }
+        $expected = [string]$expectedValue
         if ($LASTEXITCODE -ne 0 -or $actual -cne $expected) {
             throw "Restored row count mismatch for ${name}: expected $expected, found $actual"
         }
     }
 
-    # The UI publishes RSI at four strategy clocks. Materialize the compact AAPL/MSFT
-    # development window locally so a clean restore can release and backtest those cards
-    # without the retired D: drive or an AWS feature worker.
-    $encodedCredential = [uri]::EscapeDataString($postgresCredential)
-    $env:LOCAL_FEATURE_DATABASE_URL = "postgresql+psycopg://${user}:${encodedCredential}@127.0.0.1:15432/${database}"
-    $env:LOCAL_FEATURE_ROOT = Join-Path $root '.harness/local/tmp/feature-materialization'
-    $env:LOCAL_FEATURE_S3_ENDPOINT = 'http://127.0.0.1:19000'
-    $env:LOCAL_FEATURE_S3_BUCKET = $localBucket
+    docker compose --env-file $envPath -f $composePath up -d --wait redis
+    if ($LASTEXITCODE -ne 0) { throw 'Local Redis did not become healthy for market-history projection.' }
+    $env:LOCAL_HISTORY_DATABASE_URL = $env:LOCAL_FEATURE_DATABASE_URL
+    $env:LOCAL_HISTORY_STATE_ROOT = Join-Path $root '.harness/local/tmp/market-history-projection'
+    $env:LOCAL_HISTORY_S3_ENDPOINT = 'http://127.0.0.1:19000'
+    $env:LOCAL_HISTORY_S3_BUCKET = $localBucket
+    $env:LOCAL_HISTORY_REDIS_URI = 'redis://127.0.0.1:16379/0'
     $env:AWS_ACCESS_KEY_ID = $minioUser
     $env:AWS_SECRET_ACCESS_KEY = $minioCredential
     $env:AWS_REGION = 'ap-northeast-2'
+    uv run --project (Join-Path $root 'data-pipeline') python `
+        (Join-Path $root 'scripts/local/project-local-market-history.py') | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Local three-month market-history projection failed.' }
+
+    # The UI publishes RSI at four strategy clocks. Materialize the compact AAPL/MSFT
+    # development window locally so a clean restore can release and backtest those cards
+    # without the retired D: drive or an AWS feature worker.
+    $env:LOCAL_FEATURE_ROOT = Join-Path $root '.harness/local/tmp/feature-materialization'
+    $env:LOCAL_FEATURE_S3_ENDPOINT = 'http://127.0.0.1:19000'
+    $env:LOCAL_FEATURE_S3_BUCKET = $localBucket
     uv run --project (Join-Path $root 'data-pipeline') python `
         (Join-Path $root 'scripts/local/materialize-local-strategy-features.py') | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Local strategy feature materialization failed.' }

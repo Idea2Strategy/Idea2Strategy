@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "policies": [
     {
-      "version": "development-official-backtest-2026-q3-v2",
+      "version": "development-official-backtest-2026-q3-v3",
       "releaseQuarter": "2026-Q3",
-      "periodStart": "2024-01-01T05:00:00Z",
-      "periodEnd": "2024-02-01T05:00:00Z",
+      "periodStart": "2016-01-01T05:00:00Z",
+      "periodEnd": "2026-07-30T04:00:00Z",
       "feeRate": "0.002",
       "slippageRateBps": 5,
       "timezone": "America/New_York",

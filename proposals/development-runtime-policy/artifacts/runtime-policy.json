@@ -4,8 +4,8 @@
     "maxAttempts": 3,
     "leaseDurationSeconds": 300,
     "attemptTimeoutSeconds": 1800,
-    "maxCpuTimeSeconds": 300,
-    "maxMemoryBytes": 536870912
+    "maxCpuTimeSeconds": 900,
+    "maxMemoryBytes": 1073741824
   },
   "microstructure": {
     "version": "development-microstructure-v1",
