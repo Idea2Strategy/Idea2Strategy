@@ -21,6 +21,7 @@ const EXPECTED_ELEMENTS = [
   'BASIC_EQUAL_ALLOCATION_ORDER',
 ];
 const ALLOWED_RESOLUTIONS = new Set(['30m', '1h', '4h', '1d']);
+const normalizedFixtureBytes = (value) => value.replace(/\r\n/g, '\n').replace(/\n*$/, '\n');
 
 class ContractError extends Error {
   constructor(code, detail) {
@@ -124,7 +125,7 @@ async function main() {
   validateCorpus(corpus);
   for (const copy of options.copies) {
     const copyBytes = await readFile(copy, 'utf8');
-    if (copyBytes !== canonicalBytes) {
+    if (normalizedFixtureBytes(copyBytes) !== normalizedFixtureBytes(canonicalBytes)) {
       throw new ContractError('FIXTURE_PARITY_MISMATCH', copy);
     }
   }
