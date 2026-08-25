@@ -277,6 +277,21 @@ def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
         if isinstance(row.get("name"), str) and isinstance(row.get("id"), str)
     ]
     receipts: list[dict[str, str]] = []
+
+    def configure(strategy_id: str, sample: SampleStrategy) -> Mapping[str, Any]:
+        lease = api.acquire_lease(strategy_id)
+        lease_token = lease.get("leaseToken")
+        if not isinstance(lease_token, str):
+            raise ValueError("Strategy edit lease token is unavailable")
+        try:
+            api.save_document(strategy_id, lease_token, sample)
+        finally:
+            api.release_lease(strategy_id, lease_token)
+        validation = api.validate_strategy(strategy_id, catalog_id)
+        if validation.get("status") != "VALID" or not isinstance(validation.get("validationRunId"), str):
+            raise ValueError(f"Sample strategy did not validate: {sample.key}")
+        return validation
+
     for sample in samples:
         same_name = [row for row in library if row["name"] == sample.name]
         released_exists = any(row.get("kind") == "released" for row in same_name)
@@ -302,22 +317,19 @@ def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
         existing = configured or resumable
         if draft_candidates and existing is None:
             raise ValueError(f"Strategy name is already used by a non-sample document: {sample.name}")
+
         strategy_id = existing["id"] if existing else api.create_strategy(sample)
-        lease = api.acquire_lease(strategy_id)
-        lease_token = lease.get("leaseToken")
-        if not isinstance(lease_token, str):
-            raise ValueError("Strategy edit lease token is unavailable")
-        try:
-            api.save_document(strategy_id, lease_token, sample)
-        finally:
-            api.release_lease(strategy_id, lease_token)
-        validation = api.validate_strategy(strategy_id, catalog_id)
-        if validation.get("status") != "VALID" or not isinstance(validation.get("validationRunId"), str):
-            raise ValueError(f"Sample strategy did not validate: {sample.key}")
+        validation = configure(strategy_id, sample)
+        if released_exists:
+            receipts.append({"key": sample.key, "strategyId": strategy_id, "status": "created"})
+            continue
+
         released = api.release_strategy(strategy_id, validation["validationRunId"])
+        editable_strategy_id = api.create_strategy(sample)
+        configure(editable_strategy_id, sample)
         receipts.append({
             "key": sample.key,
-            "strategyId": strategy_id,
+            "strategyId": editable_strategy_id,
             "releaseId": str(released.get("releaseId", "")),
             "botId": str(released.get("botId", "")),
             "status": "created",

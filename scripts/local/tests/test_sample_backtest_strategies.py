@@ -143,7 +143,7 @@ class _RecordingApi:
 
     def create_strategy(self, sample):
         self.created.append(sample.key)
-        return f"created-{sample.key}"
+        return f"created-{len(self.created)}-{sample.key}"
 
     def acquire_lease(self, strategy_id: str):
         return {"leaseToken": f"lease-{strategy_id}"}
@@ -164,17 +164,33 @@ class _RecordingApi:
         return {"releaseId": f"release-{strategy_id}", "botId": f"bot-{strategy_id}"}
 
 
-def test_seed_creates_saves_validates_and_releases_each_new_sample() -> None:
+def test_seed_creates_validates_and_releases_each_new_sample_once() -> None:
     api = _RecordingApi()
 
     receipts = seed_samples(api)
 
     assert len(receipts) == 3
-    assert len(api.created) == 3
-    assert len(api.saved) == 3
-    assert len(api.validated) == 3
+    assert len(api.created) == 6
+    assert len(api.saved) == 6
+    assert len(api.validated) == 6
     assert len(api.released) == 3
     assert api.lease_released == api.saved
+
+
+def test_seed_keeps_a_separate_editable_copy_after_releasing_each_new_sample() -> None:
+    api = _RecordingApi()
+
+    receipts = seed_samples(api)
+
+    assert len(api.created) == 6
+    assert len(api.saved) == 6
+    assert len(api.validated) == 6
+    assert len(api.released) == 3
+    assert [receipt["strategyId"] for receipt in receipts] == [
+        "created-2-AAPL_MOMENTUM_REVERSAL",
+        "created-4-MSFT_STREAK_REVERSAL",
+        "created-6-LIQUID_MULTI_ASSET_CYCLE",
+    ]
 
 
 def test_seed_reuses_samples_with_the_same_stable_key() -> None:
@@ -189,7 +205,7 @@ def test_seed_reuses_samples_with_the_same_stable_key() -> None:
     assert api.released == []
 
 
-def test_seed_updates_and_releases_an_older_sample_revision() -> None:
+def test_seed_updates_an_older_editable_revision_without_releasing_it_again() -> None:
     api = _RecordingApi(existing=True, stale=True)
 
     receipts = seed_samples(api)
@@ -197,7 +213,7 @@ def test_seed_updates_and_releases_an_older_sample_revision() -> None:
     assert [receipt["status"] for receipt in receipts] == ["created", "created", "created"]
     assert api.created == []
     assert api.saved == ["existing-0", "existing-1", "existing-2"]
-    assert api.released == api.saved
+    assert api.released == []
 
 
 def test_seed_resumes_an_empty_draft_left_by_an_interrupted_run() -> None:
@@ -205,11 +221,18 @@ def test_seed_resumes_an_empty_draft_left_by_an_interrupted_run() -> None:
 
     receipts = seed_samples(api)
 
-    assert receipts[0]["strategyId"] == "partial-0"
+    assert receipts[0]["strategyId"] == "created-1-AAPL_MOMENTUM_REVERSAL"
     assert "partial-0" in api.saved
     assert "partial-0" in api.validated
     assert "partial-0" in api.released
-    assert api.created == ["MSFT_STREAK_REVERSAL", "LIQUID_MULTI_ASSET_CYCLE"]
+    assert api.released[0] == "partial-0"
+    assert api.created == [
+        "AAPL_MOMENTUM_REVERSAL",
+        "MSFT_STREAK_REVERSAL",
+        "MSFT_STREAK_REVERSAL",
+        "LIQUID_MULTI_ASSET_CYCLE",
+        "LIQUID_MULTI_ASSET_CYCLE",
+    ]
 
 
 def test_http_adapter_sends_release_budget_without_exposing_credentials() -> None:

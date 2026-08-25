@@ -102,6 +102,18 @@ foreach ($serviceName in @("flyway", "backend-api", "backend-batch", "backend-wo
     }
 }
 
+$backendApiEnvironment = $config.services."backend-api".environment
+foreach ($required in @(
+    "MARKET_DATA_REDIS_URI",
+    "MARKET_DATA_REDIS_KEY_PREFIX",
+    "MARKET_DATA_WEBSOCKET_ALLOWED_ORIGIN_PATTERNS"
+)) {
+    if (-not $backendApiEnvironment.PSObject.Properties.Name.Contains($required) -or
+        [string]::IsNullOrWhiteSpace([string]$backendApiEnvironment.$required)) {
+        throw "backend-api is missing the local market-history read model wiring: $required"
+    }
+}
+
 if ($config.services.PSObject.Properties.Name.Contains("market-gateway")) {
     throw "The apps profile must start without the credential-gated live market gateway."
 }
