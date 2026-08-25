@@ -2,10 +2,10 @@
 
 - 실행 일시: 2026-08-25 (KST)
 - 환경: Windows 로컬 Docker Desktop, 실제 PostgreSQL·Redis·LocalStack·MinIO와 브라우저
-- 루트 기준 커밋(증빙 커밋 직전): `c22e035b8365e21053f2ef0976befc0f68ad92a2`
-- Backend: `7283b7c8220c999820b445fa2fcad1214ed280b1`
-- Backtest: `c5458b008eeca42a8d7780a84718b2982282a483`
-- Data Pipeline: `3efef2ee7d0a219a20b11db6629a796715aa5660`
+- 루트 기준 커밋(최종 통합 커밋 직전): `d76eb0c`
+- Backend `develop`: `933f3e3f48a83fb68e3107ac903c699d2e9e7383`
+- Backtest `develop`: `2ce1020f8429ae7bc35cb3022bcb086dfe033407`
+- Data Pipeline `develop`: `3e7a33a382b003ab9d9e9c4be95d7114470734b7`
 - UI: `b3ab7e7195715837fc2b75bf4caccd11cea3041a`
 - 판정: **PASS**
 
@@ -129,7 +129,7 @@ cd ..
 | UI typecheck/build | `tsc --noEmit` 및 Vite production build 통과 |
 | Backtest pytest | 1,217 수집, 1,215 통과, Docker 제외 2 skip |
 | Backtest lint/type | Ruff 오류 0, mypy 57 source files 오류 0 |
-| Data Pipeline feature/DB | 272/272 통과 |
+| Data Pipeline feature/DB | 로컬 feature/DB 272/272 및 PR CI 10/10 통과 |
 | 3-lane 생성 matrix | 5/5 통과 |
 | Flyway | 4 migrations 적용·validate 통과, 두 번째 migrate 0건 |
 | Flyway bundle checksum | `d1fce94a6113e7eb33ba7f4f9868a2cbe1bfa7948c5cc6327e437324e389bb87` |
