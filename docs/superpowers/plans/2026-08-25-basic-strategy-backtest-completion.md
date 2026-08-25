@@ -44,7 +44,7 @@ Create Node tests that invoke the validator against a temporary corpus and prove
 
 - [ ] **Step 2: Run the tests and verify RED**
 
-Run: `node --test scripts/validate-basic-strategy-conformance.test.mjs`  
+Run: `node --test scripts/validate-basic-strategy-conformance.test.mjs`
 Expected: FAIL because the validator and corpus do not exist.
 
 - [ ] **Step 3: Add the literal fourteen-case corpus and validator**
@@ -74,7 +74,7 @@ Each condition case includes both BUY and SELL when allowed. SELL-only position 
 
 - [ ] **Step 4: Run the validator tests and verify GREEN**
 
-Run: `node --test scripts/validate-basic-strategy-conformance.test.mjs`  
+Run: `node --test scripts/validate-basic-strategy-conformance.test.mjs`
 Expected: all tests pass.
 
 - [ ] **Step 5: Add the root command**
