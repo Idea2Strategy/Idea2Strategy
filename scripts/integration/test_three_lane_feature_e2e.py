@@ -64,7 +64,7 @@ RSI_30M_FEED_CODE = "FEATURE_RSI_14_30M_RSI_1_0_0"
 
 def _production_plan() -> dict[str, Any]:
     plan = copy.deepcopy(compiled_plan())
-    plan["elementCatalogVersion"] = "basic-elements:2026-08-08"
+    plan["elementCatalogVersion"] = "basic-elements:2026-08-25"
     requirement = plan["requiredFeatures"][0]
     requirement.update(
         {
@@ -93,6 +93,7 @@ def _production_plan() -> dict[str, Any]:
                 "timeInForce": "DAY",
                 "side": "BUY",
                 "orderPercent": "100",
+                "maxPositionPercent": "40",
                 "executionMode": "1회만",
                 "waitMode": "조건 재충족",
                 "waitInterval": "1",

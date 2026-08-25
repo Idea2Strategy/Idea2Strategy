@@ -58,8 +58,14 @@ if ($runtimeGrantEntries.Count -ne 1) {
     throw 'The pinned Flyway manifest must contain exactly one generated runtime grant migration.'
 }
 $versionedEntries = @($manifestLines | Where-Object { $_ -match '^V[^\t]+\.sql\t[0-9a-f]{64}$' })
-if ($versionedEntries.Count -ne 1 -or $versionedEntries[0] -notmatch '^V1__initial_schema\.sql\t') {
-    throw 'The rebased Flyway manifest must contain V1 as its only versioned migration.'
+$expectedVersionedNames = @(
+    'V1__initial_schema.sql',
+    'V20260825000000__backend_basic_strategy_execution_completion.sql',
+    'V20260825000001__pipeline_basic_strategy_feature_catalog.sql'
+)
+$actualVersionedNames = @($versionedEntries | ForEach-Object { ($_ -split "`t", 2)[0] })
+if ((ConvertTo-Json -Compress $actualVersionedNames) -cne (ConvertTo-Json -Compress $expectedVersionedNames)) {
+    throw "The Flyway manifest does not contain the immutable V1 and approved ordered post-V1 migrations: $($actualVersionedNames -join ', ')."
 }
 $runtimeGrantPath = Join-Path $bundle 'R__database_runtime_grants.sql'
 $runtimeGrantSql = Get-Content -LiteralPath $runtimeGrantPath -Raw
