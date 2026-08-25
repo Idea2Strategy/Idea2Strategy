@@ -20,6 +20,7 @@
     "contract:validate:release-adoption": "node --test scripts/validate-release-protected-contracts.test.mjs",
     "contract:validate:registry": "node --test scripts/validate-contract-registry.test.mjs",
     "contract:validate:basic-strategy": "node scripts/validate-basic-strategy-conformance.mjs",
+    "contract:validate:ui-api": "node --test scripts/validate-ui-api-contracts.test.mjs && node scripts/validate-ui-api-contracts.mjs",
     "dbdiagram": "dbdiagram"
   },
   "devDependencies": {
