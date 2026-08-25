@@ -265,8 +265,8 @@ foreach ($queueName in @(
 $initialMigrationPath = Join-Path $root "backend/db-migration/src/main/resources/db/migration/V1__initial_schema.sql"
 $initialMigration = Get-Content -LiteralPath $initialMigrationPath -Raw
 $createTableCount = ([regex]::Matches($initialMigration, "(?im)^CREATE TABLE ")).Count
-if ($createTableCount -ne 181) {
-    throw "The rebased V1 Flyway baseline must contain 181 tables; found $createTableCount."
+if ($createTableCount -ne 183) {
+    throw "The rebased V1 Flyway baseline must contain 183 tables; found $createTableCount."
 }
 
 $devScript = Get-Content -LiteralPath (Join-Path $root "scripts/dev.ps1") -Raw
