@@ -1,5 +1,11 @@
--- Publish the complete Basic execution catalog without mutating the consolidated V1 rows.
--- Existing releases stay pinned to basic-elements:2026-08-08; new drafts select this later catalog.
+-- Publish the complete Basic execution catalog without mutating the consolidated V1 definitions.
+-- Existing releases stay pinned to the retired basic-elements:2026-08-08 catalog; new drafts select
+-- the single active catalog published below.
+
+UPDATE strategy.element_catalog_versions
+SET retired_at = '2026-08-25 00:00:00+00'
+WHERE catalog_version = 'basic-elements:2026-08-08'
+  AND retired_at IS NULL;
 
 INSERT INTO strategy.element_catalog_versions (
     id, language_version, schema_version, catalog_version, data_requirement_version,
