@@ -3,7 +3,7 @@
   "backend_gitlink": "7283b7c8220c999820b445fa2fcad1214ed280b1",
   "backtest_gitlink": "c5458b008eeca42a8d7780a84718b2982282a483",
   "trading_gitlink": "7afc4d25477e906146c00533ae0e91c14bdb731a",
-  "data_pipeline_gitlink": "236d1e3d8981d747d44ea7cba2805508d070e60e",
+  "data_pipeline_gitlink": "3efef2ee7d0a219a20b11db6629a796715aa5660",
   "bundle_sha256": "d1fce94a6113e7eb33ba7f4f9868a2cbe1bfa7948c5cc6327e437324e389bb87",
   "trading_read_projection_contract_sha256": "5ce4893dec56409ba2ee5610996081695d0842a2b20196ba1ba45170d0544681",
   "canonical_baseline_sha256": "24e27b3720a48bfe95aa4786fa8096a19e4b4aeb6e95a4f62fea4b5cd0f7c750"
