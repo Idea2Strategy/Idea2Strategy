@@ -97,6 +97,6 @@
 
 - [x] Rebuild affected Docker services and wait for health.
 - [x] Compare API equity points to original Parquet and benchmark returns to original Redis daily bars.
-- [ ] Run backtest-engine, backend, and full UI suites, typecheck, and production build.
+- [x] Run backtest-engine, backend, and full UI suites, typecheck, and production build.
 - [x] Verify actual completed, cancelled, empty, and recoverable error states in the browser.
-- [ ] Run secret gates, inspect diffs, commit submodules and root, and push the current branches.
+- [x] Run secret gates, inspect diffs, commit submodules and root, and push the current branches.
