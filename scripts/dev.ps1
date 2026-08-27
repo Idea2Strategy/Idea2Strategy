@@ -343,8 +343,9 @@ function Initialize-LocalStrategyData {
         return
     }
     $policySeed = Join-Path $root 'proposals/development-runtime-policy/artifacts/policy-seed.sql'
+    $scoringSeedInitializer = Join-Path $root 'scripts/initialize-local-scoring-catalog.ps1'
     $seedScript = Join-Path $root 'scripts/local/full_range_manifest.py'
-    foreach ($required in @($policySeed, $seedScript)) {
+    foreach ($required in @($policySeed, $scoringSeedInitializer, $seedScript)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "Local strategy seed input is missing: $required"
         }
@@ -363,6 +364,12 @@ function Initialize-LocalStrategyData {
     docker exec idea2strategy-postgres psql -v ON_ERROR_STOP=1 `
         -U $postgresUser -d $postgresDatabase -f /tmp/local-backtest-policy-seed.sql | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Unable to seed the local execution-policy catalog.' }
+
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scoringSeedInitializer `
+        -ContainerName 'idea2strategy-postgres' `
+        -PostgresUser $postgresUser `
+        -PostgresDatabase $postgresDatabase
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to seed the local scoring-template catalog.' }
 
     $names = @(
         'LOCAL_FEATURE_DATABASE_URL'
