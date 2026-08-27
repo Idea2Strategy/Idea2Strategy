@@ -25,7 +25,7 @@ backtest create|list|get|cancel|delete
 competition create|list|get|delete
 ```
 
-All commands return the existing single JSON envelope. IDs are path-encoded, list limits are bounded, stop/delete commands require `--yes`, mutation requests use an idempotency key, and API problem details remain visible as stable CLI errors without leaking credentials.
+All commands return the existing single JSON envelope. IDs are path-encoded, list limits are bounded, and stop/delete commands require `--yes`. Mutations follow their server-owned replay contract: backtest creation requires the caller's idempotency key, while commands whose backend derives a stable domain key or treats a repeated terminal request as a no-op keep that canonical behavior. API problem details remain visible as stable CLI errors without leaking credentials; the CLI does not pretend an unsupported header makes a non-idempotent endpoint safe.
 
 Backend and Backtest API may use separate origins locally. `--base-url`/`I2S_BASE_URL` selects Backend and `--backtest-base-url`/`I2S_BACKTEST_BASE_URL` selects Backtest API; the latter defaults to the Backend origin for deployed path routing.
 
