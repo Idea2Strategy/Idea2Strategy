@@ -2,180 +2,89 @@
 
 상태: 배포됨
 정본 위치: `docs/collaboration-policy.md`
-적용 범위: Idea2Strategy 루트 저장소, `ui` 작업공간, 향후 GitLab 제출 작업공간, 모든 개발자·에이전트·자동화 작업
 
-## 1. 목적과 정본 관계
+## 1. 정본과 작업 시작
 
-이 문서는 Idea2Strategy 전용 Git·협업 운영 정책의 단일 공유 정본이다. 제품 요구사항은 `specs/`와 `contracts/`가 소유하며 이 문서는 제품 동작을 정의하지 않는다.
+제품 의미는 `specs/`, 서비스 의무는 `contracts/`, DB 모델은
+`db/schema.dbml`, 출시 순서와 완료 조건은 `docs/launch-readiness-plan.md`와
+`docs/launch-readiness-tasks.json`이 소유한다. 이 문서는 Git·협업 운영만
+정의한다.
 
-작업자는 모든 작업 시작 전에 `AGENTS.md`, `.harness/entry.md`와 이 문서를 읽는다. 정본 우선순위는 다음과 같다.
+모든 작업은 다음 순서로 시작한다.
 
-1. 제품 의미와 서비스 의무: `specs/`, `contracts/`
-2. Idea2Strategy 전용 협업 정책: 이 문서
-3. 프로젝트 복원·조정·계획·검증의 공통 절차: Stackcord 지침과 `.harness/entry.md`
-4. 실제 Git·remote·submodule·worktree·인증 가능 범위
-5. 로컬 작업 상태와 생성된 요약
+1. `scripts/initialize-local-harness.ps1 -Verify`를 실행한다.
+2. `AGENTS.md`, 이 문서, 관련 사양과 계약을 읽는다.
+3. `git status --short --branch`, `git worktree list`, `git submodule status`로
+   실제 로컬 상태를 확인한다.
+4. GitHub Issue·PR·리뷰가 필요한 작업은 인증된 도구로 현재 상태를 읽는다.
+   캐시나 대화 기록은 실시간 상태를 대신하지 않는다.
+5. 공유·장기·교차 저장소 작업은 전용 worktree, 변경 경로, 소유자, 의존성,
+   병합 순서, 첫 실패 테스트와 완료 근거를 먼저 기록한다.
 
-Stackcord 공통 절차와 이 문서가 충돌하면 공통 절차 자체는 Stackcord가 정본이고, Idea2Strategy의 저장소 역할·문서 소유·이중 구조·로컬 기록은 이 문서가 정본이다. 충돌을 발견한 작업자는 어느 쪽도 임의로 고치지 않고 차이와 영향을 보고한다.
+## 2. 저장소와 Git Flow
 
-## 2. 규칙 분류
+- GitHub 루트 저장소는 submodule 구조의 정본이다.
+- `develop`은 개발·통합 브랜치이고 `main`은 `v1.0.0`부터 정식 릴리스 전용이다.
+- 기능 브랜치는 목적을 나타내며 일반 PR은 `develop`을 대상으로 한다.
+- submodule 변경과 루트 gitlink 갱신은 별도 검토 단위다. 단,
+  `docs/launch-readiness-tasks.json`의 `may_move_gitlinks`에 지정된 소유자는 자기
+  submodule 포인터를 직접 갱신한다.
+- `db/schema.dbml`, `compose.back.yml`, `compose.front.yml` 등 ledger의
+  `exclusive_paths`는 지정 소유자만 변경한다.
+- Development 배포, BASIC queue/worker, operator 계정, DB bootstrap 같은
+  `serialized_resources`는 루트 Issue에 사용 시작·종료를 남기고 한 번에 한
+  사람만 사용한다.
+- 기존 변경을 임의로 stash, reset, clean, checkout 하지 않는다.
 
-| 범주 | 정본 | 적용 내용 |
+GitLab monolithic 제출 작업공간은 GitHub submodule 작업공간과 분리한다. 두
+원격의 이력과 자격증명을 같은 것으로 가정하지 않으며, 토큰·비밀번호·개인키는
+문서·로그·커밋에 기록하지 않는다.
+
+## 3. 제품 권한과 보호 정본
+
+권한 구성의 정본은 `docs/product-authorities.yaml`이다. 네 권한자
+`user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, `user:hjcud`는 product,
+policy, business, contract 범위에서 동등하다.
+
+- 보호 경로: `docs/product-authorities.yaml`, `specs/**`, `contracts/**`, 이
+  문서와 이 규칙을 집행하는 파일.
+- 일반 작업자는 보호 경로를 직접 고치지 않고 격리된 proposal을 만든다.
+- `v1.0.0` 전에는 구성된 권한자의 명시적 지시를 PR 본문에 권한자 이름과 함께
+  인용하면 해당 PR에서 보호 정본을 수정할 수 있다.
+- `v1.0.0`부터는 정확한 커밋에 대한 GitHub의 fresh approval이 필요하다.
+- 승인 상태가 없거나 오래됐거나 확인 불가하면 승인·통합·릴리스로 표현하지
+  않는다.
+- Git user.name and user.email never prove authority.
+
+이 변경은 권한자 `user:kcrmin`의 2026-08-12/13 외부 조정 도구 완전 제거
+지시에 따라 독립 PR로 수행한다. 원문은 PR 본문에 기록한다.
+
+## 4. 로컬 비공유 영역
+
+`.harness/local/`은 프로젝트 스크립트가 쓰는 일반 로컬 운영 영역이다. 모든
+clone은 `README.md`와 `.gitkeep` 골격만 공유하고 실제 산출물·임시 파일·캐시·
+로그·Jira 이전 기록·정책 해시는 Git에서 제외한다. 자격증명, 세션 쿠키, 토큰,
+개인키, 복구 코드는 저장하지 않는다.
+
+`scripts/initialize-local-harness.ps1`은 이 골격, ignore 경계, Git hook,
+workspace isolation을 검증한다. `.harness/ui/baselines/`는 별도의 추적되는 UI
+기준선이며 로컬 운영 데이터가 아니다.
+
+## 5. DBML·계약·검증
+
+- `db/schema.dbml`이 데이터 모델의 Git 정본이다. 이미 적용된 Flyway migration은
+  수정하지 않고 새 migration을 추가한다.
+- dbdiagram과 외부 UI 도구는 제안 입력일 뿐 정본이 아니다.
+- 계약/API/DB/Compose/submodule 경계 변경은 통합 검증을 거친다.
+- 완료 주장은 관련 테스트, CI, 정확한 커밋과 PR 상태로 증명한다.
+- 원격 쓰기, Issue/Jira 변경, push, merge, release는 사용자가 요청한 범위에서만
+  수행한다.
+
+## 6. 변경 이력
+
+| 날짜 | 변경 | 승인 근거 |
 | --- | --- | --- |
-| Stackcord 공통 규칙 | 설치된 Stackcord 지침, `.harness/entry.md` | 프로젝트 복원, 상태 감사, 경계 간 조정, 실행 계획, 작업 선점, 계약·DBML·UI·통합 검증 |
-| Idea2Strategy 추가 규칙 | 이 문서 | GitHub/GitLab 역할 분리, submodule/monolithic 경계, 정책 문서 통제, Jira 로컬 기록, dbdiagram 운영 |
-| 로컬 전용 규칙 | `.harness/local/` | 논리적 소유자 대응, 문서 무결성 기준, Jira 누적 기록, 구조 동기화 상태와 하네스별 비공유 상태 |
-
-공통 규칙을 이 문서에 복제하지 않는다. 작업 유형에 맞는 Stackcord 재개·조정·계획 지침을 먼저 적용하고 이 문서의 프로젝트 전용 경계를 추가한다.
-
-## 3. 작업 시작과 계획
-
-1. 루트 저장소를 확인하고 Stackcord 상태·컨텍스트 감사와 실제 Git·submodule 상태를 읽는다.
-2. 이 문서의 무결성과 무단 변경 여부를 검사한다.
-3. 관련 `specs/`, `contracts/`, 작업 정의와 실제 provider 상태를 읽는다.
-4. 공유·장기·교차 저장소 작업은 Stackcord 계획으로 경로와 의미 범위, 소유자, 의존성, 병합 순서와 검증 근거를 정의한다.
-5. 선택된 task provider만 실시간 작업 상태를 소유한다. 캐시나 로컬 추정으로 외부 상태를 대신하지 않는다.
-6. 원격 write, Issue/Jira 등록, push, 보호 규칙 변경, release는 사용자가 해당 행동을 명시적으로 승인한 경우에만 수행한다.
-
-## 4. 저장소와 원격 역할
-
-### GitHub
-
-- 루트 저장소와 `ui` Git submodule 구조의 정본이다.
-- `ui`의 커밋과 루트 submodule 포인터 변경은 별도 검토 대상으로 취급한다.
-- GitHub Issues는 TODO·할당·진행 추적용 후보 provider다. 실제 생성·수정·할당은 명시적 요청이 있을 때만 수행한다.
-- 현재 로컬 task provider는 Git-local이며, GitHub Issues 전환은 실제 connector 또는 인증 CLI와 사용자 승인이 준비된 뒤 수행한다.
-
-### GitLab
-
-- SSAFY 제출·팀 협업용 monolithic 원격이다.
-- 별도 sibling 작업공간과 Git Credential Manager 인증이 구성되어 있다. 구체적인 계정 식별자와 자격 증명은 공유 기록에 남기지 않는다.
-- GitLab 구조는 `ui` 콘텐츠를 포함하지만 GitHub 정본 작업공간에서 submodule을 제거하거나 직접 전환하지 않는다.
-- 별도 하네스 또는 안전한 작업공간에서 변환하며, 정확한 동기화 방식이 승인되기 전 자동화하지 않는다.
-- 자격 증명은 OS 자격 증명 저장소 또는 공식 credential helper만 사용한다.
-
-### 원격별 인증 경계
-
-- GitHub와 GitLab은 서로 다른 사용자일 수 있으며 하나의 논리적 `정책 문서 소유자` 역할로만 연결한다.
-- 계정명·이메일·토큰은 이 문서, Jira 기록, 커밋, 로그에 기록하지 않는다.
-- 전역 Git 설정을 바꾸지 않는다. 필요한 설정은 저장소·worktree·하네스 작업공간 범위로 제한한다.
-- 한 원격의 자격 증명·사용자 설정을 다른 원격에 재사용하지 않는다.
-
-## 5. Git 구조와 추적 관계
-
-- GitHub 작업공간은 현재 submodule 구조를 유지한다.
-- GitLab monolithic 작업공간은 별도로 만들며 두 구조를 한 작업 디렉터리에서 전환하지 않는다.
-- 두 원격의 커밋 SHA나 브랜치 이력이 동일하다고 가정하지 않는다.
-- 논리적으로 같은 변경은 향후 승인될 동기화 기록에서 원본 변경, 대상 변경, 관련 Issue/Jira 키와 검증 결과로 연결한다.
-- GitHub 구조를 GitLab에, GitLab monolithic 구조를 GitHub 정본에 잘못 게시하지 않도록 원격·작업공간·submodule 형태 검사를 배포 전 필수로 둔다.
-- 최초 monolithic 변환은 검증된 GitHub 루트 커밋과 정확히 일치하는 UI tree를 사용한다. 이후 반복 동기화·충돌·되돌리기 자동화는 별도 설계 전까지 수행하지 않는다.
-
-## 6. Git convention과 Git Flow
-
-- Stackcord가 정한 일반 브랜치·커밋 규칙을 공통 기준으로 참조한다.
-- 브랜치는 업무 목적을 나타내고, 커밋은 실제 변경 의미를 나타낸다.
-- 브랜치명과 커밋 메시지에 에이전트·모델·자동 생성 표식이나 도구 이름을 넣지 않는다.
-- 작업 식별자가 생기면 GitHub Issue 또는 향후 Jira 기록과 연결한다.
-- 제품 코드와 이 정책 문서의 변경은 같은 커밋에 섞지 않는다.
-- `develop`은 GitHub와 GitLab의 기본 개발·통합 브랜치다. 일반 `feature/*`, `fix/*`, `docs/*`, `chore/*` pull/merge request는 `develop`을 대상으로 한다.
-- `main`은 정식 릴리스 전용이다. 첫 제품 변경은 완성된 서비스가 승인된 `v1.0.0` 시점에만 검증된 `develop`에서 `main`으로 반영하고 같은 semantic version 태그를 붙인다.
-- `v1.0.0` 이후 긴급 수정은 `hotfix/*`를 `main`에서 분기해 검증 후 `main`과 `develop` 양쪽에 반영한다.
-- 호스팅 서비스가 제안하는 기본 대상 브랜치를 그대로 사용하지 않고 작업 성격과 이 규칙을 먼저 확인한다.
-
-## 7. 공식 협업 정책 변경 통제
-
-- 일반 참여자와 일반 자동화 작업은 이 문서를 읽을 수 있지만 직접 수정하지 않는다.
-- 변경이 필요하면 로컬 Jira 형식 또는 선택된 task provider에 별도 변경 요청을 기록한다.
-- 최초 생성자에 연결된 권한 있는 `정책 문서 소유자`가 승인한 전용 작업에서만 수정한다.
-- 논리적 소유자 대응과 승인 상태는 Git에서 제외된 로컬 메타데이터에만 둔다. 비밀번호·토큰·세션·개인키·복구 코드는 어느 로컬 메타데이터에도 저장하지 않는다.
-- 변경 작업은 이유·영향·승인 근거를 이 문서의 변경 이력에 추가하고 제품 코드 변경과 분리한다.
-- 무단 변경이나 무결성 차이를 발견하면 관련 작업을 중단하고 정본과의 차이를 보고한다.
-- 자동 포맷터가 이 문서를 일괄 재작성하지 않게 한다.
-
-이 규칙은 로컬 검증만으로 절대적인 수정 방지를 보장하지 않는다. 실제 강제에는 아래 원격 보호와 CI가 필요하다.
-
-### 제품 권한과 확정 원본 수정 차단
-
-- Stackcord 제품 권한 검사를 활성화하며 선택 provider는 GitHub, 기준 저장소는 `Idea2Strategy/Idea2Strategy`, 권한자는 `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, `user:hjcud`이다. 등록 항목과 실제 인원이 1:1로 대응하며 한 사람이 복수 계정으로 등록된 항목은 없다.
-- `.harness/governance.yaml`, `specs/**`, `contracts/**`, 이 문서와 차단 규칙을 집행하는 파일을 수정하기 전에 `stackcord governance check --json`을 실행한다.
-- 정확한 저장소·HEAD 커밋·보호 의미 fingerprint에 대해 구성된 권한자(`user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, `user:hjcud`)를 승인자로 확인한 fresh provider 관찰만 확정 원본 수정을 허용한다.
-- 네 항목은 모두 동등하다. 권한 범위는 `protected_kinds` 전체(`product`, `policy`, `business`, `contract`)이며 kind별·영역별 제한을 두지 않는다. `approval.minimum: 1`과 `authority_self_approval: true`이므로 각 권한자는 단독 자기 승인으로 확정 원본 변경을 승인할 수 있다.
-- 저장소 협력자 권한과 제품 권한은 별개다. governance 등록은 승인을 인정하는 조건일 뿐이고, 실제 승인에는 저장소 접근 권한이 따로 필요하다.
-  - `user:kcrmin`·`user:pjy008008`·`user:Juwon-Na`·`user:hjcud`: `admin` (2026-08-04 확인). 네 항목 모두 PR 승인이 가능하다.
-- 관찰이 없거나 stale·unknown·unavailable이거나 다른 subject이면 작업자는 must not edit 원칙에 따라 확정 원본을 수정하지 않는다. 별도 격리 제안은 만들 수 있지만 승인·통합·릴리스된 변경으로 표현하지 않는다.
-- **v1.0.0 이전 개발 단계 예외.** `v1.0.0` 릴리스가 존재하기 전까지는 위 항목에서 fresh provider 관찰 대신 **구성된 제품 권한자의 지시를 변경 자체에 기록**하는 것으로 대체한다. 해당 PR 본문에 권한자를 명시하고 지시를 인용한 뒤 그 PR에서 확정 원본을 직접 수정한다. 권한자는 여전히 네 명 중 한 명이어야 하고 변경은 여전히 검토 가능한 단위여야 한다.
-  - 근거: 관찰은 이미 보호 경로를 건드리는 PR에 대한 리뷰 승인으로만 생성되고 GitHub은 PR 작성자의 자기 승인을 허용하지 않는다. 릴리스 이전에는 이 순환을 감당할 이유가 없다 — 보호할 공개된 제품 의미가 아직 없고, 검증 불가한 로컬 검사를 정지 신호로 취급하면 아무것도 지키지 못한 채 일반 개발만 막힌다.
-  - `v1.0.0`부터 fresh provider 요구가 다시 필수가 되며, 이 예외 항목은 완화가 아니라 삭제한다.
-  - 이 예외로 만든 변경을 provider가 승인했다고 표현하지 않는다. PR 기록이 유일한 감사 근거다. 권한자가 실제로 요청하지 않은 변경은 여전히 제안으로 남긴다.
-- Git user.name and user.email never prove authority. 알려진 이메일은 로컬 연락 메타데이터일 뿐 권한 판정에 사용하지 않는다.
-- GitLab monolithic 저장소도 별도의 GitLab 사용자에게 제품 권한을 부여하지 않고 위 GitHub 권한을 동일하게 따른다.
-
-## 8. 보호 계층과 현재 적용 상태
-
-| 계층 | 필요한 통제 | 현재 상태 |
-| --- | --- | --- |
-| 로컬 | 필수 읽기 진입점, ignore 검증, 정책 해시·변경 감지, 민감정보 패턴 검사 | 이번 검토본에 구성 |
-| GitHub | 보호 브랜치, 정책 경로 CODEOWNERS 승인, 필수 상태 검사, 직접 push 제한 | 미적용·사용자 승인 필요 |
-| GitLab | protected branch, CODEOWNERS/approval rule, 필수 pipeline, 직접 push 제한 | 원격 구성·보호 규칙 미적용 |
-| CI/검토 | 정책 변경 전용 검사, 승인 소유자 검증, 제품 변경과 정책 변경 혼합 차단 | 미구현 |
-| 조직 권한 | GitHub/GitLab의 실제 정책 소유자 계정 매핑과 최소 권한 | Stackcord 권한자는 `user:kcrmin`·`user:pjy008008`·`user:Juwon-Na`·`user:hjcud`로 구성. 네 계정 모두 `admin`이라 승인 가능. fresh provider 승인 관찰은 아직 없음 |
-
-원격 보호를 적용하기 전에는 누구도 정책 문서가 기술적으로 변경 불가능하다고 주장하지 않는다.
-
-## 9. Jira 로컬 기록
-
-- Jira에는 자동 등록하지 않는다.
-- 프로젝트 누적 기록은 Git에서 제외된 `.harness/local/project/jira/project-log.yaml`에 둔다.
-- 하네스별 임시 상태와 프로젝트 전체 누적 기록을 분리하며 임시 폴더 삭제가 누적 기록을 지우지 않게 한다.
-- 작업·체크리스트·담당 역할·할당/시작/완료 시각·상태·브랜치·커밋·GitHub Issue·근거와 비고를 기록한다.
-- 계정 식별자와 인증 정보는 기록하지 않는다.
-- Jira 프로젝트 키·실제 담당자·일정은 사용자가 지정하기 전 만들지 않는다.
-- 사용자가 요청하면 누적 기록에서 Jira 이전용 문서를 생성하되 실제 등록은 별도 승인 작업으로 수행한다.
-
-## 10. DBML과 dbdiagram 보류 정책
-
-- `db/schema.dbml`이 데이터 모델의 Git 정본이고 dbdiagram은 시각화·협업 제안 도구다.
-- 사용자의 현재 결정에 따라 DBML의 의미 변경은 보류한다. 보류 해제 전에는 테이블·열·관계·인덱스·note를 변경하거나 dbdiagram 변경을 정본에 적용하지 않는다.
-- dbdiagram은 현재 로컬에서 인증된 정책 문서 소유자 관리 계정으로 운영한다. 구체적인 계정 식별자는 공유 문서에 기록하지 않는다.
-- 온라인 변경은 격리된 proposal로 pull하고 의미 diff·계약·migration·test·rollback 영향을 검토한 뒤에만 Git 정본 변경 후보가 된다.
-
-## 11. 로컬 비공유 영역
-
-`.harness/local/`은 프로젝트 전체의 지속적인 로컬 운영 영역이다. 모든 clone은 `README.md`와 정확한 `.gitkeep` 표식으로 같은 골격을 공유하지만, 그 밖의 실제 내용은 Git에서 제외한다. `scripts/initialize-local-harness.ps1`이 골격을 복원하고 경계를 검증한다. 다음만 저장한다.
-
-- 원격별 논리적 소유자 대응과 검증 상태
-- 정책 문서 소유자·무결성 메타데이터
-- Jira 누적 작업 기록
-- 하네스별 로컬 작업 참조
-- GitHub submodule과 향후 GitLab monolithic 구조의 동기화 상태
-- 비밀이 아닌 검증 해시와 시각
-
-토큰·비밀번호·세션 쿠키·개인키·복구 코드·원격 인증 원문은 저장하지 않는다. 생성물은 `.harness/local/artifacts/`, 임시 파일은 `.harness/local/tmp/`, 캐시는 `.harness/local/cache/`, 로그는 `.harness/local/logs/`에 둔다. 실제 내용은 `.gitignore`로 제외하며 검증 스크립트로 ignore와 추적 allowlist를 확인한다.
-
-## 12. 배포 전후 운영
-
-사용자는 2026-07-22 검토본과 로컬 하네스 구조의 배포를 승인했다. 배포는 검증된 GitHub 후보를 먼저 게시한 뒤 그 정확한 커밋으로 별도 GitLab monolithic 작업공간을 만드는 순서로 진행한다. GitHub Issue/Jira 등록과 원격 보호 규칙 변경은 여전히 별도 승인 없이는 수행하지 않는다.
-
-배포 뒤 모든 작업자는 같은 커밋의 이 문서를 읽어야 한다. 정책 변경 요청과 일반 제품 작업을 분리하고, Stackcord 복원 시 이 문서의 존재·무결성·Git 상태를 함께 확인한다.
-
-## 13. 미결정 사항
-
-- 최초 변환 이후 submodule 변경을 GitLab monolithic 구조에 반복 동기화하는 자동화·충돌·rollback 방식
-- GitHub Issues를 Stackcord의 실시간 task provider로 전환하는 시점
-- GitHub `user:kcrmin`·`user:pjy008008`·`user:Juwon-Na`·`user:hjcud`의 fresh provider 승인 관찰과 GitHub/GitLab 원격 보호 설정
-- Jira 프로젝트 키·실제 담당자·일정
-
-## 14. 변경 이력
-
-| 날짜 | 상태 | 변경 이유 | 승인 근거 |
-| --- | --- | --- | --- |
-| 2026-08-04 | 제품 권한자 제거 + 검증기 CI 연결 | `user:Pearone99`를 `product_authorities`에서 제거. 이 계정은 나주원의 보조 계정이라 실질 권한자 수를 늘리지 않으면서 협력자 권한이 `read`여서 PR 승인에도 쓸 수 없었다. 제거로 권한 표면이 줄고 등록 항목이 실제 인원(4명)과 1:1로 대응한다. 나주원은 `user:Juwon-Na`(admin)로 승인한다. 함께 `verify-collaboration-policy.ps1`·`verify-foundation-evidence.mjs`·`test-local-harness.ps1`를 CI `schema-and-coordination` 잡에 연결해 권한자 목록 불일치가 자동 검출되게 했다 | 권한자 `user:kcrmin`이 현재 세션에서 `user:Pearone99` 제거를 명시적으로 지시. 검증기 CI 연결은 동일 세션에서 판단을 위임받아 수행 |
-| 2026-08-04 | 제품 권한자 추가 | `user:hjcud`(구성원 B 손현준, 전략·봇)을 다섯 번째 항목이자 `user:kcrmin`과 동등한 제품 권한자로 등록하고 `protected_kinds` 전체(`product`, `policy`, `business`, `contract`) 권한을 부여. 영향: 단독 자기 승인으로 서비스 방향성을 확정할 수 있는 실질 권한자가 3명에서 4명으로 늘어남. `approval.minimum: 1`·`authority_self_approval: true`는 권한자 지시로 유지 | 권한자 `user:kcrmin`이 현재 세션에서 명시적으로 추가를 지시("나주원, 박준유, 손현준을 나와 완전히 동일한 권한으로 승격"). 나주원·박준유는 이미 등록되어 있어 실제 변경은 `user:hjcud` 추가 하나다. `user:hjcud`의 GitHub 협력자 권한은 `admin`으로 확인되어 PR 승인이 가능하다. 주의: 이 커밋 시점 `stackcord governance check --json`은 `unknown`(blocker `governance.approval-unknown`)이며 fresh provider 승인 관찰은 아직 없다 |
-| 2026-08-02 | 제품 권한자 추가 | `user:Pearone99`을 네 번째 항목으로 등록. 앞서 `Pearwon99`로 전달된 식별자의 오타를 권한자가 정정한 것이다. 계정 이름이 "Juwon Na"로 `user:Juwon-Na`와 동일인의 다른 계정이므로 실질 권한자 수는 셋으로 유지된다 | 권한자 `user:kcrmin`이 현재 세션에서 오타를 정정하고 즉시 사용 가능하도록 지시. 다만 `user:Pearone99`의 저장소 접근 권한은 `none`으로 확인되어 협력자 초대 전에는 승인에 사용할 수 없다 |
-| 2026-08-02 | 제품 권한자 추가 | `user:Juwon-Na`(구성원 A, 계정·운영)를 세 번째 동등 권한자로 등록하고 `protected_kinds` 전체 권한을 부여. 영향: 단독 자기 승인이 가능한 권한자가 셋으로 늘어남 | 권한자 `user:kcrmin`이 현재 세션에서 명시적으로 추가를 지시. `user:Juwon-Na`의 GitHub 협력자 권한은 `write`로 확인되어 PR 승인이 가능하다. 근거 문서: `proposals/product-authority/product-authority-expansion.v1.md` |
-| 2026-08-02 | 제품 권한자 추가 | `user:pjy008008`(구성원 C, 시장·평가)을 `user:kcrmin`과 동등한 제품 권한자로 등록하고 `protected_kinds` 전체에 대한 권한을 부여. 영향: 보호 정본 승인 경로가 둘로 늘어나며 `approval.minimum: 1`·`authority_self_approval: true` 하에서 각 권한자가 단독 자기 승인 가능 | 권한자 `user:kcrmin`이 현재 세션에서 명시적으로 추가를 지시하고 정본 반영을 승인. 근거 문서: `proposals/product-authority/product-authority-expansion.v1.md`. 주의: `stackcord governance check --json`은 여전히 `unknown`이며 fresh provider 승인 관찰은 아직 없음 |
-| 2026-07-22 | 제품 권한 governance 활성화 | GitHub `user:kcrmin`만 확정 제품·정책·비즈니스·계약 변경을 승인할 수 있게 하고, 다른 사용자는 격리 제안만 만들도록 사전 차단 규칙을 추가 | 사용자가 권한 계정과 로컬 연락 이메일을 명시하고 설계 검토 후 진행 승인 |
-| 2026-07-22 | Git Flow 정정 | 양쪽 기본 개발 브랜치를 `develop`으로 통일하고 `main`을 `v1.0.0`부터의 정식 릴리스 전용으로 제한 | 사용자의 명시적 정정 및 진행 승인 |
-| 2026-07-22 | GitHub·GitLab 배포 | GitHub submodule 기준선과 별도 GitLab monolithic 기준선을 검증된 커밋으로 게시 | 사용자의 명시적 진행 요청; 로컬·DBML·UI tree 검증 통과 |
-| 2026-07-22 | 배포 승인·구현 중 | 로컬 운영 영역을 `.harness/local/`로 통합하고 GitLab 저장소·인증·별도 monolithic 작업공간 경계를 확정 | 사용자의 A 구조 선택과 명시적 진행 요청 |
-| 2026-07-22 | 배포 전 검토본 생성 | GitHub submodule·향후 GitLab monolithic 구조와 Stackcord 기반 협업을 하나의 정책으로 통합 | 현재 세션의 명시적 사용자 요청; 원격 소유권·보호 설정은 아직 검증·적용하지 않음 |
+| 2026-08-13 | 외부 조정 도구 의존성을 제거하고 Git·GitHub·저장소 스크립트 기반 절차로 전환. 권한 구성을 `docs/product-authorities.yaml`로 이동 | `user:kcrmin`의 현재 세션 명시적 제거 지시 |
+| 2026-08-04 | 제품 권한자를 실제 네 명과 1:1로 정리하고 CI 검증 연결 | `user:kcrmin`의 명시적 지시 |
+| 2026-08-02 | `user:pjy008008`, `user:Juwon-Na`, `user:hjcud`를 동등 권한자로 확장 | `user:kcrmin`의 명시적 지시 |
+| 2026-07-22 | `develop` 통합, `main` 릴리스 전용 Git Flow와 GitHub/GitLab 분리 구조 확정 | 사용자의 명시적 승인 |

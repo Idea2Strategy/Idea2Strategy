@@ -126,9 +126,9 @@ function verifyPolicy() {
       throw new Error(`Unexpected tracked local-harness content: ${path}`);
     }
   }
-  const governance = readFileSync(join(root, ".harness/governance.yaml"), "utf8");
+  const governance = readFileSync(join(root, "docs/product-authorities.yaml"), "utf8");
   for (const value of [
-    "enabled: true", "provider: github", "repository: Idea2Strategy/Idea2Strategy",
+    "provider: github", "repository: Idea2Strategy/Idea2Strategy",
     "product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]", "authority_self_approval: true",
   ]) {
     if (!governance.includes(value)) throw new Error(`Governance requirement is missing: ${value}`);

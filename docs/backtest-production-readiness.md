@@ -4,9 +4,9 @@ This document records the executable service boundary for the production backtes
 not authorize a production deployment; environment rollout, migration approval, and traffic
 switching remain separate release actions.
 
-The selected-resolution RSI change is currently an implementation proposal. A fresh
-`stackcord governance check --json` did not identify an approved product authority for the
-protected fingerprint, so the exact canonical contract replacement and deployment remain gated.
+The selected-resolution RSI change is currently an implementation proposal. The exact canonical
+contract replacement and deployment remain gated until a configured product authority approves
+the exact change through the repository's GitHub review process.
 See [`proposals/backtest-rsi-resolution-alignment/README.md`](../proposals/backtest-rsi-resolution-alignment/README.md).
 
 ## Supported strategy boundary
@@ -66,7 +66,7 @@ Before deployment, all of the following must pass on the exact root/submodule co
 - UI Vitest suite and production Vite build;
 - a real cross-service journey: publish a Basic strategy, request each supported resolution,
   execute the worker, read the result, and cancel both queued and running runs;
-- root collaboration-policy verification and Stackcord release/status audit.
+- root collaboration-policy verification and exact GitHub release/commit status audit.
 
 Production startup remains fail-closed when the Flyway catalog migration, PostgreSQL schema,
 dataset feed resolution, object hashes, queue configuration, authentication, or service health

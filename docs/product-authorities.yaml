@@ -1,5 +1,4 @@
 schema_version: 1
-enabled: true
 provider: github
 repository: Idea2Strategy/Idea2Strategy
 product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]

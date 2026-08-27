@@ -1,13 +1,18 @@
-# Plugin-less and CLI-less fallback
+# Offline project recovery
 
-1. Treat the natural-language request as the entry point. Run `scripts/initialize-local-harness.ps1 -Verify`, then read `AGENTS.md`, `docs/collaboration-policy.md`, `.harness/entry.md`, the manifest, workspaces, profile, and selected task source; do not ask the user to operate internal files. Do not modify the official collaboration policy during ordinary work.
-2. From a child repository, locate the actual orchestration root. Inspect branch, dirty state, upstream, ahead/behind/diverged state, worktrees, workspace commits, remotes, and exact submodule pointers without mutation.
-3. Read only related approved `specs/`; product, business, behavior, interface, and data `contracts/`; product-authority policy and fresh review state; external UI authority and exact UI baseline; current work definitions; and test evidence.
-4. If an external task source is selected, refresh it with a real authenticated connector or CLI. Treat cached status as unknown. Recover a Git work reservation from the coordination branch, but do not present it as fresh external status.
-5. Separate confirmed facts, stale derivations, unknown external state, blockers, active ownership, and local-only work. State one safe next action. Run a context audit when settled questions repeat or sources disagree.
-6. A small private local edit needs no ticket or reservation. Before shared or risky work, define the service meaning, behavioral boundary, first failing test, semantic scope, owner, dependencies, and merge order; then synchronize the selected task source and Git work reservation.
-7. If UI is independent, verify its clean commit, remote availability, source fingerprints, root pointer, and the baseline fingerprint used by frontend work. Require test and integration evidence before merge. Bind technical and user validation to one release candidate. Keep strict release optional.
-8. Before protected product meaning becomes canonical, verify the exact commit and fingerprint through `stackcord governance check --json`. An ordinary contributor may prepare a proposal and PR, but Git user.name or user.email never proves product authority. If the selected review provider is unavailable, report approval as unknown and do not integrate or release.
-9. Idea2Strategy's canonical-write gate is stricter than the default fallback: only a fresh provider observation for the exact repository, head commit, and protected fingerprint approving a configured product authority (`user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, or `user:hjcud`) permits edits to `.harness/governance.yaml`, `specs/**`, `contracts/**`, `docs/collaboration-policy.md`, or their enforcement files. Otherwise you must not edit the canonical protected source and may create only a clearly isolated proposal. Git user.name and user.email never prove authority. Pre-v1.0.0: a configured product authority instruction recorded in the pull request substitutes for the observation until a `v1.0.0` release exists; see `AGENTS.md`.
+1. Run `scripts/initialize-local-harness.ps1 -Verify`.
+2. Read `AGENTS.md`, `docs/collaboration-policy.md`, the launch ledger, and only
+   the specifications and contracts relevant to the request.
+3. Inspect `git status --short --branch`, `git worktree list`, remotes, upstream
+   divergence, and exact submodule pointers without mutating them.
+4. Treat GitHub issue, pull-request, and review state as unverified until an
+   authenticated connector or CLI can refresh it.
+5. Keep shared work in a dedicated worktree and define path ownership,
+   dependencies, merge order, first failing test, and acceptance evidence.
+6. Protected canonical changes need an authority listed in
+   `docs/product-authorities.yaml`. Before v1.0.0, record that authority's
+   explicit instruction in the pull request. From v1.0.0, require a fresh
+   approval on the exact commit.
 
-Without the CLI, fingerprint, divergence, atomic remote reservation, semantic-conflict, archive-safety, and exact release-identity verification has reduced coverage. Do not report those checks as passed.
+Without authenticated GitHub access, do not claim that remote review, branch
+protection, issue assignment, or release status was verified.

@@ -6,10 +6,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $resolvedRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
-$harnessManifest = Join-Path $resolvedRoot '.harness/manifest.yaml'
-if (-not (Test-Path -LiteralPath (Join-Path $resolvedRoot '.git')) -or
-    -not (Test-Path -LiteralPath $harnessManifest -PathType Leaf)) {
-  throw "RepositoryRoot must contain .git and .harness/manifest.yaml: $resolvedRoot"
+if (-not (Test-Path -LiteralPath (Join-Path $resolvedRoot '.git'))) {
+  throw "RepositoryRoot must contain .git: $resolvedRoot"
 }
 
 $localRoot = Join-Path $resolvedRoot '.harness/local'
@@ -31,7 +29,7 @@ $readme = @'
 
 This directory exists in every clone, but Git tracks only this README and the
 approved `.gitkeep` markers. All generated artifacts, temporary data, caches,
-logs, Stackcord operation records, dbdiagram proposals, owner mappings, Jira
+logs, operation records, dbdiagram proposals, owner mappings, Jira
 transfer records, and remote synchronization state stored here remain local.
 
 Run `scripts/initialize-local-harness.ps1 -Verify` after cloning. Add

@@ -5,8 +5,8 @@
 ## Start here
 
 - Always work from the root Git superproject unless the assigned issue explicitly targets one submodule.
-- Before any task, run `scripts/initialize-local-harness.ps1 -Verify`, then read `.harness/entry.md`, `docs/collaboration-policy.md`, and `docs/development-start-guide.md`.
-- Recover actual state with `stackcord status --json`, `git status --short --branch`, and `git submodule status`. Treat chat history as a hint, not repository truth.
+- Before any task, run `scripts/initialize-local-harness.ps1 -Verify`, then read `docs/collaboration-policy.md` and `docs/development-start-guide.md`.
+- Recover actual state with `git status --short --branch`, `git worktree list`, `git submodule status`, and the relevant GitHub issue or pull request. Treat chat history as a hint, not repository truth.
 - Do not pull, rebase, stash, reset, clean, switch branches, initialize submodules, commit, push, merge, or change a root submodule pointer without stating the action first. Preserve every existing local change.
 - `develop` is the integration branch. `main` is reserved for complete releases beginning with `v1.0.0`.
 - Implement in the repository named by the assigned child issue on a short-lived `feature/<issue>-<name>` branch. Target that repository's `develop` branch with the pull request.
