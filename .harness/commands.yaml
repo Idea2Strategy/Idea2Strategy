@@ -1,10 +1,6 @@
 schema_version: 1
 workspace_id: workspace.root
 commands:
-  - id: command.context-audit
-    kind: test
-    argv: [stackcord, context, audit, --root, ., --json]
-    timeout_seconds: 120
   - id: command.workspace-isolation
     kind: security
     argv: [pwsh, -NoProfile, -File, scripts/verify-workspace-isolation.ps1]

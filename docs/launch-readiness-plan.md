@@ -45,7 +45,7 @@
 2. 루트 포인터는 **별개 PR**이고 **머지 커밋**으로 병합한다.
 3. `backend`·`trading-engine`·`backtest-engine`·`data-pipeline` gitlink를 옮기는 포인터 PR은 **같은 커밋에서** `scripts/refresh-flyway-ci-bundle.ps1`을 돌려야 한다. gitlink를 먼저 커밋한 뒤 스크립트를 돌린다(스크립트가 HEAD를 검증한다). 안 하면 `flyway-integration`이 깨진다.
 4. 포인터 PR은 **한 번에 하나만** 열어 둔다.
-5. v1.0.0 전까지 `specs/**`·`contracts/**`·`.harness/governance.yaml`·`docs/collaboration-policy.md`를 고칠 때는 제품 권한자(`kcrmin`·`pjy008008`·`Juwon-Na`·`hjcud`)의 지시를 PR 본문에 인용한다(`AGENTS.md` 참조). 그 외 경로는 이 규약과 무관하다.
+5. v1.0.0 전까지 `specs/**`·`contracts/**`·`.harness/product-authorities.yaml`·`docs/collaboration-policy.md`를 고칠 때는 제품 권한자(`kcrmin`·`pjy008008`·`Juwon-Na`·`hjcud`)의 지시를 변경 기록에 남긴다(`AGENTS.md` 참조). 그 외 경로는 이 규약과 무관하다.
 
 ### 0.5 v1.0 범위에서 빠지는 것 (확인 필요)
 

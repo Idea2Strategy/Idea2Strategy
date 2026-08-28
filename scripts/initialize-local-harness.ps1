@@ -31,12 +31,15 @@ $readme = @'
 
 This directory exists in every clone, but Git tracks only this README and the
 approved `.gitkeep` markers. All generated artifacts, temporary data, caches,
-logs, Stackcord operation records, dbdiagram proposals, owner mappings, Jira
+logs, operation records, dbdiagram proposals, owner mappings, Jira
 transfer records, and remote synchronization state stored here remain local.
 
 Run `scripts/initialize-local-harness.ps1 -Verify` after cloning. Add
 `-MigrateLegacy` only when migrating the former root `output/`, `tmp/`, or
-`.idea2strategy-local/` directories. Never store credentials in this tree.
+`.idea2strategy-local/` directories. Files below `tmp/`, `cache/`, and `logs/`
+are disposable and should not be used as completion evidence. Keep durable,
+non-secret receipts in `artifacts/` and project metadata in `project/`. Never
+store credentials in this tree.
 '@
 
 function Initialize-Layout {
@@ -89,14 +92,14 @@ provider: github
 repository: Idea2Strategy/Idea2Strategy
 product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]
 contact_email_is_authority: false
-purpose: non-secret product-authority reference; provider verification is required
+purpose: repository-local product-authority reference; an explicit change record or pull-request review is required
 '@
   if (Test-Path -LiteralPath $ownerMetadataPath -PathType Leaf) {
     # Migrate any superseded generated default; never overwrite a locally
     # customized owner reference, which omits the generated purpose marker.
     $existing = Get-Content -Raw -Encoding utf8 $ownerMetadataPath
-    if ($existing.Contains('product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]') -or
-        -not $existing.Contains('purpose: non-secret product-authority reference')) {
+    if ($existing.Contains('purpose: repository-local product-authority reference') -or
+        -not $existing.Contains('purpose: non-secret product-authority reference; provider verification is required')) {
       return
     }
   }

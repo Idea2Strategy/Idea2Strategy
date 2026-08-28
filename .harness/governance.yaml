@@ -1,9 +1,0 @@
-schema_version: 1
-enabled: true
-provider: github
-repository: Idea2Strategy/Idea2Strategy
-product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]
-protected_kinds: [product, policy, business, contract]
-approval:
-  minimum: 1
-  authority_self_approval: true

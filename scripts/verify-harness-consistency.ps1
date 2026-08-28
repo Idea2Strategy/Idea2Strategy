@@ -25,8 +25,7 @@ $required = @(
   '.harness/sources.yaml',
   '.harness/workspaces.yaml',
   '.harness/commands.yaml',
-  '.harness/governance.yaml',
-  '.harness/work/provider.yaml'
+  '.harness/product-authorities.yaml'
 )
 foreach ($path in $required) {
   Assert-True ($path -in $tracked) "missing required file $path"
@@ -39,6 +38,11 @@ Assert-True ($obsoleteWorkState.Count -eq 0) (
   'executable work state must come from docs/launch-readiness-tasks.json; remove: ' +
   ($obsoleteWorkState -join ', ')
 )
+foreach ($removedDependencyPath in @('.harness/governance.yaml', '.harness/work/provider.yaml')) {
+  Assert-True (-not (Test-Path -LiteralPath (Join-Path $resolvedRoot $removedDependencyPath))) (
+    "obsolete coordination file remains: $removedDependencyPath"
+  )
+}
 
 $workItems = @($tracked | Where-Object { $_ -match '^\.harness/work/items/.+\.yaml$' })
 foreach ($path in $workItems) {

@@ -124,9 +124,8 @@ jobs:
           for path in backend backtest-engine data-pipeline trading-engine ui; do
             test "$(git ls-files -s "$path" | awk '{print $1}')" = "160000"
           done
-      # The governance verifiers assert the product-authority list as literals in
-      # four scripts and four rule documents. Without these steps a change to
-      # .harness/governance.yaml can silently drift from its enforcement files.
+      # These verifiers keep the repository-native product-authority registry,
+      # policy, entry instructions, and enforcement scripts consistent.
       # initialize-local-harness.ps1 generates the ignored owner.yaml and the
       # policy integrity baseline from the checked-out tree, so a fresh runner
       # has everything the verifiers need.
@@ -147,6 +146,9 @@ jobs:
       - name: Verify completed harness work stays historical
         shell: pwsh
         run: ./scripts/test-completed-work-recovery.ps1
+      - name: Verify repository-native coordination stays self-contained
+        shell: pwsh
+        run: ./scripts/test-repository-native-harness.ps1
 
   flyway-integration:
     runs-on: ubuntu-latest

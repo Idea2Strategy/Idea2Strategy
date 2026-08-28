@@ -1,0 +1,12 @@
+schema_version: 1
+repository: Idea2Strategy/Idea2Strategy
+authority_ids: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]
+protected_paths:
+  - .harness/product-authorities.yaml
+  - specs/**
+  - contracts/**
+  - docs/collaboration-policy.md
+approval:
+  before_v1: explicit-authority-instruction-recorded-in-change
+  from_v1: pull-request-review-by-authority
+  minimum: 1

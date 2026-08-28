@@ -5,16 +5,32 @@ description: Use when starting, continuing, changing, coordinating, recovering, 
 
 # Use Project Harness
 
-Treat the user's natural-language request as the entry point; do not make them memorize commands or edit `.harness/`. Run `scripts/initialize-local-harness.ps1 -Verify`, read `docs/collaboration-policy.md` and `.harness/entry.md`, run `stackcord status --json` when available, and inspect actual Git, workspace, and submodule state. The collaboration policy is the Idea2Strategy-specific Git and collaboration source of truth and must not be changed during ordinary work. From a child repository, resolve the actual orchestration root before asserting service-wide context. Read only canonical sources related to the request. `specs/` owns product meaning; `contracts/` owns service purpose, commitments, non-goals, business rules, failure behavior, interfaces, and data obligations.
+Treat the user's natural-language request as the entry point. Do not require them to memorize commands or edit `.harness/`.
 
-When discovering or redefining the product, treat the initial product request as the first material answer. Infer discoverable facts, checkpoint normalized meaning rather than raw dialogue, and verify a successful apply before asking the next material question. When choices help, use 2–3 exclusive options labeled A/B/C, put the recommended option first and mark it recommended, and accept either a letter or free-form input. Keep work management proportional: a small private local edit does not need a ticket or Git work reservation. For shared, long-lived, cross-workspace, or semantically risky work, the selected task source owns live status and the Git work reservation owns exclusive semantic scope. Re-read both, check path and meaning overlap, and set ownership and merge order before parallel work. Use conventional Git names without AI markers.
+## Recover current state
 
-Use TDD for behavior, bugs, contracts, migrations, and UI interactions; exploratory spikes may stay unmerged until evidence exists. Keep coordination internals out of normal replies. If context was compacted, settled questions repeat, or sources disagree, run a context audit before mutation. Use core release normally and enable strict release only for an explicit organizational need. If the CLI is unavailable, follow `references/fallback.md` and state reduced verification.
+1. Resolve the root superproject.
+2. Run `scripts/initialize-local-harness.ps1 -Verify`.
+3. Read `docs/collaboration-policy.md`, `.harness/entry.md`, and only the specifications and contracts relevant to the request.
+4. Inspect `git status --short --branch`, `git submodule status`, and the target repository's branch, upstream, and dirty state.
+5. For launch work, run `scripts/launch-status.ps1 -Owner <owner>` and use `docs/launch-readiness-tasks.json` as the dependency ledger. Do not invent a task when the ledger says the owner is waiting.
 
-Before changing service purpose, policy, business rules, contracts, or governance, run `stackcord governance check --json`. If governance is enabled and the selected Git provider does not identify the current account as a product authority, keep the protected change as a proposal, prepare its tests and implementation normally, and use the chosen issue or PR workflow to request review. Git user.name and user.email are display metadata, not authority. Never mark a proposal approved from cached review data; integration and release require a fresh exact-commit approval.
+Repository evidence wins over chat history. `specs/` owns product meaning; `contracts/` owns service commitments, non-goals, failure behavior, interfaces, and data obligations. From a child repository, resolve the actual orchestration root before making service-wide claims.
 
-Idea2Strategy uses the stricter canonical-write gate. Before editing `.harness/governance.yaml`, `specs/**`, `contracts/**`, `docs/collaboration-policy.md`, or the files enforcing this gate, run `stackcord governance check --json`. Only a fresh provider observation for the exact repository, head commit, and protected fingerprint that approves a configured product authority (`user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, or `user:hjcud`) permits the canonical write. For a missing, stale, unknown, unavailable, or different identity, you must not edit the canonical protected source; keep any work in a clearly isolated proposal that cannot be presented as approved, integrated, or releasable. Git user.name and user.email never prove authority.
+## Protect canonical meaning
 
-Pre-v1.0.0 posture: until a `v1.0.0` release exists, a configured product authority instruction recorded in the change itself substitutes for the fresh provider observation. Name the authority and quote the instruction in the pull request, then write the canonical source there. See `AGENTS.md`.
+`.harness/product-authorities.yaml` lists the protected paths and authorities: `user:kcrmin`, `user:pjy008008`, `user:Juwon-Na`, and `user:hjcud`. Git user.name and user.email never prove authority.
 
-When an editable UI workspace exists, inspect external sources before bringing accepted whole or selected files into it. Treat them as ordinary editable files, bind approved UI to an exact published commit, and ensure frontend work names that baseline fingerprint. UI creation tools are optional inputs, not canonical service state.
+Before `v1.0.0`, a protected canonical change requires an explicit instruction from one listed authority recorded in the change. From `v1.0.0`, it requires pull-request approval by at least one listed authority. If the requirement is absent, you must not edit the protected source; create a clearly isolated proposal and never present it as approved, integrated, or releasable.
+
+## Execute safely
+
+- Use TDD for behavior, bugs, contracts, migrations, and UI interactions.
+- Keep work proportional. Use a dedicated worktree when another session may share a checkout.
+- Respect repository and path ownership from the task ledger. Coordinate semantic overlap and merge order before parallel work.
+- `db/schema.dbml` is canonical. Applied Flyway migrations are immutable; add a later migration.
+- A submodule merge and root gitlink update are separate changes. Refresh the Flyway CI bundle whenever a pinned backend gitlink moves.
+- When UI work is in scope, recover the declared UI baseline and exact root pointer first. External design tools are optional inputs, not canonical service state.
+- Verify with repository scripts and relevant tests before claiming completion. Report changed files, observed results, and remaining integration work.
+
+If context was compacted or sources disagree, repeat the recovery steps before mutation. Keep coordination internals out of normal user replies.
