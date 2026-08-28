@@ -1,5 +1,0 @@
-schema_version: 1
-work_id: work.com07-flyway-integration
-claim_id: claim.com07-central-flyway-20260802
-branch: feature/com07-central-flyway
-baseline: b4c9776c701f4daa267cd5115c8ec8f3945d1f2b

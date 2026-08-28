@@ -141,6 +141,12 @@ jobs:
       - name: Test local harness
         shell: pwsh
         run: ./scripts/test-local-harness.ps1
+      - name: Verify compact harness coordination state
+        shell: pwsh
+        run: ./scripts/verify-harness-consistency.ps1
+      - name: Verify completed harness work stays historical
+        shell: pwsh
+        run: ./scripts/test-completed-work-recovery.ps1
 
   flyway-integration:
     runs-on: ubuntu-latest

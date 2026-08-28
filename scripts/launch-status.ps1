@@ -3,7 +3,7 @@
     출시 준비 작업의 완료·준비·차단 상태를 계산한다.
 
 .DESCRIPTION
-    docs/launch-readiness-tasks.yaml 을 읽어 각 작업의 완료 조건을 실제로 검사하고,
+    docs/launch-readiness-tasks.json 을 읽어 각 작업의 완료 조건을 실제로 검사하고,
     의존성을 풀어 담당자별로 "지금 할 수 있는 것"을 고른다.
 
     상태를 손으로 관리하지 않는 것이 요점이다. 완료 여부는 검사 결과에서 나오므로

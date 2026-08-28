@@ -5,37 +5,35 @@ commands:
     kind: test
     argv: [stackcord, context, audit, --root, ., --json]
     timeout_seconds: 120
+  - id: command.workspace-isolation
+    kind: security
+    argv: [pwsh, -NoProfile, -File, scripts/verify-workspace-isolation.ps1]
+    timeout_seconds: 120
   - id: command.repository-integrity
     kind: security
     argv: [git, fsck, --no-dangling]
     timeout_seconds: 120
-  - id: command.develop-ancestry
-    kind: integration
-    argv: [git, merge-base, --is-ancestor, origin/develop, HEAD]
-    timeout_seconds: 30
-  - id: command.user-validation-checkpoint
-    kind: user
-    argv: [git, rev-parse, --verify, HEAD]
-    timeout_seconds: 30
-  - id: command.foundation-repository-build
+  - id: command.launch-status
     kind: test
-    argv: [node, scripts/verify-foundation-evidence.mjs, ci]
-    environment: [APPDATA, LOCALAPPDATA]
-    timeout_seconds: 120
-  - id: command.foundation-service-smoke-test
-    kind: test
-    argv: [node, scripts/verify-foundation-evidence.mjs, ci]
-    environment: [APPDATA, LOCALAPPDATA]
-    timeout_seconds: 120
-  - id: command.compose-static-validation
-    kind: test
-    argv: [node, scripts/verify-foundation-evidence.mjs, compose]
+    argv: [pwsh, -NoProfile, -File, scripts/launch-status.ps1]
     timeout_seconds: 120
   - id: command.collaboration-policy-check
     kind: security
-    argv: [node, scripts/verify-foundation-evidence.mjs, policy]
+    argv: [pwsh, -NoProfile, -File, scripts/verify-collaboration-policy.ps1]
     timeout_seconds: 120
-  - id: command.flyway-migration
-    kind: migration
-    argv: [node, scripts/verify-foundation-evidence.mjs, migration]
-    timeout_seconds: 300
+  - id: command.harness-consistency
+    kind: test
+    argv: [pwsh, -NoProfile, -File, scripts/verify-harness-consistency.ps1]
+    timeout_seconds: 120
+  - id: command.flyway-bundle
+    kind: test
+    argv: [pwsh, -NoProfile, -File, scripts/test-flyway-ci-bundle.ps1]
+    timeout_seconds: 1200
+  - id: command.local-docker-model
+    kind: test
+    argv: [pwsh, -NoProfile, -File, scripts/test-docker-development.ps1]
+    timeout_seconds: 600
+  - id: command.secret-scan-hook
+    kind: security
+    argv: [node, --test, scripts/test-secret-scan-git-hook.mjs]
+    timeout_seconds: 120

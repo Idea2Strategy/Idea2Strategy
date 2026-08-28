@@ -1,8 +1,9 @@
 # Project harness entry
 
-1. Find the orchestration root from the actual Git superproject first, then `.harness/manifest.yaml`; a standalone child must use `.harness/bridge.yaml` and report incomplete service context.
-2. Refresh filesystem, Git, workspace, submodule, work, spec, contract, and evidence state read-only.
-3. Treat `specs/` as product meaning, `contracts/` as obligations, and `.harness/` as coordination state. Protected meaning requires the configured product authority's fresh exact-provider approval; a non-authority may only propose it.
-4. Before implementation, identify the product slice, scenario, contract, failure behavior, failing TDD test, conflict scope, ownership, and merge order.
-5. Never hide pull, rebase, stash, reset, clean, force-push, external write, install, or release actions.
-6. If context was compacted or appears forgotten, run a full context audit before mutation.
+1. Work from the actual Git superproject and run `scripts/initialize-local-harness.ps1 -Verify`.
+2. Read `docs/collaboration-policy.md`. Product meaning lives in `specs/`; obligations live in `contracts/`.
+3. Use `docs/launch-readiness-plan.md` for launch scope and `docs/launch-readiness-tasks.json` for current work. Run `scripts/launch-status.ps1 -Owner <kcrmin|hjcud>` instead of selecting work from old harness records.
+4. Refresh Git, submodule, workspace, relevant spec, contract, and evidence state before changing files. Treat chat summaries as hints.
+5. Identify the scenario, failure behavior, first failing test, ownership, conflict scope, and merge order before implementation.
+6. Follow the protected-write gate in `AGENTS.md`. Never hide Git history changes, external writes, installs, or releases.
+7. If context was compacted or appears forgotten, repeat this audit before mutation.

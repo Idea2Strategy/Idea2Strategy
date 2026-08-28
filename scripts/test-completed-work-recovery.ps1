@@ -27,14 +27,16 @@ foreach ($workID in $completedWorkIDs) {
   Assert-True $itemText.Contains('status: done') "$workID is recorded as done"
 }
 
-$nextRaw = & stackcord work next --root $repositoryRoot --json 2>&1
-$nextExit = $LASTEXITCODE
-$next = $nextRaw | ConvertFrom-Json
-$recommendations = @($next.facts | Where-Object code -eq 'work.recommended')
+$executableRecords = @(
+  Get-ChildItem -LiteralPath (Join-Path $repositoryRoot '.harness/work') -Recurse -File |
+    Where-Object { $_.FullName -match '[\\/](definitions|claims|branches)[\\/]' }
+)
+Assert-True ($executableRecords.Count -eq 0) 'completed setup work has no executable definition, claim, or branch record'
 
-Assert-True ($nextExit -eq 6) 'an empty executable queue reports no dependency-ready work'
-Assert-True ($next.status -eq 'unknown') 'an empty executable queue is explicit rather than silently successful'
-Assert-True ($recommendations.Count -eq 0) 'completed setup work is never recommended again'
+$taskLedger = Join-Path $repositoryRoot 'docs/launch-readiness-tasks.json'
+$launchStatus = Join-Path $repositoryRoot 'scripts/launch-status.ps1'
+Assert-True (Test-Path -LiteralPath $taskLedger -PathType Leaf) 'the current task ledger exists'
+Assert-True ((Get-Content -Raw -Encoding utf8 $launchStatus).Contains('launch-readiness-tasks.json')) 'launch-status reads the current task ledger'
 
 [pscustomobject]@{
   status = 'passed'
