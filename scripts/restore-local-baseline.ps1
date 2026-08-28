@@ -271,8 +271,9 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
         (Join-Path $root 'scripts/local/project-local-market-history.py') | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Local three-month market-history projection failed.' }
 
-    # The UI publishes RSI at four strategy clocks. Materialize the compact AAPL/MSFT
-    # development window locally so a clean restore can release and backtest those cards
+    # The UI publishes RSI at four strategy clocks. Materialize the compact sample
+    # instrument set and development window locally so a clean restore can release
+    # and backtest those cards
     # without the retired D: drive or an AWS feature worker.
     $env:LOCAL_FEATURE_ROOT = Join-Path $root '.harness/local/tmp/feature-materialization'
     $env:LOCAL_FEATURE_S3_ENDPOINT = 'http://127.0.0.1:19000'

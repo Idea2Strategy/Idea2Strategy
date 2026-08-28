@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Protocol
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-SAMPLE_REVISION = 2
+SAMPLE_REVISION = 3
 
 
 @dataclass(frozen=True)
@@ -49,20 +50,32 @@ class _Definition:
 _PRICE_UP = _Condition(
     "BASIC_PRICE_COMPARE",
     {"resolution": "30m", "operator": "GT", "reference": "PREVIOUS_CLOSE"},
-    "가격 비교", "condition", ">", "전일 종가",
+    "가격 비교",
+    "condition",
+    ">",
+    "전일 종가",
 )
 _PRICE_DOWN = _Condition(
     "BASIC_PRICE_COMPARE",
     {"resolution": "30m", "operator": "LT", "reference": "PREVIOUS_CLOSE"},
-    "가격 비교", "condition", "<", "전일 종가",
+    "가격 비교",
+    "condition",
+    "<",
+    "전일 종가",
 )
 _VOLUME_CONFIRM = _Condition(
     "BASIC_VOLUME_COMPARE",
     {
-        "resolution": "30m", "operator": "GTE", "reference": "AVERAGE_VOLUME",
-        "period": "20", "multiplier": "1",
+        "resolution": "30m",
+        "operator": "GTE",
+        "reference": "AVERAGE_VOLUME",
+        "period": "20",
+        "multiplier": "1",
     },
-    "거래량", "data", "≥", "20봉 평균 거래량의 1배",
+    "거래량",
+    "data",
+    "≥",
+    "20봉 평균 거래량의 1배",
 )
 
 
@@ -70,7 +83,9 @@ def _streak(direction: str, bars: int) -> _Condition:
     return _Condition(
         "BASIC_STREAK",
         {"resolution": "30m", "direction": direction, "bars": str(bars)},
-        "연속 상승·하락", "condition", "상승" if direction == "UP" else "하락",
+        "연속 상승·하락",
+        "condition",
+        "상승" if direction == "UP" else "하락",
         f"{bars}봉",
     )
 
@@ -79,7 +94,10 @@ def _holding(bars: int) -> _Condition:
     return _Condition(
         "BASIC_HOLDING_PERIOD",
         {"unit": "BAR", "amount": str(bars), "resolution": "30m"},
-        "보유 기간", "time", "이상", f"{bars}봉",
+        "보유 기간",
+        "time",
+        "이상",
+        f"{bars}봉",
     )
 
 
@@ -130,6 +148,7 @@ def _semantic_group(
     instrument_id: str,
     conditions: Sequence[_Condition],
 ) -> dict[str, Any]:
+    scheduled = any(condition.element_code == "BASIC_SCHEDULE" for condition in conditions)
     blocks = [
         {
             "id": f"{card_id}-condition-{index}",
@@ -138,18 +157,26 @@ def _semantic_group(
         }
         for index, condition in enumerate(conditions, start=1)
     ]
-    blocks.append({
-        "id": f"{card_id}-order",
-        "elementCode": "BASIC_EQUAL_ALLOCATION_ORDER",
-        "parameters": {
-            "orderPercent": "10" if container == "BUY" else "100",
-            "maxPositionPercent": "25",
-            "executionMode": "대기 후 재진입" if container == "BUY" else "대기 후 재실행",
-            "waitMode": "조건 재충족",
-            "waitInterval": "1",
-            "maxExecutions": "1000",
-        },
-    })
+    blocks.append(
+        {
+            "id": f"{card_id}-order",
+            "elementCode": "BASIC_EQUAL_ALLOCATION_ORDER",
+            "parameters": {
+                "orderPercent": "10" if container == "BUY" else "100",
+                "maxPositionPercent": "25",
+                "executionMode": (
+                    "주기마다"
+                    if container == "BUY" and scheduled
+                    else "대기 후 재진입"
+                    if container == "BUY"
+                    else "대기 후 재실행"
+                ),
+                "waitMode": "조건 재충족",
+                "waitInterval": "1",
+                "maxExecutions": "1000",
+            },
+        }
+    )
     return {
         "id": f"{card_id}:{instrument_id}",
         "allocationGroupId": card_id,
@@ -160,18 +187,24 @@ def _semantic_group(
         "blocks": blocks,
         "connections": [
             {
-                "fromBlockId": block["id"], "outputPort": "passed",
-                "toBlockId": blocks[index + 1]["id"], "inputPort": "passed",
+                "fromBlockId": block["id"],
+                "outputPort": "passed",
+                "toBlockId": blocks[index + 1]["id"],
+                "inputPort": "passed",
             }
             for index, block in enumerate(blocks[:-1])
         ],
     }
 
 
-def _sample(definition: _Definition, catalog_id: str, instruments: Mapping[str, str]) -> SampleStrategy:
+def _sample(
+    definition: _Definition, catalog_id: str, instruments: Mapping[str, str]
+) -> SampleStrategy:
     for symbol in definition.symbols:
         if symbol not in instruments:
-            raise ValueError(f"Basic catalog is missing required sample instrument: {symbol}")
+            raise ValueError(
+                f"Basic catalog is missing required sample instrument: {symbol}"
+            )
 
     section_id = f"sample-{definition.key.lower()}"
     buy_id = f"{section_id}-buy"
@@ -186,44 +219,67 @@ def _sample(definition: _Definition, catalog_id: str, instruments: Mapping[str, 
         for instrument_id in instrument_ids
     ]
     snapshot = {
-        "sections": [{
-            "id": section_id,
-            "symbol": " · ".join(definition.symbols),
-            "instrumentIds": instrument_ids,
-            "allocation": 100,
-            "timeframe": "30분봉",
-            "x": 80,
-            "y": 80,
-            "width": 760,
-            "height": 520,
-            "cards": {"buy": [buy_id], "sell": [sell_id], "risk": []},
-            "cardOrder": [buy_id, sell_id],
-            "cardPositions": {buy_id: {"x": 24, "y": 96}, sell_id: {"x": 396, "y": 96}},
-        }],
+        "sections": [
+            {
+                "id": section_id,
+                "symbol": " · ".join(definition.symbols),
+                "instrumentIds": instrument_ids,
+                "allocation": 100,
+                "timeframe": "30분봉",
+                "x": 80,
+                "y": 80,
+                "width": 760,
+                "height": 520,
+                "cards": {"buy": [buy_id], "sell": [sell_id], "risk": []},
+                "cardOrder": [buy_id, sell_id],
+                "cardPositions": {
+                    buy_id: {"x": 24, "y": 96},
+                    sell_id: {"x": 396, "y": 96},
+                },
+            }
+        ],
         "cardBlocks": {
-            buy_id: [_condition_block(buy_id, i, item) for i, item in enumerate(definition.buy, start=1)],
-            sell_id: [_condition_block(sell_id, i, item) for i, item in enumerate(definition.sell, start=1)],
+            buy_id: [
+                _condition_block(buy_id, i, item)
+                for i, item in enumerate(definition.buy, start=1)
+            ],
+            sell_id: [
+                _condition_block(sell_id, i, item)
+                for i, item in enumerate(definition.sell, start=1)
+            ],
         },
         "cardMeta": {
-            buy_id: {"title": "복합 매수", "detail": definition.description, "explanation": definition.description},
-            sell_id: {"title": "복합 매도", "detail": definition.description, "explanation": definition.description},
+            buy_id: {
+                "title": "복합 매수",
+                "detail": definition.description,
+                "explanation": definition.description,
+            },
+            sell_id: {
+                "title": "복합 매도",
+                "detail": definition.description,
+                "explanation": definition.description,
+            },
         },
-        "buySettings": {buy_id: {
-            "maxOrderPercent": 10,
-            "entryMode": "대기 후 재진입",
-            "cycle": "매 거래일",
-            "cycleInterval": 1,
-            "reentryWait": "조건 재충족",
-            "reentryInterval": 1,
-            "maxEntries": 1000,
-        }},
-        "sellSettings": {sell_id: {
-            "sellPercent": 100,
-            "executeMode": "대기 후 재실행",
-            "reexecWait": "조건 재충족",
-            "reexecInterval": 1,
-            "maxExecutions": 1000,
-        }},
+        "buySettings": {
+            buy_id: {
+                "maxOrderPercent": 10,
+                "entryMode": "대기 후 재진입",
+                "cycle": "매 거래일",
+                "cycleInterval": 1,
+                "reentryWait": "조건 재충족",
+                "reentryInterval": 1,
+                "maxEntries": 1000,
+            }
+        },
+        "sellSettings": {
+            sell_id: {
+                "sellPercent": 100,
+                "executeMode": "대기 후 재실행",
+                "reexecWait": "조건 재충족",
+                "reexecInterval": 1,
+                "maxExecutions": 1000,
+            }
+        },
         "symbolLimits": {section_id: {symbol: 25 for symbol in definition.symbols}},
     }
     return SampleStrategy(
@@ -232,16 +288,364 @@ def _sample(definition: _Definition, catalog_id: str, instruments: Mapping[str, 
         description=definition.description,
         semantic_document={"mode": "BASIC", "catalogId": catalog_id, "groups": groups},
         presentation_document={
-            "basicEditor": {"version": 1, "snapshot": snapshot, "viewport": {"pan": {"x": 0, "y": 0}, "zoom": 1}},
+            "basicEditor": {
+                "version": 1,
+                "snapshot": snapshot,
+                "viewport": {"pan": {"x": 0, "y": 0}, "zoom": 1},
+            },
             "localSampleKey": definition.key,
             "localSampleRevision": SAMPLE_REVISION,
         },
     )
 
 
-def build_samples(catalog_id: str, instruments: Mapping[str, str]) -> tuple[SampleStrategy, ...]:
+def _condition(
+    element_code: str,
+    resolution: str,
+    parameters: Mapping[str, str],
+    label: str,
+    op: str,
+    value: str,
+    *,
+    tone: str = "condition",
+    base: str | None = None,
+) -> _Condition:
+    return _Condition(
+        element_code,
+        {"resolution": resolution, **parameters} if resolution else dict(parameters),
+        label,
+        tone,
+        op,
+        value,
+        base,
+    )
+
+
+def _price_guard(resolution: str) -> _Condition:
+    return _condition(
+        "BASIC_PRICE_COMPARE",
+        resolution,
+        {"operator": "NEQ", "reference": "PREVIOUS_CLOSE"},
+        "가격 비교",
+        "≠",
+        "전일 종가",
+        tone="data",
+    )
+
+
+def _full_catalog_sample(
+    catalog_id: str, instruments: Mapping[str, str]
+) -> SampleStrategy:
+    required = ("AAPL", "MSFT", "META", "NVDA")
+    for symbol in required:
+        if symbol not in instruments:
+            raise ValueError(
+                f"Basic catalog is missing required sample instrument: {symbol}"
+            )
+
+    schedule = _condition(
+        "BASIC_SCHEDULE",
+        "30m",
+        {"cycle": "EVERY_TRADING_DAY", "interval": "1"},
+        "실행 주기",
+        "매 거래일",
+        "1",
+        tone="time",
+    )
+    targets: dict[str, tuple[str, tuple[_Condition, ...], tuple[_Condition, ...]]] = {
+        "AAPL": (
+            "30m",
+            (
+                schedule,
+                _condition(
+                    "BASIC_PRICE_COMPARE",
+                    "30m",
+                    {"operator": "GT", "reference": "PREVIOUS_CLOSE"},
+                    "가격 비교",
+                    ">",
+                    "전일 종가",
+                    tone="data",
+                ),
+                _condition(
+                    "BASIC_PRICE_CHANGE_PERCENT",
+                    "30m",
+                    {
+                        "base": "PREVIOUS_CLOSE",
+                        "direction": "UP",
+                        "thresholdPercent": "0",
+                    },
+                    "가격 변화율",
+                    "상승",
+                    "0%",
+                    tone="data",
+                    base="전일 종가",
+                ),
+            ),
+            (
+                _condition(
+                    "BASIC_POSITION_RETURN",
+                    "",
+                    {"direction": "LOSS", "thresholdPercent": "0"},
+                    "현재 수익률",
+                    "손실",
+                    "0%",
+                    tone="risk",
+                ),
+                _condition(
+                    "BASIC_HOLDING_PERIOD",
+                    "30m",
+                    {"unit": "BAR", "amount": "1"},
+                    "보유 기간",
+                    "≥",
+                    "1봉",
+                    tone="risk",
+                ),
+            ),
+        ),
+        "MSFT": (
+            "1h",
+            (
+                _condition(
+                    "BASIC_VOLUME_COMPARE",
+                    "1h",
+                    {
+                        "operator": "GTE",
+                        "reference": "AVERAGE_VOLUME",
+                        "period": "20",
+                        "multiplier": "1",
+                    },
+                    "거래량",
+                    "≥",
+                    "최근 20봉 평균 거래량 1배",
+                    tone="data",
+                ),
+                _condition(
+                    "BASIC_STREAK",
+                    "1h",
+                    {"direction": "UP", "bars": "2"},
+                    "연속 상승·하락",
+                    "↑",
+                    "2봉",
+                ),
+            ),
+            (
+                _condition(
+                    "BASIC_PEAK_RETURN",
+                    "",
+                    {"operator": "GTE", "thresholdPercent": "0"},
+                    "최고 수익률",
+                    "≥",
+                    "0%",
+                    tone="risk",
+                ),
+            ),
+        ),
+        "META": (
+            "4h",
+            (
+                _condition(
+                    "BASIC_SMA_CROSS",
+                    "4h",
+                    {"direction": "UP", "shortPeriod": "5", "longPeriod": "20"},
+                    "평균선 교차",
+                    "↑",
+                    "5봉 · 20봉",
+                    tone="indicator",
+                ),
+                _condition(
+                    "BASIC_RSI_CROSS",
+                    "4h",
+                    {"direction": "UP", "period": "14", "threshold": "30"},
+                    "RSI 반등",
+                    "↑",
+                    "30",
+                ),
+            ),
+            (
+                _condition(
+                    "BASIC_DRAWDOWN_FROM_PEAK",
+                    "",
+                    {"operator": "GTE", "thresholdPercent": "0"},
+                    "고점 대비 하락",
+                    "≥",
+                    "0%",
+                    tone="risk",
+                ),
+            ),
+        ),
+        "NVDA": (
+            "1d",
+            (
+                _condition(
+                    "BASIC_MACD_CROSS",
+                    "1d",
+                    {
+                        "direction": "UP",
+                        "fastPeriod": "12",
+                        "slowPeriod": "26",
+                        "signalPeriod": "9",
+                    },
+                    "MACD 전환",
+                    "↑",
+                    "12 · 26 · 9",
+                ),
+                _condition(
+                    "BASIC_BOLLINGER_REVERSAL",
+                    "1d",
+                    {"direction": "UP", "period": "20", "deviations": "2"},
+                    "가격 띠 반전",
+                    "↑",
+                    "20봉 · 2σ",
+                ),
+            ),
+            (
+                _condition(
+                    "BASIC_HOLDING_PERIOD",
+                    "1d",
+                    {"unit": "TRADING_DAY", "amount": "1"},
+                    "보유 기간",
+                    "≥",
+                    "1거래일",
+                    tone="risk",
+                ),
+            ),
+        ),
+    }
+    groups: list[dict[str, Any]] = []
+    sections: list[dict[str, Any]] = []
+    card_blocks: dict[str, list[dict[str, Any]]] = {}
+    card_meta: dict[str, dict[str, str]] = {}
+    buy_settings: dict[str, dict[str, Any]] = {}
+    sell_settings: dict[str, dict[str, Any]] = {}
+    symbol_limits: dict[str, dict[str, int]] = {}
+
+    for section_index, (symbol, (resolution, buy_targets, sell_targets)) in enumerate(
+        targets.items(), start=1
+    ):
+        section_id = f"full-catalog-{symbol.lower()}"
+        instrument_id = instruments[symbol]
+        buy_cards: list[str] = []
+        sell_cards: list[str] = []
+        card_positions: dict[str, dict[str, int]] = {}
+        for container, conditions in (("BUY", buy_targets), ("SELL", sell_targets)):
+            for card_index, target in enumerate(conditions, start=1):
+                card_id = f"{section_id}-{container.lower()}-{card_index}"
+                guard = (
+                    _condition(
+                        "BASIC_VOLUME_COMPARE",
+                        resolution,
+                        {
+                            "operator": "GTE",
+                            "reference": "PREVIOUS_VOLUME",
+                            "period": "1",
+                            "multiplier": "1",
+                        },
+                        "거래량",
+                        "≥",
+                        "이전 봉 거래량 1배",
+                        tone="data",
+                    )
+                    if target.element_code == "BASIC_PRICE_COMPARE"
+                    else _price_guard(resolution)
+                )
+                flow_conditions = (target, guard)
+                groups.append(
+                    _semantic_group(card_id, container, instrument_id, flow_conditions)
+                )
+                visible_conditions = tuple(
+                    item
+                    for item in flow_conditions
+                    if item.element_code != "BASIC_SCHEDULE"
+                )
+                card_blocks[card_id] = [
+                    _condition_block(card_id, index, item)
+                    for index, item in enumerate(visible_conditions, start=1)
+                ]
+                card_meta[card_id] = {
+                    "title": f"{target.label} 검증",
+                    "detail": f"{symbol} {resolution} · {target.label}",
+                    "explanation": "전체 Basic 블록의 실제 데이터 실행 경로를 검증하는 로컬 샘플입니다.",
+                }
+                card_positions[card_id] = {
+                    "x": 24 if container == "BUY" else 396,
+                    "y": 96 + (card_index - 1) * 150,
+                }
+                if container == "BUY":
+                    buy_cards.append(card_id)
+                    periodic = target.element_code == "BASIC_SCHEDULE"
+                    buy_settings[card_id] = {
+                        "maxOrderPercent": 10,
+                        "entryMode": "주기마다" if periodic else "대기 후 재진입",
+                        "cycle": "매 거래일",
+                        "cycleInterval": 1,
+                        "reentryWait": "조건 재충족",
+                        "reentryInterval": 1,
+                        "maxEntries": 1000,
+                    }
+                else:
+                    sell_cards.append(card_id)
+                    sell_settings[card_id] = {
+                        "sellPercent": 100,
+                        "executeMode": "대기 후 재실행",
+                        "reexecWait": "조건 재충족",
+                        "reexecInterval": 1,
+                        "maxExecutions": 1000,
+                    }
+        sections.append(
+            {
+                "id": section_id,
+                "symbol": symbol,
+                "instrumentIds": [instrument_id],
+                "allocation": 25,
+                "timeframe": {
+                    "30m": "30분봉",
+                    "1h": "1시간봉",
+                    "4h": "4시간봉",
+                    "1d": "일봉",
+                }[resolution],
+                "x": 80 + (section_index - 1) * 40,
+                "y": 80 + (section_index - 1) * 40,
+                "width": 760,
+                "height": 720,
+                "cards": {"buy": buy_cards, "sell": sell_cards, "risk": []},
+                "cardOrder": [*buy_cards, *sell_cards],
+                "cardPositions": card_positions,
+            }
+        )
+        symbol_limits[section_id] = {symbol: 25}
+
+    return SampleStrategy(
+        key="FULL_CATALOG_MIXED_RESOLUTION",
+        name="검증 · 전체 14블록 · 30분·1시간·4시간·일봉",
+        description="모든 Basic 블록을 네 가지 봉 주기와 매수·매도 흐름에서 실제 데이터로 실행하는 검증 전략입니다.",
+        semantic_document={"mode": "BASIC", "catalogId": catalog_id, "groups": groups},
+        presentation_document={
+            "basicEditor": {
+                "version": 1,
+                "snapshot": {
+                    "sections": sections,
+                    "cardBlocks": card_blocks,
+                    "cardMeta": card_meta,
+                    "buySettings": buy_settings,
+                    "sellSettings": sell_settings,
+                    "symbolLimits": symbol_limits,
+                },
+                "viewport": {"pan": {"x": 0, "y": 0}, "zoom": 0.8},
+            },
+            "localSampleKey": "FULL_CATALOG_MIXED_RESOLUTION",
+            "localSampleRevision": SAMPLE_REVISION,
+        },
+    )
+
+
+def build_samples(
+    catalog_id: str, instruments: Mapping[str, str]
+) -> tuple[SampleStrategy, ...]:
     """Build stable API and UI documents from the published catalog identities."""
-    return tuple(_sample(definition, catalog_id, instruments) for definition in _DEFINITIONS)
+    return (
+        *(_sample(definition, catalog_id, instruments) for definition in _DEFINITIONS),
+        _full_catalog_sample(catalog_id, instruments),
+    )
 
 
 class SampleSeederApi(Protocol):
@@ -250,10 +654,16 @@ class SampleSeederApi(Protocol):
     def get_document(self, strategy_id: str) -> Mapping[str, Any]: ...
     def create_strategy(self, sample: SampleStrategy) -> str: ...
     def acquire_lease(self, strategy_id: str) -> Mapping[str, Any]: ...
-    def save_document(self, strategy_id: str, lease_token: str, sample: SampleStrategy) -> Mapping[str, Any]: ...
+    def save_document(
+        self, strategy_id: str, lease_token: str, sample: SampleStrategy
+    ) -> Mapping[str, Any]: ...
     def release_lease(self, strategy_id: str, lease_token: str) -> None: ...
-    def validate_strategy(self, strategy_id: str, catalog_id: str) -> Mapping[str, Any]: ...
-    def release_strategy(self, strategy_id: str, validation_id: str) -> Mapping[str, Any]: ...
+    def validate_strategy(
+        self, strategy_id: str, catalog_id: str
+    ) -> Mapping[str, Any]: ...
+    def release_strategy(
+        self, strategy_id: str, validation_id: str
+    ) -> Mapping[str, Any]: ...
 
 
 def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
@@ -261,19 +671,22 @@ def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
     catalog = api.get_catalog()
     version = catalog.get("version")
     if not isinstance(version, Mapping) or not isinstance(version.get("id"), str):
-        raise ValueError("Basic catalog version id is unavailable")
+        raise TypeError("Basic catalog version id is unavailable")
     catalog_id = version["id"]
     catalog_instruments = catalog.get("instruments")
     if not isinstance(catalog_instruments, Sequence):
-        raise ValueError("Basic catalog instruments are unavailable")
+        raise TypeError("Basic catalog instruments are unavailable")
     instruments = {
         row["symbol"]: row["id"]
         for row in catalog_instruments
-        if isinstance(row, Mapping) and isinstance(row.get("symbol"), str) and isinstance(row.get("id"), str)
+        if isinstance(row, Mapping)
+        and isinstance(row.get("symbol"), str)
+        and isinstance(row.get("id"), str)
     }
     samples = build_samples(catalog_id, instruments)
     library = [
-        row for row in api.list_strategies()
+        row
+        for row in api.list_strategies()
         if isinstance(row.get("name"), str) and isinstance(row.get("id"), str)
     ]
     receipts: list[dict[str, str]] = []
@@ -282,13 +695,15 @@ def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
         lease = api.acquire_lease(strategy_id)
         lease_token = lease.get("leaseToken")
         if not isinstance(lease_token, str):
-            raise ValueError("Strategy edit lease token is unavailable")
+            raise TypeError("Strategy edit lease token is unavailable")
         try:
             api.save_document(strategy_id, lease_token, sample)
         finally:
             api.release_lease(strategy_id, lease_token)
         validation = api.validate_strategy(strategy_id, catalog_id)
-        if validation.get("status") != "VALID" or not isinstance(validation.get("validationRunId"), str):
+        if validation.get("status") != "VALID" or not isinstance(
+            validation.get("validationRunId"), str
+        ):
             raise ValueError(f"Sample strategy did not validate: {sample.key}")
         return validation
 
@@ -302,9 +717,14 @@ def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
         for candidate in draft_candidates:
             document = api.get_document(candidate["id"])
             presentation = document.get("presentationDocument")
-            if isinstance(presentation, Mapping) and presentation.get("localSampleKey") == sample.key:
+            if (
+                isinstance(presentation, Mapping)
+                and presentation.get("localSampleKey") == sample.key
+            ):
                 configured = candidate
-                configured_is_current = presentation.get("localSampleRevision") == SAMPLE_REVISION
+                configured_is_current = (
+                    presentation.get("localSampleRevision") == SAMPLE_REVISION
+                )
                 break
             semantic = document.get("semanticDocument")
             groups = semantic.get("groups") if isinstance(semantic, Mapping) else None
@@ -312,28 +732,36 @@ def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
                 resumable = candidate
 
         if configured and configured_is_current and released_exists:
-            receipts.append({"key": sample.key, "strategyId": configured["id"], "status": "reused"})
+            receipts.append(
+                {"key": sample.key, "strategyId": configured["id"], "status": "reused"}
+            )
             continue
         existing = configured or resumable
         if draft_candidates and existing is None:
-            raise ValueError(f"Strategy name is already used by a non-sample document: {sample.name}")
+            raise ValueError(
+                f"Strategy name is already used by a non-sample document: {sample.name}"
+            )
 
         strategy_id = existing["id"] if existing else api.create_strategy(sample)
         validation = configure(strategy_id, sample)
         if released_exists:
-            receipts.append({"key": sample.key, "strategyId": strategy_id, "status": "created"})
+            receipts.append(
+                {"key": sample.key, "strategyId": strategy_id, "status": "created"}
+            )
             continue
 
         released = api.release_strategy(strategy_id, validation["validationRunId"])
         editable_strategy_id = api.create_strategy(sample)
         configure(editable_strategy_id, sample)
-        receipts.append({
-            "key": sample.key,
-            "strategyId": editable_strategy_id,
-            "releaseId": str(released.get("releaseId", "")),
-            "botId": str(released.get("botId", "")),
-            "status": "created",
-        })
+        receipts.append(
+            {
+                "key": sample.key,
+                "strategyId": editable_strategy_id,
+                "releaseId": str(released.get("releaseId", "")),
+                "botId": str(released.get("botId", "")),
+                "status": "created",
+            }
+        )
     return receipts
 
 
@@ -343,7 +771,11 @@ def _json_transport(
     body: Mapping[str, Any] | None,
     token: str | None,
 ) -> Mapping[str, Any]:
-    encoded = None if body is None else json.dumps(body, separators=(",", ":")).encode("utf-8")
+    encoded = (
+        None
+        if body is None
+        else json.dumps(body, separators=(",", ":")).encode("utf-8")
+    )
     headers = {"Accept": "application/json"}
     if encoded is not None:
         headers["Content-Type"] = "application/json"
@@ -355,12 +787,16 @@ def _json_transport(
             payload = response.read()
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Local sample API request failed ({error.code} {method} {url}): {detail}") from error
+        raise RuntimeError(
+            f"Local sample API request failed ({error.code} {method} {url}): {detail}"
+        ) from error
     if not payload:
         return {}
     value = json.loads(payload)
     if not isinstance(value, Mapping):
-        raise ValueError(f"Local sample API returned a non-object response: {method} {url}")
+        raise TypeError(
+            f"Local sample API returned a non-object response: {method} {url}"
+        )
     return value
 
 
@@ -370,7 +806,9 @@ class LocalSampleApi:
         self._token = token
         self._transport = transport
 
-    def _request(self, method: str, path: str, body: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+    def _request(
+        self, method: str, path: str, body: Mapping[str, Any] | None = None
+    ) -> Mapping[str, Any]:
         return self._transport(method, f"{self._base_url}{path}", body, self._token)
 
     def get_catalog(self) -> Mapping[str, Any]:
@@ -380,58 +818,92 @@ class LocalSampleApi:
         page = self._request("GET", "/api/v1/strategies?limit=100")
         items = page.get("items")
         if not isinstance(items, Sequence):
-            raise ValueError("Strategy library response has no items")
+            raise TypeError("Strategy library response has no items")
         return [item for item in items if isinstance(item, Mapping)]
 
     def get_document(self, strategy_id: str) -> Mapping[str, Any]:
         return self._request("GET", f"/api/v1/strategies/{quote(strategy_id)}/document")
 
     def create_strategy(self, sample: SampleStrategy) -> str:
-        result = self._request("POST", "/api/v1/strategies", {
-            "name": sample.name, "description": sample.description, "mode": "BASIC",
-        })
+        result = self._request(
+            "POST",
+            "/api/v1/strategies",
+            {
+                "name": sample.name,
+                "description": sample.description,
+                "mode": "BASIC",
+            },
+        )
         strategy_id = result.get("id")
         if not isinstance(strategy_id, str):
-            raise ValueError("Strategy creation response has no id")
+            raise TypeError("Strategy creation response has no id")
         return strategy_id
 
     def acquire_lease(self, strategy_id: str) -> Mapping[str, Any]:
-        return self._request("POST", f"/api/v1/strategies/{quote(strategy_id)}/edit-lease")
+        return self._request(
+            "POST", f"/api/v1/strategies/{quote(strategy_id)}/edit-lease"
+        )
 
-    def save_document(self, strategy_id: str, lease_token: str, sample: SampleStrategy) -> Mapping[str, Any]:
+    def save_document(
+        self, strategy_id: str, lease_token: str, sample: SampleStrategy
+    ) -> Mapping[str, Any]:
         current = self.get_document(strategy_id)
         edit_sequence = current.get("editSequence")
         if not isinstance(edit_sequence, int):
-            raise ValueError("Strategy document response has no edit sequence")
-        return self._request("PUT", f"/api/v1/strategies/{quote(strategy_id)}/document", {
-            "expectedEditSequence": edit_sequence,
-            "leaseToken": lease_token,
-            "semanticDocument": sample.semantic_document,
-            "presentationDocument": sample.presentation_document,
-        })
+            raise TypeError("Strategy document response has no edit sequence")
+        return self._request(
+            "PUT",
+            f"/api/v1/strategies/{quote(strategy_id)}/document",
+            {
+                "expectedEditSequence": edit_sequence,
+                "leaseToken": lease_token,
+                "semanticDocument": sample.semantic_document,
+                "presentationDocument": sample.presentation_document,
+            },
+        )
 
     def release_lease(self, strategy_id: str, lease_token: str) -> None:
-        self._request("DELETE", f"/api/v1/strategies/{quote(strategy_id)}/edit-lease", {"leaseToken": lease_token})
+        self._request(
+            "DELETE",
+            f"/api/v1/strategies/{quote(strategy_id)}/edit-lease",
+            {"leaseToken": lease_token},
+        )
 
     def validate_strategy(self, strategy_id: str, catalog_id: str) -> Mapping[str, Any]:
-        return self._request("POST", f"/api/v1/strategies/{quote(strategy_id)}/validations", {"catalogId": catalog_id})
+        return self._request(
+            "POST",
+            f"/api/v1/strategies/{quote(strategy_id)}/validations",
+            {"catalogId": catalog_id},
+        )
 
-    def release_strategy(self, strategy_id: str, validation_id: str) -> Mapping[str, Any]:
-        return self._request("POST", f"/api/v1/strategies/{quote(strategy_id)}/releases", {
-            "validationRunId": validation_id,
-            "initialCashAmount": "100000.00000000",
-            "budgetCapBps": 10000,
-            "candidateConflictPolicy": {"policy": "FIRST_WINS"},
-        })
+    def release_strategy(
+        self, strategy_id: str, validation_id: str
+    ) -> Mapping[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/strategies/{quote(strategy_id)}/releases",
+            {
+                "validationRunId": validation_id,
+                "initialCashAmount": "100000.00000000",
+                "budgetCapBps": 10000,
+                "candidateConflictPolicy": {"policy": "FIRST_WINS"},
+            },
+        )
 
 
 def _login(base_url: str, email: str, password: str) -> str:
-    response = _json_transport("POST", f"{base_url.rstrip('/')}/api/v1/auth/login", {
-        "email": email, "password": password,
-    }, None)
+    response = _json_transport(
+        "POST",
+        f"{base_url.rstrip('/')}/api/v1/auth/login",
+        {
+            "email": email,
+            "password": password,
+        },
+        None,
+    )
     token = response.get("accessToken")
     if not isinstance(token, str):
-        raise ValueError("Local login response has no access token")
+        raise TypeError("Local login response has no access token")
     return token
 
 
@@ -440,7 +912,13 @@ def main() -> None:
     email = os.environ["LOCAL_SAMPLE_EMAIL"]
     password = os.environ["LOCAL_SAMPLE_PASSWORD"]
     receipts = seed_samples(LocalSampleApi(base_url, _login(base_url, email, password)))
-    print(json.dumps({"status": "prepared", "samples": receipts}, ensure_ascii=False, sort_keys=True))
+    print(
+        json.dumps(
+            {"status": "prepared", "samples": receipts},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":
