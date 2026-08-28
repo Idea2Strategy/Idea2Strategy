@@ -10,11 +10,9 @@ function Assert-True {
   if (-not $Condition) { throw "Harness consistency failed: $Message" }
 }
 
-$tracked = @(
-  @(git -C $resolvedRoot ls-files -- '.harness') |
-    Where-Object { Test-Path -LiteralPath (Join-Path $resolvedRoot $_) }
-  git -C $resolvedRoot ls-files --others --exclude-standard -- '.harness'
-) | Sort-Object -Unique
+$trackedIndex = @(git -C $resolvedRoot ls-files -- '.harness')
+$untracked = @(git -C $resolvedRoot ls-files --others --exclude-standard -- '.harness')
+$tracked = @($trackedIndex + $untracked) | Sort-Object -Unique
 Assert-True ($LASTEXITCODE -eq 0) 'unable to list tracked harness files'
 
 $required = @(
@@ -68,7 +66,13 @@ foreach ($scriptMatch in [regex]::Matches($commandText, 'scripts/[A-Za-z0-9._/-]
 
 $trackedBytes = 0
 foreach ($path in $tracked) {
-  $trackedBytes += (Get-Item -LiteralPath (Join-Path $resolvedRoot $path)).Length
+  if ($path -in $trackedIndex) {
+    $blobBytes = git -C $resolvedRoot cat-file -s ":$path"
+    Assert-True ($LASTEXITCODE -eq 0) "unable to read indexed harness blob $path"
+    $trackedBytes += [long]$blobBytes
+  } else {
+    $trackedBytes += (Get-Item -LiteralPath (Join-Path $resolvedRoot $path)).Length
+  }
 }
 Assert-True ($trackedBytes -le 20000) "tracked harness is too large ($trackedBytes bytes; limit 20000)"
 
