@@ -52,8 +52,8 @@ These were latent in already-merged code, not introduced by the wiring:
   universe is a query over listing and symbol effectivity observed on one date, not a published
   artifact.
 - A **plan-level order side does not exist** any more, in any of the three runtimes. A Basic
-  strategy is one container per side; a single side for the whole plan could only ever describe one
-  of them, and that fiction is what made root#202 possible.
+  strategy may have multiple independent containers on either side; a single side for the whole
+  plan could only ever describe one of them, and that fiction is what made root#202 possible.
 - `basic-compiled-plan.v2` is emitted for every new release, single-container included. Version 1
   is still read by both consumers with its original checksums, so previously released bots keep
   loading.

@@ -9,28 +9,31 @@ import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import boto3
 import psycopg
 from botocore.exceptions import ClientError
 
-
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "data-pipeline"))
 
-from apps.pipeline_worker.commands import Command, PipelineCommandExecutor  # noqa: E402
-from apps.pipeline_worker.config import WorkerConfig  # noqa: E402
-from market_pipeline_lib.catalog import PostgresCatalog, StorageObjectsPolicy  # noqa: E402
-from market_pipeline_lib.features.backfill import plan_feature_backfill  # noqa: E402
-from market_pipeline_lib.features.definitions import (  # noqa: E402
+from apps.pipeline_worker.commands import Command, PipelineCommandExecutor
+from apps.pipeline_worker.config import WorkerConfig
+from market_pipeline_lib.catalog import (
+    PostgresCatalog,
+    StorageObjectsPolicy,
+)
+from market_pipeline_lib.features.backfill import plan_feature_backfill
+from market_pipeline_lib.features.definitions import (
     PRODUCTION_RSI_14_RESOLUTIONS,
     production_rsi_14_definition,
 )
 
-
-SYMBOLS = ("AAPL", "MSFT")
+SYMBOLS = ("AAPL", "META", "MSFT", "NVDA")
 REQUIRED_OBSERVATIONS = 14
+FEATURE_OUTPUT_PREFIX = "feature-output/"
 
 
 def _psycopg_url(url: str) -> str:
@@ -47,8 +50,16 @@ def _evaluation_window(connection: psycopg.Connection) -> tuple[datetime, dateti
         raise RuntimeError("local market-bars/1 execution policy is missing")
     policy = document[0]
     timezone = ZoneInfo(policy["timezone"])
-    start_date = datetime.fromisoformat(policy["periodStart"].replace("Z", "+00:00")).astimezone(timezone).date()
-    end_date = datetime.fromisoformat(policy["periodEnd"].replace("Z", "+00:00")).astimezone(timezone).date()
+    start_date = (
+        datetime.fromisoformat(policy["periodStart"].replace("Z", "+00:00"))
+        .astimezone(timezone)
+        .date()
+    )
+    end_date = (
+        datetime.fromisoformat(policy["periodEnd"].replace("Z", "+00:00"))
+        .astimezone(timezone)
+        .date()
+    )
     return (
         datetime.combine(start_date, datetime.min.time(), tzinfo=UTC),
         datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=UTC),
@@ -64,11 +75,15 @@ def _instrument_ids(connection: psycopg.Connection) -> dict[str, str]:
     found = {row[0]: str(row[1]) for row in rows}
     missing = sorted(set(SYMBOLS) - found.keys())
     if missing:
-        raise RuntimeError(f"local strategy instruments are missing: {', '.join(missing)}")
+        raise RuntimeError(
+            f"local strategy instruments are missing: {', '.join(missing)}"
+        )
     return found
 
 
-def _official_source_ids(connection: psycopg.Connection, evaluation_start: datetime, evaluation_end: datetime) -> set[str]:
+def _official_source_ids(
+    connection: psycopg.Connection, evaluation_start: datetime, evaluation_end: datetime
+) -> set[str]:
     earliest_start = evaluation_start - timedelta(days=REQUIRED_OBSERVATIONS)
     rows = connection.execute(
         "select relation.id from market_data.dataset_manifests manifest "
@@ -76,40 +91,98 @@ def _official_source_ids(connection: psycopg.Connection, evaluation_start: datet
         "join market_data.dataset_objects relation on relation.dataset_manifest_id = manifest.id "
         "where manifest.status = 'AVAILABLE' and feed.code = any(%s) "
         "and manifest.period_start < %s and manifest.period_end > %s",
-        ([f"ALPACA_SIP_ALL_{item.upper()}" for item in PRODUCTION_RSI_14_RESOLUTIONS], evaluation_end, earliest_start),
+        (
+            [
+                f"ALPACA_SIP_ALL_{item.upper()}"
+                for item in PRODUCTION_RSI_14_RESOLUTIONS
+            ],
+            evaluation_end,
+            earliest_start,
+        ),
     ).fetchall()
     return {str(row[0]) for row in rows}
+
+
+def _prune_orphan_feature_outputs(
+    connection: psycopg.Connection,
+    client: Any,
+    bucket: str,
+) -> int:
+    """Remove local immutable outputs that no canonical storage receipt references."""
+    referenced = {
+        str(row[0])
+        for row in connection.execute(
+            "select object_key from storage.objects where object_key like 'feature-output/%'"
+        ).fetchall()
+    }
+    orphaned = sorted(
+        item["Key"]
+        for page in client.get_paginator("list_objects_v2").paginate(
+            Bucket=bucket,
+            Prefix=FEATURE_OUTPUT_PREFIX,
+        )
+        for item in page.get("Contents", [])
+        if str(item["Key"]).startswith(FEATURE_OUTPUT_PREFIX)
+        and str(item["Key"]) not in referenced
+    )
+    for offset in range(0, len(orphaned), 1000):
+        client.delete_objects(
+            Bucket=bucket,
+            Delete={
+                "Objects": [{"Key": key} for key in orphaned[offset : offset + 1000]],
+                "Quiet": True,
+            },
+        )
+    return len(orphaned)
 
 
 def _normalize_sources(connection: psycopg.Connection, object_ids: set[str]) -> int:
     client = boto3.client("s3", endpoint_url=os.environ["LOCAL_FEATURE_S3_ENDPOINT"])
     target_bucket = os.environ["LOCAL_FEATURE_S3_BUCKET"]
     for object_id in sorted(object_ids):
-        storage_id, bucket, key, version_id, expected_hash, expected_size = connection.execute(
-            "select storage.id, storage.bucket_name, storage.object_key, storage.provider_version_id, "
-            "storage.content_hash, storage.byte_size from market_data.dataset_objects relation "
-            "join storage.objects storage on storage.id = relation.object_id where relation.id = %s",
-            (object_id,),
-        ).fetchone()
+        storage_id, bucket, key, version_id, expected_hash, expected_size = (
+            connection.execute(
+                "select storage.id, storage.bucket_name, storage.object_key, storage.provider_version_id, "
+                "storage.content_hash, storage.byte_size from market_data.dataset_objects relation "
+                "join storage.objects storage on storage.id = relation.object_id where relation.id = %s",
+                (object_id,),
+            ).fetchone()
+        )
         try:
             current = client.head_object(Bucket=bucket, Key=key, VersionId=version_id)
             read_version = version_id
         except ClientError as error:
-            if error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") not in {404}:
+            if error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") not in {
+                404
+            }:
                 raise
             current = None
-            for candidate in [bucket, *(item["Name"] for item in client.list_buckets()["Buckets"] if item["Name"] != bucket)]:
+            for candidate in [
+                bucket,
+                *(
+                    item["Name"]
+                    for item in client.list_buckets()["Buckets"]
+                    if item["Name"] != bucket
+                ),
+            ]:
                 try:
                     current = client.head_object(Bucket=candidate, Key=key)
                     bucket = candidate
                     break
                 except ClientError as candidate_error:
-                    if candidate_error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") not in {404}:
+                    if candidate_error.response.get("ResponseMetadata", {}).get(
+                        "HTTPStatusCode"
+                    ) not in {404}:
                         raise
             if current is None:
-                raise RuntimeError(f"source object is absent from every local bucket: {object_id}") from error
+                raise RuntimeError(
+                    f"source object is absent from every local bucket: {object_id}"
+                ) from error
             read_version = current.get("VersionId")
-        if current.get("Metadata", {}).get("sha256") == expected_hash and current.get("ServerSideEncryption") == "AES256":
+        if (
+            current.get("Metadata", {}).get("sha256") == expected_hash
+            and current.get("ServerSideEncryption") == "AES256"
+        ):
             if read_version != version_id:
                 connection.execute(
                     "update storage.objects set bucket_name = %s, provider_version_id = %s where id = %s",
@@ -144,10 +217,18 @@ def main() -> None:
     database_url = os.environ["LOCAL_FEATURE_DATABASE_URL"]
     work_root = Path(os.environ["LOCAL_FEATURE_ROOT"]).resolve()
     work_root.mkdir(parents=True, exist_ok=True)
+    client = boto3.client("s3", endpoint_url=os.environ["LOCAL_FEATURE_S3_ENDPOINT"])
     with psycopg.connect(_psycopg_url(database_url)) as connection:
         evaluation_start, evaluation_end = _evaluation_window(connection)
         instruments = _instrument_ids(connection)
-        official_source_ids = _official_source_ids(connection, evaluation_start, evaluation_end)
+        official_source_ids = _official_source_ids(
+            connection, evaluation_start, evaluation_end
+        )
+        pruned = _prune_orphan_feature_outputs(
+            connection,
+            client,
+            os.environ["LOCAL_FEATURE_S3_BUCKET"],
+        )
 
     catalog = PostgresCatalog.connect(
         database_url,
@@ -158,7 +239,9 @@ def main() -> None:
     satisfied = 0
     for resolution in PRODUCTION_RSI_14_RESOLUTIONS:
         seconds = {"30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}[resolution]
-        period_start = evaluation_start - timedelta(seconds=seconds * REQUIRED_OBSERVATIONS)
+        period_start = evaluation_start - timedelta(
+            seconds=seconds * REQUIRED_OBSERVATIONS
+        )
         for instrument_id in instruments.values():
             plan = plan_feature_backfill(
                 catalog,
@@ -168,7 +251,9 @@ def main() -> None:
                 period_end=evaluation_end,
             )
             if plan.has_holes or plan.warnings:
-                raise RuntimeError(f"feature backfill is incomplete for {instrument_id}/{resolution}: {plan.warnings}")
+                raise RuntimeError(
+                    f"feature backfill is incomplete for {instrument_id}/{resolution}: {plan.warnings}"
+                )
             messages.extend(command.message() for command in plan.commands)
             satisfied += len(plan.satisfied)
 
@@ -198,14 +283,23 @@ def main() -> None:
     }
     executor = PipelineCommandExecutor(WorkerConfig.from_environment(environment))
     executor.prepare()
-    results = [executor.execute(Command.parse(message, fallback_command_id="local-feature")) for message in messages]
-    print(json.dumps({
-        "status": "prepared",
-        "symbols": list(instruments),
-        "materialized": len(results),
-        "alreadyMaterialized": satisfied,
-        "normalizedSources": normalized,
-    }, sort_keys=True))
+    results = [
+        executor.execute(Command.parse(message, fallback_command_id="local-feature"))
+        for message in messages
+    ]
+    print(
+        json.dumps(
+            {
+                "status": "prepared",
+                "symbols": list(instruments),
+                "materialized": len(results),
+                "alreadyMaterialized": satisfied,
+                "normalizedSources": normalized,
+                "prunedOrphanOutputs": pruned,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -3629,6 +3629,8 @@ Table backtest.runs {
   cancellation_requested_at timestamptz
   cancellation_reason_code varchar(80)
   cancelled_at timestamptz
+  deletion_requested_at timestamptz
+  deleted_at timestamptz
 
   indexes {
     (bot_id, queued_at)
@@ -3636,6 +3638,7 @@ Table backtest.runs {
     (owner_account_id, queued_at)
     (lane, idempotency_scope, idempotency_key) [unique]
     (execution_policy_version, queued_at)
+    (owner_account_id, deleted_at, queued_at)
   }
 
   checks {
@@ -3644,6 +3647,8 @@ Table backtest.runs {
     `(cancellation_requested_at IS NULL AND cancellation_reason_code IS NULL AND cancelled_at IS NULL) OR (cancellation_requested_at IS NOT NULL AND cancellation_reason_code IS NOT NULL AND (cancelled_at IS NULL OR cancelled_at >= cancellation_requested_at))` [name: 'backtest_cancellation_state_consistent']
     `status <> 'CANCELLED' OR cancelled_at IS NOT NULL` [name: 'backtest_cancelled_run_has_time']
     `status <> 'COMPLETED' OR (cancelled_at IS NULL AND cancellation_requested_at IS NULL)` [name: 'backtest_success_not_cancelled']
+    `deleted_at IS NULL OR (deletion_requested_at IS NOT NULL AND deleted_at >= deletion_requested_at)` [name: 'backtest_deletion_state_consistent']
+    `deleted_at IS NULL OR status IN ('COMPLETED', 'FAILED', 'UNAVAILABLE', 'CANCELLED')` [name: 'backtest_deleted_run_is_terminal']
     `missing_requirements IS NULL OR (jsonb_typeof(missing_requirements) = 'array' AND jsonb_array_length(missing_requirements) > 0 AND NOT jsonb_path_exists(missing_requirements, '$[*] ? (@.type() != "string")'))` [name: 'runs_missing_requirements_is_a_non_empty_string_array']
   }
 

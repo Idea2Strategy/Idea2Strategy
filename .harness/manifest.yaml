@@ -1,7 +1,7 @@
 schema_version: 1
 id: idea2strategy.platform
 locale: ko
-generated_by: stackcord
+generated_by: idea2strategy
 paths:
   specs: specs
   contracts: contracts

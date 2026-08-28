@@ -9,7 +9,6 @@
 - Git
 - Docker Desktop
 - PowerShell 5.1 이상
-- Stackcord CLI 1.0.0
 - GitHub 조직과 담당 저장소 접근 권한
 
 개발 기준 브랜치는 `develop`이다. `main`은 `v1.0.0`부터 완성된 릴리스에만 사용한다.
@@ -44,10 +43,11 @@ git submodule update --init --recursive
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/initialize-local-harness.ps1 -Verify
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-collaboration-policy.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-harness-consistency.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-docker-development.ps1
 ```
 
-`stackcord status --json`에서 제품 권한이 `unknown`으로 표시될 수 있다. 일반 구현은 진행할 수 있지만 `specs/`, `contracts/`, 협업 정책과 제품 거버넌스 파일은 승인 확인 없이 수정하지 않는다.
+제품 권한자는 `.harness/product-authorities.yaml`에서 확인한다. 일반 구현은 진행할 수 있지만 `specs/`, `contracts/`, 협업 정책과 권한 레지스트리는 정책에 정한 승인 근거 없이 수정하지 않는다.
 
 ## 5. 전체 로컬 환경 실행
 
@@ -183,5 +183,5 @@ Claude는 이 명령에서 구현을 시작하지 않고 현재 상태, 담당 �
 슬래시 명령을 사용하지 않는 환경에서는 다음 문장을 그대로 입력해도 된다.
 
 ```text
-나는 [이름]([GitHub ID])이고 [A-F] 담당이야. CLAUDE.md와 AGENTS.md를 읽고 Stackcord로 실제 Git·서브모듈·Issue 상태를 복원해줘. 내 담당 범위에서 선행조건이 완료되어 지금 시작 가능한 하위 Issue 하나만 알려줘. 이미 확정된 제품 결정을 다시 묻지 말고, 내가 "해줘"라고 하면 그 Issue 체크리스트 단위로 해당 서브모듈 feature 브랜치에서 구현하고 테스트해줘.
+나는 [이름]([GitHub ID])이야. CLAUDE.md와 AGENTS.md를 읽고 저장소의 Git·서브모듈·작업 원장 상태를 복원해줘. 내 담당 범위에서 선행조건이 완료되어 지금 시작 가능한 작업 하나만 알려줘. 이미 확정된 제품 결정을 다시 묻지 말고, 내가 "해줘"라고 하면 그 작업 단위로 해당 저장소 feature 브랜치에서 구현하고 테스트해줘.
 ```

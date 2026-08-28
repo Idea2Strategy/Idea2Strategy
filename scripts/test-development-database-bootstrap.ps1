@@ -260,7 +260,7 @@ if ($artifactManifest.sourceApprovalPullRequest -ne 225 -or
 }
 # The artifacts may be amended after that review, but never anonymously. An amendment has to name the
 # product authority that asked for it, quote the instruction, and say which version it retires — that
-# record is the whole audit trail for a policy change made before v1.0.0, when no fresh provider
+# record is the whole audit trail for a policy change made before v1.0.0, when no pull-request
 # observation is obtainable (AGENTS.md, pre-v1.0.0 posture).
 if ($null -ne $artifactManifest.amendment) {
     foreach ($field in @(

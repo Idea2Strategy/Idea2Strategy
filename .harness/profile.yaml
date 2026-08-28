@@ -3,5 +3,6 @@ tdd: default
 git:
   collaboration: strongly_recommended
   release: required
-task_source: git-local
+task_source: repository-ledger
+task_ledger: docs/launch-readiness-tasks.json
 release: core

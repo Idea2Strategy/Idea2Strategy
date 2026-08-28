@@ -126,12 +126,14 @@ function verifyPolicy() {
       throw new Error(`Unexpected tracked local-harness content: ${path}`);
     }
   }
-  const governance = readFileSync(join(root, ".harness/governance.yaml"), "utf8");
+  const authorityRegistry = readFileSync(join(root, ".harness/product-authorities.yaml"), "utf8");
   for (const value of [
-    "enabled: true", "provider: github", "repository: Idea2Strategy/Idea2Strategy",
-    "product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]", "authority_self_approval: true",
+    "repository: Idea2Strategy/Idea2Strategy",
+    "authority_ids: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]",
+    "before_v1: explicit-authority-instruction-recorded-in-change",
+    "from_v1: pull-request-review-by-authority",
   ]) {
-    if (!governance.includes(value)) throw new Error(`Governance requirement is missing: ${value}`);
+    if (!authorityRegistry.includes(value)) throw new Error(`Authority-registry requirement is missing: ${value}`);
   }
   const owner = readFileSync(ownerPath, "utf8");
   for (const value of ["product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]", "contact_email_is_authority: false"]) {

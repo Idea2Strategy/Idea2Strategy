@@ -57,6 +57,7 @@ try {
   $ownerText = Get-Content -Raw -Encoding utf8 $ownerPath
   Assert-True $ownerText.Contains('product_authorities: [user:kcrmin, user:pjy008008, user:Juwon-Na, user:hjcud]') 'authority reference names provider identities'
   Assert-True $ownerText.Contains('contact_email_is_authority: false') 'authority reference rejects email authentication'
+  Assert-True $ownerText.Contains('purpose: repository-local product-authority reference') 'authority reference uses repository-native verification'
   Assert-True (-not $ownerText.Contains('@')) 'generated authority reference contains no email address'
 
   $expectedFiles = @{
@@ -113,7 +114,7 @@ contact_email_is_authority: false
 
   [pscustomobject]@{
     status = 'passed'
-    assertions = 31
+    assertions = 32
   } | ConvertTo-Json -Compress
 } finally {
   $resolvedTemp = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())

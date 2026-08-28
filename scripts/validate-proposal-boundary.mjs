@@ -12,7 +12,7 @@ const changedPaths = output
   .filter(Boolean);
 
 const protectedPaths = changedPaths.filter((path) =>
-  path === '.harness/governance.yaml'
+  path === '.harness/product-authorities.yaml'
   || path === 'docs/collaboration-policy.md'
   || path === 'db/schema.dbml'
   || path.startsWith('specs/')
