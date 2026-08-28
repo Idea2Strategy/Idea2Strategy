@@ -54,9 +54,9 @@ pytestmark = pytest.mark.docker
 
 LANES = (RunLane.BASIC, RunLane.CUSTOM, RunLane.COMPETITION)
 MATERIALIZATION_ID = uuid.UUID("00000000-0000-4000-8000-0000000000e1")
-RSI_30M_DEFINITION_ID = "4b1c6801-0259-5176-a857-0e5ea923d898"
+RSI_30M_DEFINITION_ID = "ec37984b-6605-5560-8ea0-774c5b8e9626"
 RSI_30M_DEFINITION_HASH = (
-    "363f534dc77c6af0ebfe58f35be4fd2aa208906b1eaa36b550b17e9acb8692e4"
+    "sha256:250df12e46d233e7b8ece86c64df7a3941f0d70436aebe522b1387f15fb346dc"
 )
 RSI_30M_FEED_ID = uuid.UUID("57794d8c-2254-53e4-966e-44f97edd9e6a")
 RSI_30M_FEED_CODE = "FEATURE_RSI_14_30M_RSI_1_0_0"
@@ -163,7 +163,7 @@ def _production_feature_rows() -> list[dict[str, str]]:
 def _production_feature_result_hash(rows: list[dict[str, str]]) -> str:
     starts = _production_bar_starts()
     payload = {
-        "definition_hash": RSI_30M_DEFINITION_HASH,
+        "definition_hash": RSI_30M_DEFINITION_HASH.removeprefix("sha256:"),
         "input_dataset_set_hash": INPUT_HASH,
         "instrument_id": INSTRUMENT_ID,
         "period_end": (starts[-1] + timedelta(minutes=30))
@@ -182,6 +182,26 @@ def _production_feature_result_hash(rows: list[dict[str, str]]) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _production_request(plan: dict[str, Any], *, locked_hash: str) -> dict[str, Any]:
+    """Bind acceptance to the same materialization the worker consumes."""
+
+    request = official_backtest_request(
+        plan=plan,
+        include_feature_materializations=False,
+    )
+    request["featureMaterializations"] = [
+        {
+            "featureMaterializationId": str(MATERIALIZATION_ID),
+            "lockedResultHash": locked_hash,
+        }
+    ]
+    request.pop("requestHash")
+    request["requestHash"] = "sha256:" + hashlib.sha256(
+        json.dumps(request, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return request
 
 
 def _queues(sqs: Any) -> dict[RunLane, tuple[str, str]]:
@@ -418,7 +438,7 @@ def test_three_feature_lanes_reach_results_with_shared_retry_dedup_and_fail_clos
         monitor=monitor,
         plans={plan["planChecksum"]: plan},
         manifests={DATASET_MANIFEST_ID: manifest},
-        request=official_backtest_request(plan=plan),
+        request=_production_request(plan, locked_hash=locked_hash),
     )
     stack.market_data.path.write_bytes(market_body)
     stack.handler._feature_materializations = Source({MATERIALIZATION_ID: record})
