@@ -1819,6 +1819,8 @@ Table market_data.dataset_manifests {
   status market_data.dataset_status [not null]
   period_start timestamptz [not null]
   period_end timestamptz [not null]
+  actual_start_at timestamptz [note: '검증된 Parquet 행의 최소 bar_start_at. 기존 미검증 리비전은 null이다.']
+  actual_end_at timestamptz [note: '검증된 Parquet 행의 최대 bar_start_at. coverage period_end와 달리 포함 시각이다.']
   schema_version varchar(40) [not null]
   dataset_hash varchar(128) [not null]
   object_count bigint [not null, default: 0, note: '현재 등록된 content object 수. 중앙 Flyway가 트랜잭션으로 유지하며 zero-object manifest는 content-hash uniqueness에서 제외한다.']
@@ -1834,6 +1836,7 @@ Table market_data.dataset_manifests {
 
   checks {
     `object_count >= 0` [name: 'dataset_manifest_object_count_nonnegative']
+    `((actual_start_at IS NULL AND actual_end_at IS NULL) OR (actual_start_at IS NOT NULL AND actual_end_at IS NOT NULL AND actual_start_at <= actual_end_at AND actual_start_at >= period_start AND actual_end_at < period_end))` [name: 'dataset_manifest_actual_range_valid']
   }
 
   Note: 'dataset_hash는 object content set의 hash 의미를 유지한다. 객체가 없는 QUARANTINED manifest는 같은 빈 content hash를 가질 수 있고, 객체가 하나 이상인 manifest만 동일 content hash가 금지된다. 다중 종목 데이터셋의 null-safe 유일성과 object_count 유지 trigger는 중앙 마이그레이션에서 강제한다.'
@@ -1853,6 +1856,8 @@ Table market_data.dataset_objects {
   partition_end date [not null, note: 'ET 달력 기준 미포함 종료일.']
   period_start timestamptz [not null]
   period_end timestamptz [not null]
+  actual_start_at timestamptz [note: '이 Parquet 객체 행의 최소 bar_start_at.']
+  actual_end_at timestamptz [note: '이 Parquet 객체 행의 최대 bar_start_at.']
   shard_key varchar(120) [not null]
   part_number int [not null]
   row_count bigint [not null]
@@ -1868,6 +1873,7 @@ Table market_data.dataset_objects {
   checks {
     `partition_end > partition_start` [name: 'dataset_object_partition_order']
     `period_end > period_start` [name: 'dataset_object_period_order']
+    `((actual_start_at IS NULL AND actual_end_at IS NULL) OR (actual_start_at IS NOT NULL AND actual_end_at IS NOT NULL AND actual_start_at <= actual_end_at AND actual_start_at >= period_start AND actual_end_at < period_end))` [name: 'dataset_object_actual_range_valid']
   }
 
   Note: '오브젝트는 ET 기준 일·주·월·연 파티션을 지원한다. 주 경계는 월요일, 월 경계는 매월 1일, 연 경계는 1월 1일이며 partition_end는 미포함이다. 마이크로배치나 작은 파티션을 더 큰 파티션으로 컴팩션할 때 원본을 덮어쓰지 않고 새 오브젝트·새 데이터셋 리비전·명시적 오브젝트 계보를 만든다. 하나의 공개 Manifest는 같은 shard와 시간 범위에 겹치는 표현을 동시에 포함하지 않는다.'
@@ -3649,6 +3655,7 @@ Table backtest.runs {
     `status <> 'COMPLETED' OR (cancelled_at IS NULL AND cancellation_requested_at IS NULL)` [name: 'backtest_success_not_cancelled']
     `deleted_at IS NULL OR (deletion_requested_at IS NOT NULL AND deleted_at >= deletion_requested_at)` [name: 'backtest_deletion_state_consistent']
     `deleted_at IS NULL OR status IN ('COMPLETED', 'FAILED', 'UNAVAILABLE', 'CANCELLED')` [name: 'backtest_deleted_run_is_terminal']
+    `completed_at IS NULL OR completed_at >= COALESCE(started_at, queued_at)` [name: 'backtest_run_terminal_timestamp_ordered']
     `missing_requirements IS NULL OR (jsonb_typeof(missing_requirements) = 'array' AND jsonb_array_length(missing_requirements) > 0 AND NOT jsonb_path_exists(missing_requirements, '$[*] ? (@.type() != "string")'))` [name: 'runs_missing_requirements_is_a_non_empty_string_array']
   }
 
@@ -3690,6 +3697,7 @@ Table backtest.run_attempts {
     `status <> 'RUNNING' OR claim_expires_at > GREATEST(claimed_at, last_heartbeat_at)` [name: 'backtest_running_attempt_claim_expiry_after_activity']
     `status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED') OR (completed_at IS NOT NULL AND terminal_reason_code IS NOT NULL)` [name: 'backtest_terminal_attempt_has_completion']
     `terminal_reason_code IS NULL OR status IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED')` [name: 'backtest_attempt_terminal_reason_only_terminal']
+    `completed_at IS NULL OR completed_at >= started_at` [name: 'backtest_attempt_terminal_timestamp_ordered']
   }
 
   Note: '백테스트 실행 시도 저장. Records는 검토용 가상 데이터이며 운영 시드나 마이그레이션이 아니다.'

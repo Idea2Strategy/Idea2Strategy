@@ -358,6 +358,8 @@ services:
       TRADING_MARKET_EVENTS_REDIS_URI: redis://redis:6379
       TRADING_MARKET_EVENTS_REDIS_KEY_PREFIX: ${MARKET_EVENT_KEY_PREFIX:-i2s}
       TRADING_MARKET_EVENTS_CONSUMER_NAME: ${TRADING_CONSUMER_NAME:-trading-worker-local-1}
+      # Fail closed by default so tests and maintenance contexts do not consume commands.
+      TRADING_BOT_CONTROL_TRANSPORT_ENABLED: "true"
       # Opens the ledger account a room participant needs. The poller reads pending
       # requests from the shared outbox table rather than from a queue, so this flag is
       # all it needs; the results it writes are relayed by backend-worker above.

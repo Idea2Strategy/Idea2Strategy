@@ -271,6 +271,9 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
         (Join-Path $root 'scripts/local/project-local-market-history.py') | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Local three-month market-history projection failed.' }
 
+    & (Join-Path $root 'scripts/local/load-local-index-benchmarks.ps1') | Out-Host
+    if (-not $?) { throw 'Local S&P 500 and NASDAQ-100 benchmark projection failed.' }
+
     # The UI publishes RSI at four strategy clocks. Materialize the compact sample
     # instrument set and development window locally so a clean restore can release
     # and backtest those cards
