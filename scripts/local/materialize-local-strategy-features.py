@@ -34,6 +34,7 @@ from market_pipeline_lib.features.definitions import (
 SYMBOLS = ("AAPL", "META", "MSFT", "NVDA")
 REQUIRED_OBSERVATIONS = 14
 FEATURE_OUTPUT_PREFIX = "feature-output/"
+FEATURE_OUTPUT_SCHEMA = "feature-series.parquet.v1"
 
 
 def _psycopg_url(url: str) -> str:
@@ -136,6 +137,37 @@ def _prune_orphan_feature_outputs(
     return len(orphaned)
 
 
+def _retire_incompatible_feature_outputs(connection: psycopg.Connection) -> int:
+    """Retire legacy outputs whose keys cannot bind the immutable manifest identity."""
+    rows = connection.execute(
+        "update market_data.dataset_manifests manifest set status = 'SUPERSEDED' "
+        "where manifest.status = 'AVAILABLE' and manifest.schema_version = %s "
+        "and exists (select 1 from market_data.dataset_objects relation "
+        "join storage.objects storage on storage.id = relation.object_id "
+        "where relation.dataset_manifest_id = manifest.id "
+        "and position('/manifest_id=' || manifest.id::text || '/' in storage.object_key) = 0) "
+        "returning manifest.id",
+        (FEATURE_OUTPUT_SCHEMA,),
+    ).fetchall()
+    return len(rows)
+
+
+def _feature_output_ids(
+    connection: psycopg.Connection, instrument_ids: list[str]
+) -> set[str]:
+    rows = connection.execute(
+        "select relation.id from market_data.feature_materializations materialization "
+        "join market_data.dataset_manifests manifest "
+        "on manifest.id = materialization.output_dataset_manifest_id "
+        "join market_data.dataset_objects relation "
+        "on relation.dataset_manifest_id = manifest.id "
+        "where materialization.status = 'SUCCEEDED' and manifest.status = 'AVAILABLE' "
+        "and manifest.schema_version = %s and materialization.instrument_id = any(%s)",
+        (FEATURE_OUTPUT_SCHEMA, instrument_ids),
+    ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
 def _normalize_sources(connection: psycopg.Connection, object_ids: set[str]) -> int:
     client = boto3.client("s3", endpoint_url=os.environ["LOCAL_FEATURE_S3_ENDPOINT"])
     target_bucket = os.environ["LOCAL_FEATURE_S3_BUCKET"]
@@ -151,6 +183,7 @@ def _normalize_sources(connection: psycopg.Connection, object_ids: set[str]) -> 
         try:
             current = client.head_object(Bucket=bucket, Key=key, VersionId=version_id)
             read_version = version_id
+            source_bucket = bucket
         except ClientError as error:
             if error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") not in {
                 404
@@ -167,7 +200,7 @@ def _normalize_sources(connection: psycopg.Connection, object_ids: set[str]) -> 
             ]:
                 try:
                     current = client.head_object(Bucket=candidate, Key=key)
-                    bucket = candidate
+                    source_bucket = candidate
                     break
                 except ClientError as candidate_error:
                     if candidate_error.response.get("ResponseMetadata", {}).get(
@@ -179,23 +212,26 @@ def _normalize_sources(connection: psycopg.Connection, object_ids: set[str]) -> 
                     f"source object is absent from every local bucket: {object_id}"
                 ) from error
             read_version = current.get("VersionId")
-        if (
-            current.get("Metadata", {}).get("sha256") == expected_hash
-            and current.get("ServerSideEncryption") == "AES256"
-        ):
-            if read_version != version_id:
-                connection.execute(
-                    "update storage.objects set bucket_name = %s, provider_version_id = %s where id = %s",
-                    (target_bucket, read_version, storage_id),
-                )
-            continue
-        get_parameters = {"Bucket": bucket, "Key": key}
+        if int(current.get("ContentLength", -1)) != int(expected_size):
+            raise RuntimeError(f"source object integrity mismatch: {object_id}")
+        get_parameters = {"Bucket": source_bucket, "Key": key}
         if read_version:
             get_parameters["VersionId"] = read_version
         body = client.get_object(**get_parameters)["Body"].read()
         actual_hash = hashlib.sha256(body).hexdigest()
         if actual_hash != expected_hash or len(body) != expected_size:
             raise RuntimeError(f"source object integrity mismatch: {object_id}")
+        if (
+            source_bucket == target_bucket
+            and current.get("Metadata", {}).get("sha256") == actual_hash
+            and current.get("ServerSideEncryption") == "AES256"
+        ):
+            connection.execute(
+                "update storage.objects set storage_provider = 'S3', bucket_name = %s, "
+                "provider_version_id = %s where id = %s",
+                (source_bucket, read_version, storage_id),
+            )
+            continue
         written = client.put_object(
             Bucket=target_bucket,
             Key=key,
@@ -229,6 +265,7 @@ def main() -> None:
             client,
             os.environ["LOCAL_FEATURE_S3_BUCKET"],
         )
+        retired = _retire_incompatible_feature_outputs(connection)
 
     catalog = PostgresCatalog.connect(
         database_url,
@@ -287,6 +324,11 @@ def main() -> None:
         executor.execute(Command.parse(message, fallback_command_id="local-feature"))
         for message in messages
     ]
+    with psycopg.connect(_psycopg_url(database_url)) as connection:
+        normalized_outputs = _normalize_sources(
+            connection,
+            _feature_output_ids(connection, list(instruments.values())),
+        )
     print(
         json.dumps(
             {
@@ -295,7 +337,9 @@ def main() -> None:
                 "materialized": len(results),
                 "alreadyMaterialized": satisfied,
                 "normalizedSources": normalized,
+                "normalizedFeatureOutputs": normalized_outputs,
                 "prunedOrphanOutputs": pruned,
+                "retiredIncompatibleOutputs": retired,
             },
             sort_keys=True,
         )

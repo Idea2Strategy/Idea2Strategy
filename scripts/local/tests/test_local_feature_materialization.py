@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import io
 from pathlib import Path
 from typing import ClassVar
 
@@ -24,6 +26,9 @@ class _Rows:
 
     def fetchall(self):
         return self._rows
+
+    def fetchone(self):
+        return self._rows[0]
 
 
 class _InstrumentConnection:
@@ -101,3 +106,161 @@ def test_local_materializer_removes_only_unreferenced_feature_outputs() -> None:
             },
         }
     ]
+
+
+class _NormalizedSourceConnection:
+    payload = b"canonical-market-object"
+
+    def __init__(self):
+        self.updates = []
+
+    def execute(self, query, parameters):
+        if query.startswith("select storage.id"):
+            return _Rows(
+                [
+                    (
+                        "storage-1",
+                        "market-data",
+                        "bars.parquet",
+                        "version-1",
+                        hashlib.sha256(self.payload).hexdigest(),
+                        len(self.payload),
+                    )
+                ]
+            )
+        self.updates.append((query, parameters))
+        return _Rows([])
+
+
+class _AlreadyImmutableClient:
+    def head_object(self, **parameters):
+        assert parameters == {
+            "Bucket": "market-data",
+            "Key": "bars.parquet",
+            "VersionId": "version-1",
+        }
+        return {
+            "Metadata": {"sha256": hashlib.sha256(_NormalizedSourceConnection.payload).hexdigest()},
+            "ServerSideEncryption": "AES256",
+            "VersionId": "version-1",
+            "ContentLength": len(_NormalizedSourceConnection.payload),
+        }
+
+    def get_object(self, **parameters):
+        assert parameters == {
+            "Bucket": "market-data",
+            "Key": "bars.parquet",
+            "VersionId": "version-1",
+        }
+        return {"Body": io.BytesIO(_NormalizedSourceConnection.payload)}
+
+
+def test_normalize_sources_records_s3_provider_even_when_object_is_already_immutable(
+    monkeypatch,
+) -> None:
+    module = _load_module()
+    connection = _NormalizedSourceConnection()
+    client = _AlreadyImmutableClient()
+    monkeypatch.setenv("LOCAL_FEATURE_S3_ENDPOINT", "http://minio")
+    monkeypatch.setenv("LOCAL_FEATURE_S3_BUCKET", "market-data")
+    monkeypatch.setattr(module.boto3, "client", lambda *_args, **_kwargs: client)
+
+    assert module._normalize_sources(connection, {"relation-1"}) == 1
+    assert connection.updates == [
+        (
+            (
+                "update storage.objects set storage_provider = 'S3', bucket_name = %s, "
+                "provider_version_id = %s where id = %s"
+            ),
+            ("market-data", "version-1", "storage-1"),
+        )
+    ]
+
+
+def test_normalize_sources_rejects_a_spoofed_metadata_hash() -> None:
+    module = _load_module()
+    connection = _NormalizedSourceConnection()
+
+    class SpoofedClient(_AlreadyImmutableClient):
+        def get_object(self, **_parameters):
+            return {"Body": io.BytesIO(b"x" * len(connection.payload))}
+
+    module.boto3.client = lambda *_args, **_kwargs: SpoofedClient()
+    module.os.environ["LOCAL_FEATURE_S3_ENDPOINT"] = "http://minio"
+    module.os.environ["LOCAL_FEATURE_S3_BUCKET"] = "market-data"
+
+    try:
+        module._normalize_sources(connection, {"relation-1"})
+    except RuntimeError as error:
+        assert "integrity mismatch" in str(error)
+    else:
+        raise AssertionError("spoofed object bytes must not be trusted")
+    assert connection.updates == []
+
+
+def test_normalize_sources_rejects_a_wrong_head_size() -> None:
+    module = _load_module()
+    connection = _NormalizedSourceConnection()
+
+    class WrongSizeClient(_AlreadyImmutableClient):
+        def head_object(self, **parameters):
+            result = super().head_object(**parameters)
+            result["ContentLength"] += 1
+            return result
+
+    module.boto3.client = lambda *_args, **_kwargs: WrongSizeClient()
+    module.os.environ["LOCAL_FEATURE_S3_ENDPOINT"] = "http://minio"
+    module.os.environ["LOCAL_FEATURE_S3_BUCKET"] = "market-data"
+
+    try:
+        module._normalize_sources(connection, {"relation-1"})
+    except RuntimeError as error:
+        assert "integrity mismatch" in str(error)
+    else:
+        raise AssertionError("wrong object size must be rejected")
+    assert connection.updates == []
+
+
+def test_normalize_sources_copies_a_verified_fallback_object_into_the_target_bucket() -> None:
+    module = _load_module()
+    connection = _NormalizedSourceConnection()
+
+    class FallbackClient:
+        def __init__(self):
+            self.puts = []
+
+        def head_object(self, **parameters):
+            if parameters["Bucket"] == "market-data":
+                from botocore.exceptions import ClientError
+
+                raise ClientError(
+                    {"Error": {"Code": "404"}, "ResponseMetadata": {"HTTPStatusCode": 404}},
+                    "HeadObject",
+                )
+            return {
+                "Metadata": {"sha256": hashlib.sha256(connection.payload).hexdigest()},
+                "ServerSideEncryption": "AES256",
+                "VersionId": "fallback-version",
+                "ContentLength": len(connection.payload),
+            }
+
+        def list_buckets(self):
+            return {"Buckets": [{"Name": "market-data"}, {"Name": "legacy-bucket"}]}
+
+        def get_object(self, **parameters):
+            assert parameters["Bucket"] == "legacy-bucket"
+            return {"Body": io.BytesIO(connection.payload)}
+
+        def put_object(self, **parameters):
+            self.puts.append(parameters)
+            return {"VersionId": "target-version"}
+
+    client = FallbackClient()
+    module.boto3.client = lambda *_args, **_kwargs: client
+    module.os.environ["LOCAL_FEATURE_S3_ENDPOINT"] = "http://minio"
+    module.os.environ["LOCAL_FEATURE_S3_BUCKET"] = "market-data"
+
+    assert module._normalize_sources(connection, {"relation-1"}) == 1
+    assert len(client.puts) == 1
+    assert client.puts[0]["Bucket"] == "market-data"
+    assert connection.updates[0][1] == ("market-data", "target-version", "storage-1")

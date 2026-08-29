@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import sys
-from datetime import UTC
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -15,10 +15,10 @@ import pyarrow.parquet as pq
 import redis
 from sqlalchemy import create_engine, text
 
-
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, os.environ.get("DATA_PIPELINE_SRC", str(ROOT / "data-pipeline")))
 
+from apps.pipeline_worker.sync_market_history import _scoped_manifest_covers
 from market_pipeline_lib.catalog import PostgresCatalog, StorageObjectsPolicy
 from market_pipeline_lib.storage import S3ObjectStore
 
@@ -30,6 +30,42 @@ def _number(value: object) -> int | float:
     if not isinstance(number, (int, float)):
         raise TypeError(f"OHLCV value is not numeric: {type(value).__name__}")
     return number
+
+
+def _manifest_applies_to_instrument(
+    manifest: dict[str, object],
+    instrument_id: str,
+) -> bool:
+    scoped_instrument = manifest.get("instrument_id")
+    return scoped_instrument is None or str(scoped_instrument) == instrument_id
+
+
+def _read_instrument_rows(
+    source_bytes: bytes,
+    instrument_id: str,
+) -> tuple[int, pa.Table]:
+    total_rows = pq.ParquetFile(pa.BufferReader(source_bytes)).metadata.num_rows
+    selected = pq.read_table(
+        pa.BufferReader(source_bytes),
+        columns=[
+            "instrument_id", "bar_start_at", "open", "high", "low", "close", "volume",
+        ],
+        filters=[("instrument_id", "=", instrument_id)],
+    )
+    return total_rows, selected
+
+
+def _shared_row_is_shadowed(
+    manifest: dict[str, object],
+    scoped_manifests: list[dict[str, object]],
+    instrument_id: str,
+    at: object,
+) -> bool:
+    return (
+        manifest.get("instrument_id") is None
+        and isinstance(at, datetime)
+        and _scoped_manifest_covers(scoped_manifests, instrument_id, at)
+    )
 
 
 def main() -> None:
@@ -84,6 +120,7 @@ def main() -> None:
                 and row["data_layer"] == "ADJUSTED"
                 and row["resolution"] == args.timeframe
                 and feed_codes.get(str(row["feed_id"])) == expected_feed
+                and _manifest_applies_to_instrument(row, str(instrument["id"]))
             }
         else:
             manifests = {
@@ -94,6 +131,9 @@ def main() -> None:
                 raise RuntimeError("projection references an unknown manifest")
 
         candidates: dict[str, tuple[tuple[int, int], dict[str, object]]] = {}
+        scoped_manifests = [
+            row for row in manifests.values() if row.get("instrument_id") is not None
+        ]
         verified_hashes: set[str] = set()
         relation_bounds: dict[str, tuple[object, object]] = {}
         manifest_bounds: dict[str, list[object]] = {}
@@ -116,19 +156,34 @@ def main() -> None:
                     source_bytes = stream.read()
                     if hashlib.sha256(source_bytes).hexdigest() != content_hash:
                         raise RuntimeError("downloaded Parquet bytes do not match the catalog hash")
-                    table = pq.read_table(pa.BufferReader(source_bytes), columns=[
-                        "instrument_id", "bar_start_at", "open", "high", "low", "close", "volume",
-                    ])
-                if int(relation["row_count"]) != table.num_rows:
+                    total_rows, table = _read_instrument_rows(
+                        source_bytes,
+                        str(instrument["id"]),
+                    )
+                if int(relation["row_count"]) != total_rows:
                     raise RuntimeError("catalog relation row count differs from verified Parquet")
                 if table.num_rows == 0:
                     continue
                 timestamps = table.column("bar_start_at").to_pylist()
-                object_start, object_end = min(timestamps), max(timestamps)
+                if args.backfill_physical_ranges:
+                    all_timestamps = pq.read_table(
+                        pa.BufferReader(source_bytes),
+                        columns=["bar_start_at"],
+                    ).column("bar_start_at").to_pylist()
+                else:
+                    all_timestamps = timestamps
+                object_start, object_end = min(all_timestamps), max(all_timestamps)
                 relation_bounds[str(relation["id"])] = (object_start, object_end)
                 manifest_bounds.setdefault(manifest_id, []).extend((object_start, object_end))
                 for row in table.to_pylist():
                     if str(row["instrument_id"]) != str(instrument["id"]):
+                        continue
+                    if _shared_row_is_shadowed(
+                        manifest,
+                        scoped_manifests,
+                        str(instrument["id"]),
+                        row["bar_start_at"],
+                    ):
                         continue
                     timestamp = row["bar_start_at"].astimezone(UTC).isoformat().replace("+00:00", "Z")
                     priority = (

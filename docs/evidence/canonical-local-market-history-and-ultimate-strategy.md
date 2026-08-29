@@ -1,6 +1,6 @@
 # Canonical local market history and Ultimate Strategy evidence
 
-Verified on 2026-08-29 in the `product-integrity-hardening` worktree. This document records reproducible local evidence; it intentionally contains no credentials, session tokens, or licensed raw bars.
+Verified on 2026-08-30 in the `product-integrity-hardening` worktree. This document records reproducible local evidence; it intentionally contains no credentials, session tokens, or licensed raw bars.
 
 ## Delivered behavior
 
@@ -8,6 +8,7 @@ Verified on 2026-08-29 in the `product-integrity-hardening` worktree. This docum
 - PostgreSQL manifests and objects now retain logical and independently measured physical ranges. Selection rejects incomplete publications and can choose only the manifests needed by each strategy partition.
 - A benchmark API exposes locally retained S&P 500 (`SPX`) and NASDAQ-100 (`NDX`) cash-index series. Backtest UI compares cumulative performance as lines and derives the monthly matrix from the canonical equity series.
 - Terminal backtest timestamps are constrained and normalized to aware UTC. Completion cannot precede the successful attempt. Existing retry, DLQ, stale lease/heartbeat, cancellation, idempotency, and restart paths remain covered by the full engine suite.
+- Feature backfill now treats a legacy success without one current AVAILABLE output and exact source-object lineage as stale. Same-year feature windows cannot accidentally supersede a different period, local S3 normalization hashes the downloaded bytes instead of trusting metadata, and composite manifests extend only the instrument scopes proven by their object shard keys.
 - `THE ULTIMATE STRATEGY` opens in the current Basic editor without destructive fallback. It contains three mixed-resolution partitions, multiple buy/sell conditions, and eight supported cards: drawdown-from-peak, equal-allocation order, position return, price compare, RSI cross, schedule, and SMA cross.
 
 ## Actual retained market data
@@ -16,23 +17,19 @@ Equity source is the canonical adjusted Alpaca SIP ALL feed already retained loc
 
 | Instrument | Resolution | Physical UTC range | Rows |
 |---|---:|---:|---:|
-| AAPL, MSFT, AMZN, NVDA | 30m | 2016-01-05 through 2026-07-29 | 34,376 each |
-| AAPL, MSFT, AMZN, NVDA | 1h | 2016-01-06 through 2026-07-29 | 18,510 each |
-| AAPL, MSFT, AMZN, NVDA | 4h | 2016-01-13 through 2026-07-29 | 5,277 each |
-| AAPL, MSFT, AMZN, NVDA | 1d | 2016-01-25 through 2026-07-29 | 2,643 each |
-| META | 30m | 2021-07-01 through 2026-07-29 | 15,330 |
-| META | 1h | 2021-07-02 through 2026-07-29 | 8,251 |
-| META | 4h | 2021-06-30 through 2026-07-29 | 2,360 full-source rows |
-| META | 1d | 2021-07-21 through 2026-07-29 | 1,171 |
-| SPX, NDX | 1d | 2015-01-02 through 2026-08-28 | 2,931 each |
+| AAPL, AMZN, META, MSFT, NVDA | 30m | 2016-01-04 through 2026-08-28 | 34,676 each |
+| AAPL, AMZN, META, MSFT, NVDA | 1h | 2016-01-04 through 2026-08-28 | 18,678 each |
+| AAPL, AMZN, META, MSFT, NVDA | 4h | 2016-01-04 through 2026-08-28 | 5,335 each |
+| AAPL, AMZN, META, MSFT, NVDA | 1d | 2016-01-04 through 2026-08-28 | 2,679 each |
+| SPX, NDX | 1d | 2015-01-02 through 2026-08-27 | 2,930 each |
 
-The requested 2015 start is present for both benchmarks. The available local Alpaca equity archive begins in 2016 for four symbols and in 2021 for META. The D drive was not mounted and no Alpaca credential was present during verification, so earlier META/equity bars were not invented or misreported. Load scripts are idempotent and can extend these ranges when an authorized source becomes available.
+The requested 2015 start is present for both benchmarks. The refreshed Alpaca SIP archive now gives all five target equities the same 2016 start and 2026-08-28 end. A second complete loader run returned `publishedManifests=0`, proving the 220 active yearly manifests are idempotent. Provider credentials remain only in the ignored local environment file and are never written to this evidence or Git.
 
 ## Local data and API proof
 
-- Physical-range backfill: 49 manifests and 404 objects verified and updated; 28 genuinely empty objects retained as empty.
-- Redis projection after rebuild: `30m=620,691`, `1h=623,549`, `4h=509,741`, `1d=387,738`; 2,560 projected keys.
-- Independent spot checks matched Parquet and API first/last values for AAPL 30m/4h/1d, MSFT 4h, META 4h, NVDA 30m, SPX 1d, and NDX 1d. Example preview ends were 2026-07-29 for equities and 2026-08-28 for indexes.
+- Redis projection after rebuild: `30m=493,798`, `1h=622,261`, `4h=487,927`, `1d=375,851`; 2,556 projected keys.
+- All 20 equity symbol/resolution combinations independently matched the hash-verified Parquet sources, Redis row order, timestamps, and OHLCV. Browser previews ended at the stored equity date 2026-08-28 rather than today's date.
+- Browser checks covered AAPL and META one- and three-month windows and AAPL/MSFT/META/NVDA changes across the strategy's actual 30m/4h/1d clocks. The visible chart range and last OHLCV row matched the API and Parquet source.
 - Offline runtime check placed every API and worker on an internal-only Docker network, proved provider egress was blocked, and still read 43 one-month bars, 125 three-month bars, both benchmarks, and the retained completed backtest.
 - The same offline check created a fresh 2024-01-01 through 2024-12-31 Ultimate Strategy backtest. It reached `COMPLETED` in about 13 seconds, pinned five immutable inputs, and returned 25.76496159%; the proof run was then soft-deleted. Backend, batch, backtest, and trading container logs contained zero external market-provider domain references during the run.
 
@@ -40,19 +37,21 @@ The requested 2015 start is present for both benchmarks. The available local Alp
 
 - Strategy: `9ec38a5c-efce-4146-b9e1-2ac880b35574` (`THE ULTIMATE STRATEGY`)
 - Bot: `9333718c-0d10-314d-bda9-9536eff2d705`
-- Completed backtest: `bc9a35d1-bec2-399a-88c5-b343ba57c854`, 2016-01-01 through 2026-07-29
+- Completed backtest: `59d02aff-874c-3097-b685-1667a3b25d25`, 2016-01-01 through 2026-07-29
 - Retained lifecycle examples: one cancelled and one failed execution; experimental records were soft-deleted.
 
-The completed result reconciled to a 209.17969718% total return, 11.2742% annualized return, -14.90967731% maximum drawdown, 0.56073482 Sharpe ratio, 22.4213666% volatility, 384 fills, 166 closing trades, 80 wins, 86 losses, 4,048.90080680 fees, 1,012.26921090 slippage, and 309,179.69718230 ending equity. The canonical performance series produced 127 monthly cells (37 positive, 24 negative, 66 flat). Over the common 2016-01-04 through 2026-07-29 range, retained benchmark returns were 262.78% for SPX and 506.41% for NDX.
+The completed result and published summary share result hash `b20e351c3dad2baddc2807893908310edfb1cd29d84f23781fbde5b6a8abc71e`. It reconciled to a 245.4808299% total return, 12.4495% annualized return, -22.37144933% maximum drawdown, 0.96431541 Sharpe ratio, 13.0759569% volatility, 886 fills, 397 closing trades, 192 wins, 205 losses, 8,708.15976729 fees, 2,177.10403335 slippage, 254,188.98966665 realized PnL, and 345,480.82989936 ending equity. The engine published 2,658 valuation points, 6,488 trade-detail rows, 3,055 replay-ledger rows, and 16,380 position snapshots. It selected the exact mixed-resolution inputs: eleven 1d manifests, one composite 30m manifest, forty-one 4h manifests, and one immutable feature pin. Over the common 2016-01-04 through 2026-07-29 range, retained benchmark returns were 262.78% for SPX and 506.41% for NDX.
 
 ## Verification matrix
 
 - Backend full Gradle suite: passed, 64 tasks.
 - Trading Engine full Gradle suite: passed, 44 tasks.
 - Backtest Engine full pytest suite and Ruff: passed.
-- Data Pipeline: 1,235 passed, 26 LocalStack-gated skipped, 69 subtests; Ruff passed.
+- Data Pipeline: 1,249 passed, 26 explicitly LocalStack-gated skipped, 69 subtests; Ruff passed.
+- Root local-data scripts: 22 passed; changed-file Ruff checks passed.
 - UI: 58 files and 689 tests passed; TypeScript check and production build passed.
-- Real-stack Playwright: `opens THE ULTIMATE STRATEGY across its three real-data resolutions` passed. It opened the editor and switched actual AAPL/MSFT/META/NVDA previews across 30m/4h/1d and one-/three-month windows; visible chart last rows matched API `availableTo`.
+- Playwright contract E2E: 11 passed. Real-stack Playwright opened THE ULTIMATE STRATEGY across its three real-data resolutions, verified its multiple immutable dataset inputs and feature pin, then independently created and validated a composite Basic strategy, released its bot, waited for an official backtest to complete, checked its immutable input hashes, and rendered the result. Temporary strategies, bots, and runs were soft-deleted afterwards.
+- CLI deletion route was exercised against the rebuilt Docker API. Strategy controller registration no longer depends on Spring bean-discovery order, and the final library contains only THE ULTIMATE STRATEGY plus its released bot.
 - Flyway pinned bundle: eight migrations applied successfully and the second migrate was idempotent.
 - Formatting/compilation: root `git diff --check`, Python script compilation, and UI typecheck passed.
 - Secret scan: Gitleaks 8.28.0 scanned every staged root/submodule diff with redaction enabled and found no leaks. The local database credential was rotated; the previous credential was rejected; customer sessions were revoked after diagnostics.
