@@ -33,7 +33,8 @@ The requested 2015 start is present for both benchmarks. The available local Alp
 - Physical-range backfill: 49 manifests and 404 objects verified and updated; 28 genuinely empty objects retained as empty.
 - Redis projection after rebuild: `30m=620,691`, `1h=623,549`, `4h=509,741`, `1d=387,738`; 2,560 projected keys.
 - Independent spot checks matched Parquet and API first/last values for AAPL 30m/4h/1d, MSFT 4h, META 4h, NVDA 30m, SPX 1d, and NDX 1d. Example preview ends were 2026-07-29 for equities and 2026-08-28 for indexes.
-- Offline runtime check placed the application on an internal-only Docker network, proved provider egress was blocked, and still read 43 one-month bars, 125 three-month bars, both benchmarks, and the retained completed backtest.
+- Offline runtime check placed every API and worker on an internal-only Docker network, proved provider egress was blocked, and still read 43 one-month bars, 125 three-month bars, both benchmarks, and the retained completed backtest.
+- The same offline check created a fresh 2024-01-01 through 2024-12-31 Ultimate Strategy backtest. It reached `COMPLETED` in about 13 seconds, pinned five immutable inputs, and returned 25.76496159%; the proof run was then soft-deleted. Backend, batch, backtest, and trading container logs contained zero external market-provider domain references during the run.
 
 ## Demo resources and reconciled result
 
@@ -60,7 +61,7 @@ The completed result reconciled to a 209.17969718% total return, 11.2742% annual
 
 - UI: `http://localhost:15173`
 - API: `http://localhost:18080`
-- Offline proof: `pwsh scripts/local/verify-offline-runtime.ps1`
+- Offline proof: `pwsh scripts/local/verify-offline-runtime.ps1 -TestEmail <local-test-email> -TestPassword <local-test-password>`
 - Parquet/API proof: `pwsh scripts/local/verify-local-market-history.ps1`
 - Physical range repair: `pwsh scripts/local/backfill-local-physical-ranges.ps1`
 - Index load: `pwsh scripts/local/load-local-index-benchmarks.ps1`
