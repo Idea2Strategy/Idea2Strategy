@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sample_backtest_strategies import (
     SAMPLE_REVISION,
     LocalSampleApi,
-    build_ultimate_strategy,
+    build_long_horizon_growth_strategy,
     build_samples,
     seed_samples,
 )
@@ -137,18 +137,14 @@ def test_visible_sample_percentage_rules_never_use_a_zero_threshold() -> None:
     assert "0%" not in visible_values
 
 
-def test_ultimate_strategy_has_balanced_partitions_and_no_empty_cards() -> None:
-    sample = build_ultimate_strategy(CATALOG_ID, INSTRUMENTS)
+def test_performance_strategy_uses_exact_daily_weights_and_low_turnover_rules() -> None:
+    sample = build_long_horizon_growth_strategy(CATALOG_ID, INSTRUMENTS)
     snapshot = sample.presentation_document["basicEditor"]["snapshot"]
 
-    assert sample.name == "THE ULTIMATE STRATEGY"
-    assert [section["allocation"] for section in snapshot["sections"]] == [40, 35, 25]
+    assert sample.name == "장기 성장 · 대형 낙폭 방어"
+    assert [section["allocation"] for section in snapshot["sections"]] == [30, 25, 20, 25]
     assert sum(section["allocation"] for section in snapshot["sections"]) == 100
-    assert [section["timeframe"] for section in snapshot["sections"]] == [
-        "4시간봉",
-        "30분봉",
-        "일봉",
-    ]
+    assert {section["timeframe"] for section in snapshot["sections"]} == {"일봉"}
     assert {
         symbol
         for section in snapshot["sections"]
@@ -156,8 +152,8 @@ def test_ultimate_strategy_has_balanced_partitions_and_no_empty_cards() -> None:
     } == {"AAPL", "MSFT", "META", "AMZN", "NVDA"}
 
     for section in snapshot["sections"]:
-        assert len(section["cards"]["buy"]) == 2
-        assert len(section["cards"]["sell"]) == 2
+        assert len(section["cards"]["buy"]) == 1
+        assert len(section["cards"]["sell"]) == 1
         assert section["cardOrder"] == [
             *section["cards"]["buy"],
             *section["cards"]["sell"],
@@ -171,9 +167,10 @@ def test_ultimate_strategy_has_balanced_partitions_and_no_empty_cards() -> None:
         for section in snapshot["sections"]
         for card_id in section["cardOrder"]
     ] == [
-        "평균선·거래량 확인 진입", "가격·거래량 추세 진입", "손실 추세 방어", "보유 후 약세 청산",
-        "RSI·가격 확인 진입", "일일 강세 분할 진입", "RSI 하락 청산", "추세 약화 청산",
-        "장기 추세 전환 진입", "일봉 강세 분할 진입", "수익 보호 청산", "장기 추세 약화 청산",
+        "상승 확인 후 최초 진입", "대형 낙폭 방어",
+        "상승 확인 후 최초 진입", "대형 낙폭 방어",
+        "상승 확인 후 최초 진입", "대형 낙폭 방어",
+        "상승 확인 후 최초 진입", "대형 낙폭 방어",
     ]
 
     groups = sample.semantic_document["groups"]
@@ -184,42 +181,19 @@ def test_ultimate_strategy_has_balanced_partitions_and_no_empty_cards() -> None:
             for block in group["blocks"]
             if block["elementCode"] != "BASIC_EQUAL_ALLOCATION_ORDER"
         ]
-        assert len(conditions) >= 2
+        assert len(conditions) >= 1
         assert all(
             float(block["parameters"].get("thresholdPercent", "1")) > 0
             for block in conditions
         )
-    sma_blocks = [
-        block
-        for group in groups
-        for block in group["blocks"]
-        if block["elementCode"] == "BASIC_SMA_CROSS"
-    ]
-    assert sma_blocks
-    assert all(
-        (block["parameters"]["shortPeriod"], block["parameters"]["longPeriod"])
-        == ("5", "20")
-        for block in sma_blocks
-    )
-    edge_trigger_elements = {
-        "BASIC_RSI_CROSS",
-        "BASIC_SMA_CROSS",
-        "BASIC_MACD_CROSS",
-        "BASIC_BOLLINGER_REVERSAL",
-    }
-    assert all(
-        sum(block["elementCode"] in edge_trigger_elements for block in group["blocks"])
-        <= 1
-        for group in groups
-    )
-    assert all(
-        {
-            block["elementCode"]
-            for block in group["blocks"]
-        }
-        != {"BASIC_POSITION_RETURN", "BASIC_DRAWDOWN_FROM_PEAK", "BASIC_EQUAL_ALLOCATION_ORDER"}
-        for group in groups
-    )
+        terminal = group["blocks"][-1]["parameters"]
+        assert terminal["maxExecutions"] == "1"
+        assert terminal["executionMode"] == "1회만"
+        section_id = group["allocationGroupId"].rsplit("-", 2)[0]
+        section = next(item for item in snapshot["sections"] if item["id"] == section_id)
+        per_symbol = section["allocation"] / len(section["instrumentIds"])
+        assert float(terminal["maxPositionPercent"]) == per_symbol
+        assert float(terminal["orderPercent"]) == (per_symbol if group["container"] == "BUY" else 100)
 
 
 def test_scheduled_flows_round_trip_with_the_editor_execution_mode() -> None:

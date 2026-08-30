@@ -638,11 +638,11 @@ def _full_catalog_sample(
     )
 
 
-def build_ultimate_strategy(
+def build_long_horizon_growth_strategy(
     catalog_id: str, instruments: Mapping[str, str]
 ) -> SampleStrategy:
-    """Build the user-facing mixed-resolution portfolio without coverage-only rules."""
-    required = ("AAPL", "MSFT", "META", "AMZN", "NVDA")
+    """Build the user-facing low-turnover growth portfolio proven on local history."""
+    required = ("NVDA", "MSFT", "AAPL", "META", "AMZN")
     for symbol in required:
         if symbol not in instruments:
             raise ValueError(
@@ -658,64 +658,6 @@ def build_ultimate_strategy(
         "전일 종가",
         tone="data",
     )
-    price_down = lambda resolution: _condition(
-        "BASIC_PRICE_COMPARE",
-        resolution,
-        {"operator": "LT", "reference": "PREVIOUS_CLOSE"},
-        "가격 비교",
-        "<",
-        "전일 종가",
-        tone="data",
-    )
-    volume_confirm = lambda resolution: _condition(
-        "BASIC_VOLUME_COMPARE",
-        resolution,
-        {
-            "operator": "GTE",
-            "reference": "AVERAGE_VOLUME",
-            "period": "20",
-            "multiplier": "1",
-        },
-        "거래량",
-        "≥",
-        "최근 20봉 평균 거래량 1배",
-        tone="data",
-    )
-    schedule = lambda resolution: _condition(
-        "BASIC_SCHEDULE",
-        resolution,
-        {"cycle": "EVERY_TRADING_DAY", "interval": "1"},
-        "실행 주기",
-        "매 거래일",
-        "1",
-        tone="time",
-    )
-    rsi = lambda resolution, direction, threshold: _condition(
-        "BASIC_RSI_CROSS",
-        resolution,
-        {"direction": direction, "period": "14", "threshold": str(threshold)},
-        "RSI 반등",
-        "↑" if direction == "UP" else "↓",
-        str(threshold),
-    )
-    sma = lambda resolution, direction, short, long: _condition(
-        "BASIC_SMA_CROSS",
-        resolution,
-        {"direction": direction, "shortPeriod": str(short), "longPeriod": str(long)},
-        "평균선 교차",
-        "↑" if direction == "UP" else "↓",
-        f"{short}봉 · {long}봉",
-        tone="indicator",
-    )
-    holding = lambda resolution, unit, amount: _condition(
-        "BASIC_HOLDING_PERIOD",
-        resolution,
-        {"unit": unit, "amount": str(amount)},
-        "보유 기간",
-        "≥",
-        f"{amount}{'거래일' if unit == 'TRADING_DAY' else '봉'}",
-        tone="risk",
-    )
     drawdown = lambda percent: _condition(
         "BASIC_DRAWDOWN_FROM_PEAK",
         "",
@@ -726,98 +668,26 @@ def build_ultimate_strategy(
         tone="risk",
     )
 
-    partitions = (
+    peak_return = _condition(
+        "BASIC_PEAK_RETURN",
+        "",
+        {"operator": "GTE", "thresholdPercent": "20"},
+        "최고 수익률",
+        "≥",
+        "20%",
+        tone="risk",
+    )
+    weights = (("NVDA", 30), ("MSFT", 25), ("AAPL", 20), ("META-AMZN", 25))
+    partitions = tuple(
         {
-            "id": "ultimate-quality-trend",
-            "symbols": ("AAPL", "MSFT"),
-            "resolution": "4h",
-            "allocation": 40,
-            "buy": (
-                ("평균선·거래량 확인 진입", (sma("4h", "UP", 5, 20), volume_confirm("4h"))),
-                ("가격·거래량 추세 진입", (price_up("4h"), volume_confirm("4h"))),
-            ),
-            "sell": (
-                (
-                    "손실 추세 방어",
-                    (
-                        _condition(
-                            "BASIC_POSITION_RETURN",
-                            "",
-                            {"direction": "LOSS", "thresholdPercent": "3"},
-                            "현재 수익률",
-                            "손실",
-                            "3%",
-                            tone="risk",
-                        ),
-                        price_down("4h"),
-                    ),
-                ),
-                ("보유 후 약세 청산", (holding("4h", "BAR", 5), price_down("4h"))),
-            ),
-        },
-        {
-            "id": "ultimate-growth-cycle",
-            "symbols": ("META", "AMZN"),
-            "resolution": "30m",
-            "allocation": 35,
-            "buy": (
-                ("RSI·가격 확인 진입", (rsi("30m", "UP", 45), price_up("30m"))),
-                ("일일 강세 분할 진입", (schedule("30m"), price_up("30m"))),
-            ),
-            "sell": (
-                ("RSI 하락 청산", (rsi("30m", "DOWN", 60), price_down("30m"))),
-                ("추세 약화 청산", (holding("30m", "BAR", 26), price_down("30m"))),
-            ),
-        },
-        {
-            "id": "ultimate-nvda-long-term",
-            "symbols": ("NVDA",),
+            "id": f"long-horizon-{symbol.lower()}",
+            "symbols": tuple(symbol.split("-")),
             "resolution": "1d",
-            "allocation": 25,
-            "buy": (
-                (
-                    "장기 추세 전환 진입",
-                    (
-                        _condition(
-                            "BASIC_MACD_CROSS",
-                            "1d",
-                            {
-                                "direction": "UP",
-                                "fastPeriod": "12",
-                                "slowPeriod": "26",
-                                "signalPeriod": "9",
-                            },
-                            "MACD 전환",
-                            "↑",
-                            "12 · 26 · 9",
-                        ),
-                        price_up("1d"),
-                    ),
-                ),
-                ("일봉 강세 분할 진입", (schedule("1d"), price_up("1d"))),
-            ),
-            "sell": (
-                (
-                    "수익 보호 청산",
-                    (
-                        _condition(
-                            "BASIC_PEAK_RETURN",
-                            "",
-                            {"operator": "GTE", "thresholdPercent": "12"},
-                            "최고 수익률",
-                            "≥",
-                            "12%",
-                            tone="risk",
-                        ),
-                        drawdown(8),
-                    ),
-                ),
-                (
-                    "장기 추세 약화 청산",
-                    (holding("1d", "TRADING_DAY", 20), price_down("1d")),
-                ),
-            ),
-        },
+            "allocation": allocation,
+            "buy": (("상승 확인 후 최초 진입", (price_up("1d"),)),),
+            "sell": (("대형 낙폭 방어", (peak_return, drawdown(40))),),
+        }
+        for symbol, allocation in weights
     )
 
     groups: list[dict[str, Any]] = []
@@ -826,13 +696,19 @@ def build_ultimate_strategy(
     card_meta: dict[str, dict[str, str]] = {}
     buy_settings: dict[str, dict[str, Any]] = {}
     sell_settings: dict[str, dict[str, Any]] = {}
-    symbol_limits: dict[str, dict[str, int]] = {}
+    symbol_limits: dict[str, dict[str, float | int]] = {}
     timeframe_labels = {"30m": "30분봉", "4h": "4시간봉", "1d": "일봉"}
 
     for section_index, partition in enumerate(partitions):
         section_id = str(partition["id"])
         symbols = tuple(partition["symbols"])
         resolution = str(partition["resolution"])
+        raw_per_symbol_limit = partition["allocation"] / len(symbols)
+        per_symbol_limit = (
+            int(raw_per_symbol_limit)
+            if raw_per_symbol_limit.is_integer()
+            else raw_per_symbol_limit
+        )
         buy_cards: list[str] = []
         sell_cards: list[str] = []
         card_positions: dict[str, dict[str, int]] = {}
@@ -844,9 +720,13 @@ def build_ultimate_strategy(
                     group = _semantic_group(
                         card_id, container, instruments[symbol], conditions
                     )
-                    group["blocks"][-1]["parameters"]["maxPositionPercent"] = str(
-                        partition["allocation"] // len(symbols)
+                    terminal = group["blocks"][-1]["parameters"]
+                    terminal["maxPositionPercent"] = str(per_symbol_limit)
+                    terminal["orderPercent"] = str(
+                        per_symbol_limit if container == "BUY" else 100
                     )
+                    terminal["executionMode"] = "1회만"
+                    terminal["maxExecutions"] = "1"
                     groups.append(group)
                 visible = tuple(
                     condition
@@ -868,24 +748,23 @@ def build_ultimate_strategy(
                 }
                 if container == "BUY":
                     buy_cards.append(card_id)
-                    periodic = conditions[0].element_code == "BASIC_SCHEDULE"
                     buy_settings[card_id] = {
-                        "maxOrderPercent": 10,
-                        "entryMode": "주기마다" if periodic else "대기 후 재진입",
+                        "maxOrderPercent": per_symbol_limit,
+                        "entryMode": "1회만",
                         "cycle": "매 거래일",
                         "cycleInterval": 1,
                         "reentryWait": "조건 재충족",
                         "reentryInterval": 1,
-                        "maxEntries": 1000,
+                        "maxEntries": 1,
                     }
                 else:
                     sell_cards.append(card_id)
                     sell_settings[card_id] = {
                         "sellPercent": 100,
-                        "executeMode": "대기 후 재실행",
+                        "executeMode": "1회만",
                         "reexecWait": "조건 재충족",
                         "reexecInterval": 1,
-                        "maxExecutions": 1000,
+                        "maxExecutions": 1,
                     }
         sections.append(
             {
@@ -903,15 +782,14 @@ def build_ultimate_strategy(
                 "cardPositions": card_positions,
             }
         )
-        per_symbol_limit = partition["allocation"] // len(symbols)
         symbol_limits[section_id] = {
             symbol: per_symbol_limit for symbol in symbols
         }
 
     return SampleStrategy(
-        key="THE_ULTIMATE_STRATEGY",
-        name="THE ULTIMATE STRATEGY",
-        description="다섯 종목을 30분·4시간·일봉으로 나눠 추세, 거래량, RSI, 손실과 낙폭을 함께 관리합니다.",
+        key="LONG_HORIZON_DRAWDOWN_DEFENSE",
+        name="장기 성장 · 대형 낙폭 방어",
+        description="다섯 성장주를 일봉에서 목표 비중으로 한 번 진입하고, 수익 달성 뒤 40% 대형 낙폭에서만 방어합니다.",
         semantic_document={"mode": "BASIC", "catalogId": catalog_id, "groups": groups},
         presentation_document={
             "basicEditor": {
@@ -926,7 +804,7 @@ def build_ultimate_strategy(
                 },
                 "viewport": {"pan": {"x": 0, "y": 0}, "zoom": 0.7},
             },
-            "localSampleKey": "THE_ULTIMATE_STRATEGY",
+            "localSampleKey": "LONG_HORIZON_DRAWDOWN_DEFENSE",
             "localSampleRevision": SAMPLE_REVISION,
         },
     )
