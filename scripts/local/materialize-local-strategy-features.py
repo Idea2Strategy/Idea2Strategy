@@ -31,7 +31,7 @@ from market_pipeline_lib.features.definitions import (
     production_rsi_14_definition,
 )
 
-SYMBOLS = ("AAPL", "META", "MSFT", "NVDA")
+SYMBOLS = ("AAPL", "AMZN", "META", "MSFT", "NVDA")
 REQUIRED_OBSERVATIONS = 14
 FEATURE_OUTPUT_PREFIX = "feature-output/"
 FEATURE_OUTPUT_SCHEMA = "feature-series.parquet.v1"

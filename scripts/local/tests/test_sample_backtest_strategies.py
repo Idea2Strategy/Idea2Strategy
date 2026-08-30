@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sample_backtest_strategies import (
     SAMPLE_REVISION,
     LocalSampleApi,
+    build_ultimate_strategy,
     build_samples,
     seed_samples,
 )
@@ -19,6 +20,7 @@ INSTRUMENTS = {
     "SPY": "7f20f2a6-dd68-4ea1-a948-ff629edd9295",
     "QQQ": "eac80a3b-662f-432b-9d12-a2a2894c7738",
     "META": "7233ce25-2963-4f55-91cd-907f405c4518",
+    "AMZN": "c96fda41-ea07-4fb1-9d00-42622dd0b77d",
     "NVDA": "5a214db8-9b32-4534-9b5b-95df27bde5a4",
 }
 
@@ -105,6 +107,118 @@ def test_full_catalog_sample_executes_every_block_across_all_four_resolutions() 
             {group["allocationGroupId"] for group in sample.semantic_document["groups"]}
         )
         == 14
+    )
+
+
+def test_visible_sample_percentage_rules_never_use_a_zero_threshold() -> None:
+    """Coverage samples shown to a user must still express meaningful rules."""
+
+    sample = next(
+        item
+        for item in build_samples(CATALOG_ID, INSTRUMENTS)
+        if item.key == "FULL_CATALOG_MIXED_RESOLUTION"
+    )
+    percentage_rules = [
+        block
+        for group in sample.semantic_document["groups"]
+        for block in group["blocks"]
+        if "thresholdPercent" in block["parameters"]
+    ]
+    assert percentage_rules
+    assert all(
+        float(block["parameters"]["thresholdPercent"]) > 0
+        for block in percentage_rules
+    )
+    visible_values = [
+        block["value"]
+        for blocks in sample.presentation_document["basicEditor"]["snapshot"]["cardBlocks"].values()
+        for block in blocks
+    ]
+    assert "0%" not in visible_values
+
+
+def test_ultimate_strategy_has_balanced_partitions_and_no_empty_cards() -> None:
+    sample = build_ultimate_strategy(CATALOG_ID, INSTRUMENTS)
+    snapshot = sample.presentation_document["basicEditor"]["snapshot"]
+
+    assert sample.name == "THE ULTIMATE STRATEGY"
+    assert [section["allocation"] for section in snapshot["sections"]] == [40, 35, 25]
+    assert sum(section["allocation"] for section in snapshot["sections"]) == 100
+    assert [section["timeframe"] for section in snapshot["sections"]] == [
+        "4시간봉",
+        "30분봉",
+        "일봉",
+    ]
+    assert {
+        symbol
+        for section in snapshot["sections"]
+        for symbol in section["symbol"].split(" · ")
+    } == {"AAPL", "MSFT", "META", "AMZN", "NVDA"}
+
+    for section in snapshot["sections"]:
+        assert len(section["cards"]["buy"]) == 2
+        assert len(section["cards"]["sell"]) == 2
+        assert section["cardOrder"] == [
+            *section["cards"]["buy"],
+            *section["cards"]["sell"],
+        ]
+        for card_id in section["cardOrder"]:
+            assert snapshot["cardBlocks"][card_id]
+            assert len(snapshot["cardBlocks"][card_id]) >= 1
+
+    assert [
+        snapshot["cardMeta"][card_id]["title"]
+        for section in snapshot["sections"]
+        for card_id in section["cardOrder"]
+    ] == [
+        "평균선·거래량 확인 진입", "가격·거래량 추세 진입", "손실 추세 방어", "보유 후 약세 청산",
+        "RSI·가격 확인 진입", "일일 강세 분할 진입", "RSI 하락 청산", "추세 약화 청산",
+        "장기 추세 전환 진입", "일봉 강세 분할 진입", "수익 보호 청산", "장기 추세 약화 청산",
+    ]
+
+    groups = sample.semantic_document["groups"]
+    assert groups
+    for group in groups:
+        conditions = [
+            block
+            for block in group["blocks"]
+            if block["elementCode"] != "BASIC_EQUAL_ALLOCATION_ORDER"
+        ]
+        assert len(conditions) >= 2
+        assert all(
+            float(block["parameters"].get("thresholdPercent", "1")) > 0
+            for block in conditions
+        )
+    sma_blocks = [
+        block
+        for group in groups
+        for block in group["blocks"]
+        if block["elementCode"] == "BASIC_SMA_CROSS"
+    ]
+    assert sma_blocks
+    assert all(
+        (block["parameters"]["shortPeriod"], block["parameters"]["longPeriod"])
+        == ("5", "20")
+        for block in sma_blocks
+    )
+    edge_trigger_elements = {
+        "BASIC_RSI_CROSS",
+        "BASIC_SMA_CROSS",
+        "BASIC_MACD_CROSS",
+        "BASIC_BOLLINGER_REVERSAL",
+    }
+    assert all(
+        sum(block["elementCode"] in edge_trigger_elements for block in group["blocks"])
+        <= 1
+        for group in groups
+    )
+    assert all(
+        {
+            block["elementCode"]
+            for block in group["blocks"]
+        }
+        != {"BASIC_POSITION_RETURN", "BASIC_DRAWDOWN_FROM_PEAK", "BASIC_EQUAL_ALLOCATION_ORDER"}
+        for group in groups
     )
 
 
@@ -235,7 +349,7 @@ class _RecordingApi:
     def acquire_lease(self, strategy_id: str):
         return {"leaseToken": f"lease-{strategy_id}"}
 
-    def save_document(self, strategy_id: str, lease_token: str, sample):
+    def save_document(self, strategy_id: str, sample):
         self.saved.append(strategy_id)
         return {"editSequence": 1}
 
@@ -261,7 +375,7 @@ def test_seed_creates_validates_and_releases_each_new_sample_once() -> None:
     assert len(api.saved) == 8
     assert len(api.validated) == 8
     assert len(api.released) == 4
-    assert api.lease_released == api.saved
+    assert api.lease_released == []
 
 
 def test_seed_keeps_a_separate_editable_copy_after_releasing_each_new_sample() -> None:

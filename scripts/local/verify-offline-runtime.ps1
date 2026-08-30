@@ -72,8 +72,8 @@ instrument = document['presentationDocument']['basicEditor']['snapshot']['sectio
 one = call(f'http://backend-api:8080/api/v1/market-data/instruments/{instrument}/bars?timeframe=4h&window=1m', token)
 three = call(f'http://backend-api:8080/api/v1/market-data/instruments/{instrument}/bars?timeframe=4h&window=3m', token)
 benchmarks = call('http://backend-api:8080/api/v1/market-data/benchmarks', token)
-run = call('http://backtest-api:8082/api/v1/backtests/bc9a35d1-bec2-399a-88c5-b343ba57c854', token)
-performance = call('http://backtest-api:8082/api/v1/backtests/bc9a35d1-bec2-399a-88c5-b343ba57c854/performance', token)
+run = call('http://backtest-api:8082/api/v1/backtests/cd7b154f-5618-3bcd-a15c-175ce39d054c', token)
+performance = call('http://backtest-api:8082/api/v1/backtests/cd7b154f-5618-3bcd-a15c-175ce39d054c/performance', token)
 
 # A stored-result read is insufficient proof: create a fresh mixed-resolution run
 # while every application container has only the internal Docker network. The fixed
@@ -81,7 +81,7 @@ performance = call('http://backtest-api:8082/api/v1/backtests/bc9a35d1-bec2-399a
 # performs official manifest selection and the worker must read the pinned Parquet.
 proof_key = 'offline-proof-' + os.environ['I2S_PROOF_NONCE']
 receipt = call(
-    'http://backend-api:8080/api/v1/bots/9333718c-0d10-314d-bda9-9536eff2d705/backtests',
+    'http://backend-api:8080/api/v1/bots/78bbaa0b-72bb-3ce6-ad94-bfe01bfa4372/backtests',
     token,
     {'periodStart': '2024-01-01', 'periodEnd': '2024-12-31'},
     extra_headers={'Idempotency-Key': proof_key},

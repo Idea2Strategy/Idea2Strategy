@@ -34,6 +34,7 @@ class _Rows:
 class _InstrumentConnection:
     ids: ClassVar = {
         "AAPL": "aa268aa6-9401-49d0-a2d4-a2a490df7d84",
+        "AMZN": "a67d0c5c-c4e5-4562-a35c-c3be736f4d49",
         "META": "7233ce25-2963-4f55-91cd-907f405c4518",
         "MSFT": "35ca27e4-8d72-4fe3-a54c-5066b4c15dcd",
         "NVDA": "5a214db8-9b32-4534-9b5b-95df27bde5a4",

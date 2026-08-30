@@ -7,9 +7,10 @@ Verified on 2026-08-30 in the `product-integrity-hardening` worktree. This docum
 - Market preview reads authenticated Redis projections rebuilt from immutable MinIO Parquet objects. It never synthesizes bars and anchors one- and three-month windows to each instrument/resolution's latest stored bar.
 - PostgreSQL manifests and objects now retain logical and independently measured physical ranges. Selection rejects incomplete publications and can choose only the manifests needed by each strategy partition.
 - A benchmark API exposes locally retained S&P 500 (`SPX`) and NASDAQ-100 (`NDX`) cash-index series. Backtest UI compares cumulative performance as lines and derives the monthly matrix from the canonical equity series.
+- Completed-run reads no longer reconstruct all 2,208 weekly detail objects for every screen request. Execution metadata reads only the immutable result object, while the performance chart reads and verifies only `CALCULATION_SERIES` parts in parallel. A rebuilt-container browser run rendered the complete result instead of remaining on the loading state.
 - Terminal backtest timestamps are constrained and normalized to aware UTC. Completion cannot precede the successful attempt. Existing retry, DLQ, stale lease/heartbeat, cancellation, idempotency, and restart paths remain covered by the full engine suite.
 - Feature backfill now treats a legacy success without one current AVAILABLE output and exact source-object lineage as stale. Same-year feature windows cannot accidentally supersede a different period, local S3 normalization hashes the downloaded bytes instead of trusting metadata, and composite manifests extend only the instrument scopes proven by their object shard keys.
-- `THE ULTIMATE STRATEGY` opens in the current Basic editor without destructive fallback. It contains three mixed-resolution partitions, multiple buy/sell conditions, and eight supported cards: drawdown-from-peak, equal-allocation order, position return, price compare, RSI cross, schedule, and SMA cross.
+- `THE ULTIMATE STRATEGY` opens in the current Basic editor without destructive fallback. It contains three mixed-resolution partitions, two buy and two sell cards per partition, and meaningful non-zero thresholds. The saved cards exercise price, volume, SMA, RSI, MACD, schedule, holding-period, position-return, peak-return, drawdown, and allocation-order behavior.
 
 ## Actual retained market data
 
@@ -30,26 +31,36 @@ The requested 2015 start is present for both benchmarks. The refreshed Alpaca SI
 - Redis projection after rebuild: `30m=493,798`, `1h=622,261`, `4h=487,927`, `1d=375,851`; 2,556 projected keys.
 - All 20 equity symbol/resolution combinations independently matched the hash-verified Parquet sources, Redis row order, timestamps, and OHLCV. Browser previews ended at the stored equity date 2026-08-28 rather than today's date.
 - Browser checks covered AAPL and META one- and three-month windows and AAPL/MSFT/META/NVDA changes across the strategy's actual 30m/4h/1d clocks. The visible chart range and last OHLCV row matched the API and Parquet source.
-- Offline runtime check placed every API and worker on an internal-only Docker network, proved provider egress was blocked, and still read 43 one-month bars, 125 three-month bars, both benchmarks, and the retained completed backtest.
-- The same offline check created a fresh 2024-01-01 through 2024-12-31 Ultimate Strategy backtest. It reached `COMPLETED` in about 13 seconds, pinned five immutable inputs, and returned 25.76496159%; the proof run was then soft-deleted. Backend, batch, backtest, and trading container logs contained zero external market-provider domain references during the run.
+- Offline runtime check placed every API and worker on an internal-only Docker network, proved provider egress was blocked, and still read 47 one-month bars, 129 three-month bars, both benchmarks, and the retained completed backtest.
+- The same offline check created a fresh 2024-01-01 through 2024-12-31 Ultimate Strategy backtest. It reached `COMPLETED`, pinned 10 immutable instrument/year inputs across the strategy's three resolutions, and returned -3.5119874%; the proof run was then soft-deleted. Backend, batch, backtest, and trading container logs contained zero external market-provider domain references during the run.
 
-## Demo resources and reconciled result
+## Demo resources and current reconciled result
 
 - Strategy: `9ec38a5c-efce-4146-b9e1-2ac880b35574` (`THE ULTIMATE STRATEGY`)
-- Bot: `9333718c-0d10-314d-bda9-9536eff2d705`
-- Completed backtest: `59d02aff-874c-3097-b685-1667a3b25d25`, 2016-01-01 through 2026-07-29
-- Retained lifecycle examples: one cancelled and one failed execution; experimental records were soft-deleted.
+- Bot: `78bbaa0b-72bb-3ce6-ad94-bfe01bfa4372`
+- Completed backtest: `cd7b154f-5618-3bcd-a15c-175ce39d054c`, 2016-01-01 through 2026-07-29
+- The owner-visible library has one strategy, one released bot, and one completed backtest. Experimental, failed, and cancelled proof records were soft-deleted after their lifecycle assertions passed.
 
-The completed result and published summary share result hash `b20e351c3dad2baddc2807893908310edfb1cd29d84f23781fbde5b6a8abc71e`. It reconciled to a 245.4808299% total return, 12.4495% annualized return, -22.37144933% maximum drawdown, 0.96431541 Sharpe ratio, 13.0759569% volatility, 886 fills, 397 closing trades, 192 wins, 205 losses, 8,708.15976729 fees, 2,177.10403335 slippage, 254,188.98966665 realized PnL, and 345,480.82989936 ending equity. The engine published 2,658 valuation points, 6,488 trade-detail rows, 3,055 replay-ledger rows, and 16,380 position snapshots. It selected the exact mixed-resolution inputs: eleven 1d manifests, one composite 30m manifest, forty-one 4h manifests, and one immutable feature pin. Over the common 2016-01-04 through 2026-07-29 range, retained benchmark returns were 262.78% for SPX and 506.41% for NDX.
+The current result replaces an earlier optimistic result that was contaminated by an over-broad shared manifest and by valuation/accounting inconsistencies. The corrected result hash is `e4a461d9a56377de71969f08bb90876f8a230afc4de7bbc4e09bb719163f4785`. It reconciles to -46.20175565% total return, -5.6983% annualized return, -47.4670059% maximum drawdown, -0.41743868 Sharpe ratio, 12.2788% volatility, 9,953 fills, 2,689 closing trades, 52.1383% win rate, 115,676.45 fees, 28,919.13 slippage, 69,142.59 realized PnL, 53,798.24434831 ending equity, and 16,527.56434831 ending cash. The series has 2,658 daily valuations and 127 monthly returns: 59 positive, 68 negative, and zero exactly-flat months. Best month was 2023-03 at +6.26559151%; worst was 2022-09 at -9.21344357%.
+
+The run pins exactly 55 instrument-scoped yearly manifests: AAPL and MSFT 4-hour bars, META and AMZN 30-minute bars, and NVDA daily bars. No shared composite manifest is used. Across those immutable objects the independent audit read 82,701 market rows. It also read all 2,208 result-detail objects and 21,548 trade records. Every object hash and row count matched PostgreSQL, all OHLC invariants held, no duplicate market key existed, all 9,953 fill identifiers were unique, every fill base price matched the authoritative execution-bar open, the 0.2% fee and 0.05% slippage rules matched exactly, and cash plus marked positions reconciled to equity with zero error. Over the common 2016-01-04 through 2026-07-29 range, retained benchmark returns remain 262.78% for S&P 500 and 506.41% for NASDAQ-100.
+
+### Exact saved strategy composition
+
+- AAPL/MSFT, 4-hour, 40% partition: SMA 5/20 plus 20-bar average-volume entry; price-above-previous-close plus volume entry; 3% loss plus price-below-previous-close exit; five-bar holding plus price-below-previous-close exit.
+- META/AMZN, 30-minute, 35% partition: RSI upward cross at 45 plus price confirmation; daily scheduled price-confirmed entry; RSI downward cross at 60 plus price confirmation exit; 26-bar holding plus price confirmation exit.
+- NVDA, daily, 25% partition: MACD 12/26/9 upward cross plus price confirmation; daily scheduled price-confirmed entry; 12% peak return plus 8% drawdown exit; 20-trading-day holding plus price confirmation exit.
+- Every buy order uses at most 10% of its strategy-card budget; sell cards close 100% of the held position. Per-symbol caps are 20% for AAPL/MSFT, 17% for META/AMZN, and 25% for NVDA.
+- The comparison chart's single 0% point is the common starting baseline used to normalize strategy, S&P 500, and NASDAQ-100. It is labeled as such in the UI; it is not a zero-return strategy interval. The monthly series contains no exactly-flat month.
 
 ## Verification matrix
 
 - Backend full Gradle suite: passed, 64 tasks.
 - Trading Engine full Gradle suite: passed, 44 tasks.
-- Backtest Engine full pytest suite and Ruff: passed.
+- Backtest Engine: Ruff passed; 1,390 default tests passed (2 skipped), and 165 Docker integration tests passed (10 environment-gated skips).
 - Data Pipeline: 1,249 passed, 26 explicitly LocalStack-gated skipped, 69 subtests; Ruff passed.
-- Root local-data scripts: 22 passed; changed-file Ruff checks passed.
-- UI: 58 files and 689 tests passed; TypeScript check and production build passed.
+- Root local-data scripts: 20 passed; changed-file Ruff checks passed.
+- UI: 59 files and 696 tests passed; TypeScript check and production build passed.
 - Playwright contract E2E: 11 passed. Real-stack Playwright opened THE ULTIMATE STRATEGY across its three real-data resolutions, verified its multiple immutable dataset inputs and feature pin, then independently created and validated a composite Basic strategy, released its bot, waited for an official backtest to complete, checked its immutable input hashes, and rendered the result. Temporary strategies, bots, and runs were soft-deleted afterwards.
 - CLI deletion route was exercised against the rebuilt Docker API. Strategy controller registration no longer depends on Spring bean-discovery order, and the final library contains only THE ULTIMATE STRATEGY plus its released bot.
 - Flyway pinned bundle: eight migrations applied successfully and the second migrate was idempotent.

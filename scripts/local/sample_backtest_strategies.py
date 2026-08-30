@@ -11,7 +11,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-SAMPLE_REVISION = 3
+SAMPLE_REVISION = 4
 
 
 @dataclass(frozen=True)
@@ -372,11 +372,11 @@ def _full_catalog_sample(
                     {
                         "base": "PREVIOUS_CLOSE",
                         "direction": "UP",
-                        "thresholdPercent": "0",
+                        "thresholdPercent": "1",
                     },
                     "가격 변화율",
                     "상승",
-                    "0%",
+                    "1%",
                     tone="data",
                     base="전일 종가",
                 ),
@@ -385,10 +385,10 @@ def _full_catalog_sample(
                 _condition(
                     "BASIC_POSITION_RETURN",
                     "",
-                    {"direction": "LOSS", "thresholdPercent": "0"},
+                    {"direction": "LOSS", "thresholdPercent": "5"},
                     "현재 수익률",
                     "손실",
-                    "0%",
+                    "5%",
                     tone="risk",
                 ),
                 _condition(
@@ -432,10 +432,10 @@ def _full_catalog_sample(
                 _condition(
                     "BASIC_PEAK_RETURN",
                     "",
-                    {"operator": "GTE", "thresholdPercent": "0"},
+                    {"operator": "GTE", "thresholdPercent": "8"},
                     "최고 수익률",
                     "≥",
-                    "0%",
+                    "8%",
                     tone="risk",
                 ),
             ),
@@ -465,10 +465,10 @@ def _full_catalog_sample(
                 _condition(
                     "BASIC_DRAWDOWN_FROM_PEAK",
                     "",
-                    {"operator": "GTE", "thresholdPercent": "0"},
+                    {"operator": "GTE", "thresholdPercent": "7"},
                     "고점 대비 하락",
                     "≥",
-                    "0%",
+                    "7%",
                     tone="risk",
                 ),
             ),
@@ -638,6 +638,300 @@ def _full_catalog_sample(
     )
 
 
+def build_ultimate_strategy(
+    catalog_id: str, instruments: Mapping[str, str]
+) -> SampleStrategy:
+    """Build the user-facing mixed-resolution portfolio without coverage-only rules."""
+    required = ("AAPL", "MSFT", "META", "AMZN", "NVDA")
+    for symbol in required:
+        if symbol not in instruments:
+            raise ValueError(
+                f"Basic catalog is missing required sample instrument: {symbol}"
+            )
+
+    price_up = lambda resolution: _condition(
+        "BASIC_PRICE_COMPARE",
+        resolution,
+        {"operator": "GT", "reference": "PREVIOUS_CLOSE"},
+        "가격 비교",
+        ">",
+        "전일 종가",
+        tone="data",
+    )
+    price_down = lambda resolution: _condition(
+        "BASIC_PRICE_COMPARE",
+        resolution,
+        {"operator": "LT", "reference": "PREVIOUS_CLOSE"},
+        "가격 비교",
+        "<",
+        "전일 종가",
+        tone="data",
+    )
+    volume_confirm = lambda resolution: _condition(
+        "BASIC_VOLUME_COMPARE",
+        resolution,
+        {
+            "operator": "GTE",
+            "reference": "AVERAGE_VOLUME",
+            "period": "20",
+            "multiplier": "1",
+        },
+        "거래량",
+        "≥",
+        "최근 20봉 평균 거래량 1배",
+        tone="data",
+    )
+    schedule = lambda resolution: _condition(
+        "BASIC_SCHEDULE",
+        resolution,
+        {"cycle": "EVERY_TRADING_DAY", "interval": "1"},
+        "실행 주기",
+        "매 거래일",
+        "1",
+        tone="time",
+    )
+    rsi = lambda resolution, direction, threshold: _condition(
+        "BASIC_RSI_CROSS",
+        resolution,
+        {"direction": direction, "period": "14", "threshold": str(threshold)},
+        "RSI 반등",
+        "↑" if direction == "UP" else "↓",
+        str(threshold),
+    )
+    sma = lambda resolution, direction, short, long: _condition(
+        "BASIC_SMA_CROSS",
+        resolution,
+        {"direction": direction, "shortPeriod": str(short), "longPeriod": str(long)},
+        "평균선 교차",
+        "↑" if direction == "UP" else "↓",
+        f"{short}봉 · {long}봉",
+        tone="indicator",
+    )
+    holding = lambda resolution, unit, amount: _condition(
+        "BASIC_HOLDING_PERIOD",
+        resolution,
+        {"unit": unit, "amount": str(amount)},
+        "보유 기간",
+        "≥",
+        f"{amount}{'거래일' if unit == 'TRADING_DAY' else '봉'}",
+        tone="risk",
+    )
+    drawdown = lambda percent: _condition(
+        "BASIC_DRAWDOWN_FROM_PEAK",
+        "",
+        {"operator": "GTE", "thresholdPercent": str(percent)},
+        "고점 대비 하락",
+        "≥",
+        f"{percent}%",
+        tone="risk",
+    )
+
+    partitions = (
+        {
+            "id": "ultimate-quality-trend",
+            "symbols": ("AAPL", "MSFT"),
+            "resolution": "4h",
+            "allocation": 40,
+            "buy": (
+                ("평균선·거래량 확인 진입", (sma("4h", "UP", 5, 20), volume_confirm("4h"))),
+                ("가격·거래량 추세 진입", (price_up("4h"), volume_confirm("4h"))),
+            ),
+            "sell": (
+                (
+                    "손실 추세 방어",
+                    (
+                        _condition(
+                            "BASIC_POSITION_RETURN",
+                            "",
+                            {"direction": "LOSS", "thresholdPercent": "3"},
+                            "현재 수익률",
+                            "손실",
+                            "3%",
+                            tone="risk",
+                        ),
+                        price_down("4h"),
+                    ),
+                ),
+                ("보유 후 약세 청산", (holding("4h", "BAR", 5), price_down("4h"))),
+            ),
+        },
+        {
+            "id": "ultimate-growth-cycle",
+            "symbols": ("META", "AMZN"),
+            "resolution": "30m",
+            "allocation": 35,
+            "buy": (
+                ("RSI·가격 확인 진입", (rsi("30m", "UP", 45), price_up("30m"))),
+                ("일일 강세 분할 진입", (schedule("30m"), price_up("30m"))),
+            ),
+            "sell": (
+                ("RSI 하락 청산", (rsi("30m", "DOWN", 60), price_down("30m"))),
+                ("추세 약화 청산", (holding("30m", "BAR", 26), price_down("30m"))),
+            ),
+        },
+        {
+            "id": "ultimate-nvda-long-term",
+            "symbols": ("NVDA",),
+            "resolution": "1d",
+            "allocation": 25,
+            "buy": (
+                (
+                    "장기 추세 전환 진입",
+                    (
+                        _condition(
+                            "BASIC_MACD_CROSS",
+                            "1d",
+                            {
+                                "direction": "UP",
+                                "fastPeriod": "12",
+                                "slowPeriod": "26",
+                                "signalPeriod": "9",
+                            },
+                            "MACD 전환",
+                            "↑",
+                            "12 · 26 · 9",
+                        ),
+                        price_up("1d"),
+                    ),
+                ),
+                ("일봉 강세 분할 진입", (schedule("1d"), price_up("1d"))),
+            ),
+            "sell": (
+                (
+                    "수익 보호 청산",
+                    (
+                        _condition(
+                            "BASIC_PEAK_RETURN",
+                            "",
+                            {"operator": "GTE", "thresholdPercent": "12"},
+                            "최고 수익률",
+                            "≥",
+                            "12%",
+                            tone="risk",
+                        ),
+                        drawdown(8),
+                    ),
+                ),
+                (
+                    "장기 추세 약화 청산",
+                    (holding("1d", "TRADING_DAY", 20), price_down("1d")),
+                ),
+            ),
+        },
+    )
+
+    groups: list[dict[str, Any]] = []
+    sections: list[dict[str, Any]] = []
+    card_blocks: dict[str, list[dict[str, Any]]] = {}
+    card_meta: dict[str, dict[str, str]] = {}
+    buy_settings: dict[str, dict[str, Any]] = {}
+    sell_settings: dict[str, dict[str, Any]] = {}
+    symbol_limits: dict[str, dict[str, int]] = {}
+    timeframe_labels = {"30m": "30분봉", "4h": "4시간봉", "1d": "일봉"}
+
+    for section_index, partition in enumerate(partitions):
+        section_id = str(partition["id"])
+        symbols = tuple(partition["symbols"])
+        resolution = str(partition["resolution"])
+        buy_cards: list[str] = []
+        sell_cards: list[str] = []
+        card_positions: dict[str, dict[str, int]] = {}
+        for container in ("BUY", "SELL"):
+            flows = partition[container.lower()]
+            for card_index, (title, conditions) in enumerate(flows, start=1):
+                card_id = f"{section_id}-{container.lower()}-{card_index}"
+                for symbol in symbols:
+                    group = _semantic_group(
+                        card_id, container, instruments[symbol], conditions
+                    )
+                    group["blocks"][-1]["parameters"]["maxPositionPercent"] = str(
+                        partition["allocation"] // len(symbols)
+                    )
+                    groups.append(group)
+                visible = tuple(
+                    condition
+                    for condition in conditions
+                    if condition.element_code != "BASIC_SCHEDULE"
+                )
+                card_blocks[card_id] = [
+                    _condition_block(card_id, index, condition)
+                    for index, condition in enumerate(visible, start=1)
+                ]
+                card_meta[card_id] = {
+                    "title": str(title),
+                    "detail": f"{' · '.join(symbols)} {timeframe_labels[resolution]}",
+                    "explanation": "서로 다른 확인 조건이 모두 충족될 때만 실행합니다.",
+                }
+                card_positions[card_id] = {
+                    "x": 24 if container == "BUY" else 396,
+                    "y": 96 + (card_index - 1) * 190,
+                }
+                if container == "BUY":
+                    buy_cards.append(card_id)
+                    periodic = conditions[0].element_code == "BASIC_SCHEDULE"
+                    buy_settings[card_id] = {
+                        "maxOrderPercent": 10,
+                        "entryMode": "주기마다" if periodic else "대기 후 재진입",
+                        "cycle": "매 거래일",
+                        "cycleInterval": 1,
+                        "reentryWait": "조건 재충족",
+                        "reentryInterval": 1,
+                        "maxEntries": 1000,
+                    }
+                else:
+                    sell_cards.append(card_id)
+                    sell_settings[card_id] = {
+                        "sellPercent": 100,
+                        "executeMode": "대기 후 재실행",
+                        "reexecWait": "조건 재충족",
+                        "reexecInterval": 1,
+                        "maxExecutions": 1000,
+                    }
+        sections.append(
+            {
+                "id": section_id,
+                "symbol": " · ".join(symbols),
+                "instrumentIds": [instruments[symbol] for symbol in symbols],
+                "allocation": partition["allocation"],
+                "timeframe": timeframe_labels[resolution],
+                "x": 80 + section_index * 820,
+                "y": 80,
+                "width": 760,
+                "height": 620,
+                "cards": {"buy": buy_cards, "sell": sell_cards, "risk": []},
+                "cardOrder": [*buy_cards, *sell_cards],
+                "cardPositions": card_positions,
+            }
+        )
+        per_symbol_limit = partition["allocation"] // len(symbols)
+        symbol_limits[section_id] = {
+            symbol: per_symbol_limit for symbol in symbols
+        }
+
+    return SampleStrategy(
+        key="THE_ULTIMATE_STRATEGY",
+        name="THE ULTIMATE STRATEGY",
+        description="다섯 종목을 30분·4시간·일봉으로 나눠 추세, 거래량, RSI, 손실과 낙폭을 함께 관리합니다.",
+        semantic_document={"mode": "BASIC", "catalogId": catalog_id, "groups": groups},
+        presentation_document={
+            "basicEditor": {
+                "version": 1,
+                "snapshot": {
+                    "sections": sections,
+                    "cardBlocks": card_blocks,
+                    "cardMeta": card_meta,
+                    "buySettings": buy_settings,
+                    "sellSettings": sell_settings,
+                    "symbolLimits": symbol_limits,
+                },
+                "viewport": {"pan": {"x": 0, "y": 0}, "zoom": 0.7},
+            },
+            "localSampleKey": "THE_ULTIMATE_STRATEGY",
+            "localSampleRevision": SAMPLE_REVISION,
+        },
+    )
+
+
 def build_samples(
     catalog_id: str, instruments: Mapping[str, str]
 ) -> tuple[SampleStrategy, ...]:
@@ -653,11 +947,9 @@ class SampleSeederApi(Protocol):
     def list_strategies(self) -> Sequence[Mapping[str, Any]]: ...
     def get_document(self, strategy_id: str) -> Mapping[str, Any]: ...
     def create_strategy(self, sample: SampleStrategy) -> str: ...
-    def acquire_lease(self, strategy_id: str) -> Mapping[str, Any]: ...
     def save_document(
-        self, strategy_id: str, lease_token: str, sample: SampleStrategy
+        self, strategy_id: str, sample: SampleStrategy
     ) -> Mapping[str, Any]: ...
-    def release_lease(self, strategy_id: str, lease_token: str) -> None: ...
     def validate_strategy(
         self, strategy_id: str, catalog_id: str
     ) -> Mapping[str, Any]: ...
@@ -692,14 +984,7 @@ def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
     receipts: list[dict[str, str]] = []
 
     def configure(strategy_id: str, sample: SampleStrategy) -> Mapping[str, Any]:
-        lease = api.acquire_lease(strategy_id)
-        lease_token = lease.get("leaseToken")
-        if not isinstance(lease_token, str):
-            raise TypeError("Strategy edit lease token is unavailable")
-        try:
-            api.save_document(strategy_id, lease_token, sample)
-        finally:
-            api.release_lease(strategy_id, lease_token)
+        api.save_document(strategy_id, sample)
         validation = api.validate_strategy(strategy_id, catalog_id)
         if validation.get("status") != "VALID" or not isinstance(
             validation.get("validationRunId"), str
@@ -845,7 +1130,7 @@ class LocalSampleApi:
         )
 
     def save_document(
-        self, strategy_id: str, lease_token: str, sample: SampleStrategy
+        self, strategy_id: str, sample: SampleStrategy
     ) -> Mapping[str, Any]:
         current = self.get_document(strategy_id)
         edit_sequence = current.get("editSequence")
@@ -856,7 +1141,6 @@ class LocalSampleApi:
             f"/api/v1/strategies/{quote(strategy_id)}/document",
             {
                 "expectedEditSequence": edit_sequence,
-                "leaseToken": lease_token,
                 "semanticDocument": sample.semantic_document,
                 "presentationDocument": sample.presentation_document,
             },
