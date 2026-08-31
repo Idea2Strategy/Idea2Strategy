@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $bundle = Join-Path $root "db/flyway-ci-bundle"
-$proposal = Join-Path $root "proposals/development-scoring-template/artifacts/scoring-template-seed.sql"
+$scoringSeed = Join-Path $root "config/development/scoring/scoring-template-seed.sql"
 $suffix = [guid]::NewGuid().ToString("N").Substring(0, 12)
 $container = "idea2strategy-scoring-seed-$suffix"
 $database = "idea2strategy"
@@ -42,7 +42,7 @@ try {
     foreach ($iteration in 1..2) {
         $null = Invoke-Docker @(
             "run", "--rm", "--network", "container:$container",
-            "-e", "PGPASSWORD=$password", "-v", "${proposal}:/seed.sql:ro",
+            "-e", "PGPASSWORD=$password", "-v", "${scoringSeed}:/seed.sql:ro",
             "postgres:16-alpine", "psql", "-h", "localhost", "-U", $user, "-d", $database,
             "-X", "-q", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", "/seed.sql"
         )

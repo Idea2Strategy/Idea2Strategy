@@ -9,4 +9,4 @@ refs: []
 
 # journey.strategy.author
 
-Create a Basic or Pro visual strategy, validate it, and release an immutable version.
+Create a Basic visual strategy, validate it, and release an immutable version.

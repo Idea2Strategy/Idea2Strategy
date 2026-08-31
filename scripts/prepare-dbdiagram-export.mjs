@@ -57,7 +57,7 @@ const invokedFile = process.argv[1] ? resolve(process.argv[1]) : '';
 if (currentFile === invokedFile) {
   const inputPath = resolve(process.argv[2] ?? 'db/schema.dbml');
   const outputPath = resolve(
-    process.argv[3] ?? '.harness/local/artifacts/dbml-export/schema.no-records.dbml',
+    process.argv[3] ?? '.local/artifacts/dbml-export/schema.no-records.dbml',
   );
   const result = await prepareDbdiagramExport(inputPath, outputPath);
   process.stdout.write(

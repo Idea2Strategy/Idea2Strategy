@@ -27,8 +27,8 @@ foreach ($token in $requiredTokens) {
     }
 }
 
-$missingBundle = Join-Path $root '.harness/local/tmp/missing-v1-bundle'
-$output = Join-Path $root '.harness/local/tmp/should-not-exist-v1.sql'
+$missingBundle = Join-Path $root '.local/tmp/missing-v1-bundle'
+$output = Join-Path $root '.local/tmp/should-not-exist-v1.sql'
 if (Test-Path -LiteralPath $missingBundle) {
     Remove-Item -LiteralPath $missingBundle -Recurse -Force
 }

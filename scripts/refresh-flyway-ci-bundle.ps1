@@ -11,7 +11,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $committedBundle = Join-Path $root 'db/flyway-ci-bundle'
-$generatedBundle = Join-Path $root '.harness/local/tmp/flyway-bundle'
+$generatedBundle = Join-Path $root '.local/tmp/flyway-bundle'
 $tradingFixtures = Join-Path $root 'trading-engine/db/migration-contributions/fixtures'
 $metadataPath = Join-Path $committedBundle 'source-revisions.json'
 

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "sourceApprovalPullRequest": 225,
+  "sourceApprovalCommit": "47932bf5febda9aa9603fd4d77e7f2ed2b60c23c",
+  "change": {
+    "reason": "The approved local baseline holds the complete adjusted market-bars/1 range and a pinned 2016-2026 XNYS calendar. v3 fixes every local official Basic run to the maximum verified interval; v1 and v2 remain immutable historical evidence.",
+    "authority": "user:kcrmin",
+    "instruction": "user:kcrmin approved a fixed maximum local backtest period and the complete 725-instrument backup: version development-official-backtest-2026-q3-v3, periodStart 2016-01-01T05:00:00Z, periodEnd 2026-07-30T04:00:00Z, marketDataSchemaVersion market-bars/1; keep earlier policy rows immutable and expose only v3 in the active runtime catalog. Full-range measurements require a 900-second CPU and 1 GiB memory ceiling within the existing 1,800-second timeout.",
+    "resourceSizingEvidence": "A single-instrument 2016-2026 AAPL run reached the former 300-second CPU ceiling after plan-aware shard, row-group, rolling-window, and evidence-compaction optimizations; the development backtest host is t4g.medium (4 GiB).",
+    "verifiedManifest": {
+      "datasetManifestId": "17574f1e-d36e-524b-923f-609fa75c966d",
+      "datasetHash": "7fb470ba16f470ddcb4afce279c21734d4029ecf04cfe7e23ce50c9b3d1fef22",
+      "dataLayer": "ADJUSTED",
+      "resolution": "30m",
+      "periodStart": "2016-01-01",
+      "periodEnd": "2026-07-30",
+      "schemaVersion": "market-bars/1",
+      "observedAt": "2026-08-25"
+    },
+    "supersededVersion": "development-official-backtest-2026-q3-v2",
+    "supersededHandling": "The policy seed remains append-only. v1 and v2 keep their exact rows and hashes; the active runtime catalog carries v3 alone."
+  },
+  "artifacts": {
+    "execution-policy.json": "bc2d7cd830d5c6fa98e4ff9c0eb7a2ce45ec3d742f90eb4297228878a1691a9b",
+    "runtime-policy.json": "d0309df1e41d6b12759c11fe35e2bb7bd21a64d126abe0e3feed239093f553c5",
+    "policy-seed.sql": "523c6856ef2a078addf04b7e7d0d70983d3a3953645c95c57ddddcdb876474f2"
+  }
+}

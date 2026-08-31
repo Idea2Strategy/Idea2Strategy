@@ -152,7 +152,7 @@ $artifactPrefix = "market-catalog-bootstrap/$head/$pipelineSourceCommit/$imageDi
 $hostScriptKey = "$artifactPrefix/development-market-catalog-bootstrap.sh"
 $dryRunReceiptKey = "$artifactPrefix/dry-run-receipt.json"
 $applyReceiptKey = "$artifactPrefix/apply-receipt.json"
-$temporaryRoot = Join-Path $root ".harness/local/tmp/market-catalog-bootstrap/$head"
+$temporaryRoot = Join-Path $root ".local/tmp/market-catalog-bootstrap/$head"
 if (-not (Test-Path -LiteralPath $temporaryRoot -PathType Container)) {
     New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 }

@@ -8,7 +8,7 @@
     scripts/aws/development-database-bootstrap.sh 가 같은 세 파일을 만들어 S3 에 올린다.
     이 스크립트는 그 절차의 로컬 대응이며, 같은 SQL 과 같은 JSON 형태를 쓴다.
 
-    산출물(기본 .harness/local/market-gateway/, git 이 무시하는 경로):
+    산출물(기본 .local/market-gateway/, git 이 무시하는 경로):
       instruments.json          symbol -> instrument id. DB 의 시장 카탈로그에서 뽑는다.
       alpaca-sip-rights.json    provider/feed/verifiedAt/expiresAt.
       materialization.properties  위 두 파일의 SHA-256 을 담은 수령증.
@@ -20,7 +20,7 @@
     psql 이 받는 연결 문자열. 생략하면 DATABASE_URL 을 쓴다.
 
 .PARAMETER OutputRoot
-    산출 디렉터리. 생략하면 <repo>/.harness/local/market-gateway.
+    산출 디렉터리. 생략하면 <repo>/.local/market-gateway.
 
 .PARAMETER RightsDays
     권리 증빙 유효 기간(일). AWS 와 같은 30 일이 기본이다.
@@ -43,7 +43,7 @@ if (-not $DatabaseUrl) { $DatabaseUrl = $env:DATABASE_URL }
 if (-not $DatabaseUrl) {
     throw '연결 문자열이 없다. -DatabaseUrl 을 주거나 DATABASE_URL 을 설정한다. 로컬 조합 기본값 예: postgresql://idea2strategy:...@localhost:5432/idea2strategy'
 }
-if (-not $OutputRoot) { $OutputRoot = Join-Path $root '.harness/local/market-gateway' }
+if (-not $OutputRoot) { $OutputRoot = Join-Path $root '.local/market-gateway' }
 
 $psql = Get-Command psql -ErrorAction SilentlyContinue
 if (-not $psql) {

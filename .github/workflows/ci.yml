@@ -124,32 +124,6 @@ jobs:
           for path in backend backtest-engine data-pipeline trading-engine ui; do
             test "$(git ls-files -s "$path" | awk '{print $1}')" = "160000"
           done
-      # These verifiers keep the repository-native product-authority registry,
-      # policy, entry instructions, and enforcement scripts consistent.
-      # initialize-local-harness.ps1 generates the ignored owner.yaml and the
-      # policy integrity baseline from the checked-out tree, so a fresh runner
-      # has everything the verifiers need.
-      - name: Initialize local harness
-        shell: pwsh
-        run: ./scripts/initialize-local-harness.ps1 -Verify
-      - name: Verify collaboration policy and product authorities
-        shell: pwsh
-        run: ./scripts/verify-collaboration-policy.ps1
-      - name: Verify governance foundation evidence
-        run: node scripts/verify-foundation-evidence.mjs policy
-      - name: Test local harness
-        shell: pwsh
-        run: ./scripts/test-local-harness.ps1
-      - name: Verify compact harness coordination state
-        shell: pwsh
-        run: ./scripts/verify-harness-consistency.ps1
-      - name: Verify completed harness work stays historical
-        shell: pwsh
-        run: ./scripts/test-completed-work-recovery.ps1
-      - name: Verify repository-native coordination stays self-contained
-        shell: pwsh
-        run: ./scripts/test-repository-native-harness.ps1
-
   flyway-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 20

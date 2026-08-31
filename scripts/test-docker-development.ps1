@@ -39,7 +39,7 @@ foreach ($sample in 1..32) {
 }
 
 & (Join-Path $root "scripts/prepare-flyway-bundle.ps1") | Out-Host
-$generatedBundle = Join-Path $root ".harness/local/tmp/flyway-bundle"
+$generatedBundle = Join-Path $root ".local/tmp/flyway-bundle"
 foreach ($fileName in @("V1__initial_schema.sql", "migration-bundle.manifest", "migration-bundle.sha256")) {
     if (-not (Test-Path -LiteralPath (Join-Path $generatedBundle $fileName) -PathType Leaf)) {
         throw "Generated Flyway bundle is missing: $fileName"
@@ -142,7 +142,7 @@ if (-not $flywaySqlMount.read_only) {
     throw "The generated Flyway bundle must be mounted read-only."
 }
 $normalizedFlywaySource = ([string]$flywaySqlMount.source).Replace('\', '/')
-if (-not $normalizedFlywaySource.EndsWith('/.harness/local/tmp/flyway-bundle')) {
+if (-not $normalizedFlywaySource.EndsWith('/.local/tmp/flyway-bundle')) {
     throw "flyway must read only the generated bundle; found $normalizedFlywaySource"
 }
 

@@ -1,9 +1,9 @@
 {
   "format": "idea2strategy-flyway-ci-bundle-v1",
-  "backend_gitlink": "36fbe7958e70b0c36641ea3ae402a1e797b579a5",
-  "backtest_gitlink": "de731370f7e89f7f36b35adaf64f40db6ef5d7e8",
+  "backend_gitlink": "d9dab63f8257718d01140d050dac01fbaa0e477a",
+  "backtest_gitlink": "ef5944ca02e3dfd4ef128d0ffeb78ce9dc90f803",
   "trading_gitlink": "7afc4d25477e906146c00533ae0e91c14bdb731a",
-  "data_pipeline_gitlink": "2b2b670296b23b961bba8ea8c2435017c0d4f5e5",
+  "data_pipeline_gitlink": "d8bd3c0c41c8bb093657f73bb6de44e07c6b90fb",
   "bundle_sha256": "71dde49e85d89b31455e52e87c3c1c4dbfd93384a2f5ec41211288ff294a3933",
   "trading_read_projection_contract_sha256": "5ce4893dec56409ba2ee5610996081695d0842a2b20196ba1ba45170d0544681",
   "canonical_baseline_sha256": "a9f3cb715bac1574da219e36c06325b914a95c1948f844b6522b5e28f61f489b"

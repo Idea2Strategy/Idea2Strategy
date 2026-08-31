@@ -6,8 +6,8 @@ param(
     [string]$AwsRegion = "ap-northeast-2",
     [ValidatePattern('^[a-z][a-z0-9_]{2,62}$')][string]$RuntimeDatabaseName = "idea2strategy_runtime",
     [string]$BundleRoot = "db/flyway-ci-bundle",
-    [string]$PolicyArtifactRoot = "proposals/development-runtime-policy/artifacts",
-    [string]$ScoringArtifactRoot = "proposals/development-scoring-template/artifacts",
+    [string]$PolicyArtifactRoot = "config/development/runtime-policy",
+    [string]$ScoringArtifactRoot = "config/development/scoring",
     [switch]$AllowMissingReceipt,
     [hashtable]$RuntimeDatabaseSecretNames = @{
         backend  = "idea2strategy-dev/database/backend-runtime"

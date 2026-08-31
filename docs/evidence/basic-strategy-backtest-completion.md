@@ -79,11 +79,10 @@ Backtest 실행 증거로 사용하지 않았다.
 ## 재현 명령과 결과
 
 ```powershell
-# root contract / governance
+# root contracts
 node --test scripts/validate-basic-strategy-conformance.test.mjs
 pnpm contract:validate:basic-strategy
 pnpm contract:validate:registry
-.\scripts\verify-collaboration-policy.ps1
 
 # Backend
 cd backend

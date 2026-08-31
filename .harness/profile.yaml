@@ -1,8 +1,0 @@
-schema_version: 1
-tdd: default
-git:
-  collaboration: strongly_recommended
-  release: required
-task_source: repository-ledger
-task_ledger: docs/launch-readiness-tasks.json
-release: core

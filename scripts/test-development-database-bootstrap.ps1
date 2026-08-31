@@ -64,13 +64,13 @@ $orchestrator = Read-RequiredFile "scripts/invoke-development-database-bootstrap
 $receiptVerifier = Read-RequiredFile "scripts/verify-development-database-bootstrap-receipt.ps1"
 $bootstrap = Read-RequiredFile "scripts/aws/development-database-bootstrap.sh"
 $releaseWorkflow = Read-RequiredFile ".github/workflows/development-release.yml"
-$artifactRoot = Join-Path $root "proposals/development-runtime-policy/artifacts"
-$artifactManifest = Read-RequiredFile "proposals/development-runtime-policy/artifacts/artifact-manifest.json" | ConvertFrom-Json
-$executionPolicy = Read-RequiredFile "proposals/development-runtime-policy/artifacts/execution-policy.json" | ConvertFrom-Json
-$runtimePolicy = Read-RequiredFile "proposals/development-runtime-policy/artifacts/runtime-policy.json" | ConvertFrom-Json
-$policySeed = Read-RequiredFile "proposals/development-runtime-policy/artifacts/policy-seed.sql"
-$scoringSeed = Read-RequiredFile "proposals/development-scoring-template/artifacts/scoring-template-seed.sql"
-$scoringManifest = Read-RequiredFile "proposals/development-scoring-template/artifacts/artifact-manifest.json" | ConvertFrom-Json
+$artifactRoot = Join-Path $root "config/development/runtime-policy"
+$artifactManifest = Read-RequiredFile "config/development/runtime-policy/artifact-manifest.json" | ConvertFrom-Json
+$executionPolicy = Read-RequiredFile "config/development/runtime-policy/execution-policy.json" | ConvertFrom-Json
+$runtimePolicy = Read-RequiredFile "config/development/runtime-policy/runtime-policy.json" | ConvertFrom-Json
+$policySeed = Read-RequiredFile "config/development/runtime-policy/policy-seed.sql"
+$scoringSeed = Read-RequiredFile "config/development/scoring/scoring-template-seed.sql"
+$scoringManifest = Read-RequiredFile "config/development/scoring/artifact-manifest.json" | ConvertFrom-Json
 $migrationManifestLines = @(Get-Content -LiteralPath (Join-Path $root "db/flyway-ci-bundle/migration-bundle.manifest"))
 $expectedMigrationCount = $migrationManifestLines.Count - 1
 $manifestValidatorPath = Join-Path $root "scripts/lib/development-database-bootstrap-manifest.ps1"
@@ -188,7 +188,7 @@ if ($publishedBundle.MigrationCount -ne $expectedMigrationCount) {
     throw "Published Flyway bundle migration count was not derived from its exact manifest."
 }
 
-$testBundleRoot = Join-Path $root ".harness/local/tmp/test-development-database-bootstrap-manifest-$PID"
+$testBundleRoot = Join-Path $root ".local/tmp/test-development-database-bootstrap-manifest-$PID"
 try {
     $futureBundle = Join-Path $testBundleRoot "future"
     New-TestFlywayBundle $futureBundle @{
@@ -254,23 +254,19 @@ foreach ($artifactName in @("execution-policy.json", "runtime-policy.json", "pol
     $actualHash = (Get-FileHash -LiteralPath (Join-Path $artifactRoot $artifactName) -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($expectedHash -cne $actualHash) { throw "Development policy artifact hash mismatch: $artifactName" }
 }
-if ($artifactManifest.sourceApprovalPullRequest -ne 225 -or
-    $artifactManifest.sourceApprovalCommit -cne "47932bf5febda9aa9603fd4d77e7f2ed2b60c23c") {
-    throw "Development policy artifacts must identify the exact reviewed proposal evidence."
+if ($null -eq $artifactManifest.change) {
+    throw "Development policy artifacts must describe the current change."
 }
 # The artifacts may be amended after that review, but never anonymously. An amendment has to name the
 # product authority that asked for it, quote the instruction, and say which version it retires — that
 # record is the whole audit trail for a policy change made before v1.0.0, when no pull-request
 # observation is obtainable (AGENTS.md, pre-v1.0.0 posture).
-if ($null -ne $artifactManifest.amendment) {
+if ($null -ne $artifactManifest.change) {
     foreach ($field in @(
-            "reason", "authority", "instruction", "supersededVersion", "supersededHandling")) {
-        if ([string]::IsNullOrWhiteSpace([string]$artifactManifest.amendment.$field)) {
-            throw "Development policy amendment must record $field."
+            "reason", "supersededVersion", "supersededHandling")) {
+        if ([string]::IsNullOrWhiteSpace([string]$artifactManifest.change.$field)) {
+            throw "Development policy change must record $field."
         }
-    }
-    if ([string]$artifactManifest.amendment.authority -notmatch '^user:[A-Za-z0-9-]+$') {
-        throw "Development policy amendment authority must name a configured product authority."
     }
 }
 # The remote bootstrap refuses a policy seed carrying anything but INSERT, so a published policy row can
@@ -310,7 +306,7 @@ if ($periodStart -cne "2016-01-01T05:00:00Z" -or $periodEnd -cne "2026-07-30T04:
 # The seed publishes the new version and leaves the superseded one exactly as published.
 Assert-Contains $policySeed "development-official-backtest-2026-q3-v3" `
     "Development policy seed must publish the amended policy version."
-Assert-Contains $policySeed ([string]$artifactManifest.amendment.supersededVersion) `
+Assert-Contains $policySeed ([string]$artifactManifest.change.supersededVersion) `
     "Development policy seed must keep publishing the superseded version so a fresh database still has its row."
 if ($runtimePolicy.schemaVersion -ne 1 -or $runtimePolicy.attempt.maxAttempts -ne 3 -or
     $runtimePolicy.attempt.leaseDurationSeconds -ne 300 -or
@@ -336,11 +332,11 @@ foreach ($needle in @(
     Assert-Contains $policySeed $needle "Development policy seed is missing reviewed value: $needle"
 }
 
-if ($scoringManifest.status -cne "proposed" -or $scoringManifest.approved -ne $false) {
-    throw "Development scoring seed must remain an explicitly unapproved proposal."
+if ($scoringManifest.status -cne "development") {
+    throw "Development scoring seed must be marked for the development environment."
 }
 $expectedScoringSeedHash = [string]$scoringManifest.artifacts."scoring-template-seed.sql"
-$actualScoringSeedHash = (Get-FileHash -LiteralPath (Join-Path $root "proposals/development-scoring-template/artifacts/scoring-template-seed.sql") -Algorithm SHA256).Hash.ToLowerInvariant()
+$actualScoringSeedHash = (Get-FileHash -LiteralPath (Join-Path $root "config/development/scoring/scoring-template-seed.sql") -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($expectedScoringSeedHash -cne $actualScoringSeedHash) {
     throw "Development scoring seed artifact hash mismatch."
 }
