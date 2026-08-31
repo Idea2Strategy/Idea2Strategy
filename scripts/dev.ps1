@@ -342,7 +342,7 @@ function Initialize-LocalStrategyData {
     if (-not $WithBackend -or $Scope -notin @("all", "back")) {
         return
     }
-    $policySeed = Join-Path $root 'proposals/development-runtime-policy/artifacts/policy-seed.sql'
+    $policySeed = Join-Path $root 'config/development/runtime-policy/policy-seed.sql'
     $scoringSeedInitializer = Join-Path $root 'scripts/initialize-local-scoring-catalog.ps1'
     $seedScript = Join-Path $root 'scripts/local/full_range_manifest.py'
     foreach ($required in @($policySeed, $scoringSeedInitializer, $seedScript)) {

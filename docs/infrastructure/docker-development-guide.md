@@ -23,7 +23,7 @@
 ./scripts/prepare-flyway-bundle.ps1
 ```
 
-생성 위치는 `.harness/local/tmp/flyway-bundle` 하나로 고정된다. 스크립트는 이 정확한 경로 밖의 디렉터리를 삭제하거나 다시 만들지 않으며 symlink·reparse point 출력도 거부한다. `compose.back.yml`의 `flyway` 서비스는 생성된 번들만 `/flyway/sql`에 읽기 전용으로 mount한다. backend와 trading runtime은 Flyway를 실행하지 않는다.
+생성 위치는 `.local/tmp/flyway-bundle` 하나로 고정된다. 스크립트는 이 정확한 경로 밖의 디렉터리를 삭제하거나 다시 만들지 않으며 symlink·reparse point 출력도 거부한다. `compose.back.yml`의 `flyway` 서비스는 생성된 번들만 `/flyway/sql`에 읽기 전용으로 mount한다. backend와 trading runtime은 Flyway를 실행하지 않는다.
 
 PostgreSQL 16에서 최초 migrate, validate, 두 번째 migrate의 pending 0과 현재 application table 수를 확인하려면 다음을 실행한다.
 

@@ -11,13 +11,12 @@ const contracts = [
   ['contract.operations.operator-trust.v1', '../contracts/business/operator-trust.v1.md'],
 ];
 
-test('pins the exact approved proposal evidence and registry fingerprints', async () => {
+test('pins approved canonical contracts and registry fingerprints', async () => {
   for (const [id, path] of contracts) {
     const contract = await readFile(new URL(path, import.meta.url), 'utf8');
     const fingerprint = `sha256:${createHash('sha256').update(contract).digest('hex')}`;
     assert.match(contract, new RegExp(`id: ${id.replaceAll('.', '\\.')}`));
     assert.match(contract, /status: approved/);
-    assert.match(contract, /Idea2Strategy\/pull\/166/);
     assert.ok(registry.includes(`id: ${id}`), `missing registry entry for ${id}`);
     assert.ok(registry.includes(`fingerprint: ${fingerprint}`), `stale registry fingerprint for ${id}`);
   }
@@ -38,13 +37,16 @@ test('pins durable batch ownership, lease recovery, and checkpoint evidence', ()
   ]) assert.ok(schema.includes(fragment), `missing batch canonical DBML: ${fragment}`);
 });
 
-test('pins versioned operator mapping and immutable one-shot bootstrap evidence', () => {
+test('pins internal operator credentials, replay-safe TOTP, and server sessions', () => {
   for (const fragment of [
-    'external_identity_key_version smallint [not null]',
-    'operator_identity_key_version_positive',
-    'Table operations.operator_bootstrap_receipts',
-    'operator_bootstrap_key_version_positive',
-    'operator_role_assignment_id > operations.operator_role_assignments.id',
-    'audit_event_id > operations.audit_events.id',
+    'Table operations.operator_login_credentials',
+    'Table operations.operator_sessions',
+    'operator_credential_versions_positive',
+    'operator_totp_nonce_valid',
+    'last_accepted_totp_step bigint',
+    'operator_session_versions_positive',
+    'operator_session_expiry_coherent',
+    'Ref: operations.operator_login_credentials.operator_account_id - operations.operator_accounts.id',
+    'Ref: operations.operator_sessions.operator_account_id > operations.operator_accounts.id',
   ]) assert.ok(schema.includes(fragment), `missing operator trust canonical DBML: ${fragment}`);
 });

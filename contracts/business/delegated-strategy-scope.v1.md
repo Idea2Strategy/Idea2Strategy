@@ -32,7 +32,7 @@ refs:
 - 파생 result는 명시 allowlist를 바꾸지 않고 다른 authorization으로 전이되지 않는다.
 - release, bot lifecycle, room final action, continuation renewal과 order mutation scope는 존재하지 않는다.
 
-외부 도구는 Basic 공식 블록·값을 노출된 API로만 편집·검증할 수 있다. Pro graph, 사용자 코드, 외부 데이터,
+외부 도구는 Basic 공식 블록·값을 노출된 API로만 편집·검증할 수 있다. 지원하지 않는 graph 전략, 사용자 코드, 외부 데이터,
 private source 원문과 직접 주문은 허용하지 않는다.
 
 ## authorization version과 명시 allowlist

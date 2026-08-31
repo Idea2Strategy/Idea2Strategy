@@ -30,7 +30,7 @@ contracts:
       - policy.strategy.no-ai
       - policy.strategy.immutable-release
       - policy.user.no-direct-orders
-    fingerprint: sha256:0ff7acec31cd7b16f5e54e381b608383d211b103ca1c471c86f331d84d899e08
+    fingerprint: sha256:212c7ebefaa624e6e86f602a858058a54981a4c5b2b44a3f47285d3d7af497dd
   - id: contract.operations.operator-rbac.v1
     kind: business
     status: approved
@@ -132,7 +132,7 @@ contracts:
   - id: contract.operations.operator-trust.v1
     kind: business
     status: approved
-    revision: 2
+    revision: 3
     source: business/operator-trust.v1.md
     compatibility: additive
     providers: [workspace.root]
@@ -154,7 +154,7 @@ contracts:
       - journey.operator.administer
       - scenario.account.sanction
       - capability.audit.evidence
-    fingerprint: sha256:4ab7defc8349220368117665d9a51368f9070a3b34c89fdf34bd48012f24e95c
+    fingerprint: sha256:53515785c72715c12c13ef8a68783edf01886a37ce3cd5805c2f9269e355d08c
   - id: contract.operations.corporate-action-approval.v1
     kind: data
     status: approved

@@ -40,7 +40,7 @@ $sourceContainer = "i2s-v1-source-$runId"
 $targetContainer = "i2s-v1-target-$runId"
 $database = 'idea2strategy_v1'
 $password = [Convert]::ToBase64String(([Guid]::NewGuid().ToByteArray())).Replace('=', 'A')
-$temporaryRoot = Join-Path $root ".harness/local/tmp/v1-rebaseline-$runId"
+$temporaryRoot = Join-Path $root ".local/tmp/v1-rebaseline-$runId"
 $generatedBaseline = Join-Path $temporaryRoot 'V1__initial_schema.sql'
 $sourceSchema = Join-Path $temporaryRoot 'source-schema.part'
 $sourceData = Join-Path $temporaryRoot 'source-data.part'

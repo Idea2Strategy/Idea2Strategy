@@ -337,7 +337,7 @@ foreach ($secret in $secretProperties) {
     $null = Invoke-AwsJson @("secretsmanager", "describe-secret", "--secret-id", [string]$secret.Value)
 }
 
-$temporaryRoot = Join-Path $root ".harness/local/tmp/database-bootstrap/$head"
+$temporaryRoot = Join-Path $root ".local/tmp/database-bootstrap/$head"
 if (-not (Test-Path -LiteralPath $temporaryRoot -PathType Container)) {
     New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 }

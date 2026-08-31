@@ -1,5 +1,5 @@
 # Tool-owned local workspaces
-.harness-drafts/
+.local/
 .dbdiagram/
 .worktrees/
 
@@ -135,9 +135,6 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 .$*.drawio.bkp
-
-# Idea2Strategy local harness: keep only the shared skeleton.
-.harness/local/**
 
 # Generated local reports and review artifacts.
 outputs/

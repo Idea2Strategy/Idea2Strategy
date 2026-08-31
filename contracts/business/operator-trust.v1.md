@@ -3,7 +3,7 @@ schema_version: 1
 id: contract.operations.operator-trust.v1
 kind: business
 status: approved
-revision: 2
+revision: 3
 refs:
   - contract.operations.operator-rbac.v1
   - role.operator
@@ -14,93 +14,47 @@ refs:
 
 # contract.operations.operator-trust.v1
 
-Status: approved canonical contract. Product authority `user:kcrmin` approved
-the Cognito assurance extension on root PR #312 in addition to the original
-proposal merged by root PR #166.
+Status: approved canonical contract. Product authority `user:kcrmin` replaced human operator Cognito/OIDC with dedicated login-name/password/TOTP authentication while preserving the existing RBAC and audit model. GitHub Actions to AWS OIDC remains deployment identity and is outside this human authentication boundary.
 
 ## 1. Credential separation
 
-Operator browser/API and `admin-mcp` requests use a dedicated short-lived OIDC JWT access token with the operator audience. Customer opaque session tokens, email/OIDC customer login sessions, delegated strategy credentials, ALB cookies without a verifiable bearer token, and internal service credentials never imply operator authority.
+Operators authenticate with a dedicated normalized login name, an Argon2id password verifier, and a 6-digit 30-second TOTP. Customer credentials, customer sessions, delegated strategy credentials, browser bearer tokens, Cognito/OIDC identities, ALB identity headers, and internal service credentials never imply operator authority.
 
-The IdP registration, issuer, audience, accepted signing algorithm/key set, allowed `acr`/`amr` values, maximum token age, and MFA freshness are versioned deployment configuration. The ALB production profile uses RS256 because the selected ALB JWT-validation action supports RS256; the backend requires the same algorithm for this profile. Secrets remain in the selected secret store and are never persisted in Git, request logs, audit JSON, or the browser bundle.
+The database stores neither plaintext passwords nor plaintext TOTP secrets. Password records carry the algorithm parameters and credential version. TOTP secrets are encrypted with a versioned key and unique nonce. Provisioning, password reset, TOTP replacement, disabling, and session revocation are audited CLI-only operations; there is no public bootstrap, signup, recovery, or self-elevation endpoint.
 
-## 2. Edge and backend verification
+## 2. Login and MFA verification
 
-The production HTTPS ALB applies JWT validation to every operator and `admin-mcp` route before forwarding. It validates signature, `iss`, `exp`, `nbf` and `iat` when present, the exact operator audience/client claim, and required assurance claims supported by the chosen IdP. Failure returns an authentication error and never reaches an operator handler.
+The login endpoint accepts the dedicated login name, password, and current TOTP code over HTTPS. It returns the same public failure for unknown, disabled, incomplete, wrong-password, and wrong-TOTP accounts. Rate limits and security evidence apply by privacy-safe source key and account when resolved, without exposing which factor failed.
 
-The target independently verifies the bearer JWT signature against the pinned issuer/JWKS policy and validates issuer, audience, subject, expiry, not-before, issued-at, allowed algorithm, key ID, assurance claims, and authentication time. Key refresh is bounded; unknown keys, unavailable required metadata beyond the safe cache window, ambiguous claims, clock violations, or configuration mismatch fail closed.
+Password verification uses the stored Argon2id parameters and rejects unsupported or weakened records. TOTP verification uses the configured clock-skew window and atomically advances `last_accepted_totp_step`; the same or an older step cannot be replayed, including by concurrent requests. Authentication succeeds only for one active operator with one active credential record whose password and credential versions match.
 
-ALB validation is defense in depth. The backend authorization decision never trusts source IP, security-group membership, servlet principal name, container role, `X-Amzn-Oidc-Identity`, `X-Operator-*`, `X-User-*`, or another client-controlled identity/MFA header. The service target accepts application traffic only from the ALB security group, but network origin alone grants no identity.
+## 3. Opaque server-side session
 
-## 3. Operator mapping and MFA
+A successful login creates an opaque server-side session cookie with `Secure`, `HttpOnly`, and `SameSite=Strict`. Only versioned HMAC digests of the session token, CSRF token, and privacy-safe source key are stored. The browser keeps CSRF material in memory only and sends it on state-changing requests. Session lookup requires exact digest and operator ownership, credential-version match, idle expiry, absolute expiry, and non-revoked state.
 
-After token verification, the backend creates the lookup input from a length-delimited canonical pair `(issuer, subject)`, protects it with the configured versioned HMAC key, and requires exactly one matching `operations.operator_accounts` row and HMAC key version with status `ACTIVE`. Rotation may query explicitly configured current and previous key versions, but a successful mapping records the matched version and never falls back to an unversioned digest. Missing, duplicate, disabled, or unmigrated mappings fail closed without revealing whether the subject is registered.
+Session rotation invalidates the previous token before the replacement is usable. Password reset, TOTP replacement, operator disablement, or credential-version change revokes all existing sessions. Logout and administrator revocation are idempotent. Missing database or key dependencies fail closed; no allow decision is cached across requests.
 
-Current MFA is true only when the verified token proves an approved `acr` value or contains an approved `amr` member and its signed `auth_time` is within the configured maximum age. `mfa_enrolled_at`, `last_mfa_verified_at`, a role name, or an edge-only claim is supporting/audit state, not sufficient proof. Successful current proof may update `last_mfa_verified_at` monotonically after verification; stale proof cannot refresh it.
+## 4. Authorization and audit
 
-For the dedicated Development Amazon Cognito operator pool, the signed HTTPS
-namespaced claim `https://ideatostrategy.com/claims/mfa` with the sole value
-`cognito:mfa-required` is an approved equivalent current-MFA value. It counts
-only when the same token has the exact configured issuer, current app-client
-audience, RS256 signature, and a signed `auth_time` within the configured
-freshness window, and the deployed pool has `MfaConfiguration=ON`, TOTP as its
-only second factor, administrator-only account creation, no remembered-device
-bypass or federation, and one public Authorization Code + PKCE S256 client.
-The V2 pre-token transformer may issue this value only for supported human
-authentication, initial password-change, and refresh events, and refresh must
-not advance `auth_time`. Missing, stale, future, differently named or valued,
-wrong-client, wrong-issuer, or unverifiable evidence fails closed. A Cognito
-group, email, enrollment record, frontend assertion, or alternate claim never
-substitutes for these controls.
+After session authentication, RBAC is recalculated from the active catalog and current assignments for every request as required by `contract.operations.operator-rbac.v1`. UI visibility, a role name supplied by a client, source IP, security-group membership, servlet principal, or any `X-Operator-*`/`X-User-*` header is never authorization.
 
-RBAC is recalculated from the active catalog and current assignments for every request as required by `contract.operations.operator-rbac.v1`. UI visibility is not authorization.
+`GET /api/v1/operations/me` returns only the authenticated operator's UI-safe identity, active catalog version, effective roles/permissions, assignment expiry boundaries, and current session expiry. Catalog, assignment, sanction, case, audit, and MCP operations retain their distinct permission and current-MFA requirements. Missing authentication is `401`; authenticated operators without permission receive stable `403` codes; responses include correlation without revealing hidden permissions or account existence.
 
-## 4. Bootstrap
+Login success/failure, logout, expiry, revocation, credential changes, TOTP replay denial, authorization denial, and privileged actions emit privacy-safe immutable audit/security evidence. Raw passwords, TOTP codes/secrets, cookies, CSRF tokens, HMAC values, and customer data never enter logs, responses, or audit JSON.
 
-There is no public HTTP bootstrap or self-elevation endpoint. Initial active catalog installation, first operator subject mapping, and first role assignment are performed by a one-shot deployment command executed through SSM with a reviewed manifest and expected empty/bootstrap state.
+## 5. Provisioning and lifecycle
 
-The command records manifest hash, catalog version, issuer/subject HMAC key version, resulting operator/assignment IDs, deployment actor, correlation ID, immutable bootstrap receipt, and audit evidence in one transaction. It refuses to run when an active catalog or operator assignment already exists, when the manifest hash was consumed, or when any requested role/permission is outside the manifest. Rerunning the same successful bootstrap key and manifest returns its prior result; another manifest with the same key fails closed.
+The initial operator and later credential maintenance use reviewed CLI commands against the operations domain. Each command requires an idempotency key, records actor/correlation/reason and a request hash, and returns the stored result for an exact replay while rejecting a conflicting replay. Partial credential or session state is never committed.
 
-Later operator grants and revocations use the ordinary permission-guarded A13 APIs. Bootstrap cannot be invoked from the UI or `admin-mcp`.
+Credential and session records belong to `operations.operator_accounts`. Runtime APIs cannot hard-delete operator, credential, session, assignment, bootstrap, or audit evidence. Legal hold and the approved operations-retention policy govern later disposal. Key rotation is forward-only and must keep enough version metadata to verify or revoke existing records safely.
 
-## 5. Permission read API
+## 6. Required verification
 
-All responses use stable IDs/codes from the active versioned catalog and omit identity-provider tokens, raw subjects, HMAC values, secrets, and permissions the caller is not allowed to enumerate.
-
-- `GET /api/v1/operations/me`: any authenticated active operator; returns operator ID, active catalog version, current MFA status/freshness, effective role IDs/codes, effective permission IDs/codes, and assignment expiry boundaries for the caller only.
-- `GET /api/v1/operations/rbac/catalog`: requires the catalog-read permission from versioned seed/config; returns the active version and its UI-safe role/permission/delegability projection.
-- `GET /api/v1/operations/rbac/operators/{operatorId}/assignments`: requires the assignment-read permission; returns current and historical assignment states without raw external identity.
-- Existing grant, revoke, sanction, case, audit, and MCP commands continue to require their separately mapped permissions and fresh MFA where configured.
-
-Unknown callers and targets preserve the existing non-enumeration rules. Missing authentication is `401`; authenticated operators without permission or required current MFA receive stable `403` codes; stale catalog/version conflicts use `409` only when revealing that state is authorized. Every denial includes correlation but no hidden permission set.
-
-## 6. Session, revocation, and failure behavior
-
-Token lifetime is short and configured outside this contract. Disabling an operator, revoking an assignment, retiring a catalog, or changing a permission takes effect on the next request regardless of remaining token lifetime. The backend does not cache an allow decision across requests.
-
-IdP/JWKS or edge outages fail closed for new authentication. A bounded cache may verify already issued tokens only while the cached key and policy are still valid; stale-while-unbounded behavior is prohibited. Authentication and RBAC denials emit privacy-safe security/audit evidence, while requests lacking a trustworthy operator UUID remain in the pre-auth security log boundary.
-
-## 7. Data lifecycle
-
-The backend operations domain owns the operator mapping, bootstrap receipt, assignment, and audit evidence. The mapping stores only a versioned HMAC of `(issuer, subject)`, never the raw subject or token. Bootstrap receipts and RBAC/audit evidence are internal restricted operational records.
-
-Until an approved operations-retention policy explicitly permits disposal, bootstrap receipts, successful/denied authorization audit evidence, and assignment history are retained. Legal hold blocks destructive processing. Runtime APIs cannot hard-delete these rows. A future approved cleanup may rotate or scrub obsolete HMAC material only after replacement mappings are verified and must never erase the evidence needed to explain a grant, revocation, sanction, or operator case decision.
-
-The schema change is additive. Existing unversioned operator digests are backfilled only from verified deployment mapping evidence; rows without that evidence remain unusable and fail closed. After versioned mapping or bootstrap evidence exists, rollback is forward-fix only.
-
-## 8. Required verification
-
-- valid token, wrong issuer, wrong audience, wrong algorithm, unknown key, expired/not-yet-valid/future-issued token;
-- spoofed operator/ALB/servlet headers and direct-target attempts never authorize;
-- same subject under another issuer maps differently;
-- inactive, missing, and duplicate operator mappings fail without enumeration;
-- absent, stale, or unapproved MFA claims deny high-risk work even when DB enrollment exists;
-- the dedicated Cognito flow covers invitation password change, TOTP enrollment,
-  interactive login, refresh before and after freshness expiry, revocation, and
-  pool/client/Lambda drift; unknown transformer events and reserved `acr`/`amr`
-  substitution fail closed;
-- role/assignment/catalog revocation takes effect on the next request;
-- bootstrap first run, exact replay, conflicting replay, non-empty state, and partial-failure rollback;
-- permission self/catalog/assignment reads enforce their distinct guards and redact provider data;
-- browser operator flow and `admin-mcp` use the same trust semantics without sharing customer sessions;
-- ALB, backend, PostgreSQL, UI browser, and audit-correlation E2E pass on the exact integrated commits.
+- valid login, normalized-name collision, unknown/disabled/incomplete operator, wrong password, wrong TOTP, boundary clock skew, replayed and concurrently replayed TOTP;
+- Argon2id parameter validation, TOTP encryption/key-version failure, and dependency outages fail closed without enumeration;
+- cookie flags, CSRF denial, idle and absolute expiry boundaries, session rotation, logout, administrator revocation, and credential-version invalidation;
+- customer cookies, bearer/OIDC tokens, spoofed headers, and direct-target requests never authenticate an operator;
+- RBAC grant/revoke/catalog changes take effect on the next request and keep existing audit semantics;
+- CLI provisioning/reset/TOTP replacement exact replay, conflicting replay, partial-failure rollback, and full session revocation;
+- browser operator flow and `admin-mcp` use the same authenticated operator and RBAC semantics without sharing customer sessions;
+- GitHub Actions to AWS OIDC remains present for deployment while no human operator Cognito/OIDC path is accepted.

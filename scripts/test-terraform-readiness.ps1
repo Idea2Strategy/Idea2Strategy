@@ -30,7 +30,7 @@ try {
     foreach ($relativePath in $terraformRoots) {
         $absolutePath = Join-Path $root $relativePath
         $safeName = $relativePath.Replace('/', '-').Replace('\', '-')
-        $dataDir = Join-Path $root ".harness/local/tmp/terraform/$safeName"
+        $dataDir = Join-Path $root ".local/tmp/terraform/$safeName"
         New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 
         $previousDataDir = $env:TF_DATA_DIR

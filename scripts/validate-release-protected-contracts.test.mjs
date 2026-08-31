@@ -8,11 +8,12 @@ const entries = [
   {
     id: 'contract.operations.operator-trust.v1',
     source: 'business/operator-trust.v1.md',
-    revision: 2,
+    revision: 3,
     required: [
-      'https://ideatostrategy.com/claims/mfa',
-      'cognito:mfa-required',
-      'MfaConfiguration=ON',
+      'Argon2id',
+      '6-digit 30-second TOTP',
+      'opaque server-side session cookie',
+      'CLI-only',
     ],
   },
   {

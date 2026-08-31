@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $prepareBundle = Join-Path $PSScriptRoot 'prepare-flyway-bundle.ps1'
-$bundle = Join-Path $root '.harness/local/tmp/flyway-bundle'
+$bundle = Join-Path $root '.local/tmp/flyway-bundle'
 $fillAllocationFixture = Join-Path $root 'trading-engine/db/migration-contributions/fixtures/partial_fill_allocation_contract.sql.fixture'
 
 if (-not (Test-Path -LiteralPath $prepareBundle -PathType Leaf)) {

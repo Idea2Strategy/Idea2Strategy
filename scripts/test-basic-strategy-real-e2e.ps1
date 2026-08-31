@@ -8,7 +8,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $environmentFile = Join-Path $root '.env.docker'
-$receiptPath = Join-Path $root '.harness/local/artifacts/basic-strategy-real-e2e-receipt.json'
+$receiptPath = Join-Path $root '.local/artifacts/basic-strategy-real-e2e-receipt.json'
+$null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $receiptPath)
 $frontendWasRunning = -not [string]::IsNullOrWhiteSpace((docker ps --quiet --filter 'name=^idea2strategy-frontend$' | Out-String).Trim())
 
 function Get-EnvironmentValue([string]$Name, [string]$DefaultValue) {

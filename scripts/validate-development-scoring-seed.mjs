@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const defaultProposalRoot = path.join(root, "proposals", "development-scoring-template");
+const defaultScoringRoot = path.join(root, "config", "development", "scoring");
 const expectedCodes = new Set([
   "SINGLE_TOTAL_RETURN_V1",
   "SINGLE_SHARPE_V1",
@@ -17,14 +17,14 @@ function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-export function validateDevelopmentScoringSeed(proposalRoot = defaultProposalRoot) {
-  const manifestPath = path.join(proposalRoot, "artifacts", "artifact-manifest.json");
-  const sqlPath = path.join(proposalRoot, "artifacts", "scoring-template-seed.sql");
+export function validateDevelopmentScoringSeed(scoringRoot = defaultScoringRoot) {
+  const manifestPath = path.join(scoringRoot, "artifact-manifest.json");
+  const sqlPath = path.join(scoringRoot, "scoring-template-seed.sql");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   const sql = fs.readFileSync(sqlPath, "utf8");
 
-  if (manifest.status !== "proposed" || manifest.approved !== false) {
-    throw new Error("scoring seed must remain an explicitly unapproved proposal");
+  if (manifest.status !== "development") {
+    throw new Error("scoring seed must be marked for the development environment");
   }
   if (!/^[0-9a-f]{64}$/u.test(manifest.sourceDecisionSha256)) {
     throw new Error("source decision checksum is malformed");
@@ -53,7 +53,7 @@ export function validateDevelopmentScoringSeed(proposalRoot = defaultProposalRoo
   const observedCodes = new Set([...sql.matchAll(/'(SINGLE_[A-Z_]+_V1|COMPOSITE_[A-Z_]+_V1)'/gu)]
     .map((match) => match[1]));
   if (observedCodes.size !== expectedCodes.size || [...observedCodes].some((code) => !expectedCodes.has(code))) {
-    throw new Error("scoring seed template code set diverges from the proposal");
+    throw new Error("scoring seed template code set diverges from the manifest");
   }
   for (const fragment of [
     '"calculationRulesVersion":"official-room-scoring.v1"',

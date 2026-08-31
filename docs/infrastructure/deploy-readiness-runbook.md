@@ -60,10 +60,9 @@ The command prints only a masked account ID and principal name. It fails when AW
 CLI authentication, the Seoul region, `backend.hcl`, or `terraform.tfvars` is
 missing. It never prints credentials or the contents of ignored input files.
 
-If a proposed diagram changes the approved EC2 count, Redis operating product,
-durable queue technology, public/private placement, or operator ingress, run a
-fresh governance check and obtain product-authority approval before encoding that
-choice in Terraform. Keep an unapproved review under `proposals/`.
+If an architecture change affects EC2 count, Redis, durable queues,
+public/private placement, or operator ingress, record the decision in the relevant
+architecture document and update Terraform and its tests together.
 
 Before requesting an AWS plan, record and review all of the following:
 

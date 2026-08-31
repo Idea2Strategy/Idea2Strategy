@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($BackupRoot)) {
-    $BackupRoot = Join-Path $root '.harness/local/artifacts/backups/baseline-2026-08-13'
+    $BackupRoot = Join-Path $root '.local/artifacts/backups/baseline-2026-08-13'
 }
 $BackupRoot = [System.IO.Path]::GetFullPath($BackupRoot)
 $manifestPath = Join-Path $BackupRoot 'backup-manifest.json'
@@ -18,7 +18,7 @@ $minioReceiptPath = Join-Path $BackupRoot 'local-minio-import-receipt.json'
 $currentObjects = Join-Path $BackupRoot 's3-current'
 $envPath = Join-Path $root '.env.docker'
 $composePath = Join-Path $root 'compose.back.yml'
-$policySeedPath = Join-Path $root 'proposals/development-runtime-policy/artifacts/policy-seed.sql'
+$policySeedPath = Join-Path $root 'config/development/runtime-policy/policy-seed.sql'
 
 foreach ($required in @($manifestPath, $dumpPath, $receiptPath, $minioReceiptPath, $currentObjects, $envPath, $composePath, $policySeedPath)) {
     if (-not (Test-Path -LiteralPath $required)) {
@@ -78,11 +78,12 @@ $expectedVolumes = @(
 )
 $importSuffix = [guid]::NewGuid().ToString('N').Substring(0, 12)
 $importVolume = "idea2strategy-baseline-import-$importSuffix"
-$mappingPath = Join-Path $root ".harness/local/tmp/baseline-import-$importSuffix.tsv"
-$versionListingPath = Join-Path $root ".harness/local/tmp/baseline-minio-versions-$importSuffix.jsonl"
-$versionMappingPath = Join-Path $root ".harness/local/tmp/baseline-object-versions-$importSuffix.tsv"
-$importScriptPath = Join-Path $root ".harness/local/tmp/baseline-import-$importSuffix.sh"
-$minioImportScriptPath = Join-Path $root ".harness/local/tmp/baseline-minio-import-$importSuffix.sh"
+$mappingPath = Join-Path $root ".local/tmp/baseline-import-$importSuffix.tsv"
+$versionListingPath = Join-Path $root ".local/tmp/baseline-minio-versions-$importSuffix.jsonl"
+$versionMappingPath = Join-Path $root ".local/tmp/baseline-object-versions-$importSuffix.tsv"
+$importScriptPath = Join-Path $root ".local/tmp/baseline-import-$importSuffix.sh"
+$minioImportScriptPath = Join-Path $root ".local/tmp/baseline-minio-import-$importSuffix.sh"
+$null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $mappingPath)
 $importVolumeCreated = $false
 
 & (Join-Path $PSScriptRoot 'prepare-flyway-bundle.ps1') | Out-Host
@@ -260,7 +261,7 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
     docker compose --env-file $envPath -f $composePath up -d --wait redis
     if ($LASTEXITCODE -ne 0) { throw 'Local Redis did not become healthy for market-history projection.' }
     $env:LOCAL_HISTORY_DATABASE_URL = $env:LOCAL_FEATURE_DATABASE_URL
-    $env:LOCAL_HISTORY_STATE_ROOT = Join-Path $root '.harness/local/tmp/market-history-projection'
+    $env:LOCAL_HISTORY_STATE_ROOT = Join-Path $root '.local/tmp/market-history-projection'
     $env:LOCAL_HISTORY_S3_ENDPOINT = 'http://127.0.0.1:19000'
     $env:LOCAL_HISTORY_S3_BUCKET = $localBucket
     $env:LOCAL_HISTORY_REDIS_URI = 'redis://127.0.0.1:16379/0'
@@ -275,7 +276,7 @@ mc find "local/$MINIO_ALIAS_BUCKET" --print '{key}' | wc -l
     # instrument set and development window locally so a clean restore can release
     # and backtest those cards
     # without the retired D: drive or an AWS feature worker.
-    $env:LOCAL_FEATURE_ROOT = Join-Path $root '.harness/local/tmp/feature-materialization'
+    $env:LOCAL_FEATURE_ROOT = Join-Path $root '.local/tmp/feature-materialization'
     $env:LOCAL_FEATURE_S3_ENDPOINT = 'http://127.0.0.1:19000'
     $env:LOCAL_FEATURE_S3_BUCKET = $localBucket
     uv run --project (Join-Path $root 'data-pipeline') python `
