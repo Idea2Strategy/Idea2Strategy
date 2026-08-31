@@ -23,9 +23,9 @@ if ($LASTEXITCODE -ne 0) {
 foreach ($relativePath in @("bootstrap", "ci-identity", "artifact-foundation", "environments/development")) {
     $workingDirectory = "/workspace/infra/terraform/$relativePath"
     $safeName = $relativePath.Replace('/', '-').Replace('\', '-')
-    $hostDataDirectory = Join-Path $root ".harness/local/tmp/terraform-docker/$safeName"
+    $hostDataDirectory = Join-Path $root ".local/tmp/terraform-docker/$safeName"
     New-Item -ItemType Directory -Force -Path $hostDataDirectory | Out-Null
-    $containerDataDirectory = "/workspace/.harness/local/tmp/terraform-docker/$safeName"
+    $containerDataDirectory = "/workspace/.local/tmp/terraform-docker/$safeName"
     & docker run --rm -e "TF_DATA_DIR=$containerDataDirectory" -e TF_VAR_aws_profile= -v $mount -w $workingDirectory $image init -backend=false -input=false -lockfile=readonly
     if ($LASTEXITCODE -ne 0) {
         throw "terraform init failed in Docker for $relativePath."

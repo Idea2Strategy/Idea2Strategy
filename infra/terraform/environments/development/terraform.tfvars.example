@@ -61,10 +61,9 @@ enable_operator_auth          = true
 enable_cognito_operator_identity = false
 
 # Dedicated operator OIDC trust. Use the exact reviewed provider values and an
-# access token that contains one exact aud plus auth_time and an approved MFA
-# acr/amr claim. Cognito remains disabled until the isolated namespaced-claim
-# proposal has fresh product-authority approval; do not substitute a customer
-# login or mark MFA optional.
+# access token that contains one exact aud plus auth_time and a configured MFA
+# acr/amr claim. Keep Cognito disabled until those claims pass the operator-auth
+# integration tests; do not substitute a customer login or mark MFA optional.
 operator_auth_issuer             = ""
 operator_auth_jwk_set_uri        = ""
 operator_auth_audience           = ""

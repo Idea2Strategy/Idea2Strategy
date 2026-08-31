@@ -108,10 +108,10 @@ $centralMigration = Join-Path $backendRoot 'db-migration/src/main/resources/db/m
 $backtestContribution = Join-Path $backtestRoot 'db/migration-contributions'
 $tradingContribution = Join-Path $tradingRoot 'db/migration-contributions'
 $dataPipelineContribution = Join-Path $dataPipelineRoot 'db/migration-contributions'
-$localRoot = Join-Path $root '.harness/local'
+$localRoot = Join-Path $root '.local'
 $temporaryRoot = Join-Path $localRoot 'tmp'
 $bundle = Join-Path $temporaryRoot 'flyway-bundle'
-$expectedBundle = Get-FullPath (Join-Path $root '.harness/local/tmp/flyway-bundle')
+$expectedBundle = Get-FullPath (Join-Path $root '.local/tmp/flyway-bundle')
 
 if ((Get-FullPath $bundle) -cne $expectedBundle) {
     throw 'Refusing to prepare a Flyway bundle outside the exact local bundle path.'
@@ -183,7 +183,7 @@ if ($null -ne $java) {
         'eclipse-temurin:21-jdk',
         'java', '-classpath', 'gradle/wrapper/gradle-wrapper.jar',
         'org.gradle.wrapper.GradleWrapperMain', '--no-daemon', ':db-migration:run',
-        '--args=/workspace/backend/db-migration/src/main/resources/db/migration /workspace/.harness/local/tmp/flyway-bundle /workspace/backtest-engine/db/migration-contributions /workspace/trading-engine/db/migration-contributions /workspace/data-pipeline/db/migration-contributions'
+        '--args=/workspace/backend/db-migration/src/main/resources/db/migration /workspace/.local/tmp/flyway-bundle /workspace/backtest-engine/db/migration-contributions /workspace/trading-engine/db/migration-contributions /workspace/data-pipeline/db/migration-contributions'
     )
     & docker @dockerArguments
     if ($LASTEXITCODE -ne 0) {

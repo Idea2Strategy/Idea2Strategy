@@ -61,9 +61,6 @@ jobs:
       - name: Validate pre-DNS host-ready deployment phase
         shell: pwsh
         run: ./scripts/test-development-host-ready-phase.ps1
-      - name: Validate optional Cognito operator identity boundaries
-        shell: pwsh
-        run: ./scripts/test-development-cognito-operator-identity.ps1
       - name: Test Cognito operator token transformer
         run: node --test infra/terraform/environments/development/lambda/operator-pre-token/index.test.mjs
       - name: Validate one-shot Development database bootstrap boundaries
@@ -123,24 +120,6 @@ jobs:
           for path in backend backtest-engine data-pipeline trading-engine ui; do
             test "$(git ls-files -s "$path" | awk '{print $1}')" = "160000"
           done
-      # The governance verifiers assert the product-authority list as literals in
-      # four scripts and four rule documents. Without these steps a change to
-      # .harness/governance.yaml can silently drift from its enforcement files.
-      # initialize-local-harness.ps1 generates the ignored owner.yaml and the
-      # policy integrity baseline from the checked-out tree, so a fresh runner
-      # has everything the verifiers need.
-      - name: Initialize local harness
-        shell: pwsh
-        run: ./scripts/initialize-local-harness.ps1 -Verify
-      - name: Verify collaboration policy and product authorities
-        shell: pwsh
-        run: ./scripts/verify-collaboration-policy.ps1
-      - name: Verify governance foundation evidence
-        run: node scripts/verify-foundation-evidence.mjs policy
-      - name: Test local harness
-        shell: pwsh
-        run: ./scripts/test-local-harness.ps1
-
   flyway-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -6,7 +6,6 @@ status: approved
 revision: 2
 refs:
     - capability.strategy.basic
-    - decision.modes.basic-pro
     - policy.strategy.no-ai
 ---
 

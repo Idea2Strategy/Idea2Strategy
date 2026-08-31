@@ -1,5 +1,0 @@
-schema_version: 1
-work_id: work.local-development-foundation
-claim_id: claim.local-development-foundation
-branch: feature/common-development-foundation
-baseline: pending-context-refresh

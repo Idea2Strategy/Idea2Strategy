@@ -88,8 +88,8 @@ jobs:
           }
           $receipt = ./scripts/verify-development-database-bootstrap-receipt.ps1 @receiptArguments -AllowMissingReceipt | ConvertFrom-Json
           if ($receipt.status -ne 'passed') {
-            $policyRoot = 'proposals/development-runtime-policy/artifacts'
-            $scoringRoot = 'proposals/development-scoring-template/artifacts'
+            $policyRoot = 'config/development/runtime-policy'
+            $scoringRoot = 'config/development/scoring'
             $policyManifest = Get-Content "$policyRoot/artifact-manifest.json" -Raw | ConvertFrom-Json
             $scoringManifest = Get-Content "$scoringRoot/artifact-manifest.json" -Raw | ConvertFrom-Json
             ./scripts/invoke-development-database-bootstrap.ps1 `

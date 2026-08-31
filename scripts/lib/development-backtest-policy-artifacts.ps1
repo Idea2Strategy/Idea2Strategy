@@ -4,7 +4,7 @@ function Get-DevelopmentBacktestPolicyArtifactSet {
         [Parameter(Mandatory = $true)][string]$RepositoryRoot
     )
 
-    $artifactRoot = Join-Path $RepositoryRoot "proposals/development-runtime-policy/artifacts"
+    $artifactRoot = Join-Path $RepositoryRoot "config/development/runtime-policy"
     $manifestPath = Join-Path $artifactRoot "artifact-manifest.json"
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         throw "Development Backtest policy artifact manifest is missing."

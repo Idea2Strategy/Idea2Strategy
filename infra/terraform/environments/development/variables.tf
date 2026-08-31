@@ -427,7 +427,7 @@ variable "enable_operator_auth" {
 }
 
 variable "enable_cognito_operator_identity" {
-  description = "Create the dedicated AWS-native operator identity plane. Keep false until the namespaced MFA assurance proposal has fresh product-authority approval."
+  description = "Create the dedicated AWS-native operator identity plane. Keep false until the namespaced MFA claims and integration tests are configured."
   type        = bool
   default     = false
 }

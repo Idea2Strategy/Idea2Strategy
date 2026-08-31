@@ -177,7 +177,7 @@ services:
       - -password=${POSTGRES_PASSWORD}
       - migrate
     volumes:
-      - ./.harness/local/tmp/flyway-bundle:/flyway/sql:ro
+      - ./.local/tmp/flyway-bundle:/flyway/sql:ro
     networks: [development]
     restart: "no"
 
@@ -313,7 +313,7 @@ services:
       # counterpart of what development-database-bootstrap.sh materializes for AWS. The
       # receipt records each file's SHA-256 against the container path, so the mount
       # point has to match MARKET_GATEWAY_*_PATH above exactly.
-      - ./.harness/local/market-gateway:/etc/market-gateway:ro
+      - ./.local/market-gateway:/etc/market-gateway:ro
     depends_on:
       redis: {condition: service_healthy}
     networks: [development]
@@ -368,7 +368,7 @@ services:
       BACKTEST_QUEUE_URL: http://localstack:4566/000000000000/backtest-basic
       BACKTEST_API_DLQ_URL: http://localstack:4566/000000000000/backtest-basic-dlq
     volumes:
-      - ./proposals/development-runtime-policy/artifacts:/runtime-policy:ro
+      - ./config/development/runtime-policy:/runtime-policy:ro
     ports:
       - "127.0.0.1:${BACKTEST_PORT:-18082}:8082"
     depends_on:
@@ -413,7 +413,7 @@ services:
       BACKTEST_API_BASE_URL: http://backtest-api:8082
       BACKTEST_RUNTIME_POLICY_FILE: /runtime-policy/runtime-policy.json
     volumes:
-      - ./proposals/development-runtime-policy/artifacts:/runtime-policy:ro
+      - ./config/development/runtime-policy:/runtime-policy:ro
     depends_on:
       flyway: {condition: service_completed_successfully}
       backtest-api: {condition: service_started}
