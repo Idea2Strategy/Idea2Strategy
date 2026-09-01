@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.error import HTTPError
@@ -148,7 +148,9 @@ def _semantic_group(
     instrument_id: str,
     conditions: Sequence[_Condition],
 ) -> dict[str, Any]:
-    scheduled = any(condition.element_code == "BASIC_SCHEDULE" for condition in conditions)
+    scheduled = any(
+        condition.element_code == "BASIC_SCHEDULE" for condition in conditions
+    )
     blocks = [
         {
             "id": f"{card_id}-condition-{index}",
@@ -638,6 +640,291 @@ def _full_catalog_sample(
     )
 
 
+def _release_proof_sample(
+    *,
+    key: str,
+    name: str,
+    description: str,
+    catalog_id: str,
+    groups: Sequence[dict[str, Any]],
+    symbols: Sequence[str],
+    instruments: Mapping[str, str],
+    expected_trades: bool = True,
+) -> SampleStrategy:
+    """Build a small editable document whose semantic groups are the audit input.
+
+    The release-proof corpus intentionally keeps presentation metadata boring.  The
+    immutable semantic document is what the production compiler consumes, while this
+    matching editor snapshot keeps each seeded draft inspectable in the local UI.
+    """
+    section_id = key.lower().replace("_", "-")
+    buy_cards = [
+        group["allocationGroupId"] for group in groups if group["container"] == "BUY"
+    ]
+    sell_cards = [
+        group["allocationGroupId"] for group in groups if group["container"] == "SELL"
+    ]
+    card_blocks: dict[str, list[dict[str, Any]]] = {}
+    card_meta: dict[str, dict[str, str]] = {}
+    buy_settings: dict[str, dict[str, Any]] = {}
+    sell_settings: dict[str, dict[str, Any]] = {}
+    card_positions: dict[str, dict[str, int]] = {}
+    for index, group in enumerate(groups):
+        card_id = group["allocationGroupId"]
+        card_blocks[card_id] = [
+            {
+                "id": block["id"],
+                "label": block["elementCode"],
+                "tone": "condition",
+                "op": "검증",
+                "value": "immutable actual data",
+            }
+            for block in group["blocks"]
+            if block["elementCode"] != "BASIC_EQUAL_ALLOCATION_ORDER"
+        ]
+        card_meta[card_id] = {
+            "title": card_id,
+            "detail": description,
+            "explanation": description,
+        }
+        card_positions[card_id] = {
+            "x": 24 if group["container"] == "BUY" else 396,
+            "y": 96 + index * 96,
+        }
+        if group["container"] == "BUY":
+            buy_settings[card_id] = {
+                "maxOrderPercent": 10,
+                "entryMode": "대기 후 재진입",
+                "cycle": "매 거래일",
+                "cycleInterval": 1,
+                "reentryWait": "조건 재충족",
+                "reentryInterval": 1,
+                "maxEntries": 1000,
+            }
+        else:
+            sell_settings[card_id] = {
+                "sellPercent": 100,
+                "executeMode": "대기 후 재실행",
+                "reexecWait": "조건 재충족",
+                "reexecInterval": 1,
+                "maxExecutions": 1000,
+            }
+    return SampleStrategy(
+        key=key,
+        name=name,
+        description=description,
+        semantic_document={
+            "mode": "BASIC",
+            "catalogId": catalog_id,
+            "groups": list(groups),
+        },
+        presentation_document={
+            "basicEditor": {
+                "version": 1,
+                "snapshot": {
+                    "sections": [
+                        {
+                            "id": section_id,
+                            "symbol": " · ".join(symbols),
+                            "instrumentIds": [
+                                instruments[symbol] for symbol in symbols
+                            ],
+                            "allocation": 100,
+                            "timeframe": "release proof",
+                            "x": 80,
+                            "y": 80,
+                            "width": 760,
+                            "height": max(520, 150 * len(groups)),
+                            "cards": {"buy": buy_cards, "sell": sell_cards, "risk": []},
+                            "cardOrder": [*buy_cards, *sell_cards],
+                            "cardPositions": card_positions,
+                        }
+                    ],
+                    "cardBlocks": card_blocks,
+                    "cardMeta": card_meta,
+                    "buySettings": buy_settings,
+                    "sellSettings": sell_settings,
+                    "symbolLimits": {
+                        section_id: {symbol: 100 // len(symbols) for symbol in symbols}
+                    },
+                },
+                "viewport": {"pan": {"x": 0, "y": 0}, "zoom": 1},
+            },
+            "localSampleKey": key,
+            "localSampleRevision": SAMPLE_REVISION,
+        },
+        minimum_fill_count=1 if expected_trades else 0,
+        minimum_closing_trade_count=0,
+        minimum_trade_month_count=1 if expected_trades else 0,
+    )
+
+
+def build_release_proof_samples(
+    catalog_id: str, instruments: Mapping[str, str]
+) -> tuple[SampleStrategy, ...]:
+    """Build the immutable-actual-data corpus used by release-proof Task 4."""
+    required = ("AAPL", "MSFT", "META", "NVDA")
+    for symbol in required:
+        if symbol not in instruments:
+            raise ValueError(
+                f"Basic catalog is missing required sample instrument: {symbol}"
+            )
+
+    def price(resolution: str, operator: str) -> _Condition:
+        return _condition(
+            "BASIC_PRICE_COMPARE",
+            resolution,
+            {"operator": operator, "reference": "PREVIOUS_CLOSE"},
+            "가격 비교",
+            operator,
+            "전일 종가",
+            tone="data",
+        )
+
+    def holding(resolution: str) -> _Condition:
+        return _condition(
+            "BASIC_HOLDING_PERIOD",
+            resolution,
+            {"unit": "BAR", "amount": "1"},
+            "보유 기간",
+            "≥",
+            "1봉",
+            tone="risk",
+        )
+
+    aapl = instruments["AAPL"]
+    msft = instruments["MSFT"]
+    single_groups = (
+        _semantic_group("release-proof-single-buy", "BUY", aapl, (price("1d", "GT"),)),
+        _semantic_group("release-proof-single-sell", "SELL", aapl, (holding("1d"),)),
+    )
+    mixed_groups = (
+        _semantic_group(
+            "release-proof-mixed-aapl-buy", "BUY", aapl, (price("30m", "GT"),)
+        ),
+        _semantic_group(
+            "release-proof-mixed-aapl-sell", "SELL", aapl, (holding("30m"),)
+        ),
+        _semantic_group(
+            "release-proof-mixed-msft-buy", "BUY", msft, (price("1d", "GT"),)
+        ),
+        _semantic_group(
+            "release-proof-mixed-msft-sell", "SELL", msft, (holding("1d"),)
+        ),
+    )
+    warning_groups = (
+        _semantic_group("release-proof-warning-buy", "BUY", aapl, (price("1d", "GT"),)),
+        _semantic_group(
+            "release-proof-warning-sell",
+            "SELL",
+            aapl,
+            (
+                _condition(
+                    "BASIC_DRAWDOWN_FROM_PEAK",
+                    "",
+                    {"operator": "GTE", "thresholdPercent": "10"},
+                    "고점 대비 하락",
+                    "≥",
+                    "10%",
+                    tone="risk",
+                ),
+                _condition(
+                    "BASIC_DRAWDOWN_FROM_PEAK",
+                    "",
+                    {"operator": "LT", "thresholdPercent": "5"},
+                    "고점 대비 하락",
+                    "<",
+                    "5%",
+                    tone="risk",
+                ),
+            ),
+        ),
+    )
+    no_signal_groups = (
+        _semantic_group(
+            "release-proof-no-signal-buy",
+            "BUY",
+            aapl,
+            (price("1d", "GT"), price("1d", "LT")),
+        ),
+        _semantic_group("release-proof-no-signal-sell", "SELL", aapl, (holding("1d"),)),
+    )
+    unavailable_groups = (
+        _semantic_group(
+            "release-proof-unavailable-30m-buy", "BUY", aapl, (price("30m", "GT"),)
+        ),
+        _semantic_group(
+            "release-proof-unavailable-1d-buy", "BUY", aapl, (price("1d", "GT"),)
+        ),
+        _semantic_group(
+            "release-proof-unavailable-sell",
+            "SELL",
+            aapl,
+            (
+                _condition(
+                    "BASIC_POSITION_RETURN",
+                    "",
+                    {"direction": "PROFIT", "thresholdPercent": "1"},
+                    "현재 수익률",
+                    "수익",
+                    "1%",
+                    tone="risk",
+                ),
+            ),
+        ),
+    )
+    return (
+        _release_proof_sample(
+            key="RELEASE_PROOF_SINGLE_CLOCK",
+            name="검증 · 단일 시계 · AAPL 일봉",
+            description="AAPL 일봉만 사용하는 실제 데이터 단일 시계 검증 전략입니다.",
+            catalog_id=catalog_id,
+            groups=single_groups,
+            symbols=("AAPL",),
+            instruments=instruments,
+        ),
+        _release_proof_sample(
+            key="RELEASE_PROOF_MIXED_CLOCK",
+            name="검증 · 혼합 시계 · AAPL 30분·MSFT 일봉",
+            description="서로 다른 실제 종목·봉 주기를 한 릴리스에서 평가합니다.",
+            catalog_id=catalog_id,
+            groups=mixed_groups,
+            symbols=("AAPL", "MSFT"),
+            instruments=instruments,
+        ),
+        _full_catalog_sample(catalog_id, instruments),
+        _release_proof_sample(
+            key="RELEASE_PROOF_WARNING",
+            name="검증 · 경고 보존 · 모순 수치 경계",
+            description="실제 데이터 실행과 CONTRADICTORY_CONDITION 경고 보존을 함께 검증합니다.",
+            catalog_id=catalog_id,
+            groups=warning_groups,
+            symbols=("AAPL",),
+            instruments=instruments,
+        ),
+        _release_proof_sample(
+            key="RELEASE_PROOF_NO_SIGNAL",
+            name="검증 · 무신호 · 상반 가격 조건",
+            description="동일 가격이 동시에 전일 종가보다 크고 작을 수 없어 신호가 없는 실제 데이터 전략입니다.",
+            catalog_id=catalog_id,
+            groups=no_signal_groups,
+            symbols=("AAPL",),
+            instruments=instruments,
+            expected_trades=False,
+        ),
+        _release_proof_sample(
+            key="RELEASE_PROOF_UNAVAILABLE_AMBIGUOUS_CLOCK",
+            name="검증 · 입력 불가 · 모호한 포지션 시계",
+            description="두 실제 시계 사이의 position-only 흐름이 명시적으로 입력 불가가 되는 계약 검증입니다.",
+            catalog_id=catalog_id,
+            groups=unavailable_groups,
+            symbols=("AAPL",),
+            instruments=instruments,
+            expected_trades=False,
+        ),
+    )
+
+
 def build_samples(
     catalog_id: str, instruments: Mapping[str, str]
 ) -> tuple[SampleStrategy, ...]:
@@ -666,7 +953,13 @@ class SampleSeederApi(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
-def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
+def seed_samples(
+    api: SampleSeederApi,
+    *,
+    sample_builder: Callable[
+        [str, Mapping[str, str]], tuple[SampleStrategy, ...]
+    ] = build_samples,
+) -> list[dict[str, str]]:
     """Idempotently create and release the stable samples through the public API."""
     catalog = api.get_catalog()
     version = catalog.get("version")
@@ -683,7 +976,7 @@ def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
         and isinstance(row.get("symbol"), str)
         and isinstance(row.get("id"), str)
     }
-    samples = build_samples(catalog_id, instruments)
+    samples = sample_builder(catalog_id, instruments)
     library = [
         row
         for row in api.list_strategies()
@@ -763,6 +1056,11 @@ def seed_samples(api: SampleSeederApi) -> list[dict[str, str]]:
             }
         )
     return receipts
+
+
+def seed_release_proof_samples(api: SampleSeederApi) -> list[dict[str, str]]:
+    """Idempotently seed only the six Task 4 corpus releases."""
+    return seed_samples(api, sample_builder=build_release_proof_samples)
 
 
 def _json_transport(
