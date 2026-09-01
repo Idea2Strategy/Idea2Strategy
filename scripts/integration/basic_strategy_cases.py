@@ -241,7 +241,13 @@ def generated_cases() -> tuple[BasicStrategyCase, ...]:
             sides = (containers[0],)
         condition_step = _step(condition, resolution)
         steps = [condition_step]
-        if not any("resolution" in step.arguments for step in steps):
+        if condition["operation"] in {
+            "POSITION_RETURN",
+            "HOLDING_PERIOD",
+            "PEAK_RETURN",
+            "DRAWDOWN_FROM_PEAK",
+            "SCHEDULE",
+        }:
             steps.insert(0, _step(clock, resolution))
         steps.append(_step(terminal, resolution))
         result.append(
@@ -271,12 +277,12 @@ def generated_cases() -> tuple[BasicStrategyCase, ...]:
             BasicStrategyCase(
                 name="contradictory-price-boundaries",
                 steps=(
-                    _step(clock, "1h"),
+                    _step(clock, "30m"),
                     _with_arguments(drawdown, operator="GTE", thresholdPercent="10"),
                     _with_arguments(drawdown, operator="LT", thresholdPercent="5"),
-                    _step(terminal, "1h"),
+                    _step(terminal, "30m"),
                 ),
-                resolution="1h",
+                resolution="30m",
                 sides=("SELL",),
             ),
             BasicStrategyCase(
@@ -292,10 +298,10 @@ def generated_cases() -> tuple[BasicStrategyCase, ...]:
             BasicStrategyCase(
                 name="no-signal",
                 steps=(
-                    _step(fixture_by_code["BASIC_PRICE_CHANGE_PERCENT"], "1h"),
-                    _step(terminal, "1h"),
+                    _with_arguments(_step(clock, "30m"), operator="LT"),
+                    _step(terminal, "30m"),
                 ),
-                resolution="1h",
+                resolution="30m",
                 sides=("BUY",),
                 input_scenario="false",
             ),
@@ -311,8 +317,8 @@ def generated_cases() -> tuple[BasicStrategyCase, ...]:
             ),
             BasicStrategyCase(
                 name="simultaneous-buy-sell",
-                steps=(_step(clock, "1d"), _step(terminal, "1d")),
-                resolution="1d",
+                steps=(_step(clock, "30m"), _step(terminal, "30m")),
+                resolution="30m",
                 sides=SIDES,
             ),
         )
@@ -378,8 +384,9 @@ def shuffled_cases(seed: int) -> tuple[BasicStrategyCase, ...]:
     return tuple(random.Random(seed).sample(cases, len(cases)))
 
 
-_INSTRUMENT_IDS = tuple(
-    f"00000000-0000-4000-8000-{number:012d}" for number in range(301, 306)
+_INSTRUMENT_IDS = (
+    "03e7e685-d6da-4f1f-9279-91477884aab9",
+    *(f"00000000-0000-4000-8000-{number:012d}" for number in range(302, 306)),
 )
 _FEATURES = {
     "30m": ("ec37984b-6605-5560-8ea0-774c5b8e9626", "PT30M"),
@@ -403,6 +410,16 @@ def _chains_for_side(
     conditions = tuple(
         step for step in steps if step.operation != "EMIT_ORDER_CANDIDATE"
     )
+    if case.name == "maximum-four-partition-five-instrument-two-side":
+        width, remainder = divmod(len(conditions), case.partition_count)
+        chains = []
+        offset = 0
+        for partition_index in range(case.partition_count):
+            size = width + int(partition_index < remainder)
+            chunk = conditions[offset : offset + size]
+            offset += size
+            chains.append((*chunk, terminal))
+        return tuple(chains)
     clock = next(
         (step for step in conditions if step.operation == "PRICE_COMPARE"), None
     )
@@ -466,7 +483,13 @@ def compiled_plan_document(case: BasicStrategyCase) -> dict[str, object]:
     for partition_index in range(1, case.partition_count + 1):
         flows = []
         for side in case.sides:
-            for chain_index, steps in enumerate(_chains_for_side(case, side), start=1):
+            chains = _chains_for_side(case, side)
+            selected = (
+                ((partition_index, chains[partition_index - 1]),)
+                if case.name == "maximum-four-partition-five-instrument-two-side"
+                else tuple(enumerate(chains, start=1))
+            )
+            for chain_index, steps in selected:
                 runtime_steps = []
                 for sequence, step in enumerate(steps, start=1):
                     arguments = dict(step.arguments)

@@ -2,31 +2,43 @@
 
 from __future__ import annotations
 
+import uuid
 from collections import Counter
-from dataclasses import replace
 from datetime import timedelta
+from decimal import Decimal
 
 import basic_strategy_cases as matrix
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 import pytest
+from backtest_engine.attempt_coordinator import AttemptCoordinator
 from backtest_engine.basic_runtime import (
     BasicDecisionStatus,
+    BasicPlanReplay,
     BasicPlanRuntime,
     derive_data_requirements,
 )
+from backtest_engine.calendar import XNYS_CALENDAR
 from backtest_engine.data_availability import (
     AvailabilityStatus,
-    DataAvailabilityAssessor,
 )
 from backtest_engine.elements import (
     ElementCompatibilityError,
-    ElementEvaluation,
-    InstrumentInput,
-    PinnedFeatureValue,
     PlanStep,
     element_catalog,
 )
-from backtest_engine.orchestrator import ReplayStatus
-from test_basic_element_conformance import _evaluation
+from backtest_engine.execution_policy import D17_EXECUTION_POLICY_FIXTURE
+from backtest_engine.orchestrator import BacktestJob, BacktestOrchestrator, ReplayStatus
+from stored_market_snapshot import INSTRUMENT_ID, load_stored_market_snapshot
+from test_orchestrator import (
+    WALL_T0,
+    FixedMonitor,
+    RecordingEngine,
+    RecordingPublisher,
+    WallClock,
+    _policy,
+)
 
 EXPECTED_CONDITION_CODES = frozenset(
     {
@@ -111,6 +123,123 @@ EXPECTED_ENUM_PARAMETERS = frozenset(
     }
 )
 EXPECTED_SEEDS = (17, 101, 313, 2027, 4099, 7919, 65537, 104729, 8675309, 20260831)
+EXPECTED_SHAPES = {
+    "pairwise-basic_price_compare": ("30m", ("BUY",), 1, 1),
+    "pairwise-basic_price_change_percent": ("30m", ("SELL",), 2, 2),
+    "pairwise-basic_volume_compare": ("1h", ("BUY",), 3, 3),
+    "pairwise-basic_streak": ("1h", ("SELL",), 4, 4),
+    "pairwise-basic_sma_cross": ("4h", ("BUY",), 1, 5),
+    "pairwise-basic_rsi_cross": ("4h", ("SELL",), 2, 1),
+    "pairwise-basic_macd_cross": ("1d", ("BUY",), 3, 2),
+    "pairwise-basic_bollinger_reversal": ("1d", ("SELL",), 4, 3),
+    "pairwise-basic_position_return": ("30m", ("SELL",), 1, 4),
+    "pairwise-basic_holding_period": ("1d", ("SELL",), 2, 5),
+    "pairwise-basic_peak_return": ("4h", ("SELL",), 3, 1),
+    "pairwise-basic_drawdown_from_peak": ("1d", ("SELL",), 4, 2),
+    "pairwise-basic_schedule": ("1d", ("BUY",), 1, 3),
+    "maximum-four-partition-five-instrument-two-side": ("30m", ("BUY", "SELL"), 4, 5),
+    "contradictory-price-boundaries": ("30m", ("SELL",), 1, 1),
+    "duplicate-price-condition": ("30m", ("BUY",), 1, 1),
+    "no-signal": ("30m", ("BUY",), 1, 1),
+    "missing-required-history": ("4h", ("BUY",), 1, 1),
+    "simultaneous-buy-sell": ("30m", ("BUY", "SELL"), 1, 1),
+}
+EXPECTED_EXECUTIONS = {
+    "pairwise-basic_price_compare": (1, "COMPLETED", "AVAILABLE", (("CANDIDATE", 1),)),
+    "pairwise-basic_price_change_percent": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 2), ("INPUT_MISSING", 2)),
+    ),
+    "pairwise-basic_volume_compare": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 3), ("INPUT_MISSING", 6)),
+    ),
+    "pairwise-basic_streak": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 4), ("INPUT_MISSING", 12)),
+    ),
+    "pairwise-basic_sma_cross": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 1), ("INPUT_MISSING", 4)),
+    ),
+    "pairwise-basic_rsi_cross": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 2),),
+    ),
+    "pairwise-basic_macd_cross": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 3), ("INPUT_MISSING", 3)),
+    ),
+    "pairwise-basic_bollinger_reversal": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 4), ("INPUT_MISSING", 8)),
+    ),
+    "pairwise-basic_position_return": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CANDIDATE", 1), ("INPUT_MISSING", 3)),
+    ),
+    "pairwise-basic_holding_period": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 2), ("INPUT_MISSING", 8)),
+    ),
+    "pairwise-basic_peak_return": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 3),),
+    ),
+    "pairwise-basic_drawdown_from_peak": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 4), ("INPUT_MISSING", 4)),
+    ),
+    "pairwise-basic_schedule": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CONDITION_NOT_MET", 1), ("INPUT_MISSING", 2)),
+    ),
+    "maximum-four-partition-five-instrument-two-side": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("CANDIDATE", 1), ("CONDITION_NOT_MET", 4), ("INPUT_MISSING", 35)),
+    ),
+    "contradictory-price-boundaries": (
+        0,
+        "COMPLETED",
+        "AVAILABLE",
+        (("CONDITION_NOT_MET", 1),),
+    ),
+    "duplicate-price-condition": (1, "COMPLETED", "AVAILABLE", (("CANDIDATE", 1),)),
+    "no-signal": (0, "COMPLETED", "AVAILABLE", (("CONDITION_NOT_MET", 1),)),
+    "missing-required-history": (
+        0,
+        "UNAVAILABLE",
+        "UNAVAILABLE",
+        (("INPUT_MISSING", 1),),
+    ),
+    "simultaneous-buy-sell": (2, "COMPLETED", "AVAILABLE", (("CANDIDATE", 2),)),
+}
 
 
 def test_generated_matrix_has_hand_checked_size_and_complete_catalog_coverage() -> None:
@@ -217,124 +346,121 @@ def test_numeric_oracle_covers_every_published_boundary_independently() -> None:
                 catalog.validate_step(step)
 
 
-def _evaluation_for(
-    step: PlanStep, instrument_id: str, passed: bool
-) -> ElementEvaluation:
-    """Retarget one stored conformance input; never invent or aggregate OHLCV."""
-    pinned = _evaluation(step.operation, passed)
-    resolution = step.arguments.get("resolution")
-    values: dict[str, str] = {}
-    for key, value in pinned.inputs.values.items():
-        prefix, separator, suffix = key.rpartition(".")
-        if resolution and separator and suffix in matrix.RESOLUTIONS:
-            key = f"{prefix}.{resolution}"
-        values[key] = value
-    periods = {
-        "30m": timedelta(minutes=30),
-        "1h": timedelta(hours=1),
-        "4h": timedelta(hours=4),
-        "1d": timedelta(days=1),
-    }
-    feature_series = tuple(
-        replace(
-            series,
-            instrument_id=instrument_id,
-            resolution=resolution or series.resolution,
-            values=tuple(
-                PinnedFeatureValue(
-                    pinned.as_of
-                    - periods[resolution or series.resolution]
-                    * (len(series.values) - index),
-                    value.value,
-                )
-                for index, value in enumerate(series.values)
-            ),
+class _InputIdentityRuntime(BasicPlanRuntime):
+    def __init__(self) -> None:
+        super().__init__()
+        self.input_ids: dict[str, set[int]] = {}
+
+    def evaluation_for(self, instrument_id, instrument_input, as_of):
+        self.input_ids.setdefault(instrument_id, set()).add(id(instrument_input))
+        return super().evaluation_for(instrument_id, instrument_input, as_of)
+
+
+class _StoredObjectReader:
+    def iter_batches(self, manifest, policy, *, instrument_ids):
+        if manifest["resolution"] != "30m":
+            return iter(())
+        table = pq.read_table(load_stored_market_snapshot().path)
+        selected = table.filter(
+            pc.and_(
+                pc.is_in(
+                    table["instrument_id"], value_set=pa.array(list(instrument_ids))
+                ),
+                pc.and_(
+                    pc.greater_equal(
+                        table["bar_start_at"], pa.scalar(policy.period_start)
+                    ),
+                    pc.less(table["bar_start_at"], pa.scalar(policy.period_end)),
+                ),
+            )
         )
-        for series in pinned.inputs.feature_series
+        return iter(selected.to_batches())
+
+
+class _PositionRecordingEngine(RecordingEngine):
+    def runtime_values(self, instant, events):
+        values = load_stored_market_snapshot().inputs[INSTRUMENT_ID].values
+        return {INSTRUMENT_ID: values}
+
+
+def _orchestrated_outcome(case, runtime, plan):
+    snapshot = load_stored_market_snapshot()
+    requirements = derive_data_requirements(
+        plan,
+        evaluation_from=snapshot.as_of,
+        evaluation_through=snapshot.as_of + timedelta(minutes=30),
     )
-    return ElementEvaluation(
-        instrument_id=instrument_id,
-        as_of=pinned.as_of,
-        inputs=InstrumentInput(
-            instrument_id=instrument_id,
-            series=(),
-            feature_series=feature_series,
-            require_pinned_features=bool(feature_series),
-            values=values,
-        ),
+    resolution = plan.flows[0].reference_series[1]
+    manifest = {"resolution": resolution}
+    run_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"task3:{case.name}"))
+    job = BacktestJob(
+        run_id=run_id,
+        idempotency_key=f"TASK3:{case.name}",
+        worker_execution_key=f"TASK3:{case.name}:attempt-1",
+        manifest=manifest,
+        execution_policy=D17_EXECUTION_POLICY_FIXTURE,
+        requirements=requirements,
+        data_kind="ADJUSTED_BAR",
+        resolution=resolution,
+        initial_cash=Decimal(100000),
+        evaluation_from=snapshot.as_of,
+        evaluation_through=snapshot.as_of + timedelta(minutes=30),
     )
+    engine = _PositionRecordingEngine()
+    publisher = RecordingPublisher()
+
+    def replay_factory(*, clock, assessment):
+        return BasicPlanReplay(
+            runtime=runtime, plan=plan, clock=clock, assessment=assessment
+        )
+
+    orchestrator = BacktestOrchestrator(
+        reader=_StoredObjectReader(),
+        calendar=XNYS_CALENDAR,
+        replay_factory=replay_factory,
+        engine=engine,
+        publisher=publisher,
+        wall_clock=WallClock(),
+    )
+    coordinator = AttemptCoordinator(run_id, _policy(), WALL_T0)
+    lease = coordinator.acquire("task3-worker", WALL_T0)
+    outcome = orchestrator.run(
+        job, coordinator=coordinator, lease=lease, monitor=FixedMonitor()
+    )
+    return outcome, len(engine.placed)
 
 
 def _actual_case_outcome(
     case: matrix.BasicStrategyCase,
-) -> tuple[int, ReplayStatus, AvailabilityStatus]:
+) -> tuple[int, ReplayStatus, AvailabilityStatus, tuple[tuple[str, int], ...]]:
     document = matrix.compiled_plan_document(case)
-    runtime = BasicPlanRuntime()
+    runtime = _InputIdentityRuntime()
     plan = runtime.load(document)
-    if case.input_scenario == "missing":
-        execution = runtime.execute(
-            plan, {}, as_of=_evaluation("MACD_CROSS", True).as_of
-        )
-        assert {decision.status for decision in execution.decisions} == {
-            BasicDecisionStatus.INPUT_MISSING
-        }
-        requirements = derive_data_requirements(
-            plan,
-            evaluation_from=_evaluation("MACD_CROSS", True).as_of,
-            evaluation_through=_evaluation("MACD_CROSS", True).as_of
-            + timedelta(hours=1),
-        )
-        availability = DataAvailabilityAssessor().assess(requirements, []).status
-        return 0, ReplayStatus.UNAVAILABLE, availability
-
-    if case.input_scenario == "false":
-        inputs = {
-            instrument_id: _evaluation_for(
-                flow.condition_steps[0], instrument_id, False
-            ).inputs
-            for flow in plan.flows
-            for instrument_id in flow.instrument_ids
-        }
-        execution = runtime.execute(
-            plan, inputs, as_of=_evaluation("PRICE_CHANGE_PERCENT", False).as_of
-        )
-        assert {decision.status for decision in execution.decisions} == {
-            BasicDecisionStatus.CONDITION_NOT_MET
-        }
-        return 0, ReplayStatus.COMPLETED, AvailabilityStatus.AVAILABLE
-
-    signals = 0
-    for flow in plan.flows:
-        for instrument_id in flow.instrument_ids:
-            passed = True
-            for step in flow.condition_steps:
-                outcome = plan.catalog.evaluate(
-                    step,
-                    _evaluation_for(step, instrument_id, case.input_scenario == "true"),
-                )
-                if not outcome.is_passed:
-                    passed = False
-                    break
-            signals += int(passed)
-    return signals, ReplayStatus.COMPLETED, AvailabilityStatus.AVAILABLE
+    snapshot = load_stored_market_snapshot()
+    missing = case.input_scenario == "missing"
+    execution = runtime.execute(
+        plan, {} if missing else snapshot.inputs, as_of=snapshot.as_of
+    )
+    assert all(len(ids) == 1 for ids in runtime.input_ids.values())
+    runtime.input_ids.clear()
+    outcome, signal_count = _orchestrated_outcome(case, runtime, plan)
+    assert all(len(ids) == 1 for ids in runtime.input_ids.values())
+    decision_counts = Counter(decision.status.value for decision in execution.decisions)
+    return (
+        signal_count,
+        outcome.status,
+        outcome.availability_status,
+        tuple(sorted(decision_counts.items())),
+    )
 
 
 def test_materialized_documents_consume_resolution_side_partition_and_instruments() -> (
     None
 ):
-    expected_shapes = {
-        "pairwise-basic_price_compare": ("30m", ("BUY",), 1, 1),
-        "maximum-four-partition-five-instrument-two-side": (
-            "30m",
-            ("BUY", "SELL"),
-            4,
-            5,
-        ),
-        "simultaneous-buy-sell": ("1d", ("BUY", "SELL"), 1, 1),
-    }
     by_name = {case.name: case for case in matrix.generated_cases()}
 
-    for name, (resolution, sides, partitions, instruments) in expected_shapes.items():
+    assert set(by_name) == set(EXPECTED_SHAPES)
+    for name, (resolution, sides, partitions, instruments) in EXPECTED_SHAPES.items():
         case = by_name[name]
         semantic = matrix.semantic_document(case)
         compiled = matrix.compiled_plan_document(case)
@@ -358,6 +484,85 @@ def test_materialized_documents_consume_resolution_side_partition_and_instrument
         assert {flow.reference_series for flow in plan.flows} == {
             ("ADJUSTED_BAR", resolution)
         }
+        assert all(
+            flow.terminal_step.operation == "EMIT_ORDER_CANDIDATE"
+            for flow in plan.flows
+        )
+        assert all(flow.condition_steps for flow in plan.flows)
+
+
+def test_maximum_distributes_occurrences_without_duplicate_side_containers() -> None:
+    case = next(
+        case
+        for case in matrix.generated_cases()
+        if case.name == "maximum-four-partition-five-instrument-two-side"
+    )
+    document = matrix.compiled_plan_document(case)
+    partitions = document["executionSnapshot"]["partitions"]
+
+    assert len(partitions) == 4
+    assert all(
+        Counter(flow["steps"][-1]["arguments"]["side"] for flow in partition["flows"])
+        <= Counter({"BUY": 1, "SELL": 1})
+        for partition in partitions
+    )
+    assert all(
+        len(flow["steps"][:-1]) <= 5
+        for partition in partitions
+        for flow in partition["flows"]
+    )
+    actual_conditions = Counter(
+        step["operation"]
+        for partition in partitions
+        for flow in partition["flows"]
+        for step in flow["steps"][:-1]
+    )
+    assert actual_conditions == Counter(
+        {
+            "PRICE_COMPARE": 2,
+            "PRICE_CHANGE_PERCENT": 2,
+            "VOLUME_COMPARE": 2,
+            "STREAK": 2,
+            "SMA_CROSS": 2,
+            "RSI_CROSS": 2,
+            "MACD_CROSS": 2,
+            "BOLLINGER_REVERSAL": 2,
+            "POSITION_RETURN": 1,
+            "HOLDING_PERIOD": 1,
+            "PEAK_RETURN": 1,
+            "DRAWDOWN_FROM_PEAK": 1,
+            "SCHEDULE": 1,
+        }
+    )
+
+
+def test_runtime_uses_one_verified_stored_snapshot_without_relabeling_market_values() -> (
+    None
+):
+    snapshot = load_stored_market_snapshot()
+    series = snapshot.inputs[INSTRUMENT_ID].series_for("ADJUSTED_BAR", "30m")
+
+    assert (
+        snapshot.object_sha256
+        == "fa0cebb4e33275239b8ed4f801bdd137508f68bf2b6411f0ab036df3ec283d08"
+    )
+    assert (
+        snapshot.corpus_sha256
+        == "961c0b76f5638c397851e1e909acd8d495fa554904a0349b4aa799bbb90f9286"
+    )
+    assert series is not None
+    assert [
+        (bar.starts_at.isoformat(), str(bar.close), str(bar.volume))
+        for bar in series.bars
+    ] == [
+        ("2024-01-02T14:30:00+00:00", "341.45", "2977488"),
+        ("2024-01-02T15:00:00+00:00", "338.6", "1816210"),
+        ("2024-01-02T15:30:00+00:00", "337.74", "1756774"),
+        ("2024-01-02T16:00:00+00:00", "341.03", "1357032"),
+    ]
+    assert snapshot.event_ids == tuple(
+        f"bb559227-dec3-54bd-876d-167c12c6e355:{index}" for index in range(1, 5)
+    )
 
 
 def test_special_outcomes_are_observed_from_loaded_plan_and_pinned_owner_inputs() -> (
@@ -365,21 +570,29 @@ def test_special_outcomes_are_observed_from_loaded_plan_and_pinned_owner_inputs(
 ):
     by_name = {case.name: case for case in matrix.generated_cases()}
     expected = {
-        "no-signal": (0, ReplayStatus.COMPLETED, AvailabilityStatus.AVAILABLE),
+        "no-signal": (
+            0,
+            ReplayStatus.COMPLETED,
+            AvailabilityStatus.AVAILABLE,
+            ((BasicDecisionStatus.CONDITION_NOT_MET.value, 1),),
+        ),
         "missing-required-history": (
             0,
             ReplayStatus.UNAVAILABLE,
             AvailabilityStatus.UNAVAILABLE,
+            ((BasicDecisionStatus.INPUT_MISSING.value, 1),),
         ),
         "simultaneous-buy-sell": (
             2,
             ReplayStatus.COMPLETED,
             AvailabilityStatus.AVAILABLE,
+            ((BasicDecisionStatus.CANDIDATE.value, 2),),
         ),
         "contradictory-price-boundaries": (
             0,
             ReplayStatus.COMPLETED,
             AvailabilityStatus.AVAILABLE,
+            ((BasicDecisionStatus.CONDITION_NOT_MET.value, 1),),
         ),
     }
 
@@ -426,7 +639,10 @@ def test_every_generated_element_uses_arguments_the_v2_runtime_really_accepts_in
             semantic = matrix.semantic_document(generated)
             assert semantic["groups"]
             BasicPlanRuntime().load(matrix.compiled_plan_document(generated))
-            _actual_case_outcome(generated)
+            signals, status, availability, decisions = _actual_case_outcome(generated)
+            assert (signals, status.value, availability.value, decisions) == (
+                EXPECTED_EXECUTIONS[generated.name]
+            )
         except Exception as failure:  # noqa: BLE001 - seed/case identity must wrap every owner failure
             pytest.fail(
                 f"seed={seed} case={generated.name}: {type(failure).__name__}: {failure}"
