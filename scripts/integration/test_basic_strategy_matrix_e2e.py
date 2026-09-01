@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import uuid
 from collections import Counter
 from datetime import timedelta
@@ -12,6 +13,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
+import stored_market_snapshot as stored_snapshot
 from backtest_engine.attempt_coordinator import AttemptCoordinator
 from backtest_engine.basic_runtime import (
     BasicDecisionStatus,
@@ -123,6 +125,31 @@ EXPECTED_ENUM_PARAMETERS = frozenset(
     }
 )
 EXPECTED_SEEDS = (17, 101, 313, 2027, 4099, 7919, 65537, 104729, 8675309, 20260831)
+EXPECTED_LOADED_INSTRUMENT_IDS = {
+    1: ("03e7e685-d6da-4f1f-9279-91477884aab9",),
+    2: (
+        "00000000-0000-4000-8000-000000000302",
+        "03e7e685-d6da-4f1f-9279-91477884aab9",
+    ),
+    3: (
+        "00000000-0000-4000-8000-000000000302",
+        "00000000-0000-4000-8000-000000000303",
+        "03e7e685-d6da-4f1f-9279-91477884aab9",
+    ),
+    4: (
+        "00000000-0000-4000-8000-000000000302",
+        "00000000-0000-4000-8000-000000000303",
+        "00000000-0000-4000-8000-000000000304",
+        "03e7e685-d6da-4f1f-9279-91477884aab9",
+    ),
+    5: (
+        "00000000-0000-4000-8000-000000000302",
+        "00000000-0000-4000-8000-000000000303",
+        "00000000-0000-4000-8000-000000000304",
+        "00000000-0000-4000-8000-000000000305",
+        "03e7e685-d6da-4f1f-9279-91477884aab9",
+    ),
+}
 EXPECTED_SHAPES = {
     "pairwise-basic_price_compare": ("30m", ("BUY",), 1, 1),
     "pairwise-basic_price_change_percent": ("30m", ("SELL",), 2, 2),
@@ -143,6 +170,133 @@ EXPECTED_SHAPES = {
     "no-signal": ("30m", ("BUY",), 1, 1),
     "missing-required-history": ("4h", ("BUY",), 1, 1),
     "simultaneous-buy-sell": ("30m", ("BUY", "SELL"), 1, 1),
+}
+EXPECTED_PARTITION_KEYS = {
+    "pairwise-basic_price_compare": ("0e35f72c-edb0-5cd0-a09a-b9ea8ff88f42",),
+    "pairwise-basic_price_change_percent": (
+        "2f1355b5-80f6-5222-96fe-dabbb0b5d1ea",
+        "ce6af436-f6e2-5087-91d7-35e6518172d9",
+    ),
+    "pairwise-basic_volume_compare": (
+        "db03063a-ab4e-5a06-8373-dd20e95e99ce",
+        "ae6d6ab6-27a6-506a-a62b-1b8f803f639a",
+        "d91679c2-7be4-56e8-8363-a4b77fe8a7b8",
+    ),
+    "pairwise-basic_streak": (
+        "31fe73be-5fac-5339-b034-1428fbdbde84",
+        "2ffe7540-9ee8-5bcc-8ea7-d8be745da125",
+        "0dcce8c1-01b7-501f-8f46-fa3b0a386b8d",
+        "69d1fb30-e717-5bd9-9ea6-c0cc701bf6cf",
+    ),
+    "pairwise-basic_sma_cross": ("28b0f0f6-1075-534b-b20c-2680ff249a78",),
+    "pairwise-basic_rsi_cross": (
+        "981f817a-4408-56ef-99e2-bf9d98f6c789",
+        "8084513a-3ec0-552d-98fa-642bb9e659b2",
+    ),
+    "pairwise-basic_macd_cross": (
+        "1c780690-7b1e-5faa-8888-ce3334426fe7",
+        "ec9132fb-14d4-5cae-ab17-0d878393cf6f",
+        "a476d8a3-5e0e-56f7-ba57-1a8981dc60a0",
+    ),
+    "pairwise-basic_bollinger_reversal": (
+        "bbacaa6d-320b-5d81-b38d-a4a36fb7f3b6",
+        "1b9bde07-972f-5b60-93a6-3f7aa400c615",
+        "b75125c7-d50c-5c3c-8a51-6a1cc8cfe976",
+        "9216dc6b-9374-5fb9-987c-45568bb500d3",
+    ),
+    "pairwise-basic_position_return": ("fbe32cda-3b0e-5acf-af15-1d5e75c54bfb",),
+    "pairwise-basic_holding_period": (
+        "fdedda36-c3e0-5af4-98c2-d83b87b0305e",
+        "7b1560a0-1b44-5520-8aa1-1bdef3961a41",
+    ),
+    "pairwise-basic_peak_return": (
+        "cc4b907e-e321-567c-b3f6-45c911873f4b",
+        "14446179-72f9-562c-baae-85ba0fde5fc1",
+        "05dfa999-4c3b-5697-a15b-92119f2133ab",
+    ),
+    "pairwise-basic_drawdown_from_peak": (
+        "b336eede-6154-519f-a2ad-2d59ee487b34",
+        "3cbf34ef-3bac-5846-af0e-b7e46a9b11cf",
+        "e5a694d8-f00d-5024-b828-9a3b65cb2b4b",
+        "142cb410-d81e-578f-acaa-5a77fbe500e7",
+    ),
+    "pairwise-basic_schedule": ("826ebbda-e66b-581f-89b5-fd93ed9537ee",),
+    "maximum-four-partition-five-instrument-two-side": (
+        "246e43d7-6a03-5743-af19-ffe11c8d68ee",
+        "7938b08a-3bd0-5baf-9f43-1a747a3908e4",
+        "e05952c3-4156-588b-9c83-98242f1f308a",
+        "8cc4dc09-ed4c-55b3-9ef2-b74abb9679cf",
+    ),
+    "contradictory-price-boundaries": ("6a54b391-a592-5269-a599-3d3ed7d4d7ab",),
+    "duplicate-price-condition": ("c3068cc5-f800-5d36-9a4e-c9c83fc8828a",),
+    "no-signal": ("07b50e61-3464-5957-8142-ac1af8c4d37b",),
+    "missing-required-history": ("7de4a498-592e-5331-85af-386393957b29",),
+    "simultaneous-buy-sell": ("f0f0d708-89f8-52a1-ad88-be44f2d5a971",),
+}
+EXPECTED_FLOW_KEYS = {
+    "pairwise-basic_price_compare": (("partition-1-buy-flow-1",),),
+    "pairwise-basic_price_change_percent": (
+        ("partition-1-sell-flow-1",),
+        ("partition-2-sell-flow-1",),
+    ),
+    "pairwise-basic_volume_compare": (
+        ("partition-1-buy-flow-1",),
+        ("partition-2-buy-flow-1",),
+        ("partition-3-buy-flow-1",),
+    ),
+    "pairwise-basic_streak": (
+        ("partition-1-sell-flow-1",),
+        ("partition-2-sell-flow-1",),
+        ("partition-3-sell-flow-1",),
+        ("partition-4-sell-flow-1",),
+    ),
+    "pairwise-basic_sma_cross": (("partition-1-buy-flow-1",),),
+    "pairwise-basic_rsi_cross": (
+        ("partition-1-sell-flow-1",),
+        ("partition-2-sell-flow-1",),
+    ),
+    "pairwise-basic_macd_cross": (
+        ("partition-1-buy-flow-1",),
+        ("partition-2-buy-flow-1",),
+        ("partition-3-buy-flow-1",),
+    ),
+    "pairwise-basic_bollinger_reversal": (
+        ("partition-1-sell-flow-1",),
+        ("partition-2-sell-flow-1",),
+        ("partition-3-sell-flow-1",),
+        ("partition-4-sell-flow-1",),
+    ),
+    "pairwise-basic_position_return": (("partition-1-sell-flow-1",),),
+    "pairwise-basic_holding_period": (
+        ("partition-1-sell-flow-1",),
+        ("partition-2-sell-flow-1",),
+    ),
+    "pairwise-basic_peak_return": (
+        ("partition-1-sell-flow-1",),
+        ("partition-2-sell-flow-1",),
+        ("partition-3-sell-flow-1",),
+    ),
+    "pairwise-basic_drawdown_from_peak": (
+        ("partition-1-sell-flow-1",),
+        ("partition-2-sell-flow-1",),
+        ("partition-3-sell-flow-1",),
+        ("partition-4-sell-flow-1",),
+    ),
+    "pairwise-basic_schedule": (("partition-1-buy-flow-1",),),
+    "maximum-four-partition-five-instrument-two-side": (
+        ("partition-1-buy-flow-1", "partition-1-sell-flow-1"),
+        ("partition-2-buy-flow-2", "partition-2-sell-flow-2"),
+        ("partition-3-buy-flow-3", "partition-3-sell-flow-3"),
+        (
+            "partition-4-buy-flow-4",
+            "partition-4-sell-flow-4",
+        ),
+    ),
+    "contradictory-price-boundaries": (("partition-1-sell-flow-1",),),
+    "duplicate-price-condition": (("partition-1-buy-flow-1",),),
+    "no-signal": (("partition-1-buy-flow-1",),),
+    "missing-required-history": (("partition-1-buy-flow-1",),),
+    "simultaneous-buy-sell": (("partition-1-buy-flow-1", "partition-1-sell-flow-1"),),
 }
 EXPECTED_EXECUTIONS = {
     "pairwise-basic_price_compare": (1, "COMPLETED", "AVAILABLE", (("CANDIDATE", 1),)),
@@ -240,6 +394,14 @@ EXPECTED_EXECUTIONS = {
     ),
     "simultaneous-buy-sell": (2, "COMPLETED", "AVAILABLE", (("CANDIDATE", 2),)),
 }
+
+
+def _compiled(case: matrix.BasicStrategyCase) -> dict[str, object]:
+    boundary = getattr(matrix, "backend_compiled_plan", None)
+    assert callable(boundary), (
+        "production backend compiled-plan export boundary is missing"
+    )
+    return boundary(case)
 
 
 def test_generated_matrix_has_hand_checked_size_and_complete_catalog_coverage() -> None:
@@ -433,7 +595,7 @@ def _orchestrated_outcome(case, runtime, plan):
 def _actual_case_outcome(
     case: matrix.BasicStrategyCase,
 ) -> tuple[int, ReplayStatus, AvailabilityStatus, tuple[tuple[str, int], ...]]:
-    document = matrix.compiled_plan_document(case)
+    document = _compiled(case)
     runtime = _InputIdentityRuntime()
     plan = runtime.load(document)
     snapshot = load_stored_market_snapshot()
@@ -460,11 +622,36 @@ def test_materialized_documents_consume_resolution_side_partition_and_instrument
     by_name = {case.name: case for case in matrix.generated_cases()}
 
     assert set(by_name) == set(EXPECTED_SHAPES)
+    assert set(EXPECTED_PARTITION_KEYS) == set(EXPECTED_SHAPES)
+    assert set(EXPECTED_FLOW_KEYS) == set(EXPECTED_SHAPES)
     for name, (resolution, sides, partitions, instruments) in EXPECTED_SHAPES.items():
         case = by_name[name]
         semantic = matrix.semantic_document(case)
-        compiled = matrix.compiled_plan_document(case)
+        compiled = _compiled(case)
         plan = BasicPlanRuntime().load(compiled)
+
+        matrix.assert_loaded_partition_identities(
+            compiled, plan, EXPECTED_PARTITION_KEYS[name]
+        )
+        raw_partitions = compiled["executionSnapshot"]["partitions"]
+        assert (
+            tuple(
+                tuple(flow["key"] for flow in partition["flows"])
+                for partition in raw_partitions
+            )
+            == EXPECTED_FLOW_KEYS[name]
+        )
+        assert (
+            tuple(
+                tuple(
+                    flow.flow_id
+                    for flow in plan.flows
+                    if flow.partition_key == partition_key
+                )
+                for partition_key in EXPECTED_PARTITION_KEYS[name]
+            )
+            == EXPECTED_FLOW_KEYS[name]
+        )
 
         assert {group["container"] for group in semantic["groups"]} == set(sides)
         assert all(
@@ -481,6 +668,11 @@ def test_materialized_documents_consume_resolution_side_partition_and_instrument
         assert len(compiled["executionSnapshot"]["partitions"]) == partitions
         assert {flow.side for flow in plan.flows} == set(sides)
         assert len(plan.instrument_ids) == instruments
+        assert plan.instrument_ids == EXPECTED_LOADED_INSTRUMENT_IDS[instruments]
+        assert all(
+            flow.instrument_ids == EXPECTED_LOADED_INSTRUMENT_IDS[instruments]
+            for flow in plan.flows
+        )
         assert {flow.reference_series for flow in plan.flows} == {
             ("ADJUSTED_BAR", resolution)
         }
@@ -488,7 +680,33 @@ def test_materialized_documents_consume_resolution_side_partition_and_instrument
             flow.terminal_step.operation == "EMIT_ORDER_CANDIDATE"
             for flow in plan.flows
         )
+        assert all(
+            raw_flow["steps"][-1]["operation"] == "EMIT_ORDER_CANDIDATE"
+            and all(
+                step["operation"] != "EMIT_ORDER_CANDIDATE"
+                for step in raw_flow["steps"][:-1]
+            )
+            for partition in raw_partitions
+            for raw_flow in partition["flows"]
+        )
         assert all(flow.condition_steps for flow in plan.flows)
+
+
+def test_loaded_partition_identity_oracle_rejects_a_mutated_backend_artifact() -> None:
+    case = next(case for case in matrix.generated_cases() if case.name == "no-signal")
+    compiled = copy.deepcopy(_compiled(case))
+    compiled["executionSnapshot"]["partitions"][0]["key"] = (
+        "ffffffff-ffff-4fff-8fff-ffffffffffff"
+    )
+    from backtest_engine.contracts import compute_compiled_plan_checksum
+
+    compiled["planChecksum"] = compute_compiled_plan_checksum(compiled)
+    plan = BasicPlanRuntime().load(compiled)
+
+    with pytest.raises(AssertionError, match="partition identities"):
+        matrix.assert_loaded_partition_identities(
+            compiled, plan, EXPECTED_PARTITION_KEYS[case.name]
+        )
 
 
 def test_maximum_distributes_occurrences_without_duplicate_side_containers() -> None:
@@ -497,7 +715,7 @@ def test_maximum_distributes_occurrences_without_duplicate_side_containers() -> 
         for case in matrix.generated_cases()
         if case.name == "maximum-four-partition-five-instrument-two-side"
     )
-    document = matrix.compiled_plan_document(case)
+    document = _compiled(case)
     partitions = document["executionSnapshot"]["partitions"]
 
     assert len(partitions) == 4
@@ -536,6 +754,49 @@ def test_maximum_distributes_occurrences_without_duplicate_side_containers() -> 
     )
 
 
+@pytest.mark.parametrize(
+    ("field", "corrupt"),
+    (
+        ("manifest_id", "00000000-0000-4000-8000-000000000000"),
+        ("dataset_hash", "0" * 64),
+        ("object_key", "wrong/object.parquet"),
+        ("provider_version_id", "wrong-version"),
+        ("content_hash", "0" * 64),
+        ("byte_size", 1),
+        ("dataset_row_count", 1),
+        ("object_row_count", 1),
+    ),
+)
+def test_stored_market_manifest_rejects_every_corrupt_immutable_pin(
+    field: str, corrupt: object
+) -> None:
+    metadata = {
+        "manifest_id": "bb559227-dec3-54bd-876d-167c12c6e355",
+        "dataset_hash": "1bef63d47c134926e9011c3f3df6dba737fe48588a51d12ae78a0c68876f5e21",
+        "manifest_status": "AVAILABLE",
+        "object_count": 1,
+        "dataset_row_count": 3258,
+        "object_id": "4b0f38c4-5474-5564-8c64-be1799472082",
+        "object_status": "AVAILABLE",
+        "bucket": "idea2strategy-local-market-data",
+        "object_key": (
+            "historical/provider=alpaca/feed=sip/adjustment=all/session=regular/"
+            "resolution=30m/revision=00000004/year=2024/shard=00-of-01/"
+            "manifest_id=bb559227-dec3-54bd-876d-167c12c6e355/part-00001.parquet"
+        ),
+        "provider_version_id": "0879c1fb-df66-40c6-a955-695c6d531d03",
+        "content_hash": "fa0cebb4e33275239b8ed4f801bdd137508f68bf2b6411f0ab036df3ec283d08",
+        "byte_size": 381720,
+        "object_row_count": 3258,
+        "file_format": "PARQUET",
+        "schema_version": "market-bars/1",
+    }
+    metadata[field] = corrupt
+
+    with pytest.raises(AssertionError, match=field):
+        stored_snapshot.validate_pinned_market_manifest(metadata)
+
+
 def test_runtime_uses_one_verified_stored_snapshot_without_relabeling_market_values() -> (
     None
 ):
@@ -550,6 +811,13 @@ def test_runtime_uses_one_verified_stored_snapshot_without_relabeling_market_val
         snapshot.corpus_sha256
         == "961c0b76f5638c397851e1e909acd8d495fa554904a0349b4aa799bbb90f9286"
     )
+    assert snapshot.manifest_id == "bb559227-dec3-54bd-876d-167c12c6e355"
+    assert (
+        snapshot.dataset_sha256
+        == "1bef63d47c134926e9011c3f3df6dba737fe48588a51d12ae78a0c68876f5e21"
+    )
+    assert snapshot.object_version_id == "0879c1fb-df66-40c6-a955-695c6d531d03"
+    assert (snapshot.byte_size, snapshot.row_count) == (381720, 3258)
     assert series is not None
     assert [
         (bar.starts_at.isoformat(), str(bar.close), str(bar.volume))
@@ -638,7 +906,7 @@ def test_every_generated_element_uses_arguments_the_v2_runtime_really_accepts_in
         try:
             semantic = matrix.semantic_document(generated)
             assert semantic["groups"]
-            BasicPlanRuntime().load(matrix.compiled_plan_document(generated))
+            BasicPlanRuntime().load(_compiled(generated))
             signals, status, availability, decisions = _actual_case_outcome(generated)
             assert (signals, status.value, availability.value, decisions) == (
                 EXPECTED_EXECUTIONS[generated.name]

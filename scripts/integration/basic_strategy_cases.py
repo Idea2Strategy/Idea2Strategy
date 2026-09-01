@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,7 @@ CORPUS = ROOT / "contracts/fixtures/basic-strategy/v1/basic-element-conformance.
 RESOLUTIONS = ("30m", "1h", "4h", "1d")
 SIDES = ("BUY", "SELL")
 SHUFFLE_SEEDS = (17, 101, 313, 2027, 4099, 7919, 65537, 104729, 8675309, 20260831)
+_PARTITION_NAMESPACE = uuid.UUID("b184eb88-40fa-4a0c-86de-c4518c559fee")
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,12 +390,6 @@ _INSTRUMENT_IDS = (
     "03e7e685-d6da-4f1f-9279-91477884aab9",
     *(f"00000000-0000-4000-8000-{number:012d}" for number in range(302, 306)),
 )
-_FEATURES = {
-    "30m": ("ec37984b-6605-5560-8ea0-774c5b8e9626", "PT30M"),
-    "1h": ("85f4f80f-be4e-d9dc-bd52-d4781ba5f30f", "PT1H"),
-    "4h": ("65a5aaf5-f536-820f-119a-239b0aec0de7", "PT4H"),
-    "1d": ("647a5fd6-98ed-0617-d4b2-844748d54fac", "PT24H"),
-}
 
 
 def _steps_for_side(
@@ -476,86 +472,60 @@ def semantic_document(case: BasicStrategyCase) -> dict[str, object]:
     }
 
 
-def compiled_plan_document(case: BasicStrategyCase) -> dict[str, object]:
-    """Materialize the immutable v2 plan consumed by the production runtime."""
-    instruments = list(_INSTRUMENT_IDS[: case.instrument_count])
-    partitions = []
+def semantic_partitions(case: BasicStrategyCase) -> tuple[dict[str, object], ...]:
+    """Partition-specific semantic documents sent to the production backend exporter."""
+    source = semantic_document(case)
+    result = []
     for partition_index in range(1, case.partition_count + 1):
-        flows = []
-        for side in case.sides:
-            chains = _chains_for_side(case, side)
-            selected = (
-                ((partition_index, chains[partition_index - 1]),)
-                if case.name == "maximum-four-partition-five-instrument-two-side"
-                else tuple(enumerate(chains, start=1))
-            )
-            for chain_index, steps in selected:
-                runtime_steps = []
-                for sequence, step in enumerate(steps, start=1):
-                    arguments = dict(step.arguments)
-                    if step.operation == "EMIT_ORDER_CANDIDATE":
-                        arguments["side"] = side
-                    runtime_steps.append(
-                        {
-                            "sequence": sequence,
-                            "operation": step.operation,
-                            "arguments": arguments,
-                        }
+        if case.name == "maximum-four-partition-five-instrument-two-side":
+            groups = [
+                group
+                for group in source["groups"]
+                if str(group["id"]).endswith(f"-flow-{partition_index}")
+            ]
+        else:
+            groups = list(source["groups"])
+        materialized_groups = []
+        for group in groups:
+            materialized = dict(group)
+            materialized["id"] = f"partition-{partition_index}-{group['id']}"
+            materialized_groups.append(materialized)
+        result.append(
+            {
+                "key": str(
+                    uuid.uuid5(
+                        _PARTITION_NAMESPACE,
+                        f"{case.name}:partition:{partition_index}",
                     )
-                flows.append(
-                    {
-                        "key": (
-                            f"partition-{partition_index}-{side.lower()}-flow-{chain_index}"
-                        ),
-                        "officialInstrumentIds": instruments,
-                        "steps": runtime_steps,
-                    }
-                )
-        partitions.append(
-            {
-                "key": f"partition-{partition_index}",
+                ),
                 "budgetCapBps": 10000,
-                "flows": flows,
+                "semanticDocument": {
+                    "catalogId": source["catalogId"],
+                    "groups": materialized_groups,
+                },
             }
         )
+    return tuple(result)
 
-    required_features = []
-    if any(step.operation == "RSI_CROSS" for step in case.steps):
-        feature_id, iso_resolution = _FEATURES[case.resolution]
-        required_features.append(
-            {
-                "requirementId": f"rsi-14-{case.resolution}",
-                "featureId": feature_id,
-                "featureVersion": "1.0.0",
-                "instruments": instruments,
-                "resolution": iso_resolution,
-                "requiredObservations": 14,
-            }
-        )
-    document: dict[str, object] = {
-        "contractVersion": "strategy-bot.v1",
-        "schemaVersion": "basic-compiled-plan.v2",
-        "elementCatalogVersion": "basic-elements:2026-08-25",
-        "instrumentCatalogVersion": "us-supported-universe:2026-07-31",
-        "compilerVersion": "basic-compiler:1.0.0",
-        "requiredFeatureSetHash": "sha256:" + "3" * 64,
-        "requiredFeatures": required_features,
-        "executionSnapshot": {
-            "immutableStrategyVersion": {
-                "snapshotSchemaVersion": "basic-launch-snapshot.v1",
-                "semanticHash": "sha256:" + "2" * 64,
-                "snapshotHash": "sha256:" + "1" * 64,
-            },
-            "mode": "BASIC",
-            "initialCashAmount": "100000.00000000",
-            "currency": "USD",
-            "partitions": partitions,
-        },
-    }
-    from backtest_engine.contracts import compute_compiled_plan_checksum
 
-    document["planChecksum"] = compute_compiled_plan_checksum(document)
-    return document
+def backend_compiled_plan(case: BasicStrategyCase) -> dict[str, object]:
+    from backend_plan_export import compiled_plans
+
+    return compiled_plans()[case.name]
+
+
+def assert_loaded_partition_identities(
+    document: Mapping[str, object], plan: object, expected: tuple[str, ...]
+) -> None:
+    """Compare backend bytes and runtime-loaded flows with a caller-owned literal oracle."""
+    snapshot = document["executionSnapshot"]
+    assert isinstance(snapshot, Mapping)
+    partitions = snapshot["partitions"]
+    assert isinstance(partitions, list)
+    raw = tuple(str(partition["key"]) for partition in partitions)
+    loaded = tuple(dict.fromkeys(flow.partition_key for flow in plan.flows))
+    assert raw == expected, f"compiled partition identities {raw!r} != {expected!r}"
+    assert loaded == expected, f"loaded partition identities {loaded!r} != {expected!r}"
 
 
 def assert_complete_coverage(cases: tuple[BasicStrategyCase, ...]) -> None:
