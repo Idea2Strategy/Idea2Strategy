@@ -25,6 +25,7 @@ from backtest_actual_run_oracle import (
     market_bar_from_row,
     minimum_manifest_cover,
     order_fills_by_cash_chain,
+    require_exact_manifest_pairs,
     result_hash_evidence,
     row_is_replay_eligible,
     sorted_trigger_semantics,
@@ -189,6 +190,63 @@ def test_position_only_flow_resolves_its_clock_from_exact_pinned_partition() -> 
         )
         == "1d"
     )
+
+
+def test_required_manifest_pairs_reject_an_omitted_pair_or_unrelated_cross_product() -> (
+    None
+):
+    plan = {
+        "executionSnapshot": {
+            "partitions": [
+                {
+                    "flows": [
+                        {
+                            "key": "aapl-buy",
+                            "officialInstrumentIds": ["aapl"],
+                            "steps": [
+                                {
+                                    "operation": "PRICE_COMPARE",
+                                    "arguments": {"resolution": "30m"},
+                                }
+                            ],
+                        },
+                        {
+                            "key": "aapl-sell",
+                            "officialInstrumentIds": ["aapl"],
+                            "steps": [
+                                {
+                                    "operation": "POSITION_RETURN",
+                                    "arguments": {"thresholdPercent": "1"},
+                                }
+                            ],
+                        },
+                        {
+                            "key": "msft-buy",
+                            "officialInstrumentIds": ["msft"],
+                            "steps": [
+                                {
+                                    "operation": "PRICE_COMPARE",
+                                    "arguments": {"resolution": "1d"},
+                                }
+                            ],
+                        },
+                    ]
+                }
+            ]
+        }
+    }
+
+    assert require_exact_manifest_pairs(plan, {("aapl", "30m"), ("msft", "1d")}) == {
+        ("aapl", "30m"),
+        ("msft", "1d"),
+    }
+    with pytest.raises(AssertionError, match="missing=.*msft.*1d"):
+        require_exact_manifest_pairs(plan, {("aapl", "30m")})
+    with pytest.raises(AssertionError, match="unrelated=.*meta.*4h"):
+        require_exact_manifest_pairs(
+            plan,
+            {("aapl", "30m"), ("msft", "1d"), ("meta", "4h")},
+        )
 
 
 def test_trigger_warmup_gap_is_typed_separately_from_a_false_condition() -> None:

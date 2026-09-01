@@ -576,6 +576,54 @@ def exact_flow_resolution(
     return resolutions.pop()
 
 
+def require_exact_manifest_pairs(
+    plan_document: Mapping[str, Any],
+    pinned_pairs: set[tuple[str, str]],
+) -> set[tuple[str, str]]:
+    """Require pins for every exact plan clock and reject unrelated pair pins."""
+    required: set[tuple[str, str]] = set()
+    for partition in plan_document["executionSnapshot"]["partitions"]:
+        flows = partition["flows"]
+        explicit_by_instrument: dict[str, set[str]] = defaultdict(set)
+        flow_resolutions: dict[str, set[str]] = {}
+        for flow in flows:
+            resolutions = {
+                str(step["arguments"]["resolution"]).lower()
+                for step in flow["steps"]
+                if step["operation"] != "EMIT_ORDER_CANDIDATE"
+                and "resolution" in step["arguments"]
+            }
+            if len(resolutions) > 1:
+                raise AssertionError(
+                    "one plan flow declares multiple market clocks: "
+                    f"{flow['key']} {sorted(resolutions)}"
+                )
+            flow_resolutions[str(flow["key"])] = resolutions
+            for instrument_id in flow["officialInstrumentIds"]:
+                explicit_by_instrument[str(instrument_id)].update(resolutions)
+
+        for flow in flows:
+            explicit = flow_resolutions[str(flow["key"])]
+            for instrument_id_value in flow["officialInstrumentIds"]:
+                instrument_id = str(instrument_id_value)
+                resolutions = explicit or explicit_by_instrument[instrument_id]
+                if len(resolutions) != 1:
+                    raise AssertionError(
+                        "position-only flow does not resolve from one exact partition clock: "
+                        f"{flow['key']} {instrument_id} {sorted(resolutions)}"
+                    )
+                required.add((instrument_id, next(iter(resolutions))))
+
+    missing = required - pinned_pairs
+    unrelated = pinned_pairs - required
+    if missing or unrelated:
+        raise AssertionError(
+            "pinned manifest pairs differ from compiled-plan requirements: "
+            f"missing={sorted(missing)} unrelated={sorted(unrelated)}"
+        )
+    return required
+
+
 def _trigger_average(values: Sequence[Decimal]) -> Decimal:
     if not values:
         raise AssertionError("trigger average has no values")
@@ -1483,8 +1531,12 @@ def reconcile(run_id: str) -> dict[str, Any]:
 
     coverage_start = run["evaluation_start"].isoformat()
     coverage_end = (run["evaluation_end"] + timedelta(days=1)).isoformat()
+    required_pairs = require_exact_manifest_pairs(
+        run["plan_document"], set(manifest_ids_by_pair)
+    )
     selected_manifest_ids: set[str] = set()
-    for (instrument_id, resolution), actual_ids in sorted(manifest_ids_by_pair.items()):
+    for instrument_id, resolution in sorted(required_pairs):
+        actual_ids = manifest_ids_by_pair[(instrument_id, resolution)]
         cover = minimum_manifest_cover(
             candidates,
             instrument_id=instrument_id,
