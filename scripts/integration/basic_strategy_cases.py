@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,16 +16,29 @@ SHUFFLE_SEEDS = (17, 101, 313, 2027, 4099, 7919, 65537, 104729, 8675309, 2026083
 
 
 @dataclass(frozen=True, slots=True)
+class BasicStrategyStep:
+    """One concrete block occurrence, including its editor and runtime values."""
+
+    element_code: str
+    operation: str
+    parameters: Mapping[str, str]
+    arguments: Mapping[str, str]
+    containers: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class BasicStrategyCase:
     name: str
-    element_codes: tuple[str, ...]
+    steps: tuple[BasicStrategyStep, ...]
     resolution: str
     sides: tuple[str, ...]
     instrument_count: int = 1
     partition_count: int = 1
-    expected_warning_codes: tuple[str, ...] = ()
-    available: bool = True
-    expected_signal_count: int = 1
+    input_scenario: str = "true"
+
+    @property
+    def element_codes(self) -> tuple[str, ...]:
+        return tuple(step.element_code for step in self.steps)
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,12 +186,44 @@ def _complete_arguments_by_operation() -> dict[str, dict[str, str]]:
     return by_operation
 
 
+def _step(fixture: Mapping[str, object], resolution: str) -> BasicStrategyStep:
+    parameters = {
+        str(key): str(value) for key, value in fixture["validParameters"].items()
+    }
+    arguments = {str(key): str(value) for key, value in fixture["arguments"].items()}
+    if "resolution" in parameters:
+        parameters["resolution"] = resolution
+    if "resolution" in arguments:
+        arguments["resolution"] = resolution
+    if fixture["operation"] == "EMIT_ORDER_CANDIDATE":
+        arguments.update(allocation="EQUAL", orderType="MARKET", timeInForce="DAY")
+    return BasicStrategyStep(
+        element_code=str(fixture["elementCode"]),
+        operation=str(fixture["operation"]),
+        parameters=parameters,
+        arguments=arguments,
+        containers=tuple(str(value) for value in fixture["containers"]),
+    )
+
+
+def _with_arguments(step: BasicStrategyStep, **values: str) -> BasicStrategyStep:
+    parameters = dict(step.parameters)
+    arguments = dict(step.arguments)
+    parameters.update(values)
+    arguments.update(values)
+    return BasicStrategyStep(
+        step.element_code, step.operation, parameters, arguments, step.containers
+    )
+
+
 def generated_cases() -> tuple[BasicStrategyCase, ...]:
     fixture_cases = _fixture_cases()
+    fixture_by_code = {str(case["elementCode"]): case for case in fixture_cases}
     conditions_and_schedule = [
         case for case in fixture_cases if case["operation"] != "EMIT_ORDER_CANDIDATE"
     ]
-    terminal_code = "BASIC_EQUAL_ALLOCATION_ORDER"
+    terminal = fixture_by_code["BASIC_EQUAL_ALLOCATION_ORDER"]
+    clock = fixture_by_code["BASIC_PRICE_COMPARE"]
     result: list[BasicStrategyCase] = []
     dual_container_index = 0
     for index, condition in enumerate(conditions_and_schedule):
@@ -193,10 +239,15 @@ def generated_cases() -> tuple[BasicStrategyCase, ...]:
                 )
             )
             sides = (containers[0],)
+        condition_step = _step(condition, resolution)
+        steps = [condition_step]
+        if not any("resolution" in step.arguments for step in steps):
+            steps.insert(0, _step(clock, resolution))
+        steps.append(_step(terminal, resolution))
         result.append(
             BasicStrategyCase(
                 name=f"pairwise-{str(condition['elementCode']).lower()}",
-                element_codes=(str(condition["elementCode"]), terminal_code),
+                steps=tuple(steps),
                 resolution=resolution,
                 sides=sides,
                 instrument_count=1 + index % 5,
@@ -204,62 +255,65 @@ def generated_cases() -> tuple[BasicStrategyCase, ...]:
             )
         )
 
-    all_codes = tuple(str(case["elementCode"]) for case in fixture_cases)
+    all_steps = tuple(_step(case, "30m") for case in fixture_cases)
+    price = _step(clock, "30m")
+    drawdown = _step(fixture_by_code["BASIC_DRAWDOWN_FROM_PEAK"], "1h")
     result.extend(
         (
             BasicStrategyCase(
                 name="maximum-four-partition-five-instrument-two-side",
-                element_codes=all_codes,
+                steps=all_steps,
                 resolution="30m",
                 sides=SIDES,
                 instrument_count=5,
                 partition_count=4,
-                expected_signal_count=2,
             ),
             BasicStrategyCase(
                 name="contradictory-price-boundaries",
-                element_codes=(
-                    "BASIC_DRAWDOWN_FROM_PEAK",
-                    "BASIC_DRAWDOWN_FROM_PEAK",
-                    terminal_code,
+                steps=(
+                    _step(clock, "1h"),
+                    _with_arguments(drawdown, operator="GTE", thresholdPercent="10"),
+                    _with_arguments(drawdown, operator="LT", thresholdPercent="5"),
+                    _step(terminal, "1h"),
                 ),
                 resolution="1h",
                 sides=("SELL",),
-                expected_warning_codes=("CONTRADICTORY_CONDITION",),
-                expected_signal_count=0,
             ),
             BasicStrategyCase(
                 name="duplicate-price-condition",
-                element_codes=(
-                    "BASIC_PRICE_COMPARE",
-                    "BASIC_PRICE_COMPARE",
-                    terminal_code,
+                steps=(
+                    price,
+                    _step(clock, "30m"),
+                    _step(terminal, "30m"),
                 ),
                 resolution="30m",
                 sides=("BUY",),
-                expected_warning_codes=("DUPLICATE_CONDITION",),
             ),
             BasicStrategyCase(
                 name="no-signal",
-                element_codes=("BASIC_PRICE_CHANGE_PERCENT", terminal_code),
+                steps=(
+                    _step(fixture_by_code["BASIC_PRICE_CHANGE_PERCENT"], "1h"),
+                    _step(terminal, "1h"),
+                ),
                 resolution="1h",
                 sides=("BUY",),
-                expected_signal_count=0,
+                input_scenario="false",
             ),
             BasicStrategyCase(
                 name="missing-required-history",
-                element_codes=("BASIC_MACD_CROSS", terminal_code),
+                steps=(
+                    _step(fixture_by_code["BASIC_MACD_CROSS"], "4h"),
+                    _step(terminal, "4h"),
+                ),
                 resolution="4h",
                 sides=("BUY",),
-                available=False,
-                expected_signal_count=0,
+                input_scenario="missing",
             ),
             BasicStrategyCase(
                 name="simultaneous-buy-sell",
-                element_codes=("BASIC_PRICE_COMPARE", terminal_code),
+                steps=(_step(clock, "1d"), _step(terminal, "1d")),
                 resolution="1d",
                 sides=SIDES,
-                expected_signal_count=2,
             ),
         )
     )
@@ -322,6 +376,163 @@ def unknown_enum_cases() -> tuple[ArgumentValidationCase, ...]:
 def shuffled_cases(seed: int) -> tuple[BasicStrategyCase, ...]:
     cases = generated_cases()
     return tuple(random.Random(seed).sample(cases, len(cases)))
+
+
+_INSTRUMENT_IDS = tuple(
+    f"00000000-0000-4000-8000-{number:012d}" for number in range(301, 306)
+)
+_FEATURES = {
+    "30m": ("ec37984b-6605-5560-8ea0-774c5b8e9626", "PT30M"),
+    "1h": ("85f4f80f-be4e-d9dc-bd52-d4781ba5f30f", "PT1H"),
+    "4h": ("65a5aaf5-f536-820f-119a-239b0aec0de7", "PT4H"),
+    "1d": ("647a5fd6-98ed-0617-d4b2-844748d54fac", "PT24H"),
+}
+
+
+def _steps_for_side(
+    case: BasicStrategyCase, side: str
+) -> tuple[BasicStrategyStep, ...]:
+    return tuple(step for step in case.steps if side in step.containers)
+
+
+def _chains_for_side(
+    case: BasicStrategyCase, side: str
+) -> tuple[tuple[BasicStrategyStep, ...], ...]:
+    steps = _steps_for_side(case, side)
+    terminal = next(step for step in steps if step.operation == "EMIT_ORDER_CANDIDATE")
+    conditions = tuple(
+        step for step in steps if step.operation != "EMIT_ORDER_CANDIDATE"
+    )
+    clock = next(
+        (step for step in conditions if step.operation == "PRICE_COMPARE"), None
+    )
+    chains = []
+    for offset in range(0, len(conditions), 5):
+        chunk = conditions[offset : offset + 5]
+        if not any("resolution" in step.arguments for step in chunk):
+            if clock is None:
+                raise AssertionError(
+                    f"{case.name}/{side} has no resolution-bearing clock"
+                )
+            chunk = (clock, *chunk)
+        chains.append((*chunk, terminal))
+    return tuple(chains)
+
+
+def semantic_document(case: BasicStrategyCase) -> dict[str, object]:
+    """Materialize the editor document accepted at the backend compiler boundary."""
+    groups = []
+    instruments = list(_INSTRUMENT_IDS[: case.instrument_count])
+    for side in case.sides:
+        for chain_index, steps in enumerate(_chains_for_side(case, side), start=1):
+            blocks = [
+                {
+                    "id": f"{side.lower()}-{chain_index}-block-{index}",
+                    "elementCode": step.element_code,
+                    "parameters": dict(step.parameters),
+                }
+                for index, step in enumerate(steps, start=1)
+            ]
+            groups.append(
+                {
+                    "id": f"{side.lower()}-flow-{chain_index}",
+                    "allocationGroupId": side.lower(),
+                    "container": side,
+                    "evaluationMode": "INDEPENDENT",
+                    "allocationMode": "EQUAL",
+                    "instrumentIds": instruments,
+                    "blocks": blocks,
+                    "connections": [
+                        {
+                            "fromBlockId": blocks[index]["id"],
+                            "outputPort": "passed",
+                            "toBlockId": blocks[index + 1]["id"],
+                            "inputPort": "passed",
+                        }
+                        for index in range(len(blocks) - 1)
+                    ],
+                }
+            )
+    return {
+        "catalogId": "0f5a0000-0000-4000-8000-000000000001",
+        "groups": groups,
+    }
+
+
+def compiled_plan_document(case: BasicStrategyCase) -> dict[str, object]:
+    """Materialize the immutable v2 plan consumed by the production runtime."""
+    instruments = list(_INSTRUMENT_IDS[: case.instrument_count])
+    partitions = []
+    for partition_index in range(1, case.partition_count + 1):
+        flows = []
+        for side in case.sides:
+            for chain_index, steps in enumerate(_chains_for_side(case, side), start=1):
+                runtime_steps = []
+                for sequence, step in enumerate(steps, start=1):
+                    arguments = dict(step.arguments)
+                    if step.operation == "EMIT_ORDER_CANDIDATE":
+                        arguments["side"] = side
+                    runtime_steps.append(
+                        {
+                            "sequence": sequence,
+                            "operation": step.operation,
+                            "arguments": arguments,
+                        }
+                    )
+                flows.append(
+                    {
+                        "key": (
+                            f"partition-{partition_index}-{side.lower()}-flow-{chain_index}"
+                        ),
+                        "officialInstrumentIds": instruments,
+                        "steps": runtime_steps,
+                    }
+                )
+        partitions.append(
+            {
+                "key": f"partition-{partition_index}",
+                "budgetCapBps": 10000,
+                "flows": flows,
+            }
+        )
+
+    required_features = []
+    if any(step.operation == "RSI_CROSS" for step in case.steps):
+        feature_id, iso_resolution = _FEATURES[case.resolution]
+        required_features.append(
+            {
+                "requirementId": f"rsi-14-{case.resolution}",
+                "featureId": feature_id,
+                "featureVersion": "1.0.0",
+                "instruments": instruments,
+                "resolution": iso_resolution,
+                "requiredObservations": 14,
+            }
+        )
+    document: dict[str, object] = {
+        "contractVersion": "strategy-bot.v1",
+        "schemaVersion": "basic-compiled-plan.v2",
+        "elementCatalogVersion": "basic-elements:2026-08-25",
+        "instrumentCatalogVersion": "us-supported-universe:2026-07-31",
+        "compilerVersion": "basic-compiler:1.0.0",
+        "requiredFeatureSetHash": "sha256:" + "3" * 64,
+        "requiredFeatures": required_features,
+        "executionSnapshot": {
+            "immutableStrategyVersion": {
+                "snapshotSchemaVersion": "basic-launch-snapshot.v1",
+                "semanticHash": "sha256:" + "2" * 64,
+                "snapshotHash": "sha256:" + "1" * 64,
+            },
+            "mode": "BASIC",
+            "initialCashAmount": "100000.00000000",
+            "currency": "USD",
+            "partitions": partitions,
+        },
+    }
+    from backtest_engine.contracts import compute_compiled_plan_checksum
+
+    document["planChecksum"] = compute_compiled_plan_checksum(document)
+    return document
 
 
 def assert_complete_coverage(cases: tuple[BasicStrategyCase, ...]) -> None:
