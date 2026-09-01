@@ -13,18 +13,32 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-TERMINAL_STATES = frozenset({"PASSED", "FAILED", "TIMEOUT", "UNAVAILABLE"})
+TERMINAL_STATES = frozenset({"COMPLETED", "FAILED", "CANCELLED", "UNAVAILABLE"})
 REQUIRED_RESULT_FIELDS = (
     "scenario",
     "seed",
     "input_fingerprint",
     "terminal_state",
     "duration_seconds",
+    "run_id",
+    "attempt_lineage",
+    "result_hash",
+    "trade_kind_counts",
+    "failure_reason",
+    "resource_peak",
 )
 _SECRET_FIELD = re.compile(
     r"(?:password|secret|token|credential|api[-_]?key|cookie|authorization)",
     re.IGNORECASE,
 )
+_SECRET_VALUE = re.compile(
+    r"(?:\b(?:bearer|basic)\s+[A-Za-z0-9._~-]{8,}|"
+    r"\b(?:password|secret|token|credential|api[-_]?key|cookie|authorization)\s*[:=]\s*\S+|"
+    r"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
+    r"xox[baprs]-[A-Za-z0-9-]{8,}|(?:sk|rk)_(?:test|live)_[A-Za-z0-9_-]{8,}))",
+    re.IGNORECASE,
+)
+_INVALID_RECEIPT = "invalid release-proof receipt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +59,33 @@ class ScenarioResult:
     input_fingerprint: str
     terminal_state: str
     duration_seconds: float
+    run_id: str
+    attempt_lineage: list[str]
+    result_hash: str
+    trade_kind_counts: dict[str, int]
+    failure_reason: str | None
+    resource_peak: dict[str, float]
+
+
+def _invalid_receipt() -> ValueError:
+    return ValueError(_INVALID_RECEIPT)
+
+
+def _contains_secret_like_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(_SECRET_VALUE.search(value))
+    if isinstance(value, Mapping):
+        return any(
+            _contains_secret_like_value(key) or _contains_secret_like_value(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_secret_like_value(item) for item in value)
+    return False
+
+
+def _is_nonempty_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _validated_result(raw_result: ScenarioResult | Mapping[str, Any]) -> ScenarioResult:
@@ -53,23 +94,23 @@ def _validated_result(raw_result: ScenarioResult | Mapping[str, Any]) -> Scenari
     elif isinstance(raw_result, Mapping):
         raw = dict(raw_result)
     else:
-        raise TypeError("receipt result must be a ScenarioResult or mapping")
+        raise _invalid_receipt()
 
-    for field_name in raw:
-        if _SECRET_FIELD.search(str(field_name)):
-            raise ValueError(f"secret-like receipt field is not allowed: {field_name}")
+    if any(_SECRET_FIELD.search(str(field_name)) for field_name in raw):
+        raise _invalid_receipt()
+    if _contains_secret_like_value(raw):
+        raise _invalid_receipt()
 
-    missing_fields = [field for field in REQUIRED_RESULT_FIELDS if field not in raw]
-    if missing_fields:
-        raise ValueError(f"receipt result is missing required field: {missing_fields[0]}")
+    if any(field not in raw for field in REQUIRED_RESULT_FIELDS):
+        raise _invalid_receipt()
 
     unexpected_fields = set(raw).difference(REQUIRED_RESULT_FIELDS)
     if unexpected_fields:
-        raise ValueError(f"receipt result contains unexpected field: {min(unexpected_fields)}")
+        raise _invalid_receipt()
 
-    for field in ("scenario", "seed", "input_fingerprint", "terminal_state"):
-        if not isinstance(raw[field], str) or not raw[field].strip():
-            raise ValueError(f"receipt result requires a non-empty {field}")
+    for field in ("scenario", "seed", "input_fingerprint", "terminal_state", "run_id", "result_hash"):
+        if not _is_nonempty_text(raw[field]):
+            raise _invalid_receipt()
 
     duration = raw["duration_seconds"]
     if (
@@ -78,7 +119,42 @@ def _validated_result(raw_result: ScenarioResult | Mapping[str, Any]) -> Scenari
         or not math.isfinite(duration)
         or duration < 0
     ):
-        raise ValueError("receipt result requires a finite non-negative duration_seconds")
+        raise _invalid_receipt()
+
+    attempt_lineage = raw["attempt_lineage"]
+    if not isinstance(attempt_lineage, (list, tuple)) or not attempt_lineage:
+        raise _invalid_receipt()
+    if not all(_is_nonempty_text(attempt) for attempt in attempt_lineage):
+        raise _invalid_receipt()
+
+    trade_kind_counts = raw["trade_kind_counts"]
+    if not isinstance(trade_kind_counts, Mapping):
+        raise _invalid_receipt()
+    if not all(
+        _is_nonempty_text(kind)
+        and isinstance(count, int)
+        and not isinstance(count, bool)
+        and count >= 0
+        for kind, count in trade_kind_counts.items()
+    ):
+        raise _invalid_receipt()
+
+    resource_peak = raw["resource_peak"]
+    if not isinstance(resource_peak, Mapping):
+        raise _invalid_receipt()
+    if not all(
+        _is_nonempty_text(resource)
+        and isinstance(peak, (int, float))
+        and not isinstance(peak, bool)
+        and math.isfinite(peak)
+        and peak >= 0
+        for resource, peak in resource_peak.items()
+    ):
+        raise _invalid_receipt()
+
+    failure_reason = raw["failure_reason"]
+    if failure_reason is not None and not _is_nonempty_text(failure_reason):
+        raise _invalid_receipt()
 
     return ScenarioResult(
         scenario=raw["scenario"],
@@ -86,6 +162,12 @@ def _validated_result(raw_result: ScenarioResult | Mapping[str, Any]) -> Scenari
         input_fingerprint=raw["input_fingerprint"],
         terminal_state=raw["terminal_state"],
         duration_seconds=float(duration),
+        run_id=raw["run_id"],
+        attempt_lineage=list(attempt_lineage),
+        result_hash=raw["result_hash"],
+        trade_kind_counts=dict(trade_kind_counts),
+        failure_reason=failure_reason,
+        resource_peak={resource: float(peak) for resource, peak in resource_peak.items()},
     )
 
 
@@ -95,12 +177,11 @@ def assert_terminal_runs(
     """Validate and return results only when every async outcome is terminal."""
 
     validated = tuple(_validated_result(result) for result in results)
+    if not validated:
+        raise _invalid_receipt()
     for result in validated:
         if result.terminal_state not in TERMINAL_STATES:
-            raise ValueError(
-                f"nonterminal release-proof result for {result.scenario}: "
-                f"{result.terminal_state}"
-            )
+            raise _invalid_receipt()
     return validated
 
 
@@ -113,13 +194,7 @@ def write_sanitized_receipt(
     validated = assert_terminal_runs(results)
     ordered_results = sorted(
         (asdict(result) for result in validated),
-        key=lambda result: (
-            result["scenario"],
-            result["seed"],
-            result["input_fingerprint"],
-            result["terminal_state"],
-            result["duration_seconds"],
-        ),
+        key=lambda result: json.dumps(result, sort_keys=True, separators=(",", ":")),
     )
     receipt = {"schema_version": 1, "results": ordered_results}
     destination = Path(receipt_path)
@@ -139,7 +214,7 @@ def write_sanitized_receipt(
 def _parse_result(value: str) -> Mapping[str, Any]:
     parsed = json.loads(value)
     if not isinstance(parsed, Mapping):
-        raise TypeError("--result must be a JSON object")
+        raise _invalid_receipt()
     return parsed
 
 
@@ -158,7 +233,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="one JSON scenario result; may be repeated",
     )
     arguments = parser.parse_args(argv)
-    write_sanitized_receipt(arguments.receipt, (_parse_result(value) for value in arguments.result))
+    try:
+        write_sanitized_receipt(arguments.receipt, (_parse_result(value) for value in arguments.result))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        parser.error(_INVALID_RECEIPT)
     return 0
 
 
