@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from datetime import timedelta
 from decimal import Decimal
 
@@ -298,6 +299,534 @@ EXPECTED_FLOW_KEYS = {
     "missing-required-history": (("partition-1-buy-flow-1",),),
     "simultaneous-buy-sell": (("partition-1-buy-flow-1", "partition-1-sell-flow-1"),),
 }
+
+_BUY_TERMINAL_ARGUMENTS = (
+    ("allocation", "EQUAL"),
+    ("executionMode", "1회만"),
+    ("maxExecutions", "1"),
+    ("maxPositionPercent", "40"),
+    ("orderPercent", "25"),
+    ("orderType", "MARKET"),
+    ("side", "BUY"),
+    ("timeInForce", "DAY"),
+    ("waitInterval", "1"),
+    ("waitMode", "조건 재충족"),
+)
+_SELL_TERMINAL_ARGUMENTS = (
+    ("allocation", "EQUAL"),
+    ("executionMode", "1회만"),
+    ("maxExecutions", "1"),
+    ("maxPositionPercent", "40"),
+    ("orderPercent", "25"),
+    ("orderType", "MARKET"),
+    ("side", "SELL"),
+    ("timeInForce", "DAY"),
+    ("waitInterval", "1"),
+    ("waitMode", "조건 재충족"),
+)
+
+# Literal runtime steps transcribed independently from the published basic/v1
+# contract. These do not read the semantic case objects or backend artifacts.
+EXPECTED_SINGLE_CHAIN_STEPS = {
+    "pairwise-basic_price_compare": (
+        (
+            1,
+            "PRICE_COMPARE",
+            (
+                ("operator", "GT"),
+                ("reference", "PREVIOUS_CLOSE"),
+                ("resolution", "30m"),
+            ),
+        ),
+        (2, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_price_change_percent": (
+        (
+            1,
+            "PRICE_CHANGE_PERCENT",
+            (
+                ("base", "PREVIOUS_CLOSE"),
+                ("direction", "UP"),
+                ("resolution", "30m"),
+                ("thresholdPercent", "3.5"),
+            ),
+        ),
+        (2, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_volume_compare": (
+        (
+            1,
+            "VOLUME_COMPARE",
+            (
+                ("multiplier", "2"),
+                ("operator", "GTE"),
+                ("period", "20"),
+                ("reference", "AVERAGE_VOLUME"),
+                ("resolution", "1h"),
+            ),
+        ),
+        (2, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_streak": (
+        (
+            1,
+            "STREAK",
+            (("bars", "3"), ("direction", "UP"), ("resolution", "1h")),
+        ),
+        (2, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_sma_cross": (
+        (
+            1,
+            "SMA_CROSS",
+            (
+                ("direction", "UP"),
+                ("longPeriod", "20"),
+                ("resolution", "4h"),
+                ("shortPeriod", "5"),
+            ),
+        ),
+        (2, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_rsi_cross": (
+        (
+            1,
+            "RSI_CROSS",
+            (
+                ("direction", "UP"),
+                ("period", "14"),
+                ("resolution", "4h"),
+                ("threshold", "30"),
+            ),
+        ),
+        (2, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_macd_cross": (
+        (
+            1,
+            "MACD_CROSS",
+            (
+                ("direction", "UP"),
+                ("fastPeriod", "12"),
+                ("resolution", "1d"),
+                ("signalPeriod", "9"),
+                ("slowPeriod", "26"),
+            ),
+        ),
+        (2, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_bollinger_reversal": (
+        (
+            1,
+            "BOLLINGER_REVERSAL",
+            (
+                ("deviations", "2"),
+                ("direction", "UP"),
+                ("period", "20"),
+                ("resolution", "1d"),
+            ),
+        ),
+        (2, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_position_return": (
+        (
+            1,
+            "PRICE_COMPARE",
+            (
+                ("operator", "GT"),
+                ("reference", "PREVIOUS_CLOSE"),
+                ("resolution", "30m"),
+            ),
+        ),
+        (
+            2,
+            "POSITION_RETURN",
+            (("direction", "LOSS"), ("thresholdPercent", "5")),
+        ),
+        (3, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_holding_period": (
+        (
+            1,
+            "PRICE_COMPARE",
+            (
+                ("operator", "GT"),
+                ("reference", "PREVIOUS_CLOSE"),
+                ("resolution", "1d"),
+            ),
+        ),
+        (
+            2,
+            "HOLDING_PERIOD",
+            (("amount", "10"), ("resolution", "1d"), ("unit", "TRADING_DAY")),
+        ),
+        (3, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_peak_return": (
+        (
+            1,
+            "PRICE_COMPARE",
+            (
+                ("operator", "GT"),
+                ("reference", "PREVIOUS_CLOSE"),
+                ("resolution", "4h"),
+            ),
+        ),
+        (
+            2,
+            "PEAK_RETURN",
+            (("operator", "GTE"), ("thresholdPercent", "15")),
+        ),
+        (3, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_drawdown_from_peak": (
+        (
+            1,
+            "PRICE_COMPARE",
+            (
+                ("operator", "GT"),
+                ("reference", "PREVIOUS_CLOSE"),
+                ("resolution", "1d"),
+            ),
+        ),
+        (
+            2,
+            "DRAWDOWN_FROM_PEAK",
+            (("operator", "GTE"), ("thresholdPercent", "7")),
+        ),
+        (3, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+    ),
+    "pairwise-basic_schedule": (
+        (
+            1,
+            "PRICE_COMPARE",
+            (
+                ("operator", "GT"),
+                ("reference", "PREVIOUS_CLOSE"),
+                ("resolution", "1d"),
+            ),
+        ),
+        (
+            2,
+            "SCHEDULE",
+            (
+                ("cycle", "EVERY_N_TRADING_DAYS"),
+                ("interval", "5"),
+                ("resolution", "1d"),
+            ),
+        ),
+        (3, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+    ),
+    "contradictory-price-boundaries": (
+        (
+            1,
+            "PRICE_COMPARE",
+            (
+                ("operator", "GT"),
+                ("reference", "PREVIOUS_CLOSE"),
+                ("resolution", "30m"),
+            ),
+        ),
+        (
+            2,
+            "DRAWDOWN_FROM_PEAK",
+            (("operator", "GTE"), ("thresholdPercent", "10")),
+        ),
+        (
+            3,
+            "DRAWDOWN_FROM_PEAK",
+            (("operator", "LT"), ("thresholdPercent", "5")),
+        ),
+        (4, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+    ),
+    "duplicate-price-condition": (
+        (
+            1,
+            "PRICE_COMPARE",
+            (
+                ("operator", "GT"),
+                ("reference", "PREVIOUS_CLOSE"),
+                ("resolution", "30m"),
+            ),
+        ),
+        (
+            2,
+            "PRICE_COMPARE",
+            (
+                ("operator", "GT"),
+                ("reference", "PREVIOUS_CLOSE"),
+                ("resolution", "30m"),
+            ),
+        ),
+        (3, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+    ),
+    "no-signal": (
+        (
+            1,
+            "PRICE_COMPARE",
+            (
+                ("operator", "LT"),
+                ("reference", "PREVIOUS_CLOSE"),
+                ("resolution", "30m"),
+            ),
+        ),
+        (2, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+    ),
+    "missing-required-history": (
+        (
+            1,
+            "MACD_CROSS",
+            (
+                ("direction", "UP"),
+                ("fastPeriod", "12"),
+                ("resolution", "4h"),
+                ("signalPeriod", "9"),
+                ("slowPeriod", "26"),
+            ),
+        ),
+        (2, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+    ),
+}
+
+EXPECTED_FLOW_SPECIFIC_STEPS = {
+    "maximum-four-partition-five-instrument-two-side": {
+        "partition-1-buy-flow-1": (
+            (
+                1,
+                "PRICE_COMPARE",
+                (
+                    ("operator", "GT"),
+                    ("reference", "PREVIOUS_CLOSE"),
+                    ("resolution", "30m"),
+                ),
+            ),
+            (
+                2,
+                "PRICE_CHANGE_PERCENT",
+                (
+                    ("base", "PREVIOUS_CLOSE"),
+                    ("direction", "UP"),
+                    ("resolution", "30m"),
+                    ("thresholdPercent", "3.5"),
+                ),
+            ),
+            (
+                3,
+                "VOLUME_COMPARE",
+                (
+                    ("multiplier", "2"),
+                    ("operator", "GTE"),
+                    ("period", "20"),
+                    ("reference", "AVERAGE_VOLUME"),
+                    ("resolution", "30m"),
+                ),
+            ),
+            (4, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+        ),
+        "partition-1-sell-flow-1": (
+            (
+                1,
+                "PRICE_COMPARE",
+                (
+                    ("operator", "GT"),
+                    ("reference", "PREVIOUS_CLOSE"),
+                    ("resolution", "30m"),
+                ),
+            ),
+            (
+                2,
+                "PRICE_CHANGE_PERCENT",
+                (
+                    ("base", "PREVIOUS_CLOSE"),
+                    ("direction", "UP"),
+                    ("resolution", "30m"),
+                    ("thresholdPercent", "3.5"),
+                ),
+            ),
+            (
+                3,
+                "VOLUME_COMPARE",
+                (
+                    ("multiplier", "2"),
+                    ("operator", "GTE"),
+                    ("period", "20"),
+                    ("reference", "AVERAGE_VOLUME"),
+                    ("resolution", "30m"),
+                ),
+            ),
+            (4, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+        ),
+        "partition-2-buy-flow-2": (
+            (
+                1,
+                "STREAK",
+                (("bars", "3"), ("direction", "UP"), ("resolution", "30m")),
+            ),
+            (
+                2,
+                "SMA_CROSS",
+                (
+                    ("direction", "UP"),
+                    ("longPeriod", "20"),
+                    ("resolution", "30m"),
+                    ("shortPeriod", "5"),
+                ),
+            ),
+            (3, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+        ),
+        "partition-2-sell-flow-2": (
+            (
+                1,
+                "STREAK",
+                (("bars", "3"), ("direction", "UP"), ("resolution", "30m")),
+            ),
+            (
+                2,
+                "SMA_CROSS",
+                (
+                    ("direction", "UP"),
+                    ("longPeriod", "20"),
+                    ("resolution", "30m"),
+                    ("shortPeriod", "5"),
+                ),
+            ),
+            (
+                3,
+                "RSI_CROSS",
+                (
+                    ("direction", "UP"),
+                    ("period", "14"),
+                    ("resolution", "30m"),
+                    ("threshold", "30"),
+                ),
+            ),
+            (4, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+        ),
+        "partition-3-buy-flow-3": (
+            (
+                1,
+                "RSI_CROSS",
+                (
+                    ("direction", "UP"),
+                    ("period", "14"),
+                    ("resolution", "30m"),
+                    ("threshold", "30"),
+                ),
+            ),
+            (
+                2,
+                "MACD_CROSS",
+                (
+                    ("direction", "UP"),
+                    ("fastPeriod", "12"),
+                    ("resolution", "30m"),
+                    ("signalPeriod", "9"),
+                    ("slowPeriod", "26"),
+                ),
+            ),
+            (3, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+        ),
+        "partition-3-sell-flow-3": (
+            (
+                1,
+                "MACD_CROSS",
+                (
+                    ("direction", "UP"),
+                    ("fastPeriod", "12"),
+                    ("resolution", "30m"),
+                    ("signalPeriod", "9"),
+                    ("slowPeriod", "26"),
+                ),
+            ),
+            (
+                2,
+                "BOLLINGER_REVERSAL",
+                (
+                    ("deviations", "2"),
+                    ("direction", "UP"),
+                    ("period", "20"),
+                    ("resolution", "30m"),
+                ),
+            ),
+            (
+                3,
+                "POSITION_RETURN",
+                (("direction", "LOSS"), ("thresholdPercent", "5")),
+            ),
+            (4, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+        ),
+        "partition-4-buy-flow-4": (
+            (
+                1,
+                "BOLLINGER_REVERSAL",
+                (
+                    ("deviations", "2"),
+                    ("direction", "UP"),
+                    ("period", "20"),
+                    ("resolution", "30m"),
+                ),
+            ),
+            (
+                2,
+                "SCHEDULE",
+                (
+                    ("cycle", "EVERY_N_TRADING_DAYS"),
+                    ("interval", "5"),
+                    ("resolution", "30m"),
+                ),
+            ),
+            (3, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+        ),
+        "partition-4-sell-flow-4": (
+            (
+                1,
+                "HOLDING_PERIOD",
+                (
+                    ("amount", "10"),
+                    ("resolution", "30m"),
+                    ("unit", "TRADING_DAY"),
+                ),
+            ),
+            (
+                2,
+                "PEAK_RETURN",
+                (("operator", "GTE"), ("thresholdPercent", "15")),
+            ),
+            (
+                3,
+                "DRAWDOWN_FROM_PEAK",
+                (("operator", "GTE"), ("thresholdPercent", "7")),
+            ),
+            (4, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+        ),
+    },
+    "simultaneous-buy-sell": {
+        "partition-1-buy-flow-1": (
+            (
+                1,
+                "PRICE_COMPARE",
+                (
+                    ("operator", "GT"),
+                    ("reference", "PREVIOUS_CLOSE"),
+                    ("resolution", "30m"),
+                ),
+            ),
+            (2, "EMIT_ORDER_CANDIDATE", _BUY_TERMINAL_ARGUMENTS),
+        ),
+        "partition-1-sell-flow-1": (
+            (
+                1,
+                "PRICE_COMPARE",
+                (
+                    ("operator", "GT"),
+                    ("reference", "PREVIOUS_CLOSE"),
+                    ("resolution", "30m"),
+                ),
+            ),
+            (2, "EMIT_ORDER_CANDIDATE", _SELL_TERMINAL_ARGUMENTS),
+        ),
+    },
+}
 EXPECTED_EXECUTIONS = {
     "pairwise-basic_price_compare": (1, "COMPLETED", "AVAILABLE", (("CANDIDATE", 1),)),
     "pairwise-basic_price_change_percent": (
@@ -402,6 +931,89 @@ def _compiled(case: matrix.BasicStrategyCase) -> dict[str, object]:
         "production backend compiled-plan export boundary is missing"
     )
     return boundary(case)
+
+
+def _step_shape(step: PlanStep) -> tuple[int, str, tuple[tuple[str, str], ...]]:
+    return (
+        step.sequence,
+        step.operation,
+        tuple(
+            sorted((str(name), str(value)) for name, value in step.arguments.items())
+        ),
+    )
+
+
+def _expected_steps_for_flow(case_name: str, flow_id: str):
+    if case_name in EXPECTED_FLOW_SPECIFIC_STEPS:
+        return EXPECTED_FLOW_SPECIFIC_STEPS[case_name][flow_id]
+    return EXPECTED_SINGLE_CHAIN_STEPS[case_name]
+
+
+def _expected_loaded_case_shape(case_name: str):
+    resolution, sides, partition_count, instrument_count = EXPECTED_SHAPES[case_name]
+    partition_keys = EXPECTED_PARTITION_KEYS[case_name]
+    flow_keys_by_partition = EXPECTED_FLOW_KEYS[case_name]
+    assert len(partition_keys) == partition_count
+    assert len(flow_keys_by_partition) == partition_count
+
+    expected = []
+    for partition_key, flow_keys in zip(
+        partition_keys, flow_keys_by_partition, strict=True
+    ):
+        for flow_id in flow_keys:
+            steps = _expected_steps_for_flow(case_name, flow_id)
+            terminal = steps[-1]
+            terminal_arguments = dict(terminal[2])
+            expected.append(
+                (
+                    partition_key,
+                    flow_id,
+                    10_000,
+                    terminal_arguments["side"],
+                    EXPECTED_LOADED_INSTRUMENT_IDS[instrument_count],
+                    steps[:-1],
+                    terminal,
+                    "EQUAL",
+                    ("ADJUSTED_BAR", resolution),
+                )
+            )
+    assert {flow[3] for flow in expected} == set(sides)
+    return tuple(expected)
+
+
+def _assert_exact_loaded_case_shape(case_name: str, plan) -> None:
+    assert set(EXPECTED_SINGLE_CHAIN_STEPS) | set(EXPECTED_FLOW_SPECIFIC_STEPS) == set(
+        EXPECTED_SHAPES
+    )
+    assert set(EXPECTED_SINGLE_CHAIN_STEPS).isdisjoint(EXPECTED_FLOW_SPECIFIC_STEPS)
+    for special_case, expected_by_flow in EXPECTED_FLOW_SPECIFIC_STEPS.items():
+        assert set(expected_by_flow) == {
+            flow_id
+            for partition_flow_ids in EXPECTED_FLOW_KEYS[special_case]
+            for flow_id in partition_flow_ids
+        }
+
+    actual = []
+    for flow in plan.flows:
+        assert flow.terminal_step is not None
+        actual.append(
+            (
+                flow.partition_key,
+                flow.flow_id,
+                flow.budget_cap_bps,
+                flow.side,
+                flow.instrument_ids,
+                tuple(_step_shape(step) for step in flow.condition_steps),
+                _step_shape(flow.terminal_step),
+                flow.allocation,
+                flow.reference_series,
+            )
+        )
+    expected = _expected_loaded_case_shape(case_name)
+    assert tuple(actual) == expected, (
+        f"loaded flow shapes for {case_name} differ:\n"
+        f"actual={tuple(actual)!r}\nexpected={expected!r}"
+    )
 
 
 def test_generated_matrix_has_hand_checked_size_and_complete_catalog_coverage() -> None:
@@ -630,6 +1242,7 @@ def test_materialized_documents_consume_resolution_side_partition_and_instrument
         compiled = _compiled(case)
         plan = BasicPlanRuntime().load(compiled)
 
+        _assert_exact_loaded_case_shape(name, plan)
         matrix.assert_loaded_partition_identities(
             compiled, plan, EXPECTED_PARTITION_KEYS[name]
         )
@@ -707,6 +1320,98 @@ def test_loaded_partition_identity_oracle_rejects_a_mutated_backend_artifact() -
         matrix.assert_loaded_partition_identities(
             compiled, plan, EXPECTED_PARTITION_KEYS[case.name]
         )
+
+
+def test_exact_loaded_step_shape_oracle_rejects_duplicate_condition_loss() -> None:
+    case = next(
+        case
+        for case in matrix.generated_cases()
+        if case.name == "duplicate-price-condition"
+    )
+    compiled = copy.deepcopy(_compiled(case))
+    steps = compiled["executionSnapshot"]["partitions"][0]["flows"][0]["steps"]
+    steps.pop(0)
+    for sequence, step in enumerate(steps, start=1):
+        step["sequence"] = sequence
+    from backtest_engine.contracts import compute_compiled_plan_checksum
+
+    compiled["planChecksum"] = compute_compiled_plan_checksum(compiled)
+    plan = BasicPlanRuntime().load(compiled)
+
+    with pytest.raises(AssertionError, match="loaded flow shapes"):
+        _assert_exact_loaded_case_shape(case.name, plan)
+
+
+def _swap_contradictory_bounds(document: dict[str, object]) -> None:
+    steps = document["executionSnapshot"]["partitions"][0]["flows"][0]["steps"]
+    steps[1], steps[2] = steps[2], steps[1]
+    for sequence, step in enumerate(steps, start=1):
+        step["sequence"] = sequence
+
+
+def _change_condition_argument(document: dict[str, object]) -> None:
+    document["executionSnapshot"]["partitions"][0]["flows"][0]["steps"][0]["arguments"][
+        "operator"
+    ] = "GT"
+
+
+def _rename_compiled_group(document: dict[str, object]) -> None:
+    document["executionSnapshot"]["partitions"][0]["flows"][0]["key"] = (
+        "partition-1-renamed-buy-group"
+    )
+
+
+def _change_container_side(document: dict[str, object]) -> None:
+    document["executionSnapshot"]["partitions"][0]["flows"][0]["steps"][-1][
+        "arguments"
+    ]["side"] = "SELL"
+
+
+def _change_terminal_argument(document: dict[str, object]) -> None:
+    document["executionSnapshot"]["partitions"][0]["flows"][0]["steps"][-1][
+        "arguments"
+    ]["orderPercent"] = "30"
+
+
+def _reverse_instrument_order(document: dict[str, object]) -> None:
+    instruments = document["executionSnapshot"]["partitions"][0]["flows"][0][
+        "officialInstrumentIds"
+    ]
+    instruments.reverse()
+
+
+@pytest.mark.parametrize(
+    ("case_name", "mutate"),
+    (
+        ("contradictory-price-boundaries", _swap_contradictory_bounds),
+        ("no-signal", _change_condition_argument),
+        ("pairwise-basic_price_compare", _rename_compiled_group),
+        ("pairwise-basic_price_compare", _change_container_side),
+        ("pairwise-basic_price_compare", _change_terminal_argument),
+        ("pairwise-basic_price_change_percent", _reverse_instrument_order),
+    ),
+    ids=(
+        "condition-reordering",
+        "condition-arguments",
+        "group-identity",
+        "container-side",
+        "terminal-arguments",
+        "instrument-order",
+    ),
+)
+def test_exact_loaded_step_shape_oracle_rejects_semantic_mutations(
+    case_name: str, mutate: Callable[[dict[str, object]], None]
+) -> None:
+    case = next(case for case in matrix.generated_cases() if case.name == case_name)
+    compiled = copy.deepcopy(_compiled(case))
+    mutate(compiled)
+    from backtest_engine.contracts import compute_compiled_plan_checksum
+
+    compiled["planChecksum"] = compute_compiled_plan_checksum(compiled)
+    plan = BasicPlanRuntime().load(compiled)
+
+    with pytest.raises(AssertionError, match="loaded flow shapes"):
+        _assert_exact_loaded_case_shape(case.name, plan)
 
 
 def test_maximum_distributes_occurrences_without_duplicate_side_containers() -> None:
