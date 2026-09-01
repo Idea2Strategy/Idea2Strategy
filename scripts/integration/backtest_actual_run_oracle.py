@@ -13,11 +13,18 @@ import json
 import os
 import uuid
 from bisect import bisect_left, bisect_right
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Context, Decimal, localcontext
+from decimal import (
+    ROUND_FLOOR,
+    ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
+    Context,
+    Decimal,
+    localcontext,
+)
 from io import BytesIO
 from itertools import pairwise
 from typing import Any
@@ -34,6 +41,11 @@ ET = ZoneInfo("America/New_York")
 TRIGGER_MATH = Context(prec=18, rounding=ROUND_HALF_UP)
 EVALUATION_ID_NAMESPACE = uuid.UUID("6f5f4d8c-9a5b-4a3e-9b2f-1d0c8e7a6b54")
 ORDER_ID_NAMESPACE = uuid.UUID("2c1c1d0e-1f4b-4d67-9a2a-6a7f4a1b9c31")
+PARTICIPATION_RATE = Decimal("0.10")
+BUYING_POWER_BUFFER_RATE = Decimal("0.0001")
+MAX_STRATEGY_NOTIONAL = Decimal(1000000)
+MAX_GROSS_EXPOSURE = Decimal(1000000)
+MAX_INSTRUMENT_EXPOSURE = Decimal(250000)
 
 METRIC_RULES: Mapping[str, tuple[str, str]] = {
     "annualizedVolatilityPct": ("metric.annualized_volatility_pct:1.0.0", "PERCENT"),
@@ -87,6 +99,84 @@ class MarketBar:
     low: Decimal
     close: Decimal
     volume: Decimal
+
+
+@dataclass(slots=True)
+class _ExpectedOrder:
+    semantic_identity: str
+    order_id: str
+    flow_id: str
+    instrument_id: str
+    side: str
+    order_type: str
+    quantity: Decimal
+    remaining_quantity: Decimal
+    filled_quantity: Decimal
+    submitted_at: datetime
+    eligible_at: datetime
+    expires_at: datetime
+    reference_price: Decimal
+    max_position_notional: Decimal
+    submission_sequence: int
+    status: str = "ACCEPTED"
+    reason_code: str | None = None
+    reserved_cash: Decimal = Decimal(0)
+    reserved_notional: Decimal = Decimal(0)
+    reserved_quantity: Decimal = Decimal(0)
+    fill_sequence: int = 0
+
+
+@dataclass(slots=True)
+class _ExpectedExecutionGate:
+    executions: int = 0
+    bars_since_execution: int = 0
+    last_session_index: int | None = None
+    condition_rearmed: bool = True
+
+    def observe(self, condition_outcome: str) -> None:
+        if self.executions:
+            self.bars_since_execution += 1
+        if condition_outcome == "FALSE":
+            self.condition_rearmed = True
+
+    def accepts(
+        self,
+        terminal: Mapping[str, Any],
+        *,
+        session_index: int | None,
+    ) -> bool:
+        if self.executions:
+            self.bars_since_execution += 1
+        arguments = terminal["arguments"]
+        execution_mode = str(arguments.get("executionMode", "1회만"))
+        wait_mode = str(arguments.get("waitMode", "조건 재충족"))
+        wait_interval = int(arguments.get("waitInterval", "1"))
+        maximum = (
+            1 if execution_mode == "1회만" else int(arguments.get("maxExecutions", "1"))
+        )
+        if self.executions >= maximum:
+            return False
+        if self.executions == 0 or execution_mode == "주기마다":
+            eligible = True
+        elif wait_mode == "조건 재충족":
+            eligible = self.condition_rearmed
+        elif wait_mode == "N봉 이후":
+            eligible = self.bars_since_execution >= wait_interval
+        elif wait_mode == "N거래일 이후":
+            eligible = (
+                self.last_session_index is not None
+                and session_index is not None
+                and session_index - self.last_session_index >= wait_interval
+            )
+        else:
+            eligible = False
+        if not eligible:
+            return False
+        self.executions += 1
+        self.bars_since_execution = 0
+        self.last_session_index = session_index
+        self.condition_rearmed = False
+        return True
 
 
 class TriggerInputMissing(AssertionError):
@@ -151,6 +241,47 @@ def exact_fill_bar(
     return matches[0]
 
 
+def expected_market_fill_path(
+    market_bars: Sequence[MarketBar],
+    *,
+    instrument_id: str,
+    eligible_at: datetime,
+    expires_at: datetime,
+    quantity: Decimal,
+    participation_rate: Decimal = Decimal("0.10"),
+) -> list[dict[str, str]]:
+    """Derive the next eligible MARKET-bar allocations without observing fills."""
+    remaining = quantity
+    expected: list[dict[str, str]] = []
+    for bar in sorted(
+        (
+            item
+            for item in market_bars
+            if item.instrument_id == instrument_id
+            and eligible_at <= item.starts_at < expires_at
+        ),
+        key=lambda item: (item.starts_at, item.ends_at, item.resolution),
+    ):
+        capacity = (bar.volume * participation_rate).to_integral_value(
+            rounding=ROUND_FLOOR
+        )
+        allocated = min(remaining, capacity)
+        if allocated <= 0:
+            continue
+        expected.append(
+            {
+                "barStartsAt": _timestamp(bar.starts_at),
+                "occurredAt": _timestamp(bar.ends_at),
+                "basePrice": _money_text(bar.open),
+                "quantity": _decimal_text(allocated),
+            }
+        )
+        remaining -= allocated
+        if remaining <= 0:
+            break
+    return expected
+
+
 def market_bar_from_row(
     *,
     instrument_id: str,
@@ -196,6 +327,33 @@ def row_is_replay_eligible(
     """Mirror only the public half-open timestamp boundary, not engine logic."""
     starts_at = row["bar_start_at"].astimezone(UTC)
     return period_start <= starts_at < period_end
+
+
+def exact_stage_allowed(
+    series_bars: Mapping[tuple[str, str], Sequence[MarketBar]],
+    *,
+    required_pairs: set[tuple[str, str]],
+    session_hours: Mapping[date, tuple[datetime, datetime]],
+    session_date: date,
+    instant: datetime,
+) -> bool:
+    """Derive the shared availability gate from exact bar intervals.
+
+    The assessment is strategy-wide: a hole in any required series suppresses
+    evaluation, order triggering, and fills for every flow during that half-open
+    interval.  Closed-market instants are covered by the pinned calendar and are
+    therefore allowed without inventing provider bars.
+    """
+
+    opens_at, closes_at = session_hours[session_date]
+    if not opens_at <= instant < closes_at:
+        return True
+    for pair in required_pairs:
+        bars = series_bars.get(pair, ())
+        cursor = bisect_right(bars, instant, key=lambda bar: bar.starts_at) - 1
+        if cursor < 0 or not bars[cursor].starts_at <= instant < bars[cursor].ends_at:
+            return False
+    return True
 
 
 def exact_object_bytes(s3: Any, reference: ExactObject) -> bytes:
@@ -336,6 +494,182 @@ def sorted_trigger_semantics(
             separators=(",", ":"),
         ),
     )
+
+
+def require_exact_semantic_set(
+    expected: Sequence[Mapping[str, Any]],
+    actual: Sequence[Mapping[str, Any]],
+    *,
+    family: str,
+) -> None:
+    """Compare canonical multisets so an omission and an extra are both fatal."""
+    canonical = lambda value: json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    expected_rows = sorted(canonical(dict(row)) for row in expected)
+    actual_rows = sorted(canonical(dict(row)) for row in actual)
+    if expected_rows == actual_rows:
+        return
+    missing = list(expected_rows)
+    extra: list[str] = []
+    for row in actual_rows:
+        try:
+            missing.remove(row)
+        except ValueError:
+            extra.append(row)
+    first_difference = ""
+    if family == "independently enumerated execution":
+
+        def execution_key(row: Mapping[str, Any]) -> tuple[str, ...]:
+            return (
+                str(row.get("occurred_at") or row.get("occurredAt") or ""),
+                str(row.get("kind") or ""),
+                str(row.get("order_id") or row.get("order") or ""),
+                str(row.get("fill_id") or ""),
+            )
+
+        expected_by_key = {execution_key(row): dict(row) for row in expected}
+        actual_by_key = {execution_key(row): dict(row) for row in actual}
+        for key in sorted(set(expected_by_key) | set(actual_by_key)):
+            if expected_by_key.get(key) != actual_by_key.get(key):
+                first_difference = (
+                    f" firstKey={key} expected={expected_by_key.get(key)} "
+                    f"actual={actual_by_key.get(key)}"
+                )
+                break
+    raise AssertionError(
+        f"{family} semantic set differs:{first_difference} "
+        f"missing={missing[:3]} extra={extra[:3]}"
+    )
+
+
+def semantic_repetition_hash(material: Mapping[str, Any]) -> str:
+    """Hash the complete canonical result evidence used across fresh repetitions."""
+    required = {
+        "inputs",
+        "opportunities",
+        "orders",
+        "cancellations",
+        "fills",
+        "ledger",
+        "positions",
+        "equityCurve",
+        "metrics",
+        "resultObjects",
+    }
+    missing = required - set(material)
+    if missing:
+        raise AssertionError(
+            f"semantic repetition material omits families: {sorted(missing)}"
+        )
+    return _canonical_hash({key: material[key] for key in sorted(required)})
+
+
+def _canonical_scalar(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return _timestamp(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return _decimal_text(value)
+    return value
+
+
+def canonical_result_object_semantics(
+    detail_objects: Sequence[Mapping[str, Any]],
+    *,
+    trade_record_aliases: Mapping[str, str],
+    order_aliases: Mapping[str, str],
+    fill_aliases: Mapping[str, str],
+    ledger_aliases: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    """Retain every result partition and version after aliasing only record IDs.
+
+    Physical object/version IDs are independently retained and verified by the
+    result-version digest and exact VersionId fetch.  They necessarily differ for
+    fresh runs.  The repetition domain therefore represents each physical version
+    by the SHA-256 of its complete rows after replacing only run-derived record,
+    order, fill, ledger, and point IDs with deterministic semantic identities.
+    """
+
+    def require_alias(
+        aliases: Mapping[str, str], value: Any, *, family: str
+    ) -> str | None:
+        if value is None:
+            return None
+        alias = aliases.get(str(value))
+        if alias is None:
+            raise AssertionError(f"{family} has no independent semantic alias: {value}")
+        return alias
+
+    result: list[dict[str, Any]] = []
+    for item in detail_objects:
+        detail = item["detail"]
+        record_type = str(detail["record_type"])
+        canonical_rows: list[dict[str, Any]] = []
+        for source in item["rows"]:
+            row = {key: _canonical_scalar(value) for key, value in source.items()}
+            if record_type == "TRADE_DETAIL":
+                row["record_id"] = require_alias(
+                    trade_record_aliases,
+                    source["record_id"],
+                    family="trade record",
+                )
+                row["order_id"] = require_alias(
+                    order_aliases, source["order_id"], family="order record"
+                )
+                row["fill_id"] = require_alias(
+                    fill_aliases, source.get("fill_id"), family="fill record"
+                )
+            elif record_type == "POSITION_SNAPSHOT":
+                row["record_id"] = require_alias(
+                    trade_record_aliases,
+                    source["record_id"],
+                    family="position snapshot record",
+                )
+            elif record_type == "REPLAY_LEDGER":
+                for field in ("transaction_id", "source_event_id", "entry_id"):
+                    row[field] = require_alias(
+                        ledger_aliases,
+                        source[field],
+                        family=f"ledger {field}",
+                    )
+            elif record_type == "CALCULATION_SERIES":
+                occurred_at = _timestamp(source["occurred_at"])
+                instrument_id = str(source.get("instrument_id") or "PORTFOLIO")
+                row["point_id"] = (
+                    f"CALCULATION_SERIES|{source['metric_id']}|"
+                    f"{instrument_id}|{occurred_at}"
+                )
+            else:  # validate_result_families should make this unreachable.
+                raise AssertionError(f"unknown result object family: {record_type}")
+            canonical_rows.append(row)
+        canonical_rows = sorted_trigger_semantics(canonical_rows)
+        canonical_content_hash = _canonical_hash(canonical_rows)
+        if not detail["provider_version_id"]:
+            raise AssertionError("result object lacks an exact provider version")
+        identity = {
+            "recordType": record_type,
+            "weekStart": detail["week_start_date"].isoformat(),
+            "periodStart": _timestamp(detail["period_start"]),
+            "periodEnd": _timestamp(detail["period_end"]),
+            "partNumber": int(detail["part_number"]),
+        }
+        result.append(
+            {
+                "identity": identity,
+                "version": {
+                    "schemaVersion": str(detail["schema_version"]),
+                    "rowCount": int(detail["row_count"]),
+                    "canonicalContentSha256": canonical_content_hash,
+                    "exactProviderVersionVerified": True,
+                },
+            }
+        )
+    identities = [_canonical_hash(item["identity"]) for item in result]
+    if len(identities) != len(set(identities)):
+        raise AssertionError("canonical result object identities are not unique")
+    return sorted_trigger_semantics(result)
 
 
 def result_hash_evidence(
@@ -1087,6 +1421,1038 @@ def build_trigger_contexts(
     return position_contexts, schedule_contexts
 
 
+def independent_execution_oracle(
+    *,
+    plan_document: Mapping[str, Any],
+    market_bars: Sequence[MarketBar],
+    feature_series: Mapping[tuple[str, str, str], Sequence[tuple[datetime, Decimal]]],
+    session_hours: Mapping[date, tuple[datetime, datetime]],
+    period_start: datetime,
+    period_end: datetime,
+    run_snapshot_id: str,
+    plan_checksum: str,
+    initial_cash: Decimal,
+    fee_rate: Decimal,
+    slippage_bps: Decimal,
+) -> dict[str, Any]:
+    """Replay immutable inputs without consulting any persisted execution output.
+
+    This is intentionally a small, literal implementation of the published Basic
+    MARKET/DAY and whole-share contracts used by the fixed Task 4 corpus. It owns
+    the market-time loop, trigger truth/warm-up classification, candidate gate,
+    sizing, reservations, next-bar eligibility, shared bar capacity, FIFO book,
+    double-entry legs, and position snapshots. Persisted trade/fill timestamps or
+    quantities are not parameters and therefore cannot seed its answer.
+    """
+
+    ordered_events = sorted(
+        (bar for bar in market_bars if period_start <= bar.ends_at < period_end),
+        key=lambda item: (
+            item.ends_at,
+            _resolution_minutes(item.resolution),
+            item.instrument_id,
+            item.starts_at,
+        ),
+    )
+    events_at: dict[datetime, list[MarketBar]] = defaultdict(list)
+    bars_by_pair: dict[tuple[str, str], list[MarketBar]] = defaultdict(list)
+    for bar in ordered_events:
+        events_at[bar.ends_at].append(bar)
+        bars_by_pair[(bar.instrument_id, bar.resolution)].append(bar)
+    bar_end_times = {
+        key: [bar.ends_at for bar in values] for key, values in bars_by_pair.items()
+    }
+    feature_start_times = {
+        key: [item[0] for item in values] for key, values in feature_series.items()
+    }
+    pinned_pairs = set(bars_by_pair)
+
+    flow_entries: list[tuple[Mapping[str, Any], int, str]] = []
+    flow_resolutions: dict[str, str] = {}
+    for partition in plan_document["executionSnapshot"]["partitions"]:
+        for flow in partition["flows"]:
+            flow_id = str(flow["key"])
+            resolution = exact_flow_resolution(flow, pinned_pairs)
+            flow_resolutions[flow_id] = resolution
+            flow_entries.append((flow, int(partition["budgetCapBps"]), resolution))
+    required_pairs = {
+        (str(instrument_id), resolution)
+        for flow, _budget_cap_bps, resolution in flow_entries
+        for instrument_id in flow["officialInstrumentIds"]
+    }
+
+    session_dates = sorted(
+        day
+        for day, (opens_at, closes_at) in session_hours.items()
+        if closes_at > period_start and opens_at < period_end
+    )
+    session_index = {day: index for index, day in enumerate(session_dates)}
+    next_session = {
+        day: (session_dates[index + 1] if index + 1 < len(session_dates) else None)
+        for index, day in enumerate(session_dates)
+    }
+
+    cash = money(initial_cash)
+    lots: dict[str, deque[list[Decimal]]] = defaultdict(deque)
+    quantities: dict[str, Decimal] = defaultdict(Decimal)
+    costs: dict[str, Decimal] = defaultdict(Decimal)
+    opened_cycles: dict[str, datetime] = {}
+    orders: list[_ExpectedOrder] = []
+    trade_payloads: list[dict[str, Any]] = []
+    trade_semantics: list[dict[str, Any]] = []
+    ledger_semantics: list[dict[str, Any]] = []
+    canonical_ledger_semantics: list[dict[str, Any]] = []
+    position_semantics: list[dict[str, Any]] = []
+    cancellation_semantics: list[dict[str, Any]] = []
+    fill_semantics: list[dict[str, Any]] = []
+    fill_states: list[
+        tuple[
+            datetime,
+            Decimal,
+            dict[str, tuple[Decimal, Decimal]],
+            dict[str, datetime],
+        ]
+    ] = []
+    opportunities: list[dict[str, Any]] = []
+    trigger_semantics: list[dict[str, Any]] = []
+    triggered_operations: set[str] = set()
+    record_alias_by_key: dict[tuple[str, str, str, str], str] = {}
+    order_alias_by_id: dict[str, str] = {}
+    fill_alias_by_id: dict[str, str] = {}
+    ledger_alias_by_id: dict[str, str] = {}
+
+    gates: dict[tuple[str, str], _ExpectedExecutionGate] = {}
+    position_gate_identities: dict[str, datetime | None] = {}
+    tracked_cycle: dict[str, datetime] = {}
+    peak_price: dict[str, Decimal] = {}
+    holding_bars: dict[tuple[str, str], int] = {}
+    last_schedule_date: date | None = None
+
+    def positions_after() -> list[dict[str, str]]:
+        return [
+            {
+                "instrument_id": instrument_id,
+                "quantity": _decimal_text(quantity),
+                "cost_basis": _decimal_text(money(costs[instrument_id])),
+            }
+            for instrument_id, quantity in sorted(quantities.items())
+            if quantity > 0
+        ]
+
+    def append_trade(
+        order: _ExpectedOrder,
+        *,
+        kind: str,
+        occurred_at: datetime,
+        alias: str,
+        fill: Mapping[str, Decimal | str] | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "kind": kind,
+            "occurred_at": _timestamp(occurred_at),
+            "order_id": order.order_id,
+            "instrument_id": order.instrument_id,
+            "order_status": order.status,
+            "cash_after": _decimal_text(cash),
+            "positions_after": positions_after(),
+        }
+        if order.reason_code is not None:
+            payload["reason_code"] = order.reason_code
+        fill_id = ""
+        if fill is not None:
+            fill_id = str(fill["fill_id"])
+            fill_alias_by_id[fill_id] = alias
+            payload["fill_id"] = fill_id
+            for key in (
+                "quantity",
+                "base_price",
+                "price",
+                "gross_amount",
+                "slippage_amount",
+                "fee",
+                "cost_basis",
+                "realized_pnl",
+            ):
+                payload[key] = _decimal_text(Decimal(fill[key]))
+        trade_payloads.append(payload)
+        semantic_payload = dict(payload)
+        semantic_payload["order_id"] = order.semantic_identity
+        if fill_id:
+            semantic_payload["fill_id"] = alias
+        trade_semantics.append(semantic_payload)
+        record_alias_by_key[
+            (kind, order.order_id, _timestamp(occurred_at), fill_id)
+        ] = alias
+        position_semantics.append(
+            {
+                "after": alias,
+                "occurredAt": _timestamp(occurred_at),
+                "cashAfter": _money_text(cash),
+                "holdings": [
+                    [
+                        item["instrument_id"],
+                        item["quantity"],
+                        _money_text(Decimal(item["cost_basis"])),
+                    ]
+                    for item in positions_after()
+                ],
+            }
+        )
+
+    def open_orders() -> list[_ExpectedOrder]:
+        return [
+            order
+            for order in orders
+            if order.status in {"ACCEPTED", "PARTIALLY_FILLED"}
+        ]
+
+    def buying_power() -> Decimal:
+        return money(cash - money(cash * BUYING_POWER_BUFFER_RATE))
+
+    def reserved_cash(excluding: _ExpectedOrder | None = None) -> Decimal:
+        return sum(
+            (order.reserved_cash for order in open_orders() if order is not excluding),
+            Decimal(0),
+        )
+
+    def reserved_notional(excluding: _ExpectedOrder | None = None) -> Decimal:
+        return sum(
+            (
+                order.reserved_notional
+                for order in open_orders()
+                if order is not excluding
+            ),
+            Decimal(0),
+        )
+
+    def instrument_reserved(
+        instrument_id: str, excluding: _ExpectedOrder | None = None
+    ) -> Decimal:
+        return sum(
+            (
+                order.reserved_notional
+                for order in open_orders()
+                if order is not excluding
+                and order.side == "BUY"
+                and order.instrument_id == instrument_id
+            ),
+            Decimal(0),
+        )
+
+    def estimated_commitment(order: _ExpectedOrder) -> tuple[Decimal, Decimal]:
+        estimated_price = expected_fill_values(
+            base_price=order.reference_price,
+            quantity=Decimal(1),
+            side="BUY",
+            slippage_bps=slippage_bps,
+            fee_rate=fee_rate,
+        )[0]
+        notional = money(estimated_price * order.remaining_quantity)
+        fee = money(notional * fee_rate)
+        return notional, money(notional + fee)
+
+    def release_reservation(order: _ExpectedOrder) -> None:
+        order.reserved_cash = Decimal(0)
+        order.reserved_notional = Decimal(0)
+        order.reserved_quantity = Decimal(0)
+
+    def refresh_reservation(order: _ExpectedOrder) -> None:
+        if order.side == "SELL":
+            order.reserved_quantity = order.remaining_quantity
+        else:
+            order.reserved_notional, order.reserved_cash = estimated_commitment(order)
+
+    def reserve_or_reject(order: _ExpectedOrder) -> None:
+        if order.side == "SELL":
+            available = quantities[order.instrument_id] - sum(
+                (
+                    other.reserved_quantity
+                    for other in open_orders()
+                    if other is not order
+                    and other.side == "SELL"
+                    and other.instrument_id == order.instrument_id
+                ),
+                Decimal(0),
+            )
+            if available < order.remaining_quantity:
+                order.status = "REJECTED"
+                order.reason_code = "POSITION_UNAVAILABLE"
+                return
+            order.reserved_quantity = order.remaining_quantity
+            return
+
+        estimated_notional, estimated_cash = estimated_commitment(order)
+        estimated_price = expected_fill_values(
+            base_price=order.reference_price,
+            quantity=Decimal(1),
+            side="BUY",
+            slippage_bps=slippage_bps,
+            fee_rate=fee_rate,
+        )[0]
+        marked = money(quantities[order.instrument_id] * estimated_price)
+        if (
+            marked + instrument_reserved(order.instrument_id, order)
+            >= order.max_position_notional
+        ):
+            order.status = "REJECTED"
+            order.reason_code = "MAX_INSTRUMENT_POSITION_PERCENT"
+            return
+        if estimated_cash > buying_power() - reserved_cash(order):
+            order.status = "REJECTED"
+            order.reason_code = "INSUFFICIENT_AVAILABLE_CASH"
+            return
+        exposure = sum(costs.values(), Decimal(0))
+        if exposure + reserved_notional(order) + estimated_cash > MAX_STRATEGY_NOTIONAL:
+            order.status = "REJECTED"
+            order.reason_code = "STRATEGY_BUDGET_EXCEEDED"
+            return
+        if (
+            exposure + reserved_notional(order) + estimated_notional
+            > MAX_GROSS_EXPOSURE
+        ):
+            order.status = "REJECTED"
+            order.reason_code = "GROSS_EXPOSURE_EXCEEDED"
+            return
+        if (
+            costs[order.instrument_id]
+            + instrument_reserved(order.instrument_id, order)
+            + estimated_notional
+            > MAX_INSTRUMENT_EXPOSURE
+        ):
+            order.status = "REJECTED"
+            order.reason_code = "INSTRUMENT_EXPOSURE_EXCEEDED"
+            return
+        order.reserved_notional = estimated_notional
+        order.reserved_cash = estimated_cash
+
+    def append_ledger(
+        *,
+        order: _ExpectedOrder,
+        fill_id: str,
+        occurred_at: datetime,
+        gross: Decimal,
+        fee: Decimal,
+        cost_basis: Decimal,
+        realized_pnl: Decimal,
+        fill_alias: str,
+    ) -> None:
+        transaction_id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"idea2strategy:d23:ledger:{fill_id}")
+        )
+        transaction_alias = f"{fill_alias}|LEDGER"
+        ledger_alias_by_id[transaction_id] = transaction_alias
+        ledger_alias_by_id[fill_id] = fill_alias
+        if order.side == "BUY":
+            legs = [
+                ("SECURITY", "DEBIT", gross),
+                ("FEE_EXPENSE", "DEBIT", fee),
+                ("CASH", "CREDIT", money(gross + fee)),
+            ]
+        else:
+            legs = [
+                ("CASH", "DEBIT", money(gross - fee)),
+                ("FEE_EXPENSE", "DEBIT", fee),
+                ("SECURITY", "CREDIT", cost_basis),
+            ]
+            if realized_pnl > 0:
+                legs.append(("REALIZED_PNL", "CREDIT", realized_pnl))
+            elif realized_pnl < 0:
+                legs.append(("REALIZED_PNL", "DEBIT", money(-realized_pnl)))
+        for index, (account, direction, amount) in enumerate(legs, start=1):
+            if amount == 0:
+                continue
+            ledger_semantics.append(
+                {
+                    "transactionId": transaction_id,
+                    "postedAt": _timestamp(occurred_at),
+                    "sourceEventId": fill_id,
+                    "entryId": str(
+                        uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"idea2strategy:d23:entry:{fill_id}:{index}",
+                        )
+                    ),
+                    "accountCode": account,
+                    "direction": direction,
+                    "amount": _money_text(amount),
+                    "currency": "USD",
+                }
+            )
+            entry_id = str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"idea2strategy:d23:entry:{fill_id}:{index}",
+                )
+            )
+            entry_alias = f"{transaction_alias}|LEG|{index}"
+            ledger_alias_by_id[entry_id] = entry_alias
+            canonical_ledger_semantics.append(
+                {
+                    "transactionId": transaction_alias,
+                    "postedAt": _timestamp(occurred_at),
+                    "sourceEventId": fill_alias,
+                    "entryId": entry_alias,
+                    "accountCode": account,
+                    "direction": direction,
+                    "amount": _money_text(amount),
+                    "currency": "USD",
+                }
+            )
+
+    def expire_orders(at: datetime) -> None:
+        for order in sorted(
+            open_orders(),
+            key=lambda item: (
+                item.submitted_at,
+                item.submission_sequence,
+                item.order_id,
+            ),
+        ):
+            if at < order.expires_at:
+                continue
+            order.status = "EXPIRED"
+            order.reason_code = "DAY_EXPIRED"
+            release_reservation(order)
+            alias = f"{order.semantic_identity}|CANCELLATION|{_timestamp(at)}"
+            append_trade(
+                order,
+                kind="CANCELLATION",
+                occurred_at=at,
+                alias=alias,
+            )
+            cancellation_semantics.append(
+                {
+                    "identity": order.semantic_identity,
+                    "occurredAt": _timestamp(at),
+                    "status": order.status,
+                    "reasonCode": order.reason_code,
+                    "filledQuantity": _decimal_text(order.filled_quantity),
+                    "remainingQuantity": _decimal_text(order.remaining_quantity),
+                }
+            )
+
+    def process_bar(bar: MarketBar) -> None:
+        nonlocal cash
+        expire_orders(bar.starts_at)
+        capacity = (bar.volume * PARTICIPATION_RATE).to_integral_value(
+            rounding=ROUND_FLOOR
+        )
+        if capacity <= 0:
+            return
+        before_quantity = quantities[bar.instrument_id]
+        eligible = sorted(
+            (
+                order
+                for order in open_orders()
+                if order.instrument_id == bar.instrument_id
+                and order.eligible_at <= bar.starts_at
+            ),
+            key=lambda item: (
+                item.submitted_at,
+                item.submission_sequence,
+                item.order_id,
+            ),
+        )
+        for order in eligible:
+            if capacity <= 0:
+                break
+            base = money(bar.open)
+            price, _one_gross, _one_slippage, _one_fee = expected_fill_values(
+                base_price=base,
+                quantity=Decimal(1),
+                side=order.side,
+                slippage_bps=slippage_bps,
+                fee_rate=fee_rate,
+            )
+            caps = [capacity, order.remaining_quantity]
+            if order.side == "SELL":
+                caps.append(quantities[order.instrument_id])
+            else:
+                unit_cash = money(price + money(price * fee_rate))
+                exposure = sum(costs.values(), Decimal(0))
+                caps.extend(
+                    [
+                        max(buying_power() - reserved_cash(order), Decimal(0))
+                        / unit_cash,
+                        max(
+                            MAX_STRATEGY_NOTIONAL - exposure - reserved_cash(order),
+                            Decimal(0),
+                        )
+                        / unit_cash,
+                        max(
+                            MAX_GROSS_EXPOSURE - exposure - reserved_notional(order),
+                            Decimal(0),
+                        )
+                        / price,
+                        max(
+                            order.max_position_notional
+                            - money(quantities[order.instrument_id] * price)
+                            - instrument_reserved(order.instrument_id, order),
+                            Decimal(0),
+                        )
+                        / price,
+                        max(
+                            MAX_INSTRUMENT_EXPOSURE
+                            - costs[order.instrument_id]
+                            - instrument_reserved(order.instrument_id, order),
+                            Decimal(0),
+                        )
+                        / price,
+                    ]
+                )
+            fill_quantity = min(caps).to_integral_value(rounding=ROUND_FLOOR)
+            if fill_quantity <= 0:
+                continue
+            capacity -= fill_quantity
+            price, gross, slippage, fee = expected_fill_values(
+                base_price=base,
+                quantity=fill_quantity,
+                side=order.side,
+                slippage_bps=slippage_bps,
+                fee_rate=fee_rate,
+            )
+            if order.side == "BUY":
+                lots[order.instrument_id].append([fill_quantity, gross])
+                quantities[order.instrument_id] += fill_quantity
+                costs[order.instrument_id] += gross
+                cash = money(cash - gross - fee)
+                cost_basis = gross
+                realized_pnl = money(Decimal(0))
+                if before_quantity <= 0 < quantities[order.instrument_id]:
+                    opened_cycles[order.instrument_id] = bar.starts_at
+            else:
+                cost_basis = consume_fifo(lots[order.instrument_id], fill_quantity)
+                quantities[order.instrument_id] -= fill_quantity
+                costs[order.instrument_id] -= cost_basis
+                realized_pnl = money(gross - cost_basis)
+                cash = money(cash + gross - fee)
+                if quantities[order.instrument_id] <= 0:
+                    opened_cycles.pop(order.instrument_id, None)
+            order.fill_sequence += 1
+            fill_id = str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"idea2strategy:d23:{order.order_id}:{order.fill_sequence}",
+                )
+            )
+            order.filled_quantity += fill_quantity
+            order.remaining_quantity -= fill_quantity
+            if order.remaining_quantity == 0:
+                order.status = "FILLED"
+                release_reservation(order)
+            else:
+                order.status = "PARTIALLY_FILLED"
+                refresh_reservation(order)
+            fill_values: dict[str, Decimal | str] = {
+                "fill_id": fill_id,
+                "quantity": fill_quantity,
+                "base_price": base,
+                "price": price,
+                "gross_amount": gross,
+                "slippage_amount": slippage,
+                "fee": fee,
+                "cost_basis": cost_basis,
+                "realized_pnl": realized_pnl,
+            }
+            alias = f"{order.semantic_identity}|FILL|{order.fill_sequence}"
+            append_trade(
+                order,
+                kind="FILL",
+                occurred_at=bar.ends_at,
+                alias=alias,
+                fill=fill_values,
+            )
+            append_ledger(
+                order=order,
+                fill_id=fill_id,
+                occurred_at=bar.ends_at,
+                gross=gross,
+                fee=fee,
+                cost_basis=cost_basis,
+                realized_pnl=realized_pnl,
+                fill_alias=alias,
+            )
+            expected_positions = {
+                instrument_id: (amount, money(costs[instrument_id]))
+                for instrument_id, amount in quantities.items()
+                if amount > 0
+            }
+            fill_states.append(
+                (
+                    bar.ends_at,
+                    cash,
+                    expected_positions,
+                    dict(opened_cycles),
+                )
+            )
+            fill_semantics.append(
+                {
+                    "occurredAt": _timestamp(bar.ends_at),
+                    "instrumentId": order.instrument_id,
+                    "side": order.side,
+                    "resolution": bar.resolution,
+                    "barStartsAt": _timestamp(bar.starts_at),
+                    "quantity": _decimal_text(fill_quantity),
+                    "basePrice": _money_text(base),
+                    "price": _money_text(price),
+                    "gross": _money_text(gross),
+                    "fee": _money_text(fee),
+                    "slippage": _money_text(slippage),
+                    "costBasis": _money_text(cost_basis),
+                    "realizedPnl": _money_text(realized_pnl),
+                    "cashAfter": _money_text(cash),
+                }
+            )
+
+    def visible_bars(
+        instrument_id: str, resolution: str, instant: datetime
+    ) -> tuple[MarketBar, ...]:
+        key = (instrument_id, resolution)
+        values = bars_by_pair.get(key, [])
+        cursor = bisect_right(bar_end_times.get(key, []), instant)
+        return tuple(values[max(0, cursor - 180) : cursor])
+
+    def visible_features(
+        instrument_id: str, step: Mapping[str, Any], instant: datetime
+    ) -> tuple[tuple[datetime, Decimal], ...]:
+        if step["operation"] != "RSI_CROSS":
+            return ()
+        resolution = str(step["arguments"]["resolution"]).lower()
+        key = (instrument_id, "RSI_14", resolution)
+        values = feature_series.get(key, ())
+        starts = feature_start_times.get(key, [])
+        if not values:
+            raise TriggerInputMissing(
+                f"RSI trigger has no pinned feature series: {key}"
+            )
+        span = {
+            "30m": timedelta(minutes=30),
+            "1h": timedelta(hours=1),
+            "4h": timedelta(hours=4),
+            "1d": timedelta(days=1),
+        }[resolution]
+        first = bisect_left(starts, instant - span * 2)
+        last = bisect_left(starts, instant)
+        return tuple(values[first:last])
+
+    position_operations = {
+        "POSITION_RETURN",
+        "HOLDING_PERIOD",
+        "PEAK_RETURN",
+        "DRAWDOWN_FROM_PEAK",
+    }
+
+    for instant, current_events in events_at.items():
+        session_days = {bar.session_date_et for bar in current_events}
+        if len(session_days) != 1:
+            raise AssertionError(f"execution instant spans sessions: {instant}")
+        session_day = session_days.pop()
+        _opens_at, closes_at = session_hours[session_day]
+        for bar in current_events:
+            fill_probe = instant if instant < closes_at else bar.starts_at
+            if exact_stage_allowed(
+                bars_by_pair,
+                required_pairs=required_pairs,
+                session_hours=session_hours,
+                session_date=session_day,
+                instant=fill_probe,
+            ):
+                process_bar(bar)
+
+        held = {
+            instrument_id
+            for instrument_id, quantity in quantities.items()
+            if quantity > 0
+        }
+        for instrument_id in set(tracked_cycle) - held:
+            tracked_cycle.pop(instrument_id, None)
+            peak_price.pop(instrument_id, None)
+            holding_bars = {
+                key: value
+                for key, value in holding_bars.items()
+                if key[0] != instrument_id
+            }
+        current_prices: dict[str, Decimal] = {}
+        for bar in current_events:
+            current_prices[bar.instrument_id] = bar.close
+        for instrument_id in current_prices:
+            if instrument_id not in held:
+                continue
+            quantity = quantities[instrument_id]
+            average = money(costs[instrument_id] / quantity)
+            cycle = opened_cycles[instrument_id]
+            if tracked_cycle.get(instrument_id) != cycle:
+                tracked_cycle[instrument_id] = cycle
+                peak_price[instrument_id] = average
+                holding_bars = {
+                    key: value
+                    for key, value in holding_bars.items()
+                    if key[0] != instrument_id
+                }
+        for bar in current_events:
+            if bar.instrument_id in held:
+                key = (bar.instrument_id, bar.resolution)
+                holding_bars[key] = holding_bars.get(key, 0) + 1
+
+        day_position = session_index[session_day]
+        previous_day = session_dates[day_position - 1] if day_position else None
+        following_day = (
+            session_dates[day_position + 1]
+            if day_position + 1 < len(session_dates)
+            else None
+        )
+        new_day = last_schedule_date != session_day
+        schedule_values: dict[str, Decimal | int | bool] = {
+            "sessionClose": instant >= session_hours[session_day][1],
+            "newTradingDay": new_day,
+            "tradingDayIndex": day_position + 1,
+            "weekFirstTradingDay": new_day
+            and (
+                previous_day is None
+                or previous_day.isocalendar()[:2] != session_day.isocalendar()[:2]
+            ),
+            "monthFirstTradingDay": new_day
+            and (
+                previous_day is None
+                or (previous_day.year, previous_day.month)
+                != (session_day.year, session_day.month)
+            ),
+            "monthLastTradingDay": new_day
+            and (
+                following_day is None
+                or (following_day.year, following_day.month)
+                != (session_day.year, session_day.month)
+            ),
+        }
+        position_values: dict[str, dict[str, Decimal | int | bool]] = {}
+        for instrument_id, price in current_prices.items():
+            if instrument_id not in held:
+                continue
+            quantity = quantities[instrument_id]
+            average = money(costs[instrument_id] / quantity)
+            peak = max(peak_price.get(instrument_id, average), price)
+            peak_price[instrument_id] = peak
+            opened_day = opened_cycles[instrument_id].astimezone(ET).date()
+            position_values[instrument_id] = {
+                "averageEntryPrice": average,
+                "returnPercent": money((price - average) * Decimal(100) / average),
+                "peakReturnPercent": money((peak - average) * Decimal(100) / average),
+                "drawdownPercent": money((peak - price) * Decimal(100) / peak),
+                "holdingTradingDays": max(
+                    0, session_index[session_day] - session_index[opened_day]
+                ),
+                **{
+                    f"holdingBars.{resolution}": holding_bars.get(
+                        (instrument_id, resolution), 0
+                    )
+                    for resolution in ("30m", "1h", "4h", "1d")
+                },
+            }
+
+        if not exact_stage_allowed(
+            bars_by_pair,
+            required_pairs=required_pairs,
+            session_hours=session_hours,
+            session_date=session_day,
+            instant=instant,
+        ):
+            for flow, _budget_cap_bps, _resolution in flow_entries:
+                for instrument_id in sorted(
+                    (str(value) for value in flow["officialInstrumentIds"]),
+                    key=uuid.UUID,
+                ):
+                    opportunities.append(
+                        {
+                            "occurredAt": _timestamp(instant),
+                            "instrumentId": instrument_id,
+                            "flowId": str(flow["key"]),
+                            "conditionOutcome": "SKIPPED_DATA_GAP",
+                            "candidateOutcome": "NONE",
+                            "firstFailureOperation": None,
+                        }
+                    )
+            continue
+        last_schedule_date = session_day
+
+        observed_identities = {
+            instrument_id: opened_cycles[instrument_id]
+            for instrument_id in position_values
+        }
+        for instrument_id in set(position_gate_identities) | set(observed_identities):
+            current_identity = observed_identities.get(instrument_id)
+            if position_gate_identities.get(instrument_id) == current_identity:
+                continue
+            position_gate_identities[instrument_id] = current_identity
+            gates = {
+                key: value for key, value in gates.items() if key[1] != instrument_id
+            }
+
+        evaluated: list[
+            tuple[
+                Mapping[str, Any],
+                int,
+                str,
+                str,
+                str,
+                list[list[str | int]],
+                dict[str, Any],
+            ]
+        ] = []
+        for flow, budget_cap_bps, resolution in flow_entries:
+            conditions = [
+                step
+                for step in flow["steps"]
+                if step["operation"] != "EMIT_ORDER_CANDIDATE"
+            ]
+            terminal = next(
+                step
+                for step in flow["steps"]
+                if step["operation"] == "EMIT_ORDER_CANDIDATE"
+            )
+            for instrument_id in sorted(
+                (str(value) for value in flow["officialInstrumentIds"]),
+                key=uuid.UUID,
+            ):
+                visible = visible_bars(instrument_id, resolution, instant)
+                verified: list[list[str | int]] = []
+                condition_outcome = "TRUE"
+                failure: str | None = None
+                for step in conditions:
+                    if (
+                        step["operation"] in position_operations
+                        and instrument_id not in position_values
+                    ):
+                        condition_outcome = "INPUT_MISSING"
+                        failure = str(step["operation"])
+                        break
+                    try:
+                        passed = evaluate_trigger_step(
+                            step,
+                            visible,
+                            as_of=instant,
+                            feature_values=visible_features(
+                                instrument_id, step, instant
+                            ),
+                            position_values=position_values.get(instrument_id, {}),
+                            schedule_values=schedule_values,
+                        )
+                    except TriggerInputMissing:
+                        condition_outcome = "WARMUP"
+                        failure = str(step["operation"])
+                        break
+                    if not passed:
+                        condition_outcome = "FALSE"
+                        failure = str(step["operation"])
+                        break
+                    verified.append([int(step["sequence"]), str(step["operation"])])
+                opportunity = {
+                    "occurredAt": _timestamp(instant),
+                    "instrumentId": instrument_id,
+                    "flowId": str(flow["key"]),
+                    "conditionOutcome": condition_outcome,
+                    "candidateOutcome": "NONE",
+                    "firstFailureOperation": failure,
+                }
+                opportunities.append(opportunity)
+                evaluated.append(
+                    (
+                        flow,
+                        budget_cap_bps,
+                        resolution,
+                        instrument_id,
+                        condition_outcome,
+                        verified,
+                        opportunity,
+                    )
+                )
+
+        candidate_day = session_day
+        eligible_at = instant
+        if instant >= session_hours[session_day][1]:
+            candidate_day = next_session[session_day]
+            if candidate_day is not None:
+                eligible_at = session_hours[candidate_day][0]
+        if candidate_day is None:
+            for (
+                _flow,
+                _cap,
+                _resolution,
+                _instrument,
+                outcome,
+                _steps,
+                item,
+            ) in evaluated:
+                if outcome == "TRUE":
+                    item["candidateOutcome"] = "NO_NEXT_SESSION"
+            continue
+
+        survivor_counts: dict[str, int] = Counter(
+            str(flow["key"])
+            for flow, _cap, _resolution, _instrument, outcome, _steps, _item in evaluated
+            if outcome == "TRUE"
+        )
+        for (
+            flow,
+            budget_cap_bps,
+            resolution,
+            instrument_id,
+            outcome,
+            verified,
+            item,
+        ) in evaluated:
+            gate_key = (str(flow["key"]), instrument_id)
+            gate = gates.setdefault(gate_key, _ExpectedExecutionGate())
+            if outcome != "TRUE":
+                gate.observe(outcome)
+                continue
+            terminal = next(
+                step
+                for step in flow["steps"]
+                if step["operation"] == "EMIT_ORDER_CANDIDATE"
+            )
+            if not gate.accepts(
+                terminal, session_index=session_index.get(candidate_day)
+            ):
+                item["candidateOutcome"] = "GATED"
+                continue
+            visible = visible_bars(instrument_id, resolution, instant)
+            if not visible:
+                item["conditionOutcome"] = "WARMUP"
+                item["candidateOutcome"] = "NONE"
+                item["firstFailureOperation"] = "REFERENCE_PRICE"
+                continue
+            reference_price = money(visible[-1].close)
+            arguments = terminal["arguments"]
+            side = str(arguments["side"])
+            if side == "SELL":
+                raw_quantity = (
+                    quantities[instrument_id]
+                    * Decimal(str(arguments.get("orderPercent", "100")))
+                    / Decimal(100)
+                )
+            else:
+                budget = money(
+                    buying_power() * Decimal(budget_cap_bps) / Decimal(10_000)
+                )
+                denominator = survivor_counts[str(flow["key"])]
+                share = money(
+                    budget
+                    / Decimal(denominator)
+                    * Decimal(str(arguments.get("orderPercent", "100")))
+                    / Decimal(100)
+                )
+                unit_price = expected_fill_values(
+                    base_price=reference_price,
+                    quantity=Decimal(1),
+                    side="BUY",
+                    slippage_bps=slippage_bps,
+                    fee_rate=fee_rate,
+                )[0]
+                unit_cash = money(unit_price + money(unit_price * fee_rate))
+                raw_quantity = share / unit_cash
+            quantity = raw_quantity.to_integral_value(rounding=ROUND_FLOOR)
+            if quantity <= 0:
+                item["candidateOutcome"] = "DECLINED_ZERO_SIZE"
+                continue
+            order_id = expected_trigger_order_id(
+                run_snapshot_id=run_snapshot_id,
+                plan_checksum=plan_checksum,
+                occurred_at=instant,
+                flow_id=str(flow["key"]),
+                instrument_id=instrument_id,
+            )
+            identity = f"{flow['key']}|{instrument_id}|{_timestamp(instant)}"
+            order = _ExpectedOrder(
+                semantic_identity=identity,
+                order_id=order_id,
+                flow_id=str(flow["key"]),
+                instrument_id=instrument_id,
+                side=side,
+                order_type=str(arguments["orderType"]),
+                quantity=quantity,
+                remaining_quantity=quantity,
+                filled_quantity=Decimal(0),
+                submitted_at=instant,
+                eligible_at=eligible_at,
+                expires_at=session_hours[candidate_day][1],
+                reference_price=reference_price,
+                max_position_notional=money(
+                    initial_cash
+                    * Decimal(str(arguments.get("maxPositionPercent", "100")))
+                    / Decimal(100)
+                ),
+                submission_sequence=len(orders) + 1,
+            )
+            orders.append(order)
+            order_alias_by_id[order_id] = identity
+            reserve_or_reject(order)
+            kind = "ORDER" if order.status == "ACCEPTED" else "REJECTION"
+            item["candidateOutcome"] = kind
+            alias = f"{identity}|{kind}|{_timestamp(instant)}"
+            append_trade(order, kind=kind, occurred_at=instant, alias=alias)
+            triggered_operations.update(
+                str(step["operation"])
+                for step in flow["steps"]
+                if step["operation"] != "EMIT_ORDER_CANDIDATE"
+            )
+            trigger_semantics.append(
+                {
+                    "occurredAt": _timestamp(instant),
+                    "instrumentId": instrument_id,
+                    "flowId": str(flow["key"]),
+                    "recordKind": kind,
+                    "conditions": verified,
+                }
+            )
+
+    order_semantics = [
+        {
+            "identity": order.semantic_identity,
+            "flowId": order.flow_id,
+            "instrumentId": order.instrument_id,
+            "side": order.side,
+            "orderType": order.order_type,
+            "quantityMode": "WHOLE_SHARES",
+            "quantity": _decimal_text(order.quantity),
+            "filledQuantity": _decimal_text(order.filled_quantity),
+            "remainingQuantity": _decimal_text(order.remaining_quantity),
+            "submittedAt": _timestamp(order.submitted_at),
+            "eligibleAt": _timestamp(order.eligible_at),
+            "expiresAt": _timestamp(order.expires_at),
+            "referencePrice": _money_text(order.reference_price),
+            "maxPositionNotional": _money_text(order.max_position_notional),
+            "submissionSequence": order.submission_sequence,
+            "timeInForce": "DAY",
+            "status": order.status,
+            "reasonCode": order.reason_code,
+        }
+        for order in orders
+    ]
+    opportunity_counts = Counter(
+        f"{item['conditionOutcome']}:{item['candidateOutcome']}"
+        for item in opportunities
+    )
+    return {
+        "opportunities": sorted_trigger_semantics(opportunities),
+        "opportunityCounts": dict(sorted(opportunity_counts.items())),
+        "tradePayloads": trade_payloads,
+        "tradeSemantics": trade_semantics,
+        "ledger": sorted_trigger_semantics(ledger_semantics),
+        "ledgerSemantics": sorted_trigger_semantics(canonical_ledger_semantics),
+        "positions": position_semantics,
+        "orders": order_semantics,
+        "cancellations": sorted_trigger_semantics(cancellation_semantics),
+        "fillSemantics": fill_semantics,
+        "fillStates": fill_states,
+        "triggerSemantics": sorted_trigger_semantics(trigger_semantics),
+        "triggeredOperations": sorted(triggered_operations),
+        "recordAliases": record_alias_by_key,
+        "orderAliases": order_alias_by_id,
+        "fillAliases": fill_alias_by_id,
+        "ledgerAliases": ledger_alias_by_id,
+    }
+
+
 def _load_exact_parquet(
     s3: Any, row: Mapping[str, Any]
 ) -> tuple[list[dict[str, Any]], Mapping[bytes, bytes]]:
@@ -1545,7 +2911,11 @@ def reconcile(run_id: str) -> dict[str, Any]:
         details = (
             connection.execute(
                 text(
-                    """select dm.record_type, dm.row_count manifest_row_count,
+                    """select dm.id::text detail_manifest_id, dm.object_id::text object_id,
+                          dm.record_type, dm.week_start_date, dm.period_start,
+                          dm.period_end, dm.part_number, dm.schema_version,
+                          dm.source_set_hash detail_source_set_hash, dm.detail_hash,
+                          dm.row_count manifest_row_count,
                           o.bucket_name, o.object_key, o.provider_version_id,
                           o.content_hash, o.byte_size, o.row_count
                    from backtest.detail_manifests dm
@@ -1755,6 +3125,7 @@ def reconcile(run_id: str) -> dict[str, Any]:
 
     result_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
     result_versions: list[list[str]] = []
+    detail_objects: list[dict[str, Any]] = []
     run_snapshot_metadata: set[str] = set()
     for detail in details:
         if int(detail["manifest_row_count"]) != int(detail["row_count"]):
@@ -1762,6 +3133,7 @@ def reconcile(run_id: str) -> dict[str, Any]:
         rows, metadata = _load_exact_parquet(s3, detail)
         record_type = detail["record_type"]
         result_rows[record_type].extend(rows)
+        detail_objects.append({"detail": detail, "rows": rows})
         result_versions.append(
             [
                 detail["object_key"],
@@ -1827,6 +3199,90 @@ def reconcile(run_id: str) -> dict[str, Any]:
             raise AssertionError(
                 f"unbalanced double-entry transaction {transaction_id}: {debit} != {credit}"
             )
+
+    independent = independent_execution_oracle(
+        plan_document=run["plan_document"],
+        market_bars=market_bars,
+        feature_series=feature_series,
+        session_hours=session_hours,
+        period_start=policy_period_start,
+        period_end=policy_period_end,
+        run_snapshot_id=run_snapshot_id,
+        plan_checksum=str(run["compiled_plan_checksum"]),
+        initial_cash=Decimal(str(run["initial_cash_amount"])),
+        fee_rate=Decimal(str(policy["feeRate"])),
+        slippage_bps=Decimal(str(policy["slippageRateBps"])),
+    )
+    actual_execution_payloads = [
+        {
+            key: value
+            for key, value in payload.items()
+            if key not in {"run_snapshot_id", "record_id"}
+        }
+        for payload in trade_payloads
+    ]
+    require_exact_semantic_set(
+        independent["tradePayloads"],
+        actual_execution_payloads,
+        family="independently enumerated execution",
+    )
+    actual_ledger_semantics = [
+        {
+            "transactionId": str(row["transaction_id"]),
+            "postedAt": _timestamp(row["posted_at"]),
+            "sourceEventId": str(row["source_event_id"]),
+            "entryId": str(row["entry_id"]),
+            "accountCode": str(row["account_code"]),
+            "direction": str(row["direction"]),
+            "amount": _money_text(Decimal(row["amount"])),
+            "currency": str(row["currency"]),
+        }
+        for row in result_rows["REPLAY_LEDGER"]
+    ]
+    require_exact_semantic_set(
+        independent["ledger"],
+        actual_ledger_semantics,
+        family="independently derived ledger legs",
+    )
+    actual_position_semantics: list[dict[str, Any]] = []
+    trade_record_aliases: dict[str, str] = {}
+    for trade in trades:
+        alias_key = (
+            str(trade["kind"]),
+            str(trade["order_id"]),
+            _timestamp(trade["occurred_at"]),
+            str(trade["fill_id"] or ""),
+        )
+        alias = independent["recordAliases"].get(alias_key)
+        if alias is None:
+            raise AssertionError(
+                "persisted position record has no independently derived execution alias: "
+                f"{alias_key}"
+            )
+        trade_record_aliases[str(trade["record_id"])] = alias
+        actual_position_semantics.append(
+            {
+                "after": alias,
+                "occurredAt": _timestamp(trade["occurred_at"]),
+                "cashAfter": _money_text(Decimal(trade["cash_after"])),
+                "holdings": [
+                    [
+                        str(item["instrument_id"]),
+                        _decimal_text(Decimal(item["quantity"])),
+                        _money_text(Decimal(item["cost_basis"])),
+                    ]
+                    for item in sorted(
+                        positions.get(trade["record_id"], ()),
+                        key=lambda value: value["instrument_id"],
+                    )
+                ],
+            }
+        )
+    require_exact_semantic_set(
+        independent["positions"],
+        actual_position_semantics,
+        family="independently derived position snapshots",
+    )
 
     fills = [row for row in trades if row["kind"] == "FILL"]
     orders = {row["order_id"]: row for row in trades if row["kind"] == "ORDER"}
@@ -1966,74 +3422,34 @@ def reconcile(run_id: str) -> dict[str, Any]:
             }
         )
 
-    position_trigger_contexts, schedule_trigger_contexts = build_trigger_contexts(
-        market_bars,
-        fill_states=fill_states,
-        session_hours=session_hours,
-        period_start=policy_period_start,
-        period_end=policy_period_end,
+    require_exact_semantic_set(
+        independent["fillSemantics"],
+        fill_semantics,
+        family="independently derived fill path and allocation",
     )
-    plan_flows = [
-        flow
-        for partition in run["plan_document"]["executionSnapshot"]["partitions"]
-        for flow in partition["flows"]
-    ]
-    flows_by_instrument: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
-    flow_resolutions: dict[str, str] = {}
-    for flow in plan_flows:
-        flow_id = str(flow["key"])
-        flow_resolutions[flow_id] = exact_flow_resolution(
-            flow,
-            set(manifest_ids_by_pair),
-        )
-        for instrument_id in flow["officialInstrumentIds"]:
-            flows_by_instrument[str(instrument_id)].append(flow)
-
-    bars_by_pair: dict[tuple[str, str], list[MarketBar]] = defaultdict(list)
-    for bar in market_bars:
-        bars_by_pair[(bar.instrument_id, bar.resolution)].append(bar)
-    bar_end_times: dict[tuple[str, str], list[datetime]] = {}
-    for key, values in bars_by_pair.items():
-        values.sort(key=lambda item: (item.ends_at, item.starts_at))
-        bar_end_times[key] = [item.ends_at for item in values]
-    feature_start_times = {
-        key: [item[0] for item in values] for key, values in feature_series.items()
-    }
-
-    def visible_flow_bars(
-        instrument_id: str,
-        flow: Mapping[str, Any],
-        instant: datetime,
-    ) -> tuple[MarketBar, ...]:
-        key = (instrument_id, flow_resolutions[str(flow["key"])])
-        values = bars_by_pair.get(key, [])
-        cursor = bisect_right(bar_end_times.get(key, []), instant)
-        return tuple(values[max(0, cursor - 180) : cursor])
-
-    def visible_feature_values(
-        instrument_id: str,
-        step: Mapping[str, Any],
-        instant: datetime,
-    ) -> tuple[tuple[datetime, Decimal], ...]:
-        if step["operation"] != "RSI_CROSS":
-            return ()
-        resolution = str(step["arguments"]["resolution"]).lower()
-        key = (instrument_id, "RSI_14", resolution)
-        values = feature_series.get(key, [])
-        starts = feature_start_times.get(key, [])
-        if not values:
-            raise AssertionError(
-                f"RSI trigger has no exact pinned feature series: {key}"
-            )
-        span = {
-            "30m": timedelta(minutes=30),
-            "1h": timedelta(hours=1),
-            "4h": timedelta(hours=4),
-            "1d": timedelta(days=1),
-        }[resolution]
-        first = bisect_left(starts, instant - span * 2)
-        last = bisect_left(starts, instant)
-        return tuple(values[first:last])
+    fill_semantics = list(independent["fillSemantics"])
+    fill_states = list(independent["fillStates"])
+    total_fees = sum((Decimal(row["fee"]) for row in fill_semantics), Decimal(0))
+    total_slippage = sum(
+        (Decimal(row["slippage"]) for row in fill_semantics), Decimal(0)
+    )
+    realized_pnl = sum(
+        (Decimal(row["realizedPnl"]) for row in fill_semantics), Decimal(0)
+    )
+    closing_count = sum(row["side"] == "SELL" for row in fill_semantics)
+    winning_count = sum(
+        row["side"] == "SELL" and Decimal(row["realizedPnl"]) > 0
+        for row in fill_semantics
+    )
+    losing_count = sum(
+        row["side"] == "SELL" and Decimal(row["realizedPnl"]) < 0
+        for row in fill_semantics
+    )
+    cash = (
+        money(Decimal(str(run["initial_cash_amount"])))
+        if not fill_states
+        else fill_states[-1][1]
+    )
 
     candidate_records = sorted(
         (row for row in trades if row["kind"] in {"ORDER", "REJECTION"}),
@@ -2041,123 +3457,11 @@ def reconcile(run_id: str) -> dict[str, Any]:
     )
     if len({row["order_id"] for row in candidate_records}) != len(candidate_records):
         raise AssertionError("persisted candidate order identities are not unique")
-    trigger_semantics: list[dict[str, Any]] = []
-    triggered_operations: set[str] = set()
-    for record in candidate_records:
-        instrument_id = str(record["instrument_id"])
-        instant = record["occurred_at"]
-        matching_flows = [
-            flow
-            for flow in flows_by_instrument.get(instrument_id, ())
-            if expected_trigger_order_id(
-                run_snapshot_id=run_snapshot_id,
-                plan_checksum=str(run["compiled_plan_checksum"]),
-                occurred_at=instant,
-                flow_id=str(flow["key"]),
-                instrument_id=instrument_id,
-            )
-            == str(record["order_id"])
-        ]
-        if len(matching_flows) != 1:
-            raise AssertionError(
-                "persisted candidate does not bind to exactly one compiled flow: "
-                f"{record['order_id']} matches={len(matching_flows)}"
-            )
-        flow = matching_flows[0]
-        bars = visible_flow_bars(instrument_id, flow, instant)
-        conditions = [
-            step
-            for step in flow["steps"]
-            if step["operation"] != "EMIT_ORDER_CANDIDATE"
-        ]
-        verified_steps: list[list[str | int]] = []
-        for step in conditions:
-            passed = evaluate_trigger_step(
-                step,
-                bars,
-                as_of=instant,
-                feature_values=visible_feature_values(instrument_id, step, instant),
-                position_values=position_trigger_contexts.get(
-                    (instant, instrument_id), {}
-                ),
-                schedule_values=schedule_trigger_contexts.get(instant, {}),
-            )
-            if not passed:
-                raise AssertionError(
-                    "persisted candidate has a false independently recomputed condition: "
-                    f"{record['order_id']} {flow['key']} sequence={step['sequence']} "
-                    f"operation={step['operation']}"
-                )
-            triggered_operations.add(str(step["operation"]))
-            verified_steps.append([int(step["sequence"]), str(step["operation"])])
-        trigger_semantics.append(
-            {
-                "occurredAt": _timestamp(instant),
-                "instrumentId": instrument_id,
-                "flowId": str(flow["key"]),
-                "recordKind": str(record["kind"]),
-                "conditions": verified_steps,
-            }
-        )
-
-    no_signal_evaluations_checked = 0
-    if not candidate_records:
-        for flow in plan_flows:
-            instrument_ids = [str(value) for value in flow["officialInstrumentIds"]]
-            conditions = [
-                step
-                for step in flow["steps"]
-                if step["operation"] != "EMIT_ORDER_CANDIDATE"
-            ]
-            resolution = flow_resolutions[str(flow["key"])]
-            for instrument_id in instrument_ids:
-                for bar in bars_by_pair.get((instrument_id, resolution), ()):
-                    instant = bar.ends_at
-                    if not policy_period_start <= instant < policy_period_end:
-                        continue
-                    no_signal_evaluations_checked += 1
-                    context = position_trigger_contexts.get(
-                        (instant, instrument_id), {}
-                    )
-                    if (
-                        any(
-                            step["operation"]
-                            in {
-                                "POSITION_RETURN",
-                                "HOLDING_PERIOD",
-                                "PEAK_RETURN",
-                                "DRAWDOWN_FROM_PEAK",
-                            }
-                            for step in conditions
-                        )
-                        and not context
-                    ):
-                        continue
-                    visible = visible_flow_bars(instrument_id, flow, instant)
-                    try:
-                        passed = all(
-                            evaluate_trigger_step(
-                                step,
-                                visible,
-                                as_of=instant,
-                                feature_values=visible_feature_values(
-                                    instrument_id, step, instant
-                                ),
-                                position_values=context,
-                                schedule_values=schedule_trigger_contexts.get(
-                                    instant, {}
-                                ),
-                            )
-                            for step in conditions
-                        )
-                    except TriggerInputMissing:
-                        continue
-                    if passed:
-                        raise AssertionError(
-                            "no-signal result has an independently true compiled flow: "
-                            f"{flow['key']} at {_timestamp(instant)}"
-                        )
-    trigger_semantics = sorted_trigger_semantics(trigger_semantics)
+    trigger_semantics = list(independent["triggerSemantics"])
+    triggered_operations = set(independent["triggeredOperations"])
+    opportunities = list(independent["opportunities"])
+    opportunity_counts = dict(independent["opportunityCounts"])
+    no_signal_evaluations_checked = len(opportunities)
 
     calculation = sorted(
         result_rows["CALCULATION_SERIES"], key=lambda item: item["occurred_at"]
@@ -2290,8 +3594,15 @@ def reconcile(run_id: str) -> dict[str, Any]:
             if step["operation"] != "EMIT_ORDER_CANDIDATE"
         }
     )
-    semantic_result_hash = _canonical_hash(
-        {
+    result_object_semantics = canonical_result_object_semantics(
+        detail_objects,
+        trade_record_aliases=trade_record_aliases,
+        order_aliases=independent["orderAliases"],
+        fill_aliases=independent["fillAliases"],
+        ledger_aliases=independent["ledgerAliases"],
+    )
+    semantic_material = {
+        "inputs": {
             "compiledPlanChecksum": run["compiled_plan_checksum"],
             "executionPolicyVersion": run["execution_policy_version"],
             "sourceObjects": sorted(source_versions),
@@ -2299,12 +3610,18 @@ def reconcile(run_id: str) -> dict[str, Any]:
                 [row["object_key"], row["provider_version_id"], row["content_hash"]]
                 for row in feature_objects
             ),
-            "triggers": trigger_semantics,
-            "fills": fill_semantics,
-            "equityCurve": equity_curve,
-            "metrics": metrics_material,
-        }
-    )
+        },
+        "opportunities": opportunities,
+        "orders": independent["orders"],
+        "cancellations": independent["cancellations"],
+        "fills": fill_semantics,
+        "ledger": independent["ledgerSemantics"],
+        "positions": independent["positions"],
+        "equityCurve": equity_curve,
+        "metrics": metrics_material,
+        "resultObjects": result_object_semantics,
+    }
+    semantic_result_hash = semantic_repetition_hash(semantic_material)
     return {
         "runId": run_id,
         "status": "VERIFIED",
@@ -2325,6 +3642,9 @@ def reconcile(run_id: str) -> dict[str, Any]:
         "triggeredOperations": sorted(triggered_operations),
         "triggerSemanticHash": _canonical_hash(trigger_semantics),
         "noSignalEvaluationsChecked": no_signal_evaluations_checked,
+        "opportunityCount": len(opportunities),
+        "opportunityOutcomeCounts": opportunity_counts,
+        "opportunitySemanticHash": _canonical_hash(opportunities),
         "orderCount": len(orders),
         "cancellationCount": sum(row["kind"] == "CANCELLATION" for row in trades),
         "fillCount": len(fills),
@@ -2343,6 +3663,11 @@ def reconcile(run_id: str) -> dict[str, Any]:
         "fillSemanticHash": _canonical_hash(fill_semantics),
         "equityCurveHash": _canonical_hash(equity_curve),
         "metricSemanticHash": _canonical_hash(metrics_material),
+        "orderSemanticHash": _canonical_hash(independent["orders"]),
+        "cancellationSemanticHash": _canonical_hash(independent["cancellations"]),
+        "ledgerSemanticHash": _canonical_hash(independent["ledgerSemantics"]),
+        "positionSemanticHash": _canonical_hash(independent["positions"]),
+        "resultObjectSemanticHash": _canonical_hash(result_object_semantics),
         "totalFees": _money_text(total_fees),
         "totalSlippage": _money_text(total_slippage),
         "realizedPnl": _money_text(realized_pnl),

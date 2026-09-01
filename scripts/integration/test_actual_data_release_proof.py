@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
+import pytest
 from actual_data_release_proof import (
     FIXED_PERIOD,
     ActualDataApi,
@@ -22,17 +22,17 @@ BOT_IDS = {
 }
 
 
-def test_local_queue_timeout_cannot_expire_the_required_sequential_proof_batch() -> (
-    None
-):
+def test_local_recovery_uses_lane_capacity_and_prompt_dispatch_grace() -> None:
     compose = Path(__file__).resolve().parents[2] / "compose.back.yml"
-    matched = re.search(
-        r'BACKTEST_QUEUED_TIMEOUT_SECONDS:\s*"(?P<seconds>[0-9]+)"',
-        compose.read_text(encoding="utf-8"),
-    )
+    document = compose.read_text(encoding="utf-8")
 
-    assert matched is not None
-    assert int(matched.group("seconds")) >= 7200
+    assert "BACKTEST_QUEUED_TIMEOUT_SECONDS" not in document
+    assert 'BACKTEST_BASIC_QUEUE_DISPATCH_TIMEOUT_SECONDS: "300"' in document
+    assert 'BACKTEST_CUSTOM_QUEUE_DISPATCH_TIMEOUT_SECONDS: "600"' in document
+    assert 'BACKTEST_COMPETITION_QUEUE_DISPATCH_TIMEOUT_SECONDS: "180"' in document
+    assert 'BACKTEST_BASIC_MAX_CONCURRENCY: "2"' in document
+    assert 'BACKTEST_CUSTOM_MAX_CONCURRENCY: "1"' in document
+    assert 'BACKTEST_COMPETITION_MAX_CONCURRENCY: "1"' in document
 
 
 def test_schedule_is_twenty_fresh_sequential_requests_over_every_required_shape() -> (
@@ -124,3 +124,19 @@ def test_submit_schedule_proves_same_key_replay_and_conflicting_payload_rejectio
     assert proof.conflict_rejected is True
     assert len(api.calls) == 4
     assert api.calls[-1][2] == {"periodStart": "2016-01-01", "periodEnd": "2026-07-28"}
+
+
+def test_submit_schedule_rejects_a_reused_initial_submission() -> None:
+    schedule = build_run_schedule(BOT_IDS, batch_seed="task4-20260901")[:2]
+
+    class ReusedApi:
+        def submit(self, bot_id, key, period):
+            del bot_id, period
+            return {
+                "messageId": f"message-{key}",
+                "eventType": "CUSTOM_BACKTEST_REQUESTED",
+                "created": False,
+            }
+
+    with pytest.raises(AssertionError, match="fresh.*created=true"):
+        submit_schedule(ReusedApi(), schedule)

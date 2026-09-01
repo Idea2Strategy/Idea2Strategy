@@ -139,6 +139,11 @@ def submit_schedule(
     message_ids: list[str] = []
     for request in schedule:
         receipt = api.submit(request.bot_id, request.idempotency_key, request.period)
+        if receipt.get("created") is not True:
+            raise AssertionError(
+                "fresh release-proof submission did not return created=true: "
+                f"{request.idempotency_key}"
+            )
         message_ids.append(str(receipt["messageId"]))
 
     first = schedule[0]

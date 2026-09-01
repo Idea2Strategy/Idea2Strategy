@@ -4,8 +4,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from actual_data_receipt_collector import (
+    FIXED_EVALUATION_END,
+    FIXED_EVALUATION_START,
+    assert_batch_identity,
+    assert_persisted_warning,
     assert_repeatable_evidence,
     assert_sequential_terminal_runs,
+    expected_batch_keys,
 )
 
 
@@ -62,3 +67,48 @@ def test_repetition_proof_rejects_a_terminal_shape_without_full_input_evidence()
 
     with pytest.raises(AssertionError, match="five-part"):
         assert_repeatable_evidence(incomplete, {"typed-unavailable": 3})
+
+
+def test_collector_binds_the_exact_batch_keys_and_requested_interval() -> None:
+    seed = "proof"
+    keys = expected_batch_keys(seed)
+    rows = [
+        {
+            "idempotency_key": key,
+            "evaluation_start": FIXED_EVALUATION_START,
+            "evaluation_end": FIXED_EVALUATION_END,
+        }
+        for key in keys
+    ]
+
+    assert_batch_identity(rows, seed)
+    rows[0]["evaluation_end"] = FIXED_EVALUATION_END - timedelta(days=1)
+    with pytest.raises(AssertionError, match="fixed requested interval"):
+        assert_batch_identity(rows, seed)
+    rows[0]["evaluation_end"] = FIXED_EVALUATION_END
+    rows[0]["idempotency_key"] = "proof-unrelated-01"
+    with pytest.raises(AssertionError, match="exact current batch"):
+        assert_batch_identity(rows, seed)
+
+
+def test_warning_proof_requires_the_persisted_contradictory_finding() -> None:
+    assert_persisted_warning(
+        {
+            "status": "VALID",
+            "result_document": {
+                "findings": [{"severity": "WARNING", "code": "CONTRADICTORY_CONDITION"}]
+            },
+        }
+    )
+
+    with pytest.raises(AssertionError, match="CONTRADICTORY_CONDITION"):
+        assert_persisted_warning(
+            {
+                "status": "VALID",
+                "result_document": {
+                    "findings": [
+                        {"severity": "WARNING", "code": "SELL_REQUIRES_POSITION"}
+                    ]
+                },
+            }
+        )

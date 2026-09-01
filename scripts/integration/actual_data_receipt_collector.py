@@ -8,7 +8,7 @@ import json
 import os
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,8 @@ REPEATED_COUNTS = {
     scenario: count for scenario, count in EXPECTED_COUNTS.items() if count == 3
 }
 TERMINAL_STATES = {"COMPLETED", "UNAVAILABLE"}
+FIXED_EVALUATION_START = date(2016, 1, 1)
+FIXED_EVALUATION_END = date(2026, 7, 29)
 
 
 def _canonical_hash(value: Any) -> str:
@@ -59,6 +61,57 @@ def _scenario_for(key: str, seed: str) -> str:
         ):
             return scenario
     raise AssertionError("release-proof run has an unknown scenario identity")
+
+
+def expected_batch_keys(seed: str) -> tuple[str, ...]:
+    """Enumerate the exact finite batch identity; a SQL prefix is not an identity."""
+    if not seed.strip():
+        raise ValueError("release-proof batch seed is empty")
+    return tuple(
+        f"{seed}-{scenario}-{repetition:02d}"
+        for scenario, count in EXPECTED_COUNTS.items()
+        for repetition in range(1, count + 1)
+    )
+
+
+def assert_batch_identity(rows: Sequence[Mapping[str, Any]], seed: str) -> None:
+    expected = set(expected_batch_keys(seed))
+    actual = {str(row["idempotency_key"]) for row in rows}
+    if actual != expected or len(rows) != len(expected):
+        raise AssertionError(
+            "release-proof rows do not bind the exact current batch: "
+            f"missing={sorted(expected - actual)} extra={sorted(actual - expected)}"
+        )
+    if any(
+        row.get("evaluation_start") != FIXED_EVALUATION_START
+        or row.get("evaluation_end") != FIXED_EVALUATION_END
+        for row in rows
+    ):
+        raise AssertionError(
+            "release-proof row differs from the fixed requested interval"
+        )
+
+
+def assert_persisted_warning(row: Mapping[str, Any]) -> dict[str, str]:
+    """Require the exact durable warning finding, not a strategy label or VALID alone."""
+    findings = row.get("result_document", {}).get("findings", [])
+    matches = [
+        finding
+        for finding in findings
+        if isinstance(finding, Mapping)
+        and finding.get("severity") == "WARNING"
+        and finding.get("code") == "CONTRADICTORY_CONDITION"
+    ]
+    if row.get("status") != "VALID" or len(matches) != 1:
+        raise AssertionError(
+            "warning-bearing validation lacks one persisted "
+            "CONTRADICTORY_CONDITION WARNING"
+        )
+    return {
+        "status": "VALID",
+        "severity": "WARNING",
+        "code": "CONTRADICTORY_CONDITION",
+    }
 
 
 def assert_sequential_terminal_runs(rows: Sequence[Mapping[str, Any]]) -> None:
@@ -102,7 +155,9 @@ def assert_repeatable_evidence(
             raise AssertionError(f"semantic result repetition differs: {scenario}")
 
 
-def _load_rows(seed: str) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+def _load_rows(
+    seed: str,
+) -> tuple[list[dict[str, Any]], dict[str, list[str]], dict[str, Any]]:
     database_url = os.environ.get(
         "DATABASE_URL", os.environ.get("BACKTEST_DATABASE_URL", "")
     )
@@ -112,22 +167,25 @@ def _load_rows(seed: str) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
         database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
     engine = create_engine(database_url)
     with engine.connect() as connection:
+        batch_keys = expected_batch_keys(seed)
         rows = [
             dict(row)
             for row in connection.execute(
                 text(
                     """select r.id::text run_id, r.idempotency_key, r.lane, r.status,
+                              r.evaluation_start, r.evaluation_end,
                               r.queued_at, r.started_at, r.completed_at, r.failure_code,
                               r.missing_requirements, r.result_hash,
                               p.input_bundle_fingerprint
                        from backtest.runs r
                        join backtest.run_input_pins p on p.run_id=r.id
-                       where r.idempotency_key like :prefix
+                       where r.idempotency_key = any(cast(:batch_keys as text[]))
                        order by r.queued_at,r.id"""
                 ),
-                {"prefix": f"{seed}-%"},
+                {"batch_keys": list(batch_keys)},
             ).mappings()
         ]
+        assert_batch_identity(rows, seed)
         run_ids = [row["run_id"] for row in rows]
         attempts: dict[str, list[str]] = defaultdict(list)
         if run_ids:
@@ -144,11 +202,34 @@ def _load_rows(seed: str) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
                 if attempt["completed_at"] is None:
                     raise AssertionError("release-proof attempt is not terminal")
                 attempts[attempt["run_id"]].append(attempt["attempt_id"])
-    return rows, attempts
+        warning = dict(
+            connection.execute(
+                text(
+                    """select v.status, v.result_document
+                         from backtest.runs r
+                         join bot.bots b on b.id=r.bot_id
+                         join strategy.strategies s on s.name=b.name
+                         join strategy.strategy_documents d on d.strategy_id=s.id
+                         join strategy.validation_runs v
+                           on v.strategy_id=s.id
+                          and v.requested_edit_sequence=d.edit_sequence
+                          and v.semantic_hash=d.semantic_hash
+                        where r.idempotency_key=:warning_key
+                          and d.presentation_document->>'localSampleKey'='RELEASE_PROOF_WARNING'
+                          and v.status='VALID'
+                        order by v.completed_at desc, v.id
+                        limit 1"""
+                ),
+                {"warning_key": f"{seed}-warning-bearing-01"},
+            )
+            .mappings()
+            .one()
+        )
+    return rows, attempts, warning
 
 
 def collect(seed: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    rows, attempts = _load_rows(seed)
+    rows, attempts, warning_row = _load_rows(seed)
     if len(rows) != sum(EXPECTED_COUNTS.values()):
         raise AssertionError(
             "release-proof corpus does not contain exactly twenty runs"
@@ -161,6 +242,7 @@ def collect(seed: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if dict(scenario_counts) != EXPECTED_COUNTS:
         raise AssertionError("release-proof scenario distribution differs")
     assert_sequential_terminal_runs(rows)
+    persisted_warning = assert_persisted_warning(warning_row)
 
     receipts: list[dict[str, Any]] = []
     audit_runs: list[dict[str, Any]] = []
@@ -273,6 +355,7 @@ def collect(seed: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         "scenarioCounts": dict(sorted(scenario_counts.items())),
         "terminalCounts": dict(sorted(Counter(row["status"] for row in rows).items())),
         "sequentialCustomLane": True,
+        "persistedWarning": persisted_warning,
         "repetitionEvidence": repetition_evidence,
         "runs": audit_runs,
     }

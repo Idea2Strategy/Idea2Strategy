@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 from collections import deque
 from datetime import UTC, date, datetime, timedelta
@@ -13,12 +14,15 @@ from backtest_actual_run_oracle import (
     TriggerInputMissing,
     bar_identity,
     build_trigger_contexts,
+    canonical_result_object_semantics,
     consume_fifo,
     evaluate_trigger_step,
     exact_fill_bar,
     exact_flow_resolution,
     exact_object_bytes,
+    exact_stage_allowed,
     expected_fill_values,
+    expected_market_fill_path,
     expected_trigger_order_id,
     infer_side,
     latest_market_bars_by_instant,
@@ -26,8 +30,10 @@ from backtest_actual_run_oracle import (
     minimum_manifest_cover,
     order_fills_by_cash_chain,
     require_exact_manifest_pairs,
+    require_exact_semantic_set,
     result_hash_evidence,
     row_is_replay_eligible,
+    semantic_repetition_hash,
     sorted_trigger_semantics,
     validate_result_families,
 )
@@ -324,6 +330,35 @@ def test_trigger_warmup_gap_is_typed_separately_from_a_false_condition() -> None
         )
 
 
+def test_shared_stage_is_blocked_by_any_required_series_gap_until_session_close() -> (
+    None
+):
+    aapl = _trigger_bar(offset=0, close="100")
+    session_hours = {
+        aapl.session_date_et: (
+            aapl.starts_at,
+            datetime(2024, 1, 2, 21, tzinfo=UTC),
+        )
+    }
+    required = {("instrument-1", "30m"), ("instrument-2", "1d")}
+    series_bars = {("instrument-1", "30m"): (aapl,)}
+
+    assert not exact_stage_allowed(
+        series_bars,
+        required_pairs=required,
+        session_hours=session_hours,
+        session_date=aapl.session_date_et,
+        instant=aapl.ends_at,
+    )
+    assert exact_stage_allowed(
+        series_bars,
+        required_pairs=required,
+        session_hours=session_hours,
+        session_date=aapl.session_date_et,
+        instant=session_hours[aapl.session_date_et][1],
+    )
+
+
 def test_trigger_semantics_ignore_run_specific_record_order_at_same_instant() -> None:
     first = {
         "occurredAt": "2024-01-02T15:00:00Z",
@@ -473,6 +508,43 @@ def test_partial_fill_matches_its_own_later_exact_bar_not_only_the_first_bar() -
         )
         == later
     )
+
+
+def test_fill_path_starts_from_submission_semantics_and_each_bar_capacity() -> None:
+    bars = tuple(
+        _trigger_bar(offset=index, close=str(100 + index), volume="20")
+        for index in range(4)
+    )
+    order_at = bars[0].ends_at
+
+    expected = expected_market_fill_path(
+        bars,
+        instrument_id="instrument-1",
+        eligible_at=order_at,
+        expires_at=bars[-1].ends_at + timedelta(microseconds=1),
+        quantity=Decimal(5),
+    )
+
+    assert expected == [
+        {
+            "barStartsAt": "2024-01-02T15:00:00Z",
+            "occurredAt": "2024-01-02T15:30:00Z",
+            "basePrice": "101.00000000",
+            "quantity": "2",
+        },
+        {
+            "barStartsAt": "2024-01-02T15:30:00Z",
+            "occurredAt": "2024-01-02T16:00:00Z",
+            "basePrice": "102.00000000",
+            "quantity": "2",
+        },
+        {
+            "barStartsAt": "2024-01-02T16:00:00Z",
+            "occurredAt": "2024-01-02T16:30:00Z",
+            "basePrice": "103.00000000",
+            "quantity": "1",
+        },
+    ]
 
 
 def test_daily_bar_uses_explicit_session_close_not_provider_source_minutes() -> None:
@@ -661,3 +733,147 @@ def test_result_hash_chain_uses_exact_decimal_text_and_canonical_material() -> N
         "input_hash": "cb61fd3ebb2c718bab44f04ce0afebdc7b7711a5baa4abbc7db51284e9ce949a",
         "result_hash": "78598b3c777879c28029d513c7e00d057b3f9d074f8eb3c2206ded5b47ab64c2",
     }
+
+
+def test_exact_semantic_set_detects_dropped_trigger_order_and_fill_mutations() -> None:
+    expected = [
+        {
+            "kind": "ORDER",
+            "order": "flow-a|aapl|2024-01-02T15:00:00Z",
+            "occurredAt": "2024-01-02T15:00:00Z",
+        },
+        {
+            "kind": "FILL",
+            "order": "flow-a|aapl|2024-01-02T15:00:00Z",
+            "occurredAt": "2024-01-02T15:30:00Z",
+            "quantity": "1",
+        },
+    ]
+
+    require_exact_semantic_set(expected, expected, family="execution")
+    with pytest.raises(AssertionError, match="execution.*missing"):
+        require_exact_semantic_set(expected, expected[1:], family="execution")
+    delayed = [dict(item) for item in expected]
+    delayed[1]["occurredAt"] = "2024-01-02T16:00:00Z"
+    with pytest.raises(AssertionError, match="execution.*missing.*extra"):
+        require_exact_semantic_set(expected, delayed, family="execution")
+    wrong_partial = [dict(item) for item in expected]
+    wrong_partial[1]["quantity"] = "2"
+    with pytest.raises(AssertionError, match="execution.*missing.*extra"):
+        require_exact_semantic_set(expected, wrong_partial, family="execution")
+
+
+def test_semantic_repetition_hash_changes_for_every_complete_result_family() -> None:
+    material = {
+        "inputs": {"plan": "plan-v1", "sources": [["bars", "v1", "sha256:a"]]},
+        "opportunities": [
+            {"flow": "buy", "at": "2024-01-02T15:00:00Z", "truth": "TRUE"}
+        ],
+        "orders": [
+            {
+                "identity": "buy|aapl|at",
+                "status": "ACCEPTED",
+                "submittedAt": "signal",
+                "eligibleAt": "next-bar",
+                "expiresAt": "close",
+                "quantity": "3",
+            }
+        ],
+        "cancellations": [
+            {
+                "identity": "sell|aapl|at",
+                "status": "EXPIRED",
+                "occurredAt": "close",
+                "remainingQuantity": "2",
+            }
+        ],
+        "fills": [{"identity": "buy|aapl|at#1", "quantity": "1", "at": "next-bar"}],
+        "ledger": [
+            {"transaction": "buy|aapl|at#1", "legs": [["SECURITY", "DEBIT", "100"]]}
+        ],
+        "positions": [{"after": "buy|aapl|at#1", "holdings": [["aapl", "1", "100"]]}],
+        "equityCurve": [{"at": "close", "equity": "1000"}],
+        "metrics": [["fillCount", "1"]],
+        "resultObjects": [
+            {"identity": "TRADE_DETAIL:1", "version": "semantic-v1", "rows": 2}
+        ],
+    }
+    baseline = semantic_repetition_hash(material)
+
+    for family, value in material.items():
+        mutated = {key: value for key, value in material.items()}
+        mutated[family] = [] if isinstance(value, list) else {}
+        assert semantic_repetition_hash(mutated) != baseline, family
+
+    nested_mutations = (
+        ("orders", "expiresAt", "later-close"),
+        ("cancellations", "occurredAt", "later-close"),
+        ("fills", "quantity", "2"),
+        ("ledger", "legs", []),
+        ("positions", "holdings", []),
+        ("resultObjects", "identity", "TRADE_DETAIL:2"),
+        ("resultObjects", "version", "semantic-v2"),
+    )
+    for family, field, replacement in nested_mutations:
+        mutated = copy.deepcopy(material)
+        mutated[family][0][field] = replacement
+        assert semantic_repetition_hash(mutated) != baseline, f"{family}.{field}"
+
+    incomplete = dict(material)
+    incomplete.pop("ledger")
+    with pytest.raises(AssertionError, match="omits families.*ledger"):
+        semantic_repetition_hash(incomplete)
+
+
+def test_result_object_versions_alias_only_run_derived_record_identities() -> None:
+    instant = datetime(2024, 1, 2, 15, tzinfo=UTC)
+
+    def physical_object(version: str, record: str, order: str, cash: str):
+        return {
+            "detail": {
+                "record_type": "TRADE_DETAIL",
+                "week_start_date": date(2024, 1, 1),
+                "period_start": instant,
+                "period_end": instant,
+                "part_number": 1,
+                "schema_version": "1.0.0",
+                "row_count": 1,
+                "provider_version_id": version,
+            },
+            "rows": [
+                {
+                    "record_id": record,
+                    "order_id": order,
+                    "fill_id": None,
+                    "occurred_at": instant,
+                    "kind": "ORDER",
+                    "cash_after": cash,
+                }
+            ],
+        }
+
+    first = canonical_result_object_semantics(
+        [physical_object("provider-v1", "record-v1", "order-v1", "100")],
+        trade_record_aliases={"record-v1": "flow|ORDER"},
+        order_aliases={"order-v1": "flow"},
+        fill_aliases={},
+        ledger_aliases={},
+    )
+    repeated = canonical_result_object_semantics(
+        [physical_object("provider-v2", "record-v2", "order-v2", "100")],
+        trade_record_aliases={"record-v2": "flow|ORDER"},
+        order_aliases={"order-v2": "flow"},
+        fill_aliases={},
+        ledger_aliases={},
+    )
+    mutated_value = canonical_result_object_semantics(
+        [physical_object("provider-v3", "record-v3", "order-v3", "99")],
+        trade_record_aliases={"record-v3": "flow|ORDER"},
+        order_aliases={"order-v3": "flow"},
+        fill_aliases={},
+        ledger_aliases={},
+    )
+
+    assert first == repeated
+    assert first != mutated_value
+    assert first[0]["version"]["exactProviderVersionVerified"] is True
