@@ -70,9 +70,41 @@ class ScenarioResult:
     resource_peak: Mapping[str, float]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.attempt_lineage, (list, tuple)) or not self.attempt_lineage:
+            raise ValueError(_INVALID_RECEIPT)
+        if not all(isinstance(attempt, str) and attempt.strip() for attempt in self.attempt_lineage):
+            raise ValueError(_INVALID_RECEIPT)
+        if not isinstance(self.trade_kind_counts, Mapping):
+            raise TypeError(_INVALID_RECEIPT)
+        if not all(
+            isinstance(kind, str)
+            and kind.strip()
+            and isinstance(count, int)
+            and not isinstance(count, bool)
+            and count >= 0
+            for kind, count in self.trade_kind_counts.items()
+        ):
+            raise ValueError(_INVALID_RECEIPT)
+        if not isinstance(self.resource_peak, Mapping):
+            raise TypeError(_INVALID_RECEIPT)
+        if not all(
+            isinstance(resource, str)
+            and resource.strip()
+            and isinstance(peak, (int, float))
+            and not isinstance(peak, bool)
+            and math.isfinite(peak)
+            and peak >= 0
+            for resource, peak in self.resource_peak.items()
+        ):
+            raise ValueError(_INVALID_RECEIPT)
+
         object.__setattr__(self, "attempt_lineage", tuple(self.attempt_lineage))
         object.__setattr__(self, "trade_kind_counts", MappingProxyType(dict(self.trade_kind_counts)))
-        object.__setattr__(self, "resource_peak", MappingProxyType(dict(self.resource_peak)))
+        object.__setattr__(
+            self,
+            "resource_peak",
+            MappingProxyType({resource: float(peak) for resource, peak in self.resource_peak.items()}),
+        )
 
 
 def _invalid_receipt() -> ValueError:

@@ -223,6 +223,36 @@ def test_terminal_assertion_coerces_nested_evidence_to_an_immutable_snapshot() -
     assert dict(result.resource_peak) == {"peak_rss_bytes": 4096.0}
 
 
+# Production mutation caught: shallow wrappers accept nested mutable values that can
+# later alter evidence despite the outer ScenarioResult being frozen.
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("attempt_lineage", ("attempt-0001", ["attempt-0002"])),
+        ("trade_kind_counts", {"BUY": {"count": 1}}),
+        ("resource_peak", {"peak_rss_bytes": [4096]}),
+    ],
+)
+def test_scenario_result_rejects_nested_mutable_evidence_at_construction(
+    field: str, value: object
+) -> None:
+    with pytest.raises(ValueError, match="^invalid release-proof receipt$") as error:
+        ScenarioResult(**valid_result(**{field: value}))
+
+    assert repr(value) not in str(error.value)
+
+
+# Production mutation caught: exact nested validation accidentally rejects scalar
+# attempt IDs and numeric counters/peaks, or changes their deterministic JSON shape.
+def test_direct_scenario_result_keeps_valid_scalar_evidence_serializable(tmp_path) -> None:
+    receipt_path = tmp_path / "receipt.json"
+    direct_result = ScenarioResult(**valid_result())
+
+    write_sanitized_receipt(receipt_path, [direct_result])
+
+    assert json.loads(receipt_path.read_text(encoding="utf-8"))["results"][0] == valid_result()
+
+
 # Production mutation caught: scanning only keys would allow a credential placed in
 # an otherwise approved receipt field to persist in the evidence artifact.
 @pytest.mark.parametrize(
