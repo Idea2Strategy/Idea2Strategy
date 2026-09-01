@@ -579,6 +579,8 @@ def exact_flow_resolution(
 def require_exact_manifest_pairs(
     plan_document: Mapping[str, Any],
     pinned_pairs: set[tuple[str, str]],
+    *,
+    allow_ambiguous_position_only: bool = False,
 ) -> set[tuple[str, str]]:
     """Require pins for every exact plan clock and reject unrelated pair pins."""
     required: set[tuple[str, str]] = set()
@@ -608,6 +610,8 @@ def require_exact_manifest_pairs(
                 instrument_id = str(instrument_id_value)
                 resolutions = explicit or explicit_by_instrument[instrument_id]
                 if len(resolutions) != 1:
+                    if allow_ambiguous_position_only and not explicit:
+                        continue
                     raise AssertionError(
                         "position-only flow does not resolve from one exact partition clock: "
                         f"{flow['key']} {instrument_id} {sorted(resolutions)}"
@@ -1293,6 +1297,174 @@ def _record_payload(
             payload[key] = _decimal_text(Decimal(row[key]))
         payload["fill_id"] = row["fill_id"]
     return payload
+
+
+def reconcile_terminal_inputs(run_id: str) -> dict[str, Any]:
+    """Verify exact immutable inputs even when execution terminates unavailable."""
+    database_url = os.environ.get(
+        "DATABASE_URL", os.environ.get("BACKTEST_DATABASE_URL", "")
+    )
+    if not database_url:
+        raise RuntimeError("DATABASE_URL or BACKTEST_DATABASE_URL is required")
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=os.environ.get(
+            "S3_ENDPOINT_URL", os.environ.get("AWS_ENDPOINT_URL_S3")
+        ),
+        region_name=os.environ.get(
+            "S3_REGION", os.environ.get("AWS_REGION", "us-east-1")
+        ),
+    )
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        run = (
+            connection.execute(
+                text(
+                    """select r.status, r.failure_code, r.missing_requirements,
+                              r.evaluation_start, r.evaluation_end,
+                              p.input_bundle_fingerprint, p.compiled_plan_checksum,
+                              p.strategy_snapshot_hash, p.execution_policy_version,
+                              ib.as_of_at, ep.policy_document,
+                              lp.plan_checksum launch_plan_checksum, lp.plan_document
+                       from backtest.runs r
+                       join backtest.run_input_pins p on p.run_id=r.id
+                       join backtest.input_bundles ib on ib.id=p.input_bundle_id
+                       join backtest.execution_policy_versions ep
+                         on ep.version=p.execution_policy_version
+                       join bot.launch_contract_plans lp on lp.bot_id=r.bot_id
+                       where r.id=:run_id"""
+                ),
+                {"run_id": run_id},
+            )
+            .mappings()
+            .one()
+        )
+        if run["status"] not in {"COMPLETED", "UNAVAILABLE"}:
+            raise AssertionError(
+                f"run has no auditable terminal inputs: {run['status']}"
+            )
+        allow_ambiguous = run["status"] == "UNAVAILABLE"
+        if allow_ambiguous and (
+            run["failure_code"] != "REQUIRED_INPUT_UNAVAILABLE"
+            or run["missing_requirements"] != ["REQUIRED_INPUT_UNAVAILABLE"]
+        ):
+            raise AssertionError("unavailable input terminal material is not canonical")
+        if str(run["compiled_plan_checksum"]).removeprefix("sha256:") != str(
+            run["launch_plan_checksum"]
+        ).removeprefix("sha256:"):
+            raise AssertionError(
+                "launch plan checksum differs from the immutable run pin"
+            )
+        sources = (
+            connection.execute(
+                text(
+                    """select m.id::text manifest_id,
+                              m.instrument_id::text instrument_id,
+                              m.resolution, m.revision_number,
+                              m.period_start, m.period_end, m.available_at,
+                              m.dataset_hash, d.locked_dataset_hash,
+                              o.bucket_name, o.object_key, o.provider_version_id,
+                              o.content_hash, o.byte_size, o.row_count
+                       from backtest.run_input_pins p
+                       join backtest.input_datasets d
+                         on d.input_bundle_id=p.input_bundle_id
+                       join market_data.dataset_manifests m
+                         on m.id=d.dataset_manifest_id
+                       join market_data.dataset_objects mo
+                         on mo.dataset_manifest_id=m.id
+                       join storage.objects o on o.id=mo.object_id
+                       where p.run_id=:run_id
+                       order by m.instrument_id,m.resolution,m.period_start,o.object_key"""
+                ),
+                {"run_id": run_id},
+            )
+            .mappings()
+            .all()
+        )
+        candidates = _candidate_rows(connection, run["as_of_at"])
+
+    manifest_ids_by_pair: dict[tuple[str, str], set[str]] = defaultdict(set)
+    source_versions: list[list[str]] = []
+    source_rows = 0
+    for source in sources:
+        instrument_id = source["instrument_id"]
+        if instrument_id is None:
+            raise AssertionError("exact-instrument run pinned a universe-wide manifest")
+        if str(source["locked_dataset_hash"]).removeprefix("sha256:") != str(
+            source["dataset_hash"]
+        ).removeprefix("sha256:"):
+            raise AssertionError("locked dataset hash differs from its pinned manifest")
+        rows, metadata = _load_exact_parquet(s3, source)
+        resolution = str(source["resolution"]).lower()
+        if metadata.get(b"resolution", b"").decode() != resolution:
+            raise AssertionError(
+                "source Parquet resolution metadata differs from its manifest"
+            )
+        manifest_ids_by_pair[(instrument_id, resolution)].add(source["manifest_id"])
+        source_versions.append(
+            [
+                source["object_key"],
+                source["provider_version_id"],
+                source["content_hash"],
+            ]
+        )
+        source_rows += len(rows)
+        for row in rows:
+            if str(row["instrument_id"]) != instrument_id:
+                raise AssertionError("source row escaped its exact-instrument manifest")
+            prices = [
+                Decimal(str(row[key])) for key in ("open", "high", "low", "close")
+            ]
+            open_price, high, low, close = prices
+            if (
+                min(prices) <= 0
+                or high < max(open_price, low, close)
+                or low > min(open_price, high, close)
+            ):
+                raise AssertionError("source OHLC invariants failed")
+            if Decimal(str(row["volume"])) < 0:
+                raise AssertionError("source volume is negative")
+
+    required_pairs = require_exact_manifest_pairs(
+        run["plan_document"],
+        set(manifest_ids_by_pair),
+        allow_ambiguous_position_only=allow_ambiguous,
+    )
+    coverage_start = run["evaluation_start"].isoformat()
+    coverage_end = (run["evaluation_end"] + timedelta(days=1)).isoformat()
+    selected_manifest_ids: set[str] = set()
+    for instrument_id, resolution in sorted(required_pairs):
+        actual_ids = manifest_ids_by_pair[(instrument_id, resolution)]
+        cover = minimum_manifest_cover(
+            candidates,
+            instrument_id=instrument_id,
+            resolution=resolution,
+            coverage_start=coverage_start,
+            coverage_end=coverage_end,
+        )
+        expected_ids = {item.manifest_id for item in cover}
+        if actual_ids != expected_ids:
+            raise AssertionError(
+                f"pinned manifests are not the deterministic minimum cover for {instrument_id}/{resolution}: "
+                f"actual={sorted(actual_ids)} expected={sorted(expected_ids)}"
+            )
+        selected_manifest_ids.update(expected_ids)
+
+    return {
+        "status": "VERIFIED_INPUTS",
+        "runId": run_id,
+        "bundleFingerprint": run["input_bundle_fingerprint"],
+        "compiledPlanChecksum": run["compiled_plan_checksum"],
+        "strategySnapshotHash": run["strategy_snapshot_hash"],
+        "executionPolicyVersion": run["execution_policy_version"],
+        "manifestCount": len(selected_manifest_ids),
+        "sourceObjectCount": len(sources),
+        "sourceRowCount": source_rows,
+        "sourceVersionDigest": _canonical_hash(sorted(source_versions)),
+        "requiredPairs": [list(pair) for pair in sorted(required_pairs)],
+    }
 
 
 def reconcile(run_id: str) -> dict[str, Any]:

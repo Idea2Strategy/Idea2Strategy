@@ -249,6 +249,63 @@ def test_required_manifest_pairs_reject_an_omitted_pair_or_unrelated_cross_produ
         )
 
 
+def test_unavailable_input_cover_keeps_every_explicit_pair_without_resolving_ambiguity() -> (
+    None
+):
+    plan = {
+        "executionSnapshot": {
+            "partitions": [
+                {
+                    "flows": [
+                        {
+                            "key": "aapl-30m",
+                            "officialInstrumentIds": ["aapl"],
+                            "steps": [
+                                {
+                                    "operation": "PRICE_COMPARE",
+                                    "arguments": {"resolution": "30m"},
+                                }
+                            ],
+                        },
+                        {
+                            "key": "aapl-1d",
+                            "officialInstrumentIds": ["aapl"],
+                            "steps": [
+                                {
+                                    "operation": "PRICE_COMPARE",
+                                    "arguments": {"resolution": "1d"},
+                                }
+                            ],
+                        },
+                        {
+                            "key": "ambiguous-position-exit",
+                            "officialInstrumentIds": ["aapl"],
+                            "steps": [
+                                {
+                                    "operation": "POSITION_RETURN",
+                                    "arguments": {"thresholdPercent": "1"},
+                                }
+                            ],
+                        },
+                    ]
+                }
+            ]
+        }
+    }
+    pins = {("aapl", "30m"), ("aapl", "1d")}
+
+    with pytest.raises(AssertionError, match="position-only flow"):
+        require_exact_manifest_pairs(plan, pins)
+    assert (
+        require_exact_manifest_pairs(
+            plan,
+            pins,
+            allow_ambiguous_position_only=True,
+        )
+        == pins
+    )
+
+
 def test_trigger_warmup_gap_is_typed_separately_from_a_false_condition() -> None:
     only_bar = _trigger_bar(offset=0, close="100")
 

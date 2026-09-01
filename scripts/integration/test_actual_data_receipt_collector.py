@@ -33,7 +33,7 @@ def test_repetition_proof_compares_inputs_and_semantic_outputs_not_run_hashes() 
     evidence = [
         {
             "scenario": "single-clock",
-            "input": ["bundle", "sources", "plan", "policy"],
+            "input": ["bundle", "sources", "plan", "snapshot", "policy"],
             "semantic": "same-semantic-result",
             "runResultHash": f"run-specific-{index}",
         }
@@ -45,3 +45,20 @@ def test_repetition_proof_compares_inputs_and_semantic_outputs_not_run_hashes() 
     evidence[-1]["semantic"] = "different"
     with pytest.raises(AssertionError, match="semantic"):
         assert_repeatable_evidence(evidence, {"single-clock": 3})
+
+
+def test_repetition_proof_rejects_a_terminal_shape_without_full_input_evidence() -> (
+    None
+):
+    incomplete = [
+        {
+            "scenario": "typed-unavailable",
+            "input": ["bundle-only"],
+            "semantic": "same-terminal-result",
+            "runResultHash": "same-terminal-hash",
+        }
+        for _ in range(3)
+    ]
+
+    with pytest.raises(AssertionError, match="five-part"):
+        assert_repeatable_evidence(incomplete, {"typed-unavailable": 3})

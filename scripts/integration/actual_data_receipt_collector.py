@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from backtest_actual_run_oracle import reconcile
+from backtest_actual_run_oracle import reconcile, reconcile_terminal_inputs
 from release_proof_runner import write_sanitized_receipt
 from sqlalchemy import create_engine, text
 
@@ -92,6 +92,10 @@ def assert_repeatable_evidence(
         items = by_scenario.get(scenario, [])
         if len(items) != expected:
             raise AssertionError(f"repeatable scenario count differs: {scenario}")
+        if any(len(item["input"]) != 5 for item in items):
+            raise AssertionError(
+                f"repeatable scenario has no five-part immutable input evidence: {scenario}"
+            )
         if len({_canonical_hash(item["input"]) for item in items}) != 1:
             raise AssertionError(f"immutable input repetition differs: {scenario}")
         if len({str(item["semantic"]) for item in items}) != 1:
@@ -207,7 +211,7 @@ def collect(seed: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 raise AssertionError(
                     "typed-unavailable terminal fields are inconsistent"
                 )
-            oracle = None
+            oracle = reconcile_terminal_inputs(row["run_id"])
             trade_counts = {
                 kind: 0 for kind in ("ORDER", "FILL", "REJECTION", "CANCELLATION")
             }
@@ -220,7 +224,13 @@ def collect(seed: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             repetition_evidence.append(
                 {
                     "scenario": scenario,
-                    "input": [row["input_bundle_fingerprint"]],
+                    "input": [
+                        oracle["bundleFingerprint"],
+                        oracle["sourceVersionDigest"],
+                        oracle["compiledPlanChecksum"],
+                        oracle["strategySnapshotHash"],
+                        oracle["executionPolicyVersion"],
+                    ],
                     "semantic": _canonical_hash(terminal_material),
                     "runResultHash": receipt_result_hash,
                 }
