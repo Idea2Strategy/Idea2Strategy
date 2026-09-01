@@ -9,8 +9,9 @@ import os
 import re
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 TERMINAL_STATES = frozenset({"COMPLETED", "FAILED", "CANCELLED", "UNAVAILABLE"})
@@ -35,7 +36,9 @@ _SECRET_VALUE = re.compile(
     r"(?:\b(?:bearer|basic)\s+[A-Za-z0-9._~-]{8,}|"
     r"\b(?:password|secret|token|credential|api[-_]?key|cookie|authorization)\s*[:=]\s*\S+|"
     r"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
-    r"xox[baprs]-[A-Za-z0-9-]{8,}|(?:sk|rk)_(?:test|live)_[A-Za-z0-9_-]{8,}))",
+    r"xox[baprs]-[A-Za-z0-9-]{8,}|(?:sk|rk)_(?:test|live)_[A-Za-z0-9_-]{8,}|"
+    r"sk-proj-[A-Za-z0-9_-]{12,}|AKIA[A-Z0-9]{16}|"
+    r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}))",
     re.IGNORECASE,
 )
 _INVALID_RECEIPT = "invalid release-proof receipt"
@@ -60,11 +63,16 @@ class ScenarioResult:
     terminal_state: str
     duration_seconds: float
     run_id: str
-    attempt_lineage: list[str]
+    attempt_lineage: tuple[str, ...]
     result_hash: str
-    trade_kind_counts: dict[str, int]
+    trade_kind_counts: Mapping[str, int]
     failure_reason: str | None
-    resource_peak: dict[str, float]
+    resource_peak: Mapping[str, float]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "attempt_lineage", tuple(self.attempt_lineage))
+        object.__setattr__(self, "trade_kind_counts", MappingProxyType(dict(self.trade_kind_counts)))
+        object.__setattr__(self, "resource_peak", MappingProxyType(dict(self.resource_peak)))
 
 
 def _invalid_receipt() -> ValueError:
@@ -88,9 +96,25 @@ def _is_nonempty_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _result_as_dict(result: ScenarioResult) -> dict[str, Any]:
+    return {
+        "scenario": result.scenario,
+        "seed": result.seed,
+        "input_fingerprint": result.input_fingerprint,
+        "terminal_state": result.terminal_state,
+        "duration_seconds": result.duration_seconds,
+        "run_id": result.run_id,
+        "attempt_lineage": list(result.attempt_lineage),
+        "result_hash": result.result_hash,
+        "trade_kind_counts": dict(result.trade_kind_counts),
+        "failure_reason": result.failure_reason,
+        "resource_peak": dict(result.resource_peak),
+    }
+
+
 def _validated_result(raw_result: ScenarioResult | Mapping[str, Any]) -> ScenarioResult:
     if isinstance(raw_result, ScenarioResult):
-        raw: dict[str, Any] = asdict(raw_result)
+        raw: dict[str, Any] = _result_as_dict(raw_result)
     elif isinstance(raw_result, Mapping):
         raw = dict(raw_result)
     else:
@@ -155,6 +179,10 @@ def _validated_result(raw_result: ScenarioResult | Mapping[str, Any]) -> Scenari
     failure_reason = raw["failure_reason"]
     if failure_reason is not None and not _is_nonempty_text(failure_reason):
         raise _invalid_receipt()
+    if raw["terminal_state"] == "COMPLETED" and failure_reason is not None:
+        raise _invalid_receipt()
+    if raw["terminal_state"] in {"FAILED", "CANCELLED", "UNAVAILABLE"} and failure_reason is None:
+        raise _invalid_receipt()
 
     return ScenarioResult(
         scenario=raw["scenario"],
@@ -163,7 +191,7 @@ def _validated_result(raw_result: ScenarioResult | Mapping[str, Any]) -> Scenari
         terminal_state=raw["terminal_state"],
         duration_seconds=float(duration),
         run_id=raw["run_id"],
-        attempt_lineage=list(attempt_lineage),
+        attempt_lineage=tuple(attempt_lineage),
         result_hash=raw["result_hash"],
         trade_kind_counts=dict(trade_kind_counts),
         failure_reason=failure_reason,
@@ -193,7 +221,7 @@ def write_sanitized_receipt(
 
     validated = assert_terminal_runs(results)
     ordered_results = sorted(
-        (asdict(result) for result in validated),
+        (_result_as_dict(result) for result in validated),
         key=lambda result: json.dumps(result, sort_keys=True, separators=(",", ":")),
     )
     receipt = {"schema_version": 1, "results": ordered_results}
@@ -235,7 +263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     try:
         write_sanitized_receipt(arguments.receipt, (_parse_result(value) for value in arguments.result))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
         parser.error(_INVALID_RECEIPT)
     return 0
 
