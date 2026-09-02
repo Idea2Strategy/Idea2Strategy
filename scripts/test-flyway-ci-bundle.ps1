@@ -63,7 +63,11 @@ $expectedVersionedNames = @(
     'V20260825000000__backend_basic_strategy_execution_completion.sql',
     'V20260825000001__pipeline_basic_strategy_feature_catalog.sql',
     'V20260826010000__backend_bind_room_invitations_to_accounts.sql',
-    'V20260827090000__backtest_add_owner_soft_delete.sql'
+    'V20260827090000__backtest_add_owner_soft_delete.sql',
+    'V20260902000000__pipeline_backtest_object_cleanup_capability.sql',
+    'V20260902000001__pipeline_bind_backtest_cleanup_ownership.sql',
+    'V20260902000002__backtest_narrow_runtime_attempt_writes.sql',
+    'V20260902000003__pipeline_narrow_backtest_object_writes.sql'
 )
 $actualVersionedNames = @($versionedEntries | ForEach-Object { ($_ -split "`t", 2)[0] })
 if ((ConvertTo-Json -Compress $actualVersionedNames) -cne (ConvertTo-Json -Compress $expectedVersionedNames)) {
@@ -261,8 +265,8 @@ try {
     $tableCount = (docker exec -e "PGPASSWORD=$password" $container `
         psql -U $user -d $database -Atc `
         "SELECT count(*) FROM information_schema.tables WHERE table_schema IN ($schemaList) AND table_type = 'BASE TABLE';").Trim()
-    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '183') {
-        throw "Expected 183 application tables after Flyway; found '$tableCount'."
+    if ($LASTEXITCODE -ne 0 -or $tableCount -ne '185') {
+        throw "Expected 185 application tables after Flyway; found '$tableCount'."
     }
 
     docker cp $fixture "${container}:/tmp/partial_fill_allocation_contract.sql"
