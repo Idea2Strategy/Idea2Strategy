@@ -15,7 +15,7 @@ The work is safely committed and pushed, but intentionally **not merged into `de
 
 | Repository | Remote branch | Exact commit |
 |---|---|---|
-| root | `codex/release-proof` | `100e1a20f8ee9a587050c9aee0d016d4394571e2` |
+| root code checkpoint | `codex/release-proof` | contains `100e1a20f8ee9a587050c9aee0d016d4394571e2`; branch HEAD also includes this handoff document |
 | backend | `codex/release-proof-task6-handoff` | `f41d81dcd71c86a7fc0bb9d0d3ad002b4ec7fb15` |
 | backtest-engine | `codex/release-proof-task6-handoff` | `28fc4dfa64606e5ab640cc137e53cb4d629244f6` |
 | ui | `codex/release-proof-task6-handoff` | `8909196198d749848a925380c88d2cc7c7625a37` |
@@ -87,7 +87,7 @@ git status --short --branch
 git submodule status
 ```
 
-Verify the exact root/component SHAs against the table above. If a submodule remote refuses the detached commit, fetch its handoff branch explicitly inside that submodule and checkout the exact SHA.
+Verify that the root history contains the code-checkpoint SHA and that the exact component SHAs match the table above. If a submodule remote refuses the detached commit, fetch its handoff branch explicitly inside that submodule and checkout the exact SHA.
 
 Install/read these skills before acting:
 
@@ -118,4 +118,4 @@ Never copy `.env.docker`, operator keys, passwords, browser storage, access toke
 
 Paste the following into the new Codex task after checking out the branch:
 
-> Continue the active Release-proof Goal from `docs/handoffs/2026-09-02-release-proof-task6-pause.md`. Read that file, `docs/superpowers/specs/2026-08-31-release-proof-verification-design.md`, `docs/superpowers/plans/2026-08-31-release-proof-verification.md`, repository `AGENTS.md`/`CLAUDE.md`, and the SDD ledger if it was copied. Verify that root is exactly `100e1a20f8ee9a587050c9aee0d016d4394571e2` and submodules match the handoff table. Re-create an isolated worktree and re-declare the exact active Goal from the handoff. Resume Task 6 only; do not repeat Tasks 1–5. First reproduce the `/backtests` hard-navigation hang with a focused UI owner test, using the retained symptom that a real run was already `COMPLETED`/`SUCCEEDED` while `backtest-live-workspace` never rendered and `OperationsViews.tsx`/preferences stayed pending or aborted. Fix it test-first, restore verified real data into a task-only Docker stack, rerun the unchanged real strategy→release→worker→result journey, then complete the remaining customer/competition/operator state/action/responsive/accessibility inventory. Generate the sanitized browser receipt and perform a fresh scoped Task 6 review/fix loop. Then execute Tasks 7 and 8 without stopping: soak/repetition/SLO/invariant proof, final full suites and secret scans, whole-branch review, component PRs/checks/merges, refreshed Flyway bundle, root PR merge to remote `develop`, local deploy-like re-verification, URL and freshly generated test account report. Do not mark the Goal complete without actual browser and actual local-data evidence.
+> Continue the active Release-proof Goal from `docs/handoffs/2026-09-02-release-proof-task6-pause.md`. Read that file, `docs/superpowers/specs/2026-08-31-release-proof-verification-design.md`, `docs/superpowers/plans/2026-08-31-release-proof-verification.md`, repository `AGENTS.md`/`CLAUDE.md`, and the SDD ledger if it was copied. Verify that root history contains code checkpoint `100e1a20f8ee9a587050c9aee0d016d4394571e2` and submodules match the handoff table. Re-create an isolated worktree and re-declare the exact active Goal from the handoff. Resume Task 6 only; do not repeat Tasks 1–5. First reproduce the `/backtests` hard-navigation hang with a focused UI owner test, using the retained symptom that a real run was already `COMPLETED`/`SUCCEEDED` while `backtest-live-workspace` never rendered and `OperationsViews.tsx`/preferences stayed pending or aborted. Fix it test-first, restore verified real data into a task-only Docker stack, rerun the unchanged real strategy→release→worker→result journey, then complete the remaining customer/competition/operator state/action/responsive/accessibility inventory. Generate the sanitized browser receipt and perform a fresh scoped Task 6 review/fix loop. Then execute Tasks 7 and 8 without stopping: soak/repetition/SLO/invariant proof, final full suites and secret scans, whole-branch review, component PRs/checks/merges, refreshed Flyway bundle, root PR merge to remote `develop`, local deploy-like re-verification, URL and freshly generated test account report. Do not mark the Goal complete without actual browser and actual local-data evidence.
