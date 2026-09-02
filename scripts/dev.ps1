@@ -59,12 +59,9 @@ function Initialize-EnvironmentFile {
         $placeholder = "__GENERATE_" + $keyName.Replace("IDENTITY_CRYPTO_", "IDENTITY_") + "__"
         $content = $content.Replace($placeholder, (New-LocalDevelopmentSecret))
     }
-    foreach ($keyName in $backtestLocalSecrets) {
-        $content = $content.Replace("__GENERATE_$keyName__", (New-LocalDevelopmentSecret))
-    }
-    foreach ($keyName in $operatorLocalSecrets) {
-        $content = $content.Replace("__GENERATE_${keyName}__", (New-LocalDevelopmentSecret))
-    }
+    $content = Expand-LocalDevelopmentSecretPlaceholders `
+        -Content $content `
+        -Names ($backtestLocalSecrets + $operatorLocalSecrets)
     $encoding = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($environmentFile, $content, $encoding)
     Write-Host "Created local-only environment file: .env.docker" -ForegroundColor Green
