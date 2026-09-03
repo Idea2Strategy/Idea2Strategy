@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 from collections.abc import Mapping
@@ -35,6 +36,13 @@ OBJECT_BYTE_SIZE = 381720
 OBJECT_ROW_COUNT = 3258
 INSTRUMENT_ID = "03e7e685-d6da-4f1f-9279-91477884aab9"
 AS_OF = datetime(2024, 1, 2, 16, 30, tzinfo=timezone.utc)
+
+
+def _container_name(variable: str, default: str) -> str:
+    value = os.environ.get(variable, default).strip()
+    if not value:
+        raise ValueError(f"{variable} must name a Docker container")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +127,7 @@ def _load_manifest_metadata() -> dict[str, object]:
         [
             "docker",
             "exec",
-            "idea2strategy-postgres",
+            _container_name("RELEASE_PROOF_POSTGRES_CONTAINER", "idea2strategy-postgres"),
             "psql",
             "-U",
             "idea2strategy",
@@ -153,13 +161,25 @@ def _fetch_object(path: Path, metadata: Mapping[str, object]) -> None:
         f"{container_path!r}, ExtraArgs={{'VersionId': {metadata['provider_version_id']!r}}})"
     )
     subprocess.run(
-        ["docker", "exec", "idea2strategy-backtest-api", "python", "-c", program],
+        [
+            "docker",
+            "exec",
+            _container_name("RELEASE_PROOF_BACKTEST_API_CONTAINER", "idea2strategy-backtest-api"),
+            "python",
+            "-c",
+            program,
+        ],
         check=True,
         capture_output=True,
         text=True,
     )
     subprocess.run(
-        ["docker", "cp", f"idea2strategy-backtest-api:{container_path}", str(path)],
+        [
+            "docker",
+            "cp",
+            f"{_container_name('RELEASE_PROOF_BACKTEST_API_CONTAINER', 'idea2strategy-backtest-api')}:{container_path}",
+            str(path),
+        ],
         check=True,
         capture_output=True,
         text=True,

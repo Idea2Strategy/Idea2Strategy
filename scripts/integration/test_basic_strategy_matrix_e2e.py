@@ -63,6 +63,18 @@ EXPECTED_ELEMENT_CODES = EXPECTED_CONDITION_CODES | {
     "BASIC_SCHEDULE",
     "BASIC_EQUAL_ALLOCATION_ORDER",
 }
+
+
+def test_stored_snapshot_container_names_allow_an_isolated_stack(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RELEASE_PROOF_POSTGRES_CONTAINER", "task-postgres")
+    monkeypatch.setenv("RELEASE_PROOF_BACKTEST_API_CONTAINER", "task-backtest-api")
+
+    assert stored_snapshot._container_name(
+        "RELEASE_PROOF_POSTGRES_CONTAINER", "idea2strategy-postgres"
+    ) == "task-postgres"
+    assert stored_snapshot._container_name(
+        "RELEASE_PROOF_BACKTEST_API_CONTAINER", "idea2strategy-backtest-api"
+    ) == "task-backtest-api"
 EXPECTED_NUMERIC_PARAMETERS = frozenset(
     {
         ("PRICE_CHANGE_PERCENT", "thresholdPercent"),
