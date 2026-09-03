@@ -422,7 +422,11 @@ services:
       BACKTEST_MAX_TOTAL_CONCURRENCY: "4"
       BACKTEST_MAX_RECEIVE_COUNT: "5"
       BACKTEST_RECOVERY_INTERVAL_SECONDS: "30"
-      BACKTEST_QUEUED_TIMEOUT_SECONDS: "900"
+      # Recovery protects work behind live lane leases/queue heads. These short,
+      # lane-specific values therefore bound only an available dispatch slot.
+      BACKTEST_BASIC_QUEUE_DISPATCH_TIMEOUT_SECONDS: "300"
+      BACKTEST_CUSTOM_QUEUE_DISPATCH_TIMEOUT_SECONDS: "600"
+      BACKTEST_COMPETITION_QUEUE_DISPATCH_TIMEOUT_SECONDS: "180"
       BACKTEST_BASIC_REQUEST_QUEUE_URL: http://localstack:4566/000000000000/backtest-basic-request
       BACKTEST_BASIC_REQUEST_DLQ_URL: http://localstack:4566/000000000000/backtest-basic-request-dlq
       BACKTEST_CUSTOM_REQUEST_QUEUE_URL: http://localstack:4566/000000000000/backtest-custom-request

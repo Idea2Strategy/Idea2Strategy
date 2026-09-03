@@ -6,7 +6,7 @@ const contract = readFileSync(new URL('../contracts/data/backtest-execution.v1.m
 const schema = readFileSync(new URL('../db/schema.dbml', import.meta.url), 'utf8');
 
 test('approved contract binds producer identity, policy, and atomic competition linkage', () => {
-  assert.match(contract, /revision: 3/);
+  assert.match(contract, /revision: 4/);
   assert.match(contract, /stable `runId`/);
   assert.match(contract, /`executionPolicyVersion`/);
   assert.match(contract, /`\(participationId, evaluationPeriodId, runId\)`/);

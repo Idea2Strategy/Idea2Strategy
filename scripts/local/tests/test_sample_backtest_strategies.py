@@ -8,7 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sample_backtest_strategies import (
     SAMPLE_REVISION,
     LocalSampleApi,
+    build_release_proof_samples,
     build_samples,
+    seed_release_proof_samples,
     seed_samples,
 )
 
@@ -20,7 +22,100 @@ INSTRUMENTS = {
     "QQQ": "eac80a3b-662f-432b-9d12-a2a2894c7738",
     "META": "7233ce25-2963-4f55-91cd-907f405c4518",
     "NVDA": "5a214db8-9b32-4534-9b5b-95df27bde5a4",
+    "AMZN": "07adfac0-7aaa-42df-839f-642a0517ce25",
 }
+
+
+def _condition_codes(sample, key: str) -> list[str]:
+    group = next(
+        group
+        for group in sample.semantic_document["groups"]
+        if group["allocationGroupId"] == key
+    )
+    return [
+        block["elementCode"]
+        for block in group["blocks"]
+        if block["elementCode"] != "BASIC_EQUAL_ALLOCATION_ORDER"
+    ]
+
+
+def test_release_proof_corpus_has_every_required_distinct_strategy_shape() -> None:
+    samples = build_release_proof_samples(CATALOG_ID, INSTRUMENTS)
+
+    assert [sample.key for sample in samples] == [
+        "RELEASE_PROOF_SINGLE_CLOCK",
+        "RELEASE_PROOF_MIXED_CLOCK",
+        "FULL_CATALOG_MIXED_RESOLUTION",
+        "RELEASE_PROOF_WARNING",
+        "RELEASE_PROOF_NO_SIGNAL",
+        "RELEASE_PROOF_UNAVAILABLE_AMBIGUOUS_CLOCK",
+    ]
+    assert _condition_codes(samples[0], "release-proof-single-buy") == [
+        "BASIC_PRICE_COMPARE"
+    ]
+    mixed_resolutions = {
+        block["parameters"]["resolution"]
+        for group in samples[1].semantic_document["groups"]
+        for block in group["blocks"]
+        if "resolution" in block["parameters"]
+    }
+    assert mixed_resolutions == {"30m", "1d"}
+
+
+def test_release_proof_warning_is_a_materialized_numeric_contradiction() -> None:
+    sample = build_release_proof_samples(CATALOG_ID, INSTRUMENTS)[3]
+    group = next(
+        group
+        for group in sample.semantic_document["groups"]
+        if group["allocationGroupId"] == "release-proof-warning-sell"
+    )
+
+    assert [block["elementCode"] for block in group["blocks"][:2]] == [
+        "BASIC_DRAWDOWN_FROM_PEAK",
+        "BASIC_DRAWDOWN_FROM_PEAK",
+    ]
+    assert [block["parameters"] for block in group["blocks"][:2]] == [
+        {"operator": "GTE", "thresholdPercent": "10"},
+        {"operator": "LT", "thresholdPercent": "5"},
+    ]
+
+
+def test_release_proof_no_signal_is_impossible_without_missing_input() -> None:
+    sample = build_release_proof_samples(CATALOG_ID, INSTRUMENTS)[4]
+    group = next(
+        group
+        for group in sample.semantic_document["groups"]
+        if group["allocationGroupId"] == "release-proof-no-signal-buy"
+    )
+
+    assert [block["parameters"]["operator"] for block in group["blocks"][:2]] == [
+        "GT",
+        "LT",
+    ]
+    assert all(
+        block["parameters"]["reference"] == "PREVIOUS_CLOSE"
+        for block in group["blocks"][:2]
+    )
+
+
+def test_release_proof_unavailable_uses_two_actual_clocks_and_a_position_only_flow() -> (
+    None
+):
+    sample = build_release_proof_samples(CATALOG_ID, INSTRUMENTS)[5]
+    groups = sample.semantic_document["groups"]
+
+    assert {
+        block["parameters"]["resolution"]
+        for group in groups
+        for block in group["blocks"]
+        if "resolution" in block["parameters"]
+    } == {"30m", "1d"}
+    assert _condition_codes(sample, "release-proof-unavailable-sell") == [
+        "BASIC_POSITION_RETURN"
+    ]
+    assert {
+        instrument_id for group in groups for instrument_id in group["instrumentIds"]
+    } == {INSTRUMENTS["AAPL"]}
 
 
 def test_samples_are_complex_editable_buy_and_sell_strategies() -> None:
@@ -114,8 +209,7 @@ def test_scheduled_flows_round_trip_with_the_editor_execution_mode() -> None:
             group
             for group in sample.semantic_document["groups"]
             if any(
-                block["elementCode"] == "BASIC_SCHEDULE"
-                for block in group["blocks"]
+                block["elementCode"] == "BASIC_SCHEDULE" for block in group["blocks"]
             )
         ]
         for group in scheduled_groups:
@@ -123,9 +217,9 @@ def test_scheduled_flows_round_trip_with_the_editor_execution_mode() -> None:
             order = group["blocks"][-1]
             assert order["parameters"]["executionMode"] == "주기마다"
             assert (
-                sample.presentation_document["basicEditor"]["snapshot"][
-                    "buySettings"
-                ][group["allocationGroupId"]]["entryMode"]
+                sample.presentation_document["basicEditor"]["snapshot"]["buySettings"][
+                    group["allocationGroupId"]
+                ]["entryMode"]
                 == "주기마다"
             )
 
@@ -262,6 +356,23 @@ def test_seed_creates_validates_and_releases_each_new_sample_once() -> None:
     assert len(api.validated) == 8
     assert len(api.released) == 4
     assert api.lease_released == api.saved
+
+
+def test_release_proof_seed_uses_the_dedicated_six_release_corpus() -> None:
+    api = _RecordingApi()
+
+    receipts = seed_release_proof_samples(api)
+
+    assert [receipt["key"] for receipt in receipts] == [
+        "RELEASE_PROOF_SINGLE_CLOCK",
+        "RELEASE_PROOF_MIXED_CLOCK",
+        "FULL_CATALOG_MIXED_RESOLUTION",
+        "RELEASE_PROOF_WARNING",
+        "RELEASE_PROOF_NO_SIGNAL",
+        "RELEASE_PROOF_UNAVAILABLE_AMBIGUOUS_CLOCK",
+    ]
+    assert len(api.created) == 12
+    assert len(api.released) == 6
 
 
 def test_seed_keeps_a_separate_editable_copy_after_releasing_each_new_sample() -> None:
