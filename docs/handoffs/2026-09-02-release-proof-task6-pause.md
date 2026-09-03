@@ -1,8 +1,8 @@
 # Release-proof Goal handoff — paused during Task 6
 
-**Paused:** 2026-09-02 (Asia/Seoul)  
-**Plan:** `docs/superpowers/plans/2026-08-31-release-proof-verification.md`  
-**Spec:** `docs/superpowers/specs/2026-08-31-release-proof-verification-design.md`  
+**Paused:** 2026-09-02 (Asia/Seoul)
+**Plan:** `docs/superpowers/plans/2026-08-31-release-proof-verification.md`
+**Spec:** `docs/superpowers/specs/2026-08-31-release-proof-verification-design.md`
 **SDD ledger:** `.superpowers/sdd/2026-08-31-release-proof-verification/progress.md` (gitignored; copy separately if the old machine remains available)
 
 ## Active Goal
