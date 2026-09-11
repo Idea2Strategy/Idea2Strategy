@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="225" viewBox="0 0 400 225" role="img" aria-labelledby="title description">
+  <title id="title">기능 시연 GIF 자리</title>
+  <desc id="description">400 × 225 픽셀, 16:9 비율의 GIF를 넣을 공간입니다.</desc>
+  <rect x="0.5" y="0.5" width="399" height="224" rx="8" fill="#f6f8fa" stroke="#d1d9e0" />
+  <rect x="176" y="52" width="48" height="36" rx="7" fill="#ffffff" stroke="#8c959f" stroke-width="2" />
+  <path d="M195 61 L209 70 L195 79 Z" fill="#8c959f" />
+  <text x="200" y="125" fill="#57606a" font-family="Arial, sans-serif" font-size="18" font-weight="600" text-anchor="middle">GIF 준비 중</text>
+  <text x="200" y="151" fill="#6e7781" font-family="Arial, sans-serif" font-size="14" text-anchor="middle">400 × 225 px · 16:9</text>
+</svg>
