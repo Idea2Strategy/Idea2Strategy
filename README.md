@@ -20,14 +20,65 @@
 
 ### 주요 기능
 
-| 기능 | 설명 |
-| :--- | :--- |
-| 🧩 **블록 기반 전략 편집기** | Basic 편집기에서 매수·매도 조건을 조합하고, 규칙을 검증해 전략을 작성합니다. |
-| 🔒 **전략 버전 관리** | 출시한 전략을 변경할 수 없는 버전으로 보관해 실행에 사용한 규칙을 추적합니다. |
-| 📊 **자동·기간 지정 백테스트** | 봇 생성 시 자동 백테스트를 수행하고, 원하는 기간의 과거 데이터로 전략을 검증합니다. |
-| 🤖 **실시간 가상 거래** | 서버에서 봇을 실행·중지하고, 시장 데이터에 따른 전략 평가와 가상 체결을 확인합니다. |
-| 🏆 **방과 성과 비교** | 공통 규칙을 적용하는 방에서 봇을 비교하고, 평가 결과와 리더보드를 확인합니다. |
-| 🔍 **판단·거래 기록 조회** | 전략의 판단 과정, 주문·체결, 포지션과 원장 기록을 연결해 결과를 살펴봅니다. |
+<!-- GIF 영역: 400 × 225 px. 각 img의 src를 준비한 GIF 경로로 교체하고 width와 height를 유지합니다. -->
+<table>
+  <tbody>
+    <tr>
+      <td width="440" height="225" align="center" valign="middle">
+        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="블록 기반 전략 편집기 GIF 자리" />
+      </td>
+      <td width="440" height="225" align="center" valign="middle">
+        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="전략 버전 관리 GIF 자리" />
+      </td>
+    </tr>
+    <tr>
+      <td width="440" height="140" align="center" valign="top">
+        <h3>🧩 블록 기반 전략 편집기</h3>
+        <p>Basic 편집기에서 매수·매도 조건을 조합하고, 규칙을 검증해 전략을 작성합니다.</p>
+      </td>
+      <td width="440" height="140" align="center" valign="top">
+        <h3>🔒 전략 버전 관리</h3>
+        <p>출시한 전략을 변경할 수 없는 버전으로 보관해 실행에 사용한 규칙을 추적합니다.</p>
+      </td>
+    </tr>
+    <tr>
+      <td width="440" height="225" align="center" valign="middle">
+        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="자동·기간 지정 백테스트 GIF 자리" />
+      </td>
+      <td width="440" height="225" align="center" valign="middle">
+        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="실시간 가상 거래 GIF 자리" />
+      </td>
+    </tr>
+    <tr>
+      <td width="440" height="140" align="center" valign="top">
+        <h3>📊 자동·기간 지정 백테스트</h3>
+        <p>봇 생성 시 자동 백테스트를 수행하고, 원하는 기간의 과거 데이터로 전략을 검증합니다.</p>
+      </td>
+      <td width="440" height="140" align="center" valign="top">
+        <h3>🤖 실시간 가상 거래</h3>
+        <p>서버에서 봇을 실행·중지하고, 시장 데이터에 따른 전략 평가와 가상 체결을 확인합니다.</p>
+      </td>
+    </tr>
+    <tr>
+      <td width="440" height="225" align="center" valign="middle">
+        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="방과 성과 비교 GIF 자리" />
+      </td>
+      <td width="440" height="225" align="center" valign="middle">
+        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="판단·거래 기록 조회 GIF 자리" />
+      </td>
+    </tr>
+    <tr>
+      <td width="440" height="140" align="center" valign="top">
+        <h3>🏆 방과 성과 비교</h3>
+        <p>공통 규칙을 적용하는 방에서 봇을 비교하고, 평가 결과와 리더보드를 확인합니다.</p>
+      </td>
+      <td width="440" height="140" align="center" valign="top">
+        <h3>🔍 판단·거래 기록 조회</h3>
+        <p>전략의 판단 과정, 주문·체결, 포지션과 원장 기록을 연결해 결과를 살펴봅니다.</p>
+      </td>
+    </tr>
+  </tbody>
+</table>
 
 ## 팀원 👨‍💻👩‍💻
 
@@ -114,12 +165,12 @@ flowchart LR
 
 | 저장소 | 주요 역할 |
 | :--- | :--- |
+| **root(현재 저장소)** | 제품 정의·계약, DBML, 인프라, Docker 실행 구성, 서브모듈 통합 |
 | [ui](https://github.com/Idea2Strategy/Idea2Strategy-ui) | 전략 편집기, 봇 대시보드, 백테스트, 방·성과, 계정·운영 화면 |
 | [backend](https://github.com/Idea2Strategy/Idea2Strategy-backend) | 사용자 API, 계정·권한, 전략·봇 제어, 방·성과, 운영 배치와 Admin MCP |
 | [trading-engine](https://github.com/Idea2Strategy/Idea2Strategy-trading-engine) | 실시간 시세 수신, 지표·전략 평가, 가상 주문·체결, 포지션·원장 |
 | [backtest-engine](https://github.com/Idea2Strategy/Idea2Strategy-backtest-engine) | 백테스트 API·워커, 과거 데이터 기반 전략 실행과 결과 생성 |
 | [data-pipeline](https://github.com/Idea2Strategy/Idea2Strategy-data-pipeline) | 시장 데이터 수집·검증, 기업행사 처리, Parquet·Manifest 발행 |
-| **root** | 제품 정의·계약, DBML, 인프라, Docker 실행 구성, 서브모듈 통합 |
 
 ### Development 인프라
 
