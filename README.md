@@ -28,40 +28,22 @@
         <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="블록 기반 전략 편집기 GIF 자리" />
       </td>
       <td width="440" height="225" align="center" valign="middle">
-        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="전략 버전 관리 GIF 자리" />
+        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="전략 미리보기 GIF 자리" />
       </td>
     </tr>
     <tr>
       <td width="440" height="140" align="center" valign="top">
-        <h3>🧩 블록 기반 전략 편집기</h3>
-        <p>Basic 편집기에서 매수·매도 조건을 조합하고, 규칙을 검증해 전략을 작성합니다.</p>
+        <h4>블록 기반 전략 편집기</h4>
+        <p><sub>매수·매도 조건을 블록으로 조합하고,</sub><br /><sub>규칙을 검증해 전략을 작성합니다.</sub></p>
       </td>
       <td width="440" height="140" align="center" valign="top">
-        <h3>🔒 전략 버전 관리</h3>
-        <p>출시한 전략을 변경할 수 없는 버전으로 보관해 실행에 사용한 규칙을 추적합니다.</p>
-      </td>
-    </tr>
-    <tr>
-      <td width="440" height="225" align="center" valign="middle">
-        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="자동·기간 지정 백테스트 GIF 자리" />
-      </td>
-      <td width="440" height="225" align="center" valign="middle">
-        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="실시간 가상 거래 GIF 자리" />
-      </td>
-    </tr>
-    <tr>
-      <td width="440" height="140" align="center" valign="top">
-        <h3>📊 자동·기간 지정 백테스트</h3>
-        <p>봇 생성 시 자동 백테스트를 수행하고, 원하는 기간의 과거 데이터로 전략을 검증합니다.</p>
-      </td>
-      <td width="440" height="140" align="center" valign="top">
-        <h3>🤖 실시간 가상 거래</h3>
-        <p>서버에서 봇을 실행·중지하고, 시장 데이터에 따른 전략 평가와 가상 체결을 확인합니다.</p>
+        <h4>전략 미리보기</h4>
+        <p><sub>편집기로 만든 전략으로 투자했을 때의</sub><br /><sub>최근 매수·매도 내역을 미리 확인합니다.</sub></p>
       </td>
     </tr>
     <tr>
       <td width="440" height="225" align="center" valign="middle">
-        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="방과 성과 비교 GIF 자리" />
+        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="백테스트 GIF 자리" />
       </td>
       <td width="440" height="225" align="center" valign="middle">
         <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="판단·거래 기록 조회 GIF 자리" />
@@ -69,12 +51,30 @@
     </tr>
     <tr>
       <td width="440" height="140" align="center" valign="top">
-        <h3>🏆 방과 성과 비교</h3>
-        <p>공통 규칙을 적용하는 방에서 봇을 비교하고, 평가 결과와 리더보드를 확인합니다.</p>
+        <h4>백테스트</h4>
+        <p><sub>봇 생성 시 자동 백테스트를 수행하고,</sub><br /><sub>원하는 기간의 과거 데이터로 전략을 검증합니다.</sub></p>
       </td>
       <td width="440" height="140" align="center" valign="top">
-        <h3>🔍 판단·거래 기록 조회</h3>
-        <p>전략의 판단 과정, 주문·체결, 포지션과 원장 기록을 연결해 결과를 살펴봅니다.</p>
+        <h4>판단·거래 기록 조회</h4>
+        <p><sub>전략의 판단 과정, 주문·체결,</sub><br /><sub>포지션과 원장 기록을 연결해 결과를 살펴봅니다.</sub></p>
+      </td>
+    </tr>
+    <tr>
+      <td width="440" height="225" align="center" valign="middle">
+        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="실시간 가상 거래 GIF 자리" />
+      </td>
+      <td width="440" height="225" align="center" valign="middle">
+        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="대회 GIF 자리" />
+      </td>
+    </tr>
+    <tr>
+      <td width="440" height="140" align="center" valign="top">
+        <h4>실시간 가상 거래</h4>
+        <p><sub>서버에서 봇을 실행·중지하고,</sub><br /><sub>시장 데이터에 따른 전략 평가와 가상 체결을 확인합니다.</sub></p>
+      </td>
+      <td width="440" height="140" align="center" valign="top">
+        <h4>대회</h4>
+        <p><sub>공통 규칙을 적용하는 대회에서 봇의 성과를 비교하고,</sub><br /><sub>평가 결과와 리더보드를 확인합니다.</sub></p>
       </td>
     </tr>
   </tbody>
