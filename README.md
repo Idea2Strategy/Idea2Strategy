@@ -29,17 +29,15 @@
 | 🏆 **방과 성과 비교** | 공통 규칙을 적용하는 방에서 봇을 비교하고, 평가 결과와 리더보드를 확인합니다. |
 | 🔍 **판단·거래 기록 조회** | 전략의 판단 과정, 주문·체결, 포지션과 원장 기록을 연결해 결과를 살펴봅니다. |
 
-지원 대상으로 정한 미국 주식·ETF의 시장 데이터를 사용하며, 거래는 **가상 자금으로 수행하는 모의투자**입니다. 현재 개발 범위는 Basic 전략 중심이며, 상세 범위와 설계 기준은 [제품 정의](specs/product/summary.md)와 [프로젝트 결정 사항](docs/project-decisions.md)에서 확인할 수 있습니다.
-
 ## 팀원 👨‍💻👩‍💻
 
-프로젝트에 참여한 팀원과 초기 담당 영역입니다.
+프로젝트에 참여한 팀원과 담당 역할입니다.
 
-| 계정·운영 | 전략·봇 | 시장·평가 | 데이터·백테스트 | 방·성과 | 거래·인프라 |
+| Project Manager | Frontend | Backend | Backend | Infrastructure | DB / Data |
 | :---: | :---: | :---: | :---: | :---: | :---: |
-| <a href="https://github.com/Juwon-Na"><img src="https://avatars.githubusercontent.com/u/258857238?v=4" width="120" height="120" alt="나주원 GitHub 프로필" /></a> | <a href="https://github.com/hjcud"><img src="https://avatars.githubusercontent.com/u/16863475?v=4" width="120" height="120" alt="손현준 GitHub 프로필" /></a> | <a href="https://github.com/pjy008008"><img src="https://avatars.githubusercontent.com/u/69574758?v=4" width="120" height="120" alt="박준유 GitHub 프로필" /></a> | <a href="https://github.com/SeoDongWi"><img src="https://avatars.githubusercontent.com/u/255266197?v=4" width="120" height="120" alt="서동위 GitHub 프로필" /></a> | <a href="https://github.com/dertz569"><img src="https://avatars.githubusercontent.com/u/105340411?v=4" width="120" height="120" alt="황영우 GitHub 프로필" /></a> | <a href="https://github.com/kcrmin"><img src="https://avatars.githubusercontent.com/u/73128364?v=4" width="120" height="120" alt="민경철 GitHub 프로필" /></a> |
-| [나주원](https://github.com/Juwon-Na) | [손현준](https://github.com/hjcud) | [박준유](https://github.com/pjy008008) | [서동위](https://github.com/SeoDongWi) | [황영우](https://github.com/dertz569) | [민경철](https://github.com/kcrmin) |
-| 인증·권한<br />계정·운영 도구 | 전략 작성·출시<br />봇 제어·CLI | 시세 수신·지표<br />전략 평가 | 과거 데이터 수집<br />백테스트·결과 | 방 생성·참여<br />평가·리더보드 | 가상 체결·원장<br />인프라·릴리스 |
+| <a href="https://github.com/kcrmin"><img src="https://avatars.githubusercontent.com/u/73128364?v=4" width="120" height="120" alt="민경철 GitHub 프로필" /></a> | <a href="https://github.com/SeoDongWi"><img src="https://avatars.githubusercontent.com/u/255266197?v=4" width="120" height="120" alt="서동위 GitHub 프로필" /></a> | <a href="https://github.com/hjcud"><img src="https://avatars.githubusercontent.com/u/16863475?v=4" width="120" height="120" alt="손현준 GitHub 프로필" /></a> | <a href="https://github.com/pjy008008"><img src="https://avatars.githubusercontent.com/u/69574758?v=4" width="120" height="120" alt="박준유 GitHub 프로필" /></a> | <a href="https://github.com/Juwon-Na"><img src="https://avatars.githubusercontent.com/u/258857238?v=4" width="120" height="120" alt="나주원 GitHub 프로필" /></a> | <a href="https://github.com/dertz569"><img src="https://avatars.githubusercontent.com/u/105340411?v=4" width="120" height="120" alt="황영우 GitHub 프로필" /></a> |
+| [민경철](https://github.com/kcrmin) | [서동위](https://github.com/SeoDongWi) | [손현준](https://github.com/hjcud) | [박준유](https://github.com/pjy008008) | [나주원](https://github.com/Juwon-Na) | [황영우](https://github.com/dertz569) |
+| 제품 방향 수립<br />일정·의사결정<br />팀 협업 조율 | 블록형 편집기<br />화면·UX 설계<br />서비스 UI 구현 | 전략·봇·주문<br />체결·성과 기능<br />서버 설계·구현 | 전략·봇·주문<br />체결·성과 기능<br />서버 설계·구현 | 서버·컨테이너<br />배포 환경 구축<br />운영 구조 설계 | 시장 데이터 수집<br />저장·모델 설계<br />실시간 구조 설계 |
 
 ## 프로젝트 기술 스택 💡
 
@@ -74,21 +72,25 @@
 - **Alpaca SDK · pandas · NumPy · PyArrow**로 시장 데이터를 수집·가공하고, **Parquet**와 데이터셋 Manifest로 보관합니다.
 - **pytest · Ruff · mypy**로 테스트, 코드 검사와 타입 검사를 수행합니다.
 
+### 데이터베이스·스토리지
+
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis_7.4-FF4438?style=for-the-badge&logo=redis&logoColor=white)
+![Valkey](https://img.shields.io/badge/Valkey_Serverless-18BDB3?style=for-the-badge&logo=valkey&logoColor=white)
+![Amazon S3](https://img.shields.io/badge/Amazon_S3-569A31?style=for-the-badge)
+![MinIO](https://img.shields.io/badge/MinIO-C72E49?style=for-the-badge&logo=minio&logoColor=white)
+
+- **PostgreSQL 16 · Amazon RDS**: 계정, 전략, 봇, 거래 원장과 실행 상태를 저장합니다.
+- **Redis 7.4 · Valkey Serverless**: 시장 이벤트와 최신 상태를 관리합니다. 로컬에서는 Redis, AWS 환경에서는 Valkey를 사용합니다.
+- **Amazon S3**: 시장 데이터·Parquet, 백테스트 결과와 프론트엔드 정적 파일을 보관합니다.
+- **MinIO**: 로컬 개발에서 시장 데이터와 백테스트 결과를 저장하는 S3 호환 객체 저장소입니다.
+
 ### 인프라·협업
 
 ![AWS](https://img.shields.io/badge/AWS-232F3E?style=for-the-badge)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![Terraform](https://img.shields.io/badge/Terraform-844FBA?style=for-the-badge&logo=terraform&logoColor=white)
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
-
-| 용도 | 구성 |
-| :--- | :--- |
-| 애플리케이션 실행 | EC2, Backtest Auto Scaling Group, ECS Fargate Spot, Docker |
-| 웹 전달 | Route 53, CloudFront, WAF, ACM, S3 |
-| 데이터·메시지 | RDS PostgreSQL 16, S3, SQS, Valkey Serverless |
-| 배포·운영 | GitHub Actions, ECR, Terraform, Systems Manager, CloudWatch, Secrets Manager |
-| 로컬 개발 | Docker Compose, PostgreSQL 16, Redis 7.4, MinIO, LocalStack |
 
 버전은 저장소의 빌드·의존성 설정을 기준으로 정리했습니다. 서비스별 실행 방법은 각 저장소의 README와 [개발 시작 가이드](docs/development-start-guide.md)를 참고해 주세요.
 
