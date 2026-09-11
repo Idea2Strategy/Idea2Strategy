@@ -20,15 +20,15 @@
 
 ### 주요 기능
 
-<!-- GIF 영역: 400 × 225 px. 각 img의 src를 준비한 GIF 경로로 교체하고 width와 height를 유지합니다. -->
+<!-- 화면 영역: 400 × 225 px. 이미지와 GIF는 원본 비율로 표시합니다. -->
 <table>
   <tbody>
     <tr>
       <td width="440" height="225" align="center" valign="middle">
-        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="블록 기반 전략 편집기 GIF 자리" />
+        <img src="docs/assets/features/strategy-editor.png" width="400" alt="블록 기반 전략 편집기 화면" />
       </td>
       <td width="440" height="225" align="center" valign="middle">
-        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="전략 미리보기 GIF 자리" />
+        <img src="docs/assets/features/strategy-preview.png" width="400" alt="전략 미리보기 화면" />
       </td>
     </tr>
     <tr>
@@ -43,10 +43,10 @@
     </tr>
     <tr>
       <td width="440" height="225" align="center" valign="middle">
-        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="백테스트 GIF 자리" />
+        <img src="docs/assets/features/backtest.png" width="400" alt="백테스트 화면" />
       </td>
       <td width="440" height="225" align="center" valign="middle">
-        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="판단·거래 기록 조회 GIF 자리" />
+        <img src="docs/assets/features/judgment-trade-history.png" width="400" alt="판단·거래 기록 조회 화면" />
       </td>
     </tr>
     <tr>
@@ -61,10 +61,10 @@
     </tr>
     <tr>
       <td width="440" height="225" align="center" valign="middle">
-        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="실시간 가상 거래 GIF 자리" />
+        <img src="docs/assets/features/live-paper-trading.png" width="400" alt="실시간 가상 거래 화면" />
       </td>
       <td width="440" height="225" align="center" valign="middle">
-        <img src="docs/assets/feature-demo-placeholder.svg" width="400" height="225" alt="대회 GIF 자리" />
+        <img src="docs/assets/features/competition.gif" width="400" alt="대회 시연 GIF" />
       </td>
     </tr>
     <tr>
