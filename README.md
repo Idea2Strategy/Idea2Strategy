@@ -88,7 +88,7 @@
 | :---: | :---: | :---: | :---: | :---: | :---: |
 | <a href="https://github.com/kcrmin"><img src="https://avatars.githubusercontent.com/u/73128364?v=4" width="120" height="120" alt="민경철 GitHub 프로필" /></a> | <a href="https://github.com/SeoDongWi"><img src="https://avatars.githubusercontent.com/u/255266197?v=4" width="120" height="120" alt="서동위 GitHub 프로필" /></a> | <a href="https://github.com/hjcud"><img src="https://avatars.githubusercontent.com/u/16863475?v=4" width="120" height="120" alt="손현준 GitHub 프로필" /></a> | <a href="https://github.com/pjy008008"><img src="https://avatars.githubusercontent.com/u/69574758?v=4" width="120" height="120" alt="박준유 GitHub 프로필" /></a> | <a href="https://github.com/Juwon-Na"><img src="https://avatars.githubusercontent.com/u/258857238?v=4" width="120" height="120" alt="나주원 GitHub 프로필" /></a> | <a href="https://github.com/dertz569"><img src="https://avatars.githubusercontent.com/u/105340411?v=4" width="120" height="120" alt="황영우 GitHub 프로필" /></a> |
 | [민경철](https://github.com/kcrmin) | [서동위](https://github.com/SeoDongWi) | [손현준](https://github.com/hjcud) | [박준유](https://github.com/pjy008008) | [나주원](https://github.com/Juwon-Na) | [황영우](https://github.com/dertz569) |
-| 백엔드 설계·구현<br />거래·원장 처리<br />서비스 연동 | 블록형 편집기<br />화면·UX 설계<br />서비스 UI 구현 | 전략·봇·주문<br />체결·성과 기능<br />서버 설계·구현 | 전략·봇·주문<br />체결·성과 기능<br />서버 설계·구현<br />시장 데이터 수집<br />파이프라인 구현 | 서버·컨테이너<br />배포 환경 구축<br />운영 구조 설계 | 저장·모델 설계<br />실시간 구조 설계 |
+| 백엔드 설계·구현<br />거래·원장 처리<br />서비스 연동 | 블록형 편집기<br />화면·UX 설계<br />서비스 UI 구현 | 전략·봇·주문<br />체결·성과 기능<br />서버 설계·구현 | 전략·거래·성과 구현<br />시장 데이터 수집<br />파이프라인 구현 | 서버·컨테이너<br />배포 환경 구축<br />운영 구조 설계 | 저장·모델 설계<br />실시간 구조 설계 |
 
 ## 프로젝트 기술 스택 💡
 
