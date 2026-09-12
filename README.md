@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="docs/assets/i2s-logo.svg" width="200" alt="Idea2Strategy 로고" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/i2s-logo-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/i2s-logo.svg" />
+    <img src="docs/assets/i2s-logo.svg" width="200" alt="Idea2Strategy 로고" />
+  </picture>
 </p>
 <!-- Logo source: Idea2Strategy-ui@47a3334aaf7d8560296b75713d213c14fdd24d9c, src/assets/i2s-logo.svg -->
 
