@@ -482,8 +482,8 @@ GRANT SELECT ON TABLE "competition"."backtest_period_datasets" TO idea2strategy_
 GRANT SELECT ON TABLE "competition"."backtest_period_feature_materializations" TO idea2strategy_batch;
 GRANT SELECT, INSERT, UPDATE ON TABLE "competition"."backtest_period_runs" TO idea2strategy_batch;
 GRANT SELECT, INSERT ON TABLE "competition"."leaderboard_entries" TO idea2strategy_batch;
-GRANT SELECT, INSERT ON TABLE "competition"."leaderboard_snapshots" TO idea2strategy_batch;
-GRANT SELECT, INSERT ON TABLE "competition"."live_evaluation_segments" TO idea2strategy_batch;
+GRANT SELECT, INSERT, UPDATE ON TABLE "competition"."leaderboard_snapshots" TO idea2strategy_batch;
+GRANT SELECT, INSERT, UPDATE ON TABLE "competition"."live_evaluation_segments" TO idea2strategy_batch;
 GRANT SELECT ON TABLE "competition"."live_room_rules" TO idea2strategy_batch;
 GRANT SELECT, INSERT ON TABLE "competition"."participation_events" TO idea2strategy_batch;
 GRANT SELECT, UPDATE ON TABLE "competition"."participations" TO idea2strategy_batch;
