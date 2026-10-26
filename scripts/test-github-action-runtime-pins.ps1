@@ -8,6 +8,7 @@ $expectedPins = @{
     "actions/checkout"                      = @{ Sha = "3d3c42e5aac5ba805825da76410c181273ba90b1"; Tag = "v7.0.1" }
     "actions/download-artifact"             = @{ Sha = "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"; Tag = "v8.0.1" }
     "actions/setup-node"                    = @{ Sha = "820762786026740c76f36085b0efc47a31fe5020"; Tag = "v7.0.0" }
+    "actions/setup-java"                    = @{ Sha = "b6effb05e454b25005698d916606bdc6ffcbf961"; Tag = "v5.7.0" }
     "actions/setup-python"                  = @{ Sha = "5fda3b95a4ea91299a34e894583c3862153e4b97"; Tag = "v7.0.0" }
     "actions/upload-artifact"               = @{ Sha = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"; Tag = "v7.0.1" }
     "aws-actions/configure-aws-credentials" = @{ Sha = "e6de054238d6b7531b4efff3b6587d9aade6a06c"; Tag = "v6.2.3" }
