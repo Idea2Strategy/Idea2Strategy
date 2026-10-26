@@ -14,7 +14,9 @@ function git(cwd, ...args) {
 test('pre-commit rejects the GitGuardian generic-password trigger before it reaches GitHub', async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'idea2strategy-secret-hook-'));
   try {
-    assert.equal(git(fixture, 'init', '--quiet').status, 0);
+    // The hook rejects commits on develop and main, so never inherit
+    // init.defaultBranch for the fixture's baseline branch.
+    assert.equal(git(fixture, 'init', '--quiet', '--initial-branch=secret-gate-fixture').status, 0);
     assert.equal(git(fixture, 'config', 'user.name', 'Secret Gate Test').status, 0);
     assert.equal(git(fixture, 'config', 'user.email', 'secret-gate@example.invalid').status, 0);
     assert.equal(git(fixture, 'config', 'core.hooksPath', '.githooks').status, 0);
@@ -25,7 +27,8 @@ test('pre-commit rejects the GitGuardian generic-password trigger before it reac
     await chmod(path.join(fixture, '.githooks', 'pre-commit'), 0o755);
     await writeFile(path.join(fixture, 'README.md'), 'fixture\n');
     assert.equal(git(fixture, 'add', 'README.md').status, 0);
-    assert.equal(git(fixture, 'commit', '--quiet', '-m', 'fixture baseline').status, 0);
+    const baseline = git(fixture, 'commit', '--quiet', '-m', 'fixture baseline');
+    assert.equal(baseline.status, 0, `fixture baseline was rejected: ${baseline.stderr}`);
 
     // Assemble the detector fixture only at runtime. Keeping the complete known
     // false-positive string in this test source would itself trigger GitGuardian.
