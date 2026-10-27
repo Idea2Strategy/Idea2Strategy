@@ -242,7 +242,10 @@ jobs:
           set -euo pipefail
           cd ui
           pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm exec vitest run
           VITE_API_BASE_URL='' VITE_ADMIN_MCP_BASE_URL='' pnpm build
+          node scripts/assert-production-bundle.mjs
       - name: Create immutable release bundle
         id: release
         shell: pwsh
