@@ -408,7 +408,7 @@ Prove unavailable, failed, cancelled, forbidden, lease conflict, stale validatio
 
 - [ ] **Step 3: Make the local runner deterministic**
 
-Start the deploy-like Docker stack, wait on health endpoints, seed the local account and approved data, execute Playwright, write the receipt under ignored `.harness/local/artifacts`, and stop only processes the runner created.
+Start the deploy-like Docker stack, wait on health endpoints, seed the local account and approved data, execute Playwright, write the receipt under ignored `.local/artifacts`, and stop only processes the runner created.
 
 - [ ] **Step 4: Run the real E2E twice**
 

@@ -1,6 +1,6 @@
 .git
 .gitmodules
-.harness
+.local
 .worktrees
 .env
 .env.*

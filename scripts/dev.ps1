@@ -21,9 +21,9 @@ $env:COMPOSE_IGNORE_ORPHANS = "true"
 . (Join-Path $PSScriptRoot "local-development-environment.ps1")
 
 # backend-api registers its customer identity surface only when all five
-# identity.crypto keys are present (fail-closed, root #266), so both a fresh
-# bootstrap and an existing .env.docker created before the keys were added
-# must end up carrying generated values.
+# identity.crypto keys are present (fail-closed, root #266). A fresh
+# .env.docker copies the fixed local keys from .env.docker.example; an older
+# .env.docker that lacks them gets generated values appended.
 $identityCryptoKeys = @(
     "IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY",
     "IDENTITY_CRYPTO_LOOKUP_HMAC_KEY",
@@ -55,10 +55,6 @@ function Initialize-EnvironmentFile {
     $content = Get-Content -LiteralPath $environmentTemplate -Raw
     $content = $content.Replace("__GENERATE_POSTGRES_PASSWORD__", (New-LocalDevelopmentSecret))
     $content = $content.Replace("__GENERATE_MINIO_PASSWORD__", (New-LocalDevelopmentSecret))
-    foreach ($keyName in $identityCryptoKeys) {
-        $placeholder = "__GENERATE_" + $keyName.Replace("IDENTITY_CRYPTO_", "IDENTITY_") + "__"
-        $content = $content.Replace($placeholder, (New-LocalDevelopmentSecret))
-    }
     $content = Expand-LocalDevelopmentSecretPlaceholders `
         -Content $content `
         -Names ($backtestLocalSecrets + $operatorLocalSecrets)
@@ -362,7 +358,8 @@ function Initialize-LocalStrategyData {
         -U $postgresUser -d $postgresDatabase -f /tmp/local-backtest-policy-seed.sql | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Unable to seed the local execution-policy catalog.' }
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scoringSeedInitializer `
+    $powerShell = (Get-Process -Id $PID).Path
+    & $powerShell -NoProfile -ExecutionPolicy Bypass -File $scoringSeedInitializer `
         -ContainerName 'idea2strategy-postgres' `
         -PostgresUser $postgresUser `
         -PostgresDatabase $postgresDatabase

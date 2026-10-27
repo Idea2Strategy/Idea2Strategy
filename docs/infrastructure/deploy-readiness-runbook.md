@@ -4,22 +4,23 @@ This runbook covers the last safe checks before an authorized operator creates o
 
 ## Local and CI checks (no AWS access)
 
-Run from the repository root:
+Run from the repository root with PowerShell 7 (`pwsh`). On Windows PowerShell
+5.1, use `powershell.exe -NoProfile -ExecutionPolicy Bypass -File` instead.
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-deployment-inputs.ps1
+pwsh -NoProfile -File scripts/test-deployment-inputs.ps1
 ```
 
 With Terraform 1.15.x installed:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-terraform-readiness.ps1
+pwsh -NoProfile -File scripts/test-terraform-readiness.ps1
 ```
 
 Without local Terraform, use the pinned container (Docker Desktop must be running):
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-terraform-readiness-docker.ps1
+pwsh -NoProfile -File scripts/test-terraform-readiness-docker.ps1
 ```
 
 These checks validate formatting, provider lockfile integrity, Terraform configuration with the S3 backend disabled, the merged Compose model, localhost-only published ports, ignored generated inputs, secret-free examples, immutable runtime image references, and Docker Compose env-file quoting. They do not contact AWS and do not produce a plan.
@@ -53,7 +54,7 @@ rejection routes before enabling room evaluation traffic.
 Run the read-only AWS identity and input gate before creating a plan:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-aws-deployment-prerequisites.ps1 -RequireInputs -RequireAlpacaSecrets -RequireRuntimeDatabaseSecrets
+pwsh -NoProfile -File scripts/test-aws-deployment-prerequisites.ps1 -RequireInputs -RequireAlpacaSecrets -RequireRuntimeDatabaseSecrets
 ```
 
 The command prints only a masked account ID and principal name. It fails when AWS
@@ -115,7 +116,7 @@ Before requesting an AWS plan, record and review all of the following:
 Before enabling real customer email, run the credential-safe SES preflight:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-development-email-delivery-prerequisites.ps1 `
+pwsh -NoProfile -File scripts/test-development-email-delivery-prerequisites.ps1 `
   -ExpectedAwsAccountId <12-digit-development-account> `
   -ExpectedInfrastructureRegion ap-northeast-2 `
   -ExpectedEmailRegion us-east-1 `
@@ -242,7 +243,7 @@ digest-pinned Compose file before the release job fails. The final verifier
 independently repeats the exact SSM-parameter-to-container-image comparison.
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deployed-development.ps1 `
+pwsh -NoProfile -File scripts/verify-deployed-development.ps1 `
   -ExpectedAwsAccountId <12-digit-account-id>
 ```
 
@@ -314,8 +315,9 @@ dedicated bootstrap role temporary access to read only the RDS master secret and
 write only the five runtime secret versions, and launches one encrypted
 `t3.small` with no inbound rules or SSH key. The x86 instance is intentional:
 the pinned reviewed Flyway image is amd64-only; all application runtimes remain
-ARM64. Systems Manager runs Flyway `migrate` once, then `validate`/`info`, checks
-178 application tables, and applies the separately approved, SHA-pinned policy
+ARM64. Systems Manager runs Flyway `migrate` once, then `validate`/`info`,
+requires at least one base table across the ten application schemas, and applies
+the separately approved, SHA-pinned policy
 seed artifact. The seed is mandatory and may insert only into
 `trading.fee_policy_versions`,
 `trading.buying_power_buffer_policy_versions`, and
