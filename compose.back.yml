@@ -20,8 +20,9 @@ x-spring-environment: &spring-environment
   S3_MARKET_DATA_BUCKET: ${S3_MARKET_DATA_BUCKET}
   S3_RESULTS_BUCKET: ${S3_RESULTS_BUCKET}
   # backend-api registers the customer identity surface (signup/login/token refresh)
-  # only when all five keys are present (fail-closed, root #266). dev.ps1
-  # generates and backfills them into .env.docker.
+  # only when all five keys are present (fail-closed, root #266). .env.docker
+  # copies fixed local keys from .env.docker.example; dev.ps1 appends generated
+  # ones to an older .env.docker that lacks them.
   IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY: ${IDENTITY_CRYPTO_EMAIL_ENCRYPTION_KEY}
   IDENTITY_CRYPTO_LOOKUP_HMAC_KEY: ${IDENTITY_CRYPTO_LOOKUP_HMAC_KEY}
   IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY: ${IDENTITY_CRYPTO_VERIFICATION_HMAC_KEY}
