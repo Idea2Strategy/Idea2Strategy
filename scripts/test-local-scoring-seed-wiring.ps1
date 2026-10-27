@@ -25,7 +25,7 @@ try {
         '--health-cmd', "pg_isready -U $user -d $database",
         '--health-interval', '2s', '--health-timeout', '2s', '--health-retries', '30',
         '-e', "POSTGRES_DB=$database", '-e', "POSTGRES_USER=$user", '-e', "POSTGRES_PASSWORD=$password",
-        'postgres:16-alpine'
+        'postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab'
     )
 
     $healthy = $false
@@ -38,7 +38,7 @@ try {
 
     $null = Invoke-Docker @(
         'run', '--rm', '--network', "container:$container",
-        '-v', "${bundle}:/flyway/sql:ro", 'redgate/flyway:11-alpine',
+        '-v', "${bundle}:/flyway/sql:ro", 'redgate/flyway:11-alpine@sha256:52cdd559dc8ae38a17b56615e3c7137d9b01470271112525b40373de470bb005',
         "-url=jdbc:postgresql://localhost:5432/$database", "-user=$user", "-password=$password",
         '-connectRetries=30', 'migrate'
     )
