@@ -362,7 +362,8 @@ function Initialize-LocalStrategyData {
         -U $postgresUser -d $postgresDatabase -f /tmp/local-backtest-policy-seed.sql | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Unable to seed the local execution-policy catalog.' }
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scoringSeedInitializer `
+    $powerShell = (Get-Process -Id $PID).Path
+    & $powerShell -NoProfile -ExecutionPolicy Bypass -File $scoringSeedInitializer `
         -ContainerName 'idea2strategy-postgres' `
         -PostgresUser $postgresUser `
         -PostgresDatabase $postgresDatabase

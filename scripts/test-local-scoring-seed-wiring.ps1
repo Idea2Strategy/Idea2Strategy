@@ -43,8 +43,9 @@ try {
         '-connectRetries=30', 'migrate'
     )
 
+    $powerShell = (Get-Process -Id $PID).Path
     foreach ($iteration in 1..2) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $initializer `
+        & $powerShell -NoProfile -ExecutionPolicy Bypass -File $initializer `
             -ContainerName $container -PostgresUser $user -PostgresDatabase $database
         if ($LASTEXITCODE -ne 0) { throw "Local scoring initialization failed on pass $iteration." }
     }
