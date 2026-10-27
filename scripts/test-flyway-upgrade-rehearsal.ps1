@@ -200,7 +200,7 @@ function Invoke-FlywayAgainst([string]$BundlePath, [string]$Command, [switch]$Js
         'run', '--rm',
         '--network', "container:$container",
         '-v', "${BundlePath}:/flyway/sql:ro",
-        'redgate/flyway:11-alpine',
+        'redgate/flyway:11-alpine@sha256:52cdd559dc8ae38a17b56615e3c7137d9b01470271112525b40373de470bb005',
         "-url=jdbc:postgresql://localhost:5432/$database",
         "-user=$user",
         "-password=$password",
@@ -256,7 +256,7 @@ try {
         -e "POSTGRES_DB=$database" `
         -e "POSTGRES_USER=$user" `
         -e "POSTGRES_PASSWORD=$password" `
-        postgres:16-alpine
+        postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($started)) {
         throw '임시 PostgreSQL 컨테이너를 띄우지 못했다.'
     }
