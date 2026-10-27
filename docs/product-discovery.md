@@ -1511,6 +1511,5 @@
 ## 근거와 변경 이력
 
 - 역할별 화면·필수 상태와 UI 시안 전 미결정 항목은 [`ui-discovery.md`](ui-discovery.md)에 정리한다. 이 문서는 제품 결정에서 파생된 UI 발견 자료이며 최종 화면 명세나 구현 설계가 아니다.
-- 회의록·멘토 피드백·법적 리스크 자료의 요약과 파일 식별 정보는 [`product-discovery-sources.md`](product-discovery-sources.md)에 보존한다.
-- 대화 중 결정의 변경·폐기·후속 검증 이력은 [`product-discovery-history.md`](product-discovery-history.md)에 보존한다.
-- 두 파일은 감사와 맥락 복구를 위한 비정본이다. 현재 제품 의미는 이 문서의 `현재 유효한 제품 결정`만 기준으로 해석한다.
+- 회의록·멘토 피드백·법적 리스크 자료의 요약(`docs/product-discovery-sources.md`)과 결정의 변경·폐기·후속 검증 이력(`docs/product-discovery-history.md`)은 커밋 `3d7b28f`에서 저장소에서 제거되었다. 감사나 맥락 복구가 필요하면 `git show 3d7b28f^:docs/product-discovery-history.md`처럼 Git 기록에서 읽는다.
+- 두 파일은 감사와 맥락 복구를 위한 비정본이었다. 현재 제품 의미는 이 문서의 `현재 유효한 제품 결정`만 기준으로 해석한다.
