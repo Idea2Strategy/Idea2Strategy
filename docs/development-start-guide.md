@@ -3,8 +3,9 @@
 ## 준비
 
 - Git
-- Docker Desktop
-- PowerShell 5.1 이상
+- Docker Desktop 또는 호환 Docker 엔진
+- PowerShell: Windows는 5.1 이상, macOS·Linux는 PowerShell 7 이상(`pwsh`)
+- [uv](https://docs.astral.sh/uv/): `-WithBackend` 실행 시 `backtest-engine` 환경으로 로컬 전략 데이터를 준비한다
 - 각 하위 저장소 접근 권한
 
 별도의 하네스, Stackcord, 담당자 선택, 관리자 승인, 작업 원장 초기화는 필요하지 않다.
