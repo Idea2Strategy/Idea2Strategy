@@ -35,6 +35,8 @@ jobs:
       - name: Lint Terraform
         run: |
           tflint --chdir=infra/terraform/bootstrap
+          tflint --chdir=infra/terraform/ci-identity
+          tflint --chdir=infra/terraform/artifact-foundation
           tflint --chdir=infra/terraform/environments/development
       - name: Scan Terraform policy and security
         run: |
@@ -46,6 +48,9 @@ jobs:
       - name: Validate manual Development release safety boundaries
         shell: pwsh
         run: ./scripts/test-development-release-workflow.ps1
+      - name: Validate manual Development frontend release safety boundaries
+        shell: pwsh
+        run: ./scripts/test-development-frontend-release-workflow.ps1
       - name: Validate fast Development CI scheduling
         shell: pwsh
         run: ./scripts/test-ci-scheduling.ps1
@@ -111,6 +116,10 @@ jobs:
         run: pnpm contract:validate:registry
       - name: Validate complete Basic strategy conformance corpus
         run: pnpm contract:validate:basic-strategy
+      - name: Check out the pinned sources the UI API contract reads
+        run: git -c protocol.version=2 submodule update --init --depth=1 ui backend backtest-engine
+      - name: Validate UI API routes against Backend and Backtest mappings
+        run: pnpm contract:validate:ui-api
       - name: Validate A12 account lifecycle contract
         run: pnpm dbml:validate:a12
       - name: Test dbdiagram export preparation

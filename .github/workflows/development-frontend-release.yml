@@ -33,11 +33,13 @@ jobs:
     steps:
       - name: Authorize exact Development frontend release
         shell: pwsh
+        env:
+          RELEASE_AUTHORIZATION: ${{ github.event.inputs.release_authorization }}
         run: |
-          if ('${{ github.ref }}' -cne 'refs/heads/develop') {
+          if ($env:GITHUB_REF -cne 'refs/heads/develop') {
             throw 'The Development frontend release can run only from develop.'
           }
-          if ('${{ github.event.inputs.release_authorization }}' -cne 'DEPLOY_DEVELOPMENT_FRONTEND') {
+          if ($env:RELEASE_AUTHORIZATION -cne 'DEPLOY_DEVELOPMENT_FRONTEND') {
             throw 'Frontend release authorization did not match DEPLOY_DEVELOPMENT_FRONTEND.'
           }
 
@@ -130,17 +132,21 @@ jobs:
 
       - name: Verify exact AWS account
         shell: pwsh
+        env:
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
         run: |
           $actual = aws sts get-caller-identity --query Account --output text
-          if ($LASTEXITCODE -ne 0 -or $actual -cne '${{ vars.AWS_ACCOUNT_ID }}') {
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_AWS_ACCOUNT_ID) {
             throw 'AWS account mismatch.'
           }
 
       - name: Publish immutable frontend prefix before planning
         shell: pwsh
+        env:
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $bucket = "idea2strategy-dev-${{ vars.AWS_ACCOUNT_ID }}-frontend"
+          $bucket = "idea2strategy-dev-$($env:EXPECTED_AWS_ACCOUNT_ID)-frontend"
           $release = '${{ needs.build.outputs.release_id }}'
           $frontendRoot = Join-Path $env:RUNNER_TEMP 'frontend'
           New-Item -ItemType Directory $frontendRoot -Force | Out-Null
@@ -197,20 +203,27 @@ jobs:
 
       - name: Materialize current runtime and new frontend Terraform inputs
         shell: pwsh
+        env:
+          TF_VARS_JSON: ${{ vars.TF_VARS_JSON }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID: ${{ vars.OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID }}
+          OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID: ${{ vars.OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ vars.VITE_GOOGLE_OAUTH_CLIENT_ID }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $config = '${{ vars.TF_VARS_JSON }}' | ConvertFrom-Json -AsHashtable
+          $config = $env:TF_VARS_JSON | ConvertFrom-Json -AsHashtable
           if (-not $config -or $config.ContainsKey('password') -or $config.ContainsKey('secret')) {
             throw 'TF_VARS_JSON must contain reviewed non-secret Terraform variables only.'
           }
           if (-not $config.ContainsKey('dns_delegation_verified') -or $config.dns_delegation_verified -ne $true) {
             throw 'TF_VARS_JSON must carry independently reviewed public DNS delegation evidence.'
           }
-          if ([string]$config.operator_rbac_catalog_read_permission_id -cne '${{ vars.OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID }}' -or
-              [string]$config.operator_rbac_assignment_read_permission_id -cne '${{ vars.OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID }}') {
+          if ([string]$config.operator_rbac_catalog_read_permission_id -cne $env:OPERATOR_RBAC_CATALOG_READ_PERMISSION_ID -or
+              [string]$config.operator_rbac_assignment_read_permission_id -cne $env:OPERATOR_RBAC_ASSIGNMENT_READ_PERMISSION_ID) {
             throw 'Frontend RBAC permission IDs must exactly match the Terraform runtime inputs.'
           }
-          if ([string]$config.google_oauth_client_id -cne '${{ vars.VITE_GOOGLE_OAUTH_CLIENT_ID }}') {
+          if ([string]$config.google_oauth_client_id -cne $env:GOOGLE_OAUTH_CLIENT_ID) {
             throw 'Frontend Google OAuth client ID must exactly match the Terraform runtime input.'
           }
 
@@ -232,7 +245,7 @@ jobs:
 
           $config.aws_profile = ''
           $config.aws_region = '${{ env.AWS_REGION }}'
-          $config.expected_aws_account_id = '${{ vars.AWS_ACCOUNT_ID }}'
+          $config.expected_aws_account_id = $env:EXPECTED_AWS_ACCOUNT_ID
           $config.deployment_phase = 'full'
           $config.enable_https = $true
           $config.frontend_release_id = '${{ needs.build.outputs.release_id }}'
@@ -240,7 +253,7 @@ jobs:
           $config | ConvertTo-Json -Depth 20 | Set-Content -NoNewline infra/terraform/environments/development/release.auto.tfvars.json
 
           @(
-            'bucket       = "${{ vars.TF_STATE_BUCKET }}"',
+            ('bucket       = "{0}"' -f $env:TF_STATE_BUCKET),
             'key          = "idea2strategy/development/terraform.tfstate"',
             'region       = "${{ env.AWS_REGION }}"',
             'use_lockfile = true',
@@ -265,12 +278,15 @@ jobs:
       - name: Archive exact frontend plan in protected state storage
         id: archive
         shell: pwsh
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          APPLY_REVIEWED_PLAN: ${{ github.event.inputs.apply_reviewed_plan }}
         run: |
           $ErrorActionPreference = 'Stop'
           $prefix = "idea2strategy/development/release-candidates/${{ github.run_id }}/frontend-${{ github.run_attempt }}"
           $plan = 'infra/terraform/environments/development/frontend.tfplan'
           $planHash = (Get-FileHash -Algorithm SHA256 $plan).Hash.ToLowerInvariant()
-          $put = aws s3api put-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key "$prefix/frontend.tfplan" --body $plan --server-side-encryption AES256 --output json | ConvertFrom-Json
+          $put = aws s3api put-object --bucket $env:TF_STATE_BUCKET --key "$prefix/frontend.tfplan" --body $plan --server-side-encryption AES256 --output json | ConvertFrom-Json
           if ([string]::IsNullOrWhiteSpace([string]$put.VersionId)) { throw 'Versioned frontend plan publication failed.' }
           "plan_key=$prefix/frontend.tfplan" >> $env:GITHUB_OUTPUT
           "plan_version=$($put.VersionId)" >> $env:GITHUB_OUTPUT
@@ -279,7 +295,7 @@ jobs:
           "* Root commit: ${{ github.sha }}" >> $env:GITHUB_STEP_SUMMARY
           "* Frontend release: ${{ needs.build.outputs.release_id }}" >> $env:GITHUB_STEP_SUMMARY
           "* Plan SHA-256: $planHash" >> $env:GITHUB_STEP_SUMMARY
-          "* Apply requested: ${{ github.event.inputs.apply_reviewed_plan }}" >> $env:GITHUB_STEP_SUMMARY
+          "* Apply requested: $env:APPLY_REVIEWED_PLAN" >> $env:GITHUB_STEP_SUMMARY
           Get-Content infra/terraform/environments/development/frontend.plan.txt >> $env:GITHUB_STEP_SUMMARY
 
   apply-reviewed-plan:
@@ -304,9 +320,11 @@ jobs:
 
       - name: Download and verify exact reviewed frontend plan
         shell: pwsh
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
         run: |
           $ErrorActionPreference = 'Stop'
-          aws s3api get-object --bucket '${{ vars.TF_STATE_BUCKET }}' --key '${{ needs.prepare-and-plan.outputs.plan_key }}' --version-id '${{ needs.prepare-and-plan.outputs.plan_version }}' frontend.tfplan | Out-Null
+          aws s3api get-object --bucket $env:TF_STATE_BUCKET --key '${{ needs.prepare-and-plan.outputs.plan_key }}' --version-id '${{ needs.prepare-and-plan.outputs.plan_version }}' frontend.tfplan | Out-Null
           if ($LASTEXITCODE -ne 0 -or (Get-FileHash -Algorithm SHA256 frontend.tfplan).Hash.ToLowerInvariant() -cne '${{ needs.prepare-and-plan.outputs.plan_sha256 }}') {
             throw 'Saved frontend plan hash mismatch.'
           }
@@ -314,9 +332,11 @@ jobs:
       - name: Apply only the reviewed frontend plan
         working-directory: infra/terraform/environments/development
         shell: pwsh
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
         run: |
           Move-Item "$env:GITHUB_WORKSPACE/frontend.tfplan" ./frontend.tfplan
-          terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="key=idea2strategy/development/terraform.tfstate" -backend-config="region=${{ env.AWS_REGION }}" -backend-config="use_lockfile=true" -backend-config="encrypt=true"
+          terraform init -backend-config="bucket=$($env:TF_STATE_BUCKET)" -backend-config="key=idea2strategy/development/terraform.tfstate" -backend-config="region=${{ env.AWS_REGION }}" -backend-config="use_lockfile=true" -backend-config="encrypt=true"
           if ($LASTEXITCODE -ne 0) { throw 'Terraform initialization failed.' }
           terraform apply frontend.tfplan
           if ($LASTEXITCODE -ne 0) { throw 'Frontend Terraform apply failed.' }
