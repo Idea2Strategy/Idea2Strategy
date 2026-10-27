@@ -35,6 +35,8 @@ jobs:
       - name: Lint Terraform
         run: |
           tflint --chdir=infra/terraform/bootstrap
+          tflint --chdir=infra/terraform/ci-identity
+          tflint --chdir=infra/terraform/artifact-foundation
           tflint --chdir=infra/terraform/environments/development
       - name: Scan Terraform policy and security
         run: |
