@@ -14,12 +14,6 @@
   블록으로 전략을 만들고, 백테스트와 실시간 가상 거래로 검증하는 투자 전략 실험 플랫폼입니다.
 </p>
 
-## Overview
-
-Idea2Strategy lets users build trading strategies with visual blocks, test them on historical data and run them against live prices with virtual funds. Kyoungcheul Min led the six-person team, designed the initial PostgreSQL schema and service architecture, and contributed to the Java backend.
-
-The web API needs to stay online around the clock. Paper trading follows a US market schedule, while backtests only need compute when a user requests one. We split these workloads so the web API could run on a smaller instance. In our project estimate, the savings from running compute-intensive workers only when needed outweighed the extra messaging costs. [AWS architecture](docs/infrastructure/architecture.md) · [Development cost model](infra/terraform/COST-ESTIMATE.md)
-
 ## 프로젝트 소개 📝
 
 **Idea2Strategy**는 나만의 투자 아이디어를 직접 만들고 검증할 수 있도록 개발 중인 가상 트레이딩 봇 서비스입니다.
