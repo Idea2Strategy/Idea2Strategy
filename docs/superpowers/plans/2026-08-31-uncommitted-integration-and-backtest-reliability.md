@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Preserve all repository-owned local changes and do not reset, stash, or discard them.
-- Do not commit personal application PDFs, rendered pages, or generated `.harness/local/tmp` command payloads.
+- Do not commit personal application PDFs, rendered pages, or generated `.local/tmp` command payloads.
 - Base merge candidates on the latest `origin/develop`; never merge the August 13 branches wholesale over newer work.
 - Merge submodule repositories before updating and merging root gitlinks.
 - Reproduce the backtest from immutable stored inputs before changing behavior.
@@ -25,7 +25,7 @@
 
 **Files:**
 - Inspect: root and `backend/`, `backtest-engine/`, `data-pipeline/`, `trading-engine/`, `ui/`
-- Exclude: `.harness/local/tmp/**`, `tmp/pdfs/**`
+- Exclude: `.local/tmp/**`, `tmp/pdfs/**`
 
 **Interfaces:**
 - Consumes: Git index, working tree, current remote refs

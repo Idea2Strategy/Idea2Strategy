@@ -1,21 +1,26 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('./ensure-local-test-account.ps1', import.meta.url));
+const powerShell = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
+const powerShellMissing = spawnSync(powerShell, ['-NoProfile', '-Command', 'exit 0']).error
+  ? `${powerShell} is not installed`
+  : false;
 
 const runPowerShell = (args) => new Promise((resolve) => {
-  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...args]);
+  const child = spawn(powerShell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...args]);
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('error', (error) => resolve({ code: null, stdout, stderr: String(error) }));
   child.on('close', (code) => resolve({ code, stdout, stderr }));
 });
 
-test('creates the fixed local account through signup and proves it can log in', async () => {
+test('creates the fixed local account through signup and proves it can log in', { skip: powerShellMissing }, async () => {
   const requests = [];
   let accountCreated = false;
   const server = createServer((request, response) => {

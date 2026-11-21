@@ -84,7 +84,7 @@ function Start-Postgres([string]$Name) {
         '-e', "POSTGRES_PASSWORD=$password",
         '-e', "POSTGRES_DB=$database",
         '-v', "${temporaryRoot}:/work",
-        'postgres:16-alpine'
+        'postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab'
     ) | Out-Null
 
     $deadline = (Get-Date).AddMinutes(2)
@@ -103,7 +103,7 @@ function Invoke-Flyway([string]$Container, [string]$MigrationDirectory) {
     Invoke-Docker @(
         'run', '--rm', '--network', $network,
         '-v', "${MigrationDirectory}:/flyway/sql:ro",
-        'redgate/flyway:11-alpine',
+        'redgate/flyway:11-alpine@sha256:52cdd559dc8ae38a17b56615e3c7137d9b01470271112525b40373de470bb005',
         "-url=jdbc:postgresql://${Container}:5432/$database",
         '-user=postgres', "-password=$password",
         '-connectRetries=30', 'migrate'

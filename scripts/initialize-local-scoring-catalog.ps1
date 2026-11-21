@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$seed = Join-Path $root 'proposals/development-scoring-template/artifacts/scoring-template-seed.sql'
+$seed = Join-Path $root 'config/development/scoring/scoring-template-seed.sql'
 if (-not (Test-Path -LiteralPath $seed -PathType Leaf)) {
     throw "Reviewed local scoring seed is missing: $seed"
 }
