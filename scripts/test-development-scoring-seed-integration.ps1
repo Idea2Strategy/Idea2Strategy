@@ -13,7 +13,7 @@ $password = "scoring-$suffix"
 
 function Invoke-Docker([string[]]$Arguments) {
     $output = & docker @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "Docker command failed without accepting the scoring seed." }
+    if ($LASTEXITCODE -ne 0) { throw "docker $($Arguments[0]) failed with exit code $LASTEXITCODE." }
     return $output
 }
 
@@ -59,13 +59,23 @@ try {
         "-X", "-q", "-v", "ON_ERROR_STOP=1", "-c",
         "UPDATE competition.scoring_template_versions SET rules_document='{}'::jsonb WHERE id='cb2cd7ad-093d-4f1f-b76c-2762437ea101';"
     )
+    # psql exits 3 when ON_ERROR_STOP aborts the script. Any other non-zero
+    # code (docker 125-127, psql 1-2) means the seed never reached the guard.
     $priorErrorPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    & docker run --rm --network "container:$container" -e "PGPASSWORD=$password" -v "${proposal}:/seed.sql:ro" `
-        postgres:16-alpine psql -h localhost -U $user -d $database -X -q -v ON_ERROR_STOP=1 --single-transaction -f /seed.sql 2>$null
-    $collisionExitCode = $LASTEXITCODE
-    $ErrorActionPreference = $priorErrorPreference
+    try {
+        $collisionOutput = & docker run --rm --network "container:$container" -e "PGPASSWORD=$password" -v "${scoringSeed}:/seed.sql:ro" `
+            postgres:16-alpine psql -h localhost -U $user -d $database -X -q -v ON_ERROR_STOP=1 --single-transaction -f /seed.sql 2>&1
+        $collisionExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $priorErrorPreference
+    }
+    $collisionText = (@($collisionOutput) | ForEach-Object { "$_" }) -join [Environment]::NewLine
     if ($collisionExitCode -eq 0) { throw "A conflicting immutable scoring identity was not rejected." }
+    if ($collisionExitCode -ne 3 -or $collisionText -notmatch "duplicate key value violates unique constraint") {
+        throw "Collision replay failed without a unique violation (exit $collisionExitCode): $collisionText"
+    }
 
     [pscustomobject]@{ status = "passed"; templates = 4; replay = "idempotent"; collision = "rejected" } |
         ConvertTo-Json -Compress
