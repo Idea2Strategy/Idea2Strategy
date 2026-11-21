@@ -19,6 +19,17 @@ EXPORT_TEST = (
 )
 
 
+def gradle_wrapper_command(platform_name: str = os.name) -> list[str]:
+    """Return the backend Gradle wrapper invocation for this platform.
+
+    The POSIX wrapper is run through ``sh`` because the checkout does not
+    record an executable bit for it.
+    """
+    if platform_name == "nt":
+        return [str(BACKEND / "gradlew.bat")]
+    return ["sh", str(BACKEND / "gradlew")]
+
+
 @lru_cache(maxsize=1)
 def compiled_plans() -> dict[str, dict[str, object]]:
     request = {
@@ -44,9 +55,11 @@ def compiled_plans() -> dict[str, dict[str, object]]:
     environment["TASK3_BACKEND_EXPORT_OUTPUT"] = str(output_path)
     completed = subprocess.run(
         [
-            str(BACKEND / "gradlew.bat"),
+            *gradle_wrapper_command(),
             ":modules:backend-persistence:test",
-            "--rerun-tasks",
+            # Rerun only the export test: its inputs arrive through environment
+            # variables that Gradle does not track. Compilation stays incremental.
+            "--rerun",
             "--tests",
             EXPORT_TEST,
         ],
@@ -54,7 +67,7 @@ def compiled_plans() -> dict[str, dict[str, object]]:
         env=environment,
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=600,
         check=False,
     )
     if completed.returncode != 0 or not output_path.is_file():
