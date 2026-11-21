@@ -24,11 +24,11 @@ services:
       CI: "true"
       # Same-origin by default: backend-api sends no CORS headers, so a browser
       # pointed at a cross-origin VITE_API_BASE_URL cannot complete any API call
-      # (root #266). The vite dev server proxies /api and /actuator to
-      # backend-api over the compose network instead - the same posture the
-      # real-API browser E2E uses in CI.
+      # (root #266). The vite dev server proxies /api, /actuator and the /ws
+      # market-data WebSocket to backend-api over the compose network instead -
+      # the same posture the real-API browser E2E uses in CI. The UI derives
+      # the WebSocket origin from VITE_API_BASE_URL (or the page origin).
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
-      VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-}
       VITE_REAL_API_TARGET: ${VITE_REAL_API_TARGET:-http://backend-api:8080}
       # The backtest read surface lives on backtest-api, not backend-api; the
       # vite proxy sends only /api/v1/backtests there (ui fix/frontend-honest-surfaces).
